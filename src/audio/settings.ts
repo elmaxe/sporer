@@ -1,11 +1,13 @@
 /** Mixer channels, each with its own volume slider. */
-export type AudioChannel = 'music' | 'ambience';
+export type AudioChannel = 'music' | 'ambience' | 'sfx';
 
 /** Player-facing volume settings. Slider values are 0–1; `muted` silences everything. */
 export interface AudioSettings {
   master: number;
   music: number;
   ambience: number;
+  /** Sound effects (the "Effects" slider). */
+  sfx: number;
   muted: boolean;
 }
 
@@ -14,6 +16,7 @@ export const DEFAULT_AUDIO_SETTINGS: Readonly<AudioSettings> = {
   master: 0.8,
   music: 0.8,
   ambience: 0.5,
+  sfx: 0.7,
   muted: false,
 };
 
@@ -35,7 +38,7 @@ export function parseAudioSettings(json: string | null): AudioSettings {
   }
   if (typeof raw !== 'object' || raw === null) return out;
   const r = raw as Record<string, unknown>;
-  for (const key of ['master', 'music', 'ambience'] as const) {
+  for (const key of ['master', 'music', 'ambience', 'sfx'] as const) {
     const v = r[key];
     if (typeof v === 'number' && Number.isFinite(v)) out[key] = clamp01(v);
   }

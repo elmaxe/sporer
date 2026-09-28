@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { SoundEffects } from '../audio/sfx';
 import type { Debug } from '../core/Debug';
 import type { Input } from '../core/Input';
 import { generateDust, type GalaxyData, type StarRef } from '../gen/galaxy';
@@ -38,6 +39,7 @@ export class GalaxyLevel extends Level {
     canvas: HTMLElement,
     tooltip: Tooltip,
     debug: Debug,
+    sfx: SoundEffects,
     /** Called when the player scrolls in past the closest zoom (to enter a system). */
     onZoomIn: () => void,
   ) {
@@ -48,7 +50,7 @@ export class GalaxyLevel extends Level {
 
     this.add(new GalaxyDust(this.scene, generateDust(galaxy), galaxy.radius));
     const map = this.add(new GalaxyMap(this.scene, galaxy));
-    this.ship = this.add(new GalaxyShip(this.scene, start, debug));
+    this.ship = this.add(new GalaxyShip(this.scene, start, debug, sfx));
     this.orbit = this.add(
       new OrbitCamera(
         camera,

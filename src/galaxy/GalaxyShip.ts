@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { SoundEffects } from '../audio/sfx';
 import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
 import type { StarRef } from '../gen/galaxy';
@@ -22,7 +23,8 @@ const ARRIVE_SPEED = 0.5;
 /**
  * The player's ship on the galaxy map. Movement is scripted (no physics):
  * `travelTo` flies it from its current star to another with the same arrive
- * steering as the system autopilot, and it docks there on arrival.
+ * steering as the system autopilot, and it docks there on arrival. Setting
+ * off whooshes, longer for longer trips.
  */
 export class GalaxyShip implements Entity {
   /** Interpolated render transform; the galaxy camera orbits this. */
@@ -42,6 +44,7 @@ export class GalaxyShip implements Entity {
     private readonly scene: THREE.Scene,
     start: StarRef,
     debug: Debug,
+    private readonly sfx: SoundEffects,
   ) {
     const { group, ring } = buildUfoMesh();
     group.scale.setScalar(UFO_SCALE);
@@ -77,7 +80,13 @@ export class GalaxyShip implements Entity {
 
   /** Sets course for `ref` (also mid-flight). Asking for the star it's docked at does nothing. */
   travelTo(ref: StarRef): void {
-    this._destination = !this.travelling && ref === this._current ? null : ref;
+    const dest = !this.travelling && ref === this._current ? null : ref;
+    if (dest && dest !== this._destination) {
+      const { x, y, z } = dest.position;
+      const distance = Math.hypot(x - this.curr.x, y + HOVER - this.curr.y, z - this.curr.z);
+      this.sfx.play('travel', { seconds: distance / galaxyTravelParams.maxSpeed });
+    }
+    this._destination = dest;
   }
 
   fixedUpdate(dt: number): void {
