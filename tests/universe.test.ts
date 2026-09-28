@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { GALAXY_RADIUS, generateGalaxy } from '../src/gen/galaxy';
+import { COMET_MIN_PERIHELION_RADII } from '../src/gen/comets';
+import { aphelion, perihelion } from '../src/gen/orbit';
 import { findHomeSystem, generateSystem, spawnDistance, type SystemData } from '../src/gen/system';
 import type { StarKind } from '../src/gen/stars';
 
@@ -101,6 +103,49 @@ describe('generateSystem', () => {
       for (const p of system.planets) {
         expect(Math.abs(d - p.orbit.radius)).toBeGreaterThan(p.extent);
       }
+    }
+  });
+});
+
+describe('comets', () => {
+  it('gives every system a few', () => {
+    for (const system of systems) {
+      expect(system.comets.length).toBeGreaterThanOrEqual(1);
+      expect(system.comets.length).toBeLessThanOrEqual(4);
+    }
+  });
+
+  it('keeps perihelia outside the star glow and aphelia beyond the planets', () => {
+    for (const system of systems) {
+      const starRadius = Math.max(...system.stars.map((s) => s.radius));
+      const last = system.planets[system.planets.length - 1];
+      for (const c of system.comets) {
+        expect(perihelion(c.orbit)).toBeGreaterThanOrEqual(starRadius * COMET_MIN_PERIHELION_RADII - 1e-9);
+        expect(perihelion(c.orbit)).toBeGreaterThan(system.starZone + starRadius);
+        if (last) expect(aphelion(c.orbit)).toBeGreaterThan(last.orbit.radius + last.extent);
+        expect(c.orbit.eccentricity).toBeGreaterThan(0.3);
+        expect(c.orbit.eccentricity).toBeLessThan(1);
+      }
+    }
+  });
+
+  it('follows the same Kepler law as the planets', () => {
+    for (const system of systems) {
+      const p = system.planets[0];
+      if (!p) continue;
+      for (const c of system.comets) {
+        // T² ∝ a³ with the same constant.
+        const k = (orbit: { period: number }, a: number) => orbit.period ** 2 / a ** 3;
+        expect(k(c.orbit, c.orbit.semiMajor) / k(p.orbit, p.orbit.radius)).toBeCloseTo(1, 6);
+      }
+    }
+  });
+
+  it('sends the first comet of each system inbound', () => {
+    for (const system of systems) {
+      const m = system.comets[0]!.orbit.phase;
+      expect(m).toBeLessThan(0);
+      expect(m).toBeGreaterThan(-Math.PI);
     }
   });
 });

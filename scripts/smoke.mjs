@@ -5,7 +5,9 @@
 // star, travel, scroll in to its system), a real click on the speaker button starts audio; then the
 // transitions and galaxy travel play their whooshes, and M mutes. Then the planet loop (park at a planet,
 // scroll in to low orbit, click the globe and fly, scroll back out beside it), and again for every planet
-// type and a moon in other systems (skip those with --quick).
+// type and a moon in other systems (skip those with --quick). Living stars: the surface clock advances and
+// storms have particles under way (and keep animating in the planet level's sky); comets exist, move and
+// can't be picked.
 // Prints JSON with FPS, console errors and screenshot paths. Exit 1 on failure.
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
@@ -82,7 +84,7 @@ await sleep(4000);
 
 const state = `({ speed: +ship.speed.toFixed(1), pos: ship.object.position.toArray().map((n) => +n.toFixed(1)) })`;
 const started = await evaluate(`typeof window.ship !== 'undefined'`);
-let before, after, autopilot, pick, galaxyLoop, fps, audio, planetLoop;
+let before, after, autopilot, pick, living, galaxyLoop, fps, audio, planetLoop;
 const planetTypes = [];
 const wheel = (deltaY) =>
   evaluate(`game.renderer.domElement.dispatchEvent(new WheelEvent('wheel', { deltaY: ${deltaY}, bubbles: true, cancelable: true }))`);
@@ -92,6 +94,8 @@ const wheel = (deltaY) =>
  * globe a little way ahead of the ship, lets it fly, then scrolls back out. Returns what it saw.
  */
 async function runPlanetLoop(bodyExpr, shotName) {
+  // Input is blocked during transitions, which run long at headless frame rates.
+  for (let i = 0; i < 40 && (await evaluate(`levels.transitioning`)); i++) await sleep(250);
   const r = await evaluate(`(() => {
     const body = ${bodyExpr};
     window.__body = body;
@@ -110,6 +114,8 @@ async function runPlanetLoop(bodyExpr, shotName) {
   r.soundIn = await evaluate(`audio.lastPlayed?.name ?? null`);
   if (r.mode !== 'planet') return r;
   r.sky = await evaluate(`planet.skyStats`);
+  const skyTime = `world.stars[0].storms.shownTime`;
+  r.skyStarTime = await evaluate(skyTime);
   r.expectedSky = await evaluate(`({ bodies: world.planets.length + world.moons.length - 1 - world.moons.filter((m) => m.parent === __body).length })`);
 
   // Click the globe ~20° ahead of the ship, towards the top of the screen.
@@ -134,6 +140,8 @@ async function runPlanetLoop(bodyExpr, shotName) {
     })));
   })`);
   await sleep(3000);
+  // The sky's star keeps living (and its clock follows the planet level's).
+  r.skyStarTime = +((await evaluate(skyTime)) - r.skyStarTime).toFixed(2);
   r.flewDegrees = await evaluate(`+(planet.ship.direction.angleTo(__start) * 180 / Math.PI).toFixed(1)`);
   r.altitudeOk = await evaluate(`Math.abs(planet.ship.object.position.length() - planet.ship.radius) < 0.5`);
   const shot = await send('Page.captureScreenshot', { format: 'png' });
@@ -154,6 +162,7 @@ async function runPlanetLoop(bodyExpr, shotName) {
     r.click.onScreen &&
     r.click.enRoute &&
     r.flewDegrees > 3 &&
+    r.skyStarTime > 1 &&
     r.altitudeOk &&
     r.modeAfter === 'system' &&
     r.parkedAt === r.name &&
@@ -193,6 +202,26 @@ if (started) {
     })));
   })`);
   await evaluate(`ship.stop()`);
+
+  // Living stars and comets: sample twice, a couple of seconds apart.
+  const sample = `({
+    starTime: world.stars[0].storms.shownTime,
+    live: world.stars.reduce((n, s) => n + s.storms.liveParticles, 0),
+    comets: world.comets.map((c) => c.position.toArray()),
+    tails: world.comets.map((c) => +c.activity.toFixed(3)),
+    pickable: world.bodies.some((b) => world.comets.includes(b)),
+  })`;
+  const first = await evaluate(sample);
+  await sleep(2000);
+  const second = await evaluate(sample);
+  living = {
+    starSeconds: +(second.starTime - first.starTime).toFixed(2),
+    liveParticles: [first.live, second.live],
+    comets: second.comets.length,
+    cometsMoved: second.comets.every((p, i) => Math.hypot(...p.map((v, k) => v - first.comets[i][k])) > 1),
+    cometActivity: second.tails,
+    pickable: second.pickable,
+  };
 
   // Galaxy loop, driven by real wheel and pointer events.
   galaxyLoop = { from: await evaluate(`system.id`) };
@@ -308,6 +337,13 @@ writeFileSync(screenshot, Buffer.from(shot.result.data, 'base64'));
 const moved = started && after.pos[2] < before.pos[2] - 10 && after.speed > 5;
 const autopiloted = started && autopilot.endDist < Math.max(3, autopilot.startDist * 0.1);
 const picked = started && pick.target === pick.star && pick.tooltip === pick.star;
+const alive =
+  started &&
+  living.starSeconds > 1 &&
+  living.liveParticles.some((n) => n > 0) &&
+  living.comets > 0 &&
+  living.cometsMoved &&
+  !living.pickable;
 const looped =
   started &&
   galaxyLoop.modeAfterZoomOut === 'galaxy' &&
@@ -335,10 +371,10 @@ const planets =
   planetLoop.soundOut === 'transitionOut' &&
   planetTypes.every((r) => r.ok) &&
   (quick || planetTypes.length === 8);
-const ok = started && moved && autopiloted && picked && looped && sounded && planets && errors.length === 0;
+const ok = started && moved && autopiloted && picked && alive && looped && sounded && planets && errors.length === 0;
 console.log(
   JSON.stringify(
-    { ok, started, moved, autopiloted, picked, looped, sounded, planets, before, after, autopilot, pick, galaxyLoop, audio, planetLoop, planetTypes, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
+    { ok, started, moved, autopiloted, picked, alive, looped, sounded, planets, before, after, autopilot, pick, living, galaxyLoop, audio, planetLoop, planetTypes, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
     null,
     2,
   ),

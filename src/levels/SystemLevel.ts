@@ -55,7 +55,7 @@ export class SystemLevel extends Level {
     this.data = generateSystem(ref);
 
     this.starfield = this.add(new Starfield(this.scene, camera));
-    this.world = this.add(new StarSystem(this.scene, physics, this.data));
+    this.world = this.add(new StarSystem(this.scene, physics, this.data, debug));
     const spawn = new THREE.Vector3(0, 15, spawnDistance(this.data));
     this.ship = this.add(new Ship(this.scene, physics, input, camera, this.world.bodies, debug, spawn));
     // Visual-only entities below run in this order each frame: camera first, then what reads it.

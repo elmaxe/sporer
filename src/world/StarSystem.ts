@@ -1,20 +1,25 @@
 import * as THREE from 'three';
+import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
 import { FIXED_DT } from '../core/Game';
+import { hashSeed } from '../gen/rng';
 import { describePlanet, type PlanetData, type SystemData } from '../gen/system';
 import { skyScale } from '../planet/frame';
 import type { Physics } from '../physics/Physics';
 import type { CelestialBody } from './CelestialBody';
+import { Comet, cometParams } from './Comet';
 import { Planet } from './Planet';
 import { Star } from './Star';
+import { stormParams } from './StarStorms';
 import { createGlowTexture } from './glowTexture';
+import { starParams } from './starMaterials';
 
 /** Gap between a body's neighbourhood (rings, moon orbits) and where the autopilot parks. */
 const PLANET_STANDOFF_MARGIN = 10;
 const MOON_STANDOFF_MARGIN = 6;
 
 /**
- * Renders a generated SystemData: its star(s), planets and moons. Units are
+ * Renders a generated SystemData: its star(s), planets, moons and comets. Units are
  * system-scene units (see gen/system.ts). One clock drives every orbit, so
  * the system can be fast-forwarded (`setTime`) or posed at any moment
  * (`pose`, for the planet level's sky) without stepping physics.
@@ -23,6 +28,8 @@ export class StarSystem implements Entity {
   readonly stars: Star[];
   readonly planets: Planet[];
   readonly moons: Planet[] = [];
+  /** Scenery: not in `bodies`, so they can't be picked or flown to. */
+  readonly comets: Comet[];
   /** Everything the player can hover and fly to. */
   readonly bodies: CelestialBody[];
   private readonly ambient: THREE.HemisphereLight;
@@ -34,11 +41,20 @@ export class StarSystem implements Entity {
     private readonly scene: THREE.Scene,
     physics: Physics,
     readonly data: SystemData,
+    debug?: Debug,
   ) {
     this.glowTexture = createGlowTexture();
     const binary = data.stars.length > 1;
     this.stars = data.stars.map(
-      (s, i) => new Star(scene, physics, binary ? `${data.name} ${'AB'[i]}` : data.name, s, this.glowTexture),
+      (s, i) =>
+        new Star(
+          scene,
+          physics,
+          binary ? `${data.name} ${'AB'[i]}` : data.name,
+          s,
+          hashSeed(data.seed, 'star', i),
+          this.glowTexture,
+        ),
     );
     this.planets = data.planets.map((p) => {
       const planet = new Planet(scene, physics, p, describe(p), p.extent + PLANET_STANDOFF_MARGIN);
@@ -48,9 +64,26 @@ export class StarSystem implements Entity {
       }
       return planet;
     });
+    this.comets = data.comets.map((c) => new Comet(scene, c, data.habitableRadius, this.glowTexture));
     this.bodies = [...this.stars, ...this.planets, ...this.moons];
     this.ambient = new THREE.HemisphereLight('#9bb8ff', '#1a1020', 0.35);
     scene.add(this.ambient);
+    this.animate(this._time);
+
+    const stars = debug?.folder('Stars');
+    stars?.add(starParams, 'pace', 0, 5);
+    stars?.add(starParams, 'granulation', 0.2, 3);
+    stars?.add(starParams, 'spots', 0, 3);
+    stars?.add(starParams, 'limbDarkening', 0, 1);
+    stars?.add(starParams, 'corona', 0, 3);
+    stars?.add(stormParams, 'particleSize', 0.005, 0.1);
+    stars?.add(stormParams, 'brightness', 0, 3);
+    const comets = debug?.folder('Comets');
+    comets?.add(cometParams, 'activeDistance', 0.3, 3);
+    comets?.add(cometParams, 'tailLength', 0, 300);
+    comets?.add(cometParams, 'maxTailLength', 0, 1000);
+    comets?.add(cometParams, 'tailWidth', 0, 20);
+    comets?.add(cometParams, 'dustCurve', 0, 1);
   }
 
   /** System time in seconds: where every body is on its orbit. */
@@ -82,18 +115,28 @@ export class StarSystem implements Entity {
     for (const s of this.stars) s.positionAt(time, s.object.position);
     for (const p of this.planets) this.posePlanet(p, time, observer, minAngle);
     for (const m of this.moons) this.posePlanet(m, time, observer, minAngle);
+    this.animate(time);
   }
 
   update(frameDt: number, alpha: number): void {
     for (const s of this.stars) s.update(frameDt, alpha);
     for (const p of this.planets) p.update(frameDt, alpha);
     for (const m of this.moons) m.update(frameDt, alpha);
+    // The clock between the last two fixed steps, as the bodies are interpolated.
+    this.animate(this._time - FIXED_DT * (1 - alpha));
+  }
+
+  /** Living stars and comets: pure functions of the (render) time. */
+  private animate(time: number): void {
+    for (const s of this.stars) s.animate(time);
+    for (const c of this.comets) c.poseAt(time);
   }
 
   dispose(): void {
     for (const s of this.stars) s.dispose();
     for (const p of this.planets) p.dispose();
     for (const m of this.moons) m.dispose();
+    for (const c of this.comets) c.dispose();
     this.scene.remove(this.ambient);
     this.ambient.dispose();
     this.glowTexture.dispose();
