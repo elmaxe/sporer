@@ -3,29 +3,30 @@ import type { Entity } from './Entity';
 import { FixedStep } from './FixedStep';
 import { Input } from './Input';
 import type { Debug } from './Debug';
-import type { Physics } from '../physics/Physics';
+import type { Level } from '../levels/Level';
 
 export const FIXED_DT = 1 / 60;
 /** Longest frame we accept; longer gaps (tab switch, breakpoint) are clamped. */
 const MAX_FRAME_DT = 0.25;
 
 /**
- * Owns the renderer, scene, camera and main loop, and drives every Entity
- * (see Entity.ts for the hook order).
+ * Owns the renderer, camera, input and main loop. The active Level holds the
+ * scene, entities and physics; `Game` steps and renders only that level, plus
+ * a few global entities (e.g. the scene manager) that run before it.
+ * See Entity.ts for the hook order.
  */
 export class Game {
   readonly renderer: THREE.WebGLRenderer;
-  readonly scene = new THREE.Scene();
   readonly camera: THREE.PerspectiveCamera;
   readonly input: Input;
 
+  private _level: Level | null = null;
   private readonly entities: Entity[] = [];
   private readonly fixedStep = new FixedStep(FIXED_DT);
   private lastTime = -1;
 
   constructor(
     container: HTMLElement,
-    readonly physics: Physics,
     readonly debug: Debug,
   ) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -40,6 +41,19 @@ export class Game {
     window.addEventListener('resize', this.resize);
   }
 
+  get level(): Level | null {
+    return this._level;
+  }
+
+  /** Makes `level` the active one. The previous level is exited, not disposed. */
+  setLevel(level: Level): void {
+    if (level === this._level) return;
+    this._level?.exit();
+    this._level = level;
+    level.enter();
+  }
+
+  /** Adds a global entity that runs every frame regardless of the level, before it. */
   add<T extends Entity>(entity: T): T {
     this.entities.push(entity);
     return entity;
@@ -61,13 +75,14 @@ export class Game {
     this.renderer.setAnimationLoop(null);
   }
 
+  /** Disposes the global entities (which own the levels), then the renderer. */
   dispose(): void {
     this.stop();
     window.removeEventListener('resize', this.resize);
     for (const e of this.entities) e.dispose();
     this.entities.length = 0;
+    this._level = null;
     this.input.dispose();
-    this.physics.dispose();
     this.debug.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
@@ -83,14 +98,18 @@ export class Game {
     const steps = this.fixedStep.advance(frameDt);
     for (let s = 0; s < steps; s++) {
       for (const e of this.entities) e.fixedUpdate?.(FIXED_DT);
-      this.physics.step();
       for (const e of this.entities) e.afterPhysics?.();
+      this._level?.fixedStep(FIXED_DT);
     }
 
     const alpha = this.fixedStep.alpha;
     for (const e of this.entities) e.update?.(frameDt, alpha);
-
-    this.renderer.render(this.scene, this.camera);
+    // The level may have changed during the global update (a transition swap).
+    const level = this._level;
+    if (level) {
+      level.update(frameDt, alpha);
+      this.renderer.render(level.scene, this.camera);
+    }
     this.debug.endFrame();
   };
 

@@ -5,6 +5,7 @@ import type { Physics } from '../physics/Physics';
 import type { CelestialBody } from './CelestialBody';
 import { Planet } from './Planet';
 import { Star } from './Star';
+import { createGlowTexture } from './glowTexture';
 
 /** Gap between a body's neighbourhood (rings, moon orbits) and where the autopilot parks. */
 const PLANET_STANDOFF_MARGIN = 10;
@@ -74,21 +75,4 @@ function describe(p: PlanetData): string {
   if (p.rings) parts.push('rings');
   if (p.moons.length > 0) parts.push(p.moons.length === 1 ? '1 moon' : `${p.moons.length} moons`);
   return parts.join(' · ');
-}
-
-function createGlowTexture(): THREE.CanvasTexture {
-  const size = 256;
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = size;
-  const ctx = canvas.getContext('2d')!;
-  const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  g.addColorStop(0, 'rgba(255,255,255,1)');
-  g.addColorStop(0.2, 'rgba(255,255,255,0.6)');
-  g.addColorStop(0.5, 'rgba(255,255,255,0.12)');
-  g.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, size, size);
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  return texture;
 }

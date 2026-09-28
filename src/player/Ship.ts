@@ -245,7 +245,7 @@ export class Ship implements Entity {
 }
 
 /** Classic flying saucer: a hull disc, a glass dome and a spinning light ring. */
-function buildUfoMesh(): { group: THREE.Group; ring: THREE.Group } {
+export function buildUfoMesh(): { group: THREE.Group; ring: THREE.Group } {
   const group = new THREE.Group();
 
   const hull = new THREE.Mesh(

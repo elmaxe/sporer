@@ -90,3 +90,9 @@ export function describeStar(star: StarData): string {
       return 'Blue giant';
   }
 }
+
+/** A system's star(s) for UI, e.g. "G-class star" or "Binary: B-class star + Red dwarf". */
+export function describeStars(stars: readonly StarData[]): string {
+  const names = stars.map(describeStar).join(' + ');
+  return stars.length > 1 ? `Binary: ${names}` : names;
+}

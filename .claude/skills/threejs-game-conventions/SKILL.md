@@ -11,12 +11,13 @@ Browser game: Vite + TypeScript (strict), `three`, `@dimforge/rapier3d-compat` p
 
 | Path | Role |
 |---|---|
-| `src/main.ts` | Composition root: read `?seed` / `?star`, generate galaxy and system, init physics and debug, create `Game`, add entities, start. Exposes `window.game` / `ship` / `galaxy` / `system` / `world` (the `StarSystem` entity) in dev. |
-| `src/core/Game.ts` | Renderer, scene, camera, resize, main loop, entity list. `FIXED_DT = 1/60`. |
+| `src/main.ts` | Composition root: read `?seed` / `?star`, generate the galaxy, init Rapier and debug, create `Game` and the `SceneManager`, start. Exposes `window.game` / `galaxy` / `levels` (the `SceneManager`) and live getters `ship` / `world` (the `StarSystem` entity) / `system` (its data) for the current system level in dev. |
+| `src/core/Game.ts` | Renderer, shared camera, input, resize, main loop. Steps and renders only the active `Level` (`game.setLevel`), after a few global entities (`game.add`, e.g. the `SceneManager`). `FIXED_DT = 1/60`. |
+| `src/levels/` | `Level` (own `THREE.Scene`, entity list, optional `Physics`, `enter`/`exit`), `SystemLevel`, `GalaxyLevel`, and `SceneManager` (owns the levels, runs the zoom + fade transitions, blocks input meanwhile). |
 | `src/core/Entity.ts` | The only lifecycle contract (see below). |
 | `src/core/FixedStep.ts` | Pure fixed-timestep accumulator. |
 | `src/core/Input.ts` | Polled keys (`KeyboardEvent.code`), pointer position, click-vs-drag, wheel. |
-| `src/core/Debug.ts` | `debug.folder(name)` → lil-gui folder or `undefined` in prod. |
+| `src/core/Debug.ts` | `debug.folder(name)` → lil-gui folder or `undefined` in prod. Re-requesting a name replaces the folder (levels get rebuilt), so give each level's folders distinct names (`System camera`, `Galaxy camera`). |
 | `src/physics/Physics.ts` | Rapier world (zero gravity). Re-exports `RAPIER`. |
 | `src/gen/` | **Procedural generation, pure data, no THREE/DOM/Rapier**: `rng.ts` (seeded PRNG, `hashSeed`), `galaxy.ts`, `stars.ts`, `system.ts`, `planets.ts`, `names.ts`, `color.ts`, plus shared math (`orbit.ts`, `noise.ts`). |
 | `src/world/` | Views that render generated data: `StarSystem` (from `SystemData`), `Star`, `Planet` (also moons, gas bands, rings, atmosphere), `Starfield`. Stars/planets/moons implement `CelestialBody` (name, description, radius, standoff, sim + render position, velocity). |
@@ -24,7 +25,9 @@ Browser game: Vite + TypeScript (strict), `three`, `@dimforge/rapier3d-compat` p
 | `src/ui/` | DOM HUD overlays (markup lives in `index.html`). |
 | `tests/` | Vitest unit tests for pure logic. |
 
-New feature areas get their own folder under `src/` (e.g. `src/galaxy/`, `src/combat/`, `src/audio/`).
+| `src/galaxy/` | Galaxy-map entities: `GalaxyMap` (all stars in one `Points` shader), `GalaxyShip` (scripted travel), `GalaxyPicker`, `GalaxyHud`, pure `pickPoint` / `galaxyStarSize`. |
+
+New feature areas get their own folder under `src/` (e.g. `src/combat/`, `src/audio/`).
 
 ## Procedural generation (`src/gen/`)
 
@@ -38,7 +41,7 @@ New feature areas get their own folder under `src/` (e.g. `src/galaxy/`, `src/co
 
 ## Entity lifecycle
 
-Everything in the game implements `Entity` and is registered with `game.add(entity)`. The loop runs:
+Everything in the game implements `Entity` and is registered with its level (`level.add(entity)`; only level-independent things like the `SceneManager` use `game.add`). Only the active level runs; inactive levels keep their state, frozen. The loop runs:
 
 ```
 per fixed step (60 Hz):  fixedUpdate(dt) → physics.step() → afterPhysics()
@@ -51,19 +54,19 @@ game.remove(e) / game.dispose()  → dispose()
 - **`update`**: visuals only. Interpolate `mesh.position.lerpVectors(prev, curr, alpha)` and `quaternion.slerpQuaternions(...)`, plus cosmetic animation, cameras and HUD. Never apply forces here.
 - **`dispose`**: remove from the scene, `.dispose()` every geometry, material and texture you created, `world.removeRigidBody(body)`, and remove DOM/event listeners.
 
-Composite entities (e.g. `StarSystem` owning `Planet`s) forward the hooks to their children. Only the parent is registered with `Game`.
+Composite entities (e.g. `StarSystem` owning `Planet`s) forward the hooks to their children. Only the parent is registered with the level. A level disposes its entities and physics world in `dispose()`; anything added straight to its scene (e.g. a light) is disposed by a `dispose` override.
 
-Constructor pattern: take the dependencies you need (`scene`, `physics`, `input`, `debug`, ...) explicitly. There is no global singleton. `main.ts` wires everything.
+Constructor pattern: take the dependencies you need (`scene`, `physics`, `input`, `debug`, ...) explicitly. There is no global singleton. Each level's constructor wires its entities; `main.ts` wires the game.
 
 ## Physics rules (Rapier)
 
-- Rapier is WASM. `Physics.create()` awaits `RAPIER.init()`, and no Rapier call may happen before it.
+- Rapier is WASM. `main.ts` awaits `Physics.init()` once; after that `Physics.create(FIXED_DT)` makes a world synchronously (one per level that needs physics).
 - Import it as `import { RAPIER, type Physics } from '../physics/Physics'`.
 - Body types: **dynamic** for things pushed by forces (ship), **kinematicPositionBased** for scripted movers (orbiting planets, via `setNextKinematicTranslation` in `fixedUpdate`), **fixed** for static objects (sun).
 - The ship locks rotations and sets its orientation directly from input. Movement uses `applyImpulse(force * dt)` so it scales with the fixed step. Forces added with `addForce` persist until `resetForces`, so prefer impulses.
 - Rapier returns plain `{x,y,z}` objects and accepts any `{x,y,z}`/`{x,y,z,w}`, so THREE vectors and quaternions can be passed directly.
 - Enable CCD on fast bodies (`setCcdEnabled(true)`).
-- Never step the world anywhere except `Game`'s fixed-step loop.
+- Never step the world anywhere except the fixed-step loop (`Game` → `level.fixedStep`).
 
 ## Rendering and performance rules
 
@@ -71,7 +74,7 @@ Constructor pattern: take the dependencies you need (`scene`, `physics`, `input`
 - Many identical objects (asteroids, stars, fleets) → `InstancedMesh` or `Points`, never thousands of meshes.
 - Low-poly, flat-shaded, vertex-coloured style (`flatShading: true`, `vertexColors: true`). Procedural generation must be **seeded and deterministic** (`terrainNoise(x, y, z, seed)`).
 - The renderer uses ACES tone mapping. Emissive or glowing objects use `MeshBasicMaterial` or additive sprites.
-- Scale: the UFO is ~4 units wide, and distances are compressed (sun r=30, planets orbit at 90–330). The camera far plane is 20000 and the starfield sits at 9000. For galaxy-scale views, use a separate scene or scaled root, not huge coordinates (float precision).
+- Scale: the UFO is ~4 units wide, and distances are compressed (sun r=30, planets orbit at 90–330). The camera far plane is 20000 and the starfield sits at 9000. Galaxy scale lives in its own level (`GalaxyLevel`), never in huge system coordinates (float precision).
 - Pixel ratio is capped at 2.
 
 ## Tunables and debug

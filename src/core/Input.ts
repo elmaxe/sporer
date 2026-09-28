@@ -22,7 +22,8 @@ export interface PointerState {
  * Mouse: a left or right press that moves more than a few pixels is a drag
  * (drained with `consumeDrag`); a left press that doesn't is a click
  * (drained with `consumeClick`). Wheel movement accumulates until
- * `consumeWheel`.
+ * `consumeWheel`. While `blocked` (e.g. during a level transition) keys read
+ * as released and consumers get nothing; input arriving meanwhile is dropped.
  */
 export class Input {
   private readonly keys = new Set<string>();
@@ -37,6 +38,7 @@ export class Input {
   private wheel = 0;
   private click: { ndcX: number; ndcY: number } | null = null;
   private readonly delta = { x: 0, y: 0 };
+  private _blocked = false;
 
   constructor(private readonly element: HTMLElement) {
     window.addEventListener('keydown', this.onKeyDown);
@@ -50,8 +52,18 @@ export class Input {
     element.addEventListener('contextmenu', this.onContextMenu);
   }
 
+  get blocked(): boolean {
+    return this._blocked;
+  }
+
+  set blocked(value: boolean) {
+    this._blocked = value;
+    this.dragDx = this.dragDy = this.wheel = 0;
+    this.click = null;
+  }
+
   isDown(code: string): boolean {
-    return this.keys.has(code);
+    return !this._blocked && this.keys.has(code);
   }
 
   /** -1, 0 or 1 from a pair of keys. */
@@ -71,8 +83,8 @@ export class Input {
 
   /** Drag movement in pixels since the last call. The returned object is reused. */
   consumeDrag(): { readonly x: number; readonly y: number } {
-    this.delta.x = this.dragDx;
-    this.delta.y = this.dragDy;
+    this.delta.x = this._blocked ? 0 : this.dragDx;
+    this.delta.y = this._blocked ? 0 : this.dragDy;
     this.dragDx = 0;
     this.dragDy = 0;
     return this.delta;
@@ -82,14 +94,14 @@ export class Input {
   consumeWheel(): number {
     const w = this.wheel;
     this.wheel = 0;
-    return w;
+    return this._blocked ? 0 : w;
   }
 
   /** The last left click (in NDC) since the previous call, or null. */
   consumeClick(): { readonly ndcX: number; readonly ndcY: number } | null {
     const c = this.click;
     this.click = null;
-    return c;
+    return this._blocked ? null : c;
   }
 
   dispose(): void {

@@ -1,17 +1,10 @@
-import * as THREE from 'three';
-import { Game, FIXED_DT } from './core/Game';
+import { Game } from './core/Game';
 import { Debug } from './core/Debug';
 import { Physics } from './physics/Physics';
 import { generateGalaxy } from './gen/galaxy';
 import { parseSeed } from './gen/rng';
-import { findHomeSystem, generateSystem, spawnDistance } from './gen/system';
-import { Starfield } from './world/Starfield';
-import { StarSystem } from './world/StarSystem';
-import { Ship } from './player/Ship';
-import { OrbitCamera } from './player/OrbitCamera';
-import { Picker } from './player/Picker';
-import { TargetMarker } from './player/TargetMarker';
-import { Hud } from './ui/Hud';
+import { findHomeSystem } from './gen/system';
+import { SceneManager } from './levels/SceneManager';
 
 const DEFAULT_SEED = '1337';
 
@@ -20,27 +13,25 @@ async function main(): Promise<void> {
   const params = new URLSearchParams(location.search);
   const galaxy = generateGalaxy(parseSeed(params.get('seed') ?? DEFAULT_SEED));
   const starId = Number(params.get('star'));
-  const ref = (params.has('star') && galaxy.stars[starId]) || findHomeSystem(galaxy);
-  const system = generateSystem(ref);
+  const start = (params.has('star') && galaxy.stars[starId]) || findHomeSystem(galaxy);
 
-  const [physics, debug] = await Promise.all([Physics.create(FIXED_DT), Debug.create()]);
-  const game = new Game(document.getElementById('app')!, physics, debug);
-
-  game.add(new Starfield(game.scene, game.camera));
-  const world = game.add(new StarSystem(game.scene, physics, system));
-  const spawn = new THREE.Vector3(0, 15, spawnDistance(system));
-  const ship = game.add(new Ship(game.scene, physics, game.input, game.camera, world.bodies, debug, spawn));
-  // Visual-only entities below run in this order each frame: camera first, then what reads it.
-  game.add(new OrbitCamera(game.camera, ship.object, game.input, debug));
-  const picker = game.add(new Picker(game.camera, game.input, ship, world.bodies));
-  game.add(new TargetMarker(game.scene, game.camera, ship));
-  game.add(new Hud(ship, picker, game.input, system));
+  const [debug] = await Promise.all([Debug.create(), Physics.init()]);
+  const game = new Game(document.getElementById('app')!, debug);
+  const levels = game.add(new SceneManager(game, galaxy, start, debug));
 
   document.getElementById('loading')?.remove();
   game.start();
 
   // Handles for poking at the game from the browser console / automation.
-  if (import.meta.env.DEV) Object.assign(window, { game, ship, galaxy, system, world });
+  // ship / world / system follow the current system level.
+  if (import.meta.env.DEV) {
+    Object.assign(window, { game, galaxy, levels });
+    Object.defineProperties(window, {
+      ship: { get: () => levels.systemLevel.ship, configurable: true },
+      world: { get: () => levels.systemLevel.world, configurable: true },
+      system: { get: () => levels.systemLevel.data, configurable: true },
+    });
+  }
 }
 
 main().catch((err: unknown) => {

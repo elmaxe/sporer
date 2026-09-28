@@ -36,7 +36,8 @@ export class Picker implements Entity {
 
   update(): void {
     const { pointer } = this.input;
-    this.hovered = pointer.inside && !this.input.isDragging ? this.pick(pointer.ndcX, pointer.ndcY) : null;
+    const hovering = pointer.inside && !this.input.isDragging && !this.input.blocked;
+    this.hovered = hovering ? this.pick(pointer.ndcX, pointer.ndcY) : null;
 
     const click = this.input.consumeClick();
     if (!click) return;

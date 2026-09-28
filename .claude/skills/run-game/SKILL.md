@@ -31,7 +31,7 @@ npm run dev -- --strictPort
 npm run smoke            # or: npm run smoke -- http://localhost:4173/
 ```
 
-`scripts/smoke.mjs` launches headless Chrome/Edge (SwiftShader WebGL) over the DevTools protocol. It loads the game, holds W for 2 s and checks that the ship moved along −Z, autopilots back to the start point (`autopilot`), hovers and clicks the star's screen position and checks it became the target and showed the tooltip (`pick`), measures FPS, and collects console errors, warnings and exceptions. It prints JSON with `ok`, `before`/`after`, `autopilot`, `pick`, `fps`, `errors` and a `screenshot` path, and exits 1 on failure. **Read the screenshot file** to check the visuals. This needs no browser extension. Set `CHROME_PATH` if the browser isn't in a standard location.
+`scripts/smoke.mjs` launches headless Chrome/Edge (SwiftShader WebGL) over the DevTools protocol. It loads the game, holds W for 2 s and checks that the ship moved along −Z, autopilots back to the start point (`autopilot`), hovers and clicks the star's screen position and checks it became the target and showed the tooltip (`pick`), then runs the galaxy loop with real wheel/pointer events (`galaxyLoop`: scroll out past max zoom → galaxy, click the nearest star, wait for travel, scroll in → that star's system), measures FPS, and collects console errors, warnings and exceptions. It prints JSON with `ok`, `before`/`after`, `autopilot`, `pick`, `galaxyLoop`, `fps`, `errors`, and `screenshot` (final system) + `galaxyScreenshot` paths, and exits 1 on failure. **Read the screenshot file** to check the visuals. This needs no browser extension. Set `CHROME_PATH` if the browser isn't in a standard location.
 
 Extend the script when you add gameplay worth guarding, such as a new control or a new entity that should exist on load.
 
@@ -52,7 +52,7 @@ Load the tools in one ToolSearch call:
 
 - **Mouse**: real clicks work: click a planet and the HUD should show `Autopilot → <name>`, then `Parked at <name>`. Scroll zooms; drag rotates. Hovering a body shows a tooltip.
 - **Keyboard**: click empty space first to focus (this also starts an autopilot move; any WASD key cancels it), then hold keys with `computer` (`key` / hold actions for `w`, `shift+w`, `a`, `e`). Screenshot again and confirm the ship moved and the HUD speed changed.
-- **Direct state** via `javascript_tool` (the dev build exposes `window.game` and `window.ship`):
+- **Direct state** via `javascript_tool` (the dev build exposes `window.game`, `galaxy`, `levels` and, for the current system, `ship` / `world` / `system`):
 
 ```js
 // speed, position and scene size
@@ -71,6 +71,14 @@ After ~2 s, `ship.speed` should be > 0 and the position should have moved along 
 // autopilot: fly to a body (or pass any {x, y, z}); poll until parked
 ship.moveTo(world.planets[0]);
 ({ enRoute: ship.enRoute, target: ship.targetBody?.name, speed: ship.speed })
+```
+
+```js
+// levels: switch without scrolling, travel in the galaxy, inspect
+levels.toGalaxy();                                   // then, after ~1.3 s:
+levels.galaxyLevel.ship.travelTo(galaxy.stars[42]);  // wait until !levels.galaxyLevel.ship.travelling
+levels.toSystem();
+({ mode: levels.mode, transitioning: levels.transitioning, system: system.name })
 ```
 
 - **FPS**: stats.js is in the screenshot (top-left). Alternatively measure it:

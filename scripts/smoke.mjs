@@ -1,8 +1,9 @@
 // Headless browser smoke test over the Chrome DevTools Protocol.
 // Usage: npm run smoke [-- http://localhost:5173/]   (dev server must be running)
-// Checks: W moves the ship along -Z, the autopilot flies back to a point, and hovering +
-// clicking the star targets it. Prints JSON with FPS, console errors and a screenshot path.
-// Exit 1 on failure.
+// Checks: W moves the ship along -Z, the autopilot flies back to a point, hovering + clicking
+// the star targets it, and the galaxy loop works (scroll out to the galaxy, click the nearest
+// star, travel, scroll in to its system). Prints JSON with FPS, console errors and screenshot
+// paths. Exit 1 on failure.
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -73,7 +74,7 @@ await sleep(4000);
 
 const state = `({ speed: +ship.speed.toFixed(1), pos: ship.object.position.toArray().map((n) => +n.toFixed(1)) })`;
 const started = await evaluate(`typeof window.ship !== 'undefined'`);
-let before, after, autopilot, pick, fps;
+let before, after, autopilot, pick, galaxyLoop, fps;
 if (started) {
   before = await evaluate(state);
   await evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }))`);
@@ -105,6 +106,46 @@ if (started) {
     })));
   })`);
   await evaluate(`ship.stop()`);
+
+  // Galaxy loop, driven by real wheel and pointer events.
+  const wheel = (deltaY) =>
+    evaluate(`game.renderer.domElement.dispatchEvent(new WheelEvent('wheel', { deltaY: ${deltaY}, bubbles: true, cancelable: true }))`);
+  galaxyLoop = { from: await evaluate(`system.id`) };
+  await wheel(50000); // to max zoom
+  await sleep(1500);
+  await wheel(300); // keep scrolling past it
+  await sleep(1800);
+  galaxyLoop.modeAfterZoomOut = await evaluate(`levels.mode`);
+  const galaxyShot = await send('Page.captureScreenshot', { format: 'png' });
+  writeFileSync(join(outDir, 'galaxy.png'), Buffer.from(galaxyShot.result.data, 'base64'));
+
+  galaxyLoop.clicked = await evaluate(`new Promise((resolve) => {
+    const here = galaxy.stars[system.id].position;
+    let best = null, bestD = Infinity;
+    for (const s of galaxy.stars) {
+      const d = Math.hypot(s.position.x - here.x, s.position.y - here.y, s.position.z - here.z);
+      if (s.id !== system.id && d < bestD) { best = s; bestD = d; }
+    }
+    const p = new game.camera.position.constructor(best.position.x, best.position.y, best.position.z).project(game.camera);
+    const rect = game.renderer.domElement.getBoundingClientRect();
+    const at = { clientX: rect.left + ((p.x + 1) / 2) * rect.width, clientY: rect.top + ((1 - p.y) / 2) * rect.height, bubbles: true };
+    const canvas = game.renderer.domElement;
+    canvas.dispatchEvent(new PointerEvent('pointermove', at));
+    canvas.dispatchEvent(new PointerEvent('pointerdown', { ...at, button: 0 }));
+    canvas.dispatchEvent(new PointerEvent('pointerup', { ...at, button: 0 }));
+    requestAnimationFrame(() => requestAnimationFrame(() =>
+      resolve({ nearest: best.id, destination: levels.galaxyLevel.ship.destination?.id ?? null })));
+  })`);
+  for (let i = 0; i < 40 && (await evaluate(`levels.galaxyLevel.ship.travelling`)); i++) await sleep(250);
+  galaxyLoop.dockedAt = await evaluate(`levels.galaxyLevel.ship.travelling ? null : levels.galaxyLevel.ship.current.id`);
+
+  await wheel(-50000); // to min zoom
+  await sleep(1500);
+  await wheel(-300); // keep scrolling in
+  await sleep(2000);
+  galaxyLoop.modeAfterZoomIn = await evaluate(`levels.mode`);
+  galaxyLoop.to = await evaluate(`system.id`);
+  galaxyLoop.shipSpeed = await evaluate(`ship.speed`);
   fps = await evaluate(`new Promise((r) => { let n = 0; const t0 = performance.now();
     (function f() { if (++n === 120) r(Math.round(120000 / (performance.now() - t0))); else requestAnimationFrame(f); })(); })`);
 }
@@ -115,9 +156,21 @@ writeFileSync(screenshot, Buffer.from(shot.result.data, 'base64'));
 const moved = started && after.pos[2] < before.pos[2] - 10 && after.speed > 5;
 const autopiloted = started && autopilot.endDist < Math.max(3, autopilot.startDist * 0.1);
 const picked = started && pick.target === pick.star && pick.tooltip === pick.star;
-const ok = started && moved && autopiloted && picked && errors.length === 0;
+const looped =
+  started &&
+  galaxyLoop.modeAfterZoomOut === 'galaxy' &&
+  galaxyLoop.clicked.destination === galaxyLoop.clicked.nearest &&
+  galaxyLoop.dockedAt === galaxyLoop.clicked.nearest &&
+  galaxyLoop.modeAfterZoomIn === 'system' &&
+  galaxyLoop.to === galaxyLoop.clicked.nearest &&
+  typeof galaxyLoop.shipSpeed === 'number';
+const ok = started && moved && autopiloted && picked && looped && errors.length === 0;
 console.log(
-  JSON.stringify({ ok, started, moved, autopiloted, picked, before, after, autopilot, pick, fps, errors, screenshot }, null, 2),
+  JSON.stringify(
+    { ok, started, moved, autopiloted, picked, looped, before, after, autopilot, pick, galaxyLoop, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
+    null,
+    2,
+  ),
 );
 
 ws.close();

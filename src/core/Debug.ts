@@ -9,6 +9,8 @@ import type Stats from 'stats.js';
  * Usage: `const f = debug.folder('Ship'); f?.add(params, 'thrust', 0, 200);`
  */
 export class Debug {
+  private readonly folders = new Map<string, GUI>();
+
   private constructor(
     private readonly gui?: GUI,
     private readonly stats?: Stats,
@@ -33,9 +35,17 @@ export class Debug {
     return this.gui !== undefined;
   }
 
-  /** A (possibly nested) GUI folder, or undefined when debug is off. */
+  /**
+   * A GUI folder, or undefined when debug is off. Asking for an existing name
+   * replaces that folder, so an object that is rebuilt (e.g. the ship when a
+   * new system loads) doesn't leave controls bound to its disposed predecessor.
+   */
   folder(name: string): GUI | undefined {
-    return this.gui?.addFolder(name);
+    if (!this.gui) return undefined;
+    this.folders.get(name)?.destroy();
+    const folder = this.gui.addFolder(name);
+    this.folders.set(name, folder);
+    return folder;
   }
 
   beginFrame(): void {
