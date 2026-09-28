@@ -29,6 +29,11 @@ export class Level {
     for (const e of this.entities) e.update?.(frameDt, alpha);
   }
 
+  /** Draws the level; the default renders its scene. */
+  render(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera): void {
+    renderer.render(this.scene, camera);
+  }
+
   /** Called when the level becomes active (e.g. to write its HUD text). */
   enter(): void {}
 

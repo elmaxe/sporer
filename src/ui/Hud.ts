@@ -8,7 +8,8 @@ import type { Tooltip } from './Tooltip';
 
 const REFRESH_SECONDS = 0.1;
 const HELP =
-  'Click: fly to a planet, star or point · Scroll: zoom (out past the system for the galaxy) · Drag: rotate view · ' +
+  'Click: fly to a planet, star or point · Scroll: zoom (in at a planet to descend, out past the system for the galaxy) · ' +
+  'Drag: rotate view · ' +
   'WASD: nudge · E/Q: up/down · Shift: boost · M: mute';
 
 /**

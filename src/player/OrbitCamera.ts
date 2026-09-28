@@ -31,9 +31,20 @@ export interface OrbitOptions {
    * +1 past maxDistance (zoom out), -1 past minDistance (zoom in).
    */
   onZoomPastLimit?: (direction: 1 | -1) => void;
+  /**
+   * Live "up" direction (e.g. a ship's radial direction over a planet). Yaw and
+   * pitch are then measured in the plane perpendicular to it, and that plane
+   * is carried along as `up` turns, so the view doesn't spin. Default +Y.
+   */
+  up?: THREE.Vector3;
+  /** Lowest pitch in radians (default -80°). */
+  minPitch?: number;
+  /** Starting pitch in radians (default 22°). */
+  pitch?: number;
 }
 
 const MIN_PITCH = THREE.MathUtils.degToRad(-80);
+const WORLD_UP = new THREE.Vector3(0, 1, 0);
 const MAX_PITCH = THREE.MathUtils.degToRad(85);
 /** Wheel pixels past a limit (about two notches) that count as "keep scrolling". */
 const PAST_LIMIT_PX = 180;
@@ -43,16 +54,26 @@ const PAST_LIMIT_DECAY = 0.6;
 /**
  * Spore-style orbit camera, always centred on the target. Scroll zooms
  * (exponentially), left- or right-drag orbits. Yaw 0 looks along -Z.
+ * A focus override (`setFocus`) can pull the centre over to another point,
+ * e.g. to fly at a planet during a level transition.
  */
 export class OrbitCamera implements Entity {
   private yaw = 0;
-  private pitch = THREE.MathUtils.degToRad(22);
+  private pitch: number;
   private distance: number;
-  private targetYaw = this.yaw;
-  private targetPitch = this.pitch;
+  private targetYaw = 0;
+  private targetPitch: number;
   private targetDistance: number;
   private pastLimit = 0;
+  private readonly minPitch: number;
+  private focus: THREE.Vector3 | null = null;
+  private focusBlend = 0;
+  /** Carries the yaw/pitch frame along with `options.up` (identity for world up). */
+  private readonly frame = new THREE.Quaternion();
+  private readonly frameUp = new THREE.Vector3(0, 1, 0);
+  private readonly turn = new THREE.Quaternion();
   private readonly offset = new THREE.Vector3();
+  private readonly center = new THREE.Vector3();
 
   constructor(
     private readonly camera: THREE.PerspectiveCamera,
@@ -64,6 +85,8 @@ export class OrbitCamera implements Entity {
     debugName: string,
   ) {
     this.distance = this.targetDistance = options.distance;
+    this.pitch = this.targetPitch = options.pitch ?? THREE.MathUtils.degToRad(22);
+    this.minPitch = options.minPitch ?? MIN_PITCH;
     const f = debug.folder(debugName);
     f?.add(params, 'minDistance', 0.5, 100);
     f?.add(params, 'maxDistance', 100, 10000);
@@ -83,6 +106,22 @@ export class OrbitCamera implements Entity {
     this.pastLimit = 0;
   }
 
+  /**
+   * Centres the view on `point` (a live vector) instead of the target, mixed
+   * by `blend` (0 = target, 1 = point). `null` returns to the target.
+   */
+  setFocus(point: THREE.Vector3 | null, blend = 1): void {
+    this.focus = point;
+    this.focusBlend = point ? blend : 0;
+  }
+
+  /** Jumps to the yaw and pitch that put the camera in world direction `dir` from the centre. */
+  lookFrom(dir: THREE.Vector3): void {
+    const d = this.offset.copy(dir).normalize();
+    this.yaw = this.targetYaw = Math.atan2(d.x, d.z);
+    this.pitch = this.targetPitch = THREE.MathUtils.clamp(Math.asin(d.y), this.minPitch, MAX_PITCH);
+  }
+
   /** Smoothly zooms to `distance` (clamped to the limits). */
   zoomTo(distance: number): void {
     this.targetDistance = THREE.MathUtils.clamp(distance, this.params.minDistance, this.params.maxDistance);
@@ -92,7 +131,7 @@ export class OrbitCamera implements Entity {
     const p = this.params;
     const drag = this.input.consumeDrag();
     this.targetYaw -= drag.x * p.rotateSpeed;
-    this.targetPitch = THREE.MathUtils.clamp(this.targetPitch + drag.y * p.rotateSpeed, MIN_PITCH, MAX_PITCH);
+    this.targetPitch = THREE.MathUtils.clamp(this.targetPitch + drag.y * p.rotateSpeed, this.minPitch, MAX_PITCH);
 
     const wheel = this.input.consumeWheel();
     this.trackPastLimit(wheel, frameDt);
@@ -110,8 +149,19 @@ export class OrbitCamera implements Entity {
 
     const cosPitch = Math.cos(this.pitch);
     this.offset.set(Math.sin(this.yaw) * cosPitch, Math.sin(this.pitch), Math.cos(this.yaw) * cosPitch);
-    this.camera.position.copy(this.target.position).addScaledVector(this.offset, this.distance);
-    this.camera.lookAt(this.target.position);
+    const up = this.options.up;
+    if (up) {
+      // Parallel transport: turn the frame by the smallest rotation taking the old up to the new one.
+      this.frame.premultiply(this.turn.setFromUnitVectors(this.frameUp, up));
+      this.frameUp.copy(up);
+      this.offset.applyQuaternion(this.frame);
+    }
+    this.center.copy(this.target.position);
+    if (this.focus) this.center.lerp(this.focus, this.focusBlend);
+    // The camera is shared between levels, so always set its up.
+    this.camera.up.copy(up ?? WORLD_UP);
+    this.camera.position.copy(this.center).addScaledVector(this.offset, this.distance);
+    this.camera.lookAt(this.center);
   }
 
   dispose(): void {}

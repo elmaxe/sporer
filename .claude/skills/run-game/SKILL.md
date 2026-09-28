@@ -31,7 +31,7 @@ npm run dev -- --strictPort
 npm run smoke            # or: npm run smoke -- http://localhost:4173/
 ```
 
-`scripts/smoke.mjs` launches headless Chrome/Edge (SwiftShader WebGL) over the DevTools protocol. It loads the game, holds W for 2 s and checks that the ship moved along −Z, autopilots back to the start point (`autopilot`), hovers and clicks the star's screen position and checks it became the target and showed the tooltip (`pick`), then runs the galaxy loop with real wheel/pointer events (`galaxyLoop`: scroll out past max zoom → galaxy, click the nearest star, wait for travel, scroll in → that star's system), then clicks the speaker button for real (unlocking audio) and checks the Effects slider exists and each whoosh plays (`audio.sfx`: zoom out, galaxy travel, zoom in), measures FPS, and collects console errors, warnings and exceptions. It prints JSON with `ok`, `before`/`after`, `autopilot`, `pick`, `galaxyLoop`, `fps`, `errors`, and `screenshot` (final system) + `galaxyScreenshot` paths, and exits 1 on failure. **Read the screenshot file** to check the visuals. This needs no browser extension. Set `CHROME_PATH` if the browser isn't in a standard location.
+`scripts/smoke.mjs` launches headless Chrome/Edge (SwiftShader WebGL) over the DevTools protocol. It loads the game, holds W for 2 s and checks that the ship moved along −Z, autopilots back to the start point (`autopilot`), hovers and clicks the star's screen position and checks it became the target and showed the tooltip (`pick`), then runs the galaxy loop with real wheel/pointer events (`galaxyLoop`: scroll out past max zoom → galaxy, click the nearest star, wait for travel, scroll in → that star's system), then clicks the speaker button for real (unlocking audio) and checks the Effects slider exists and each whoosh plays (`audio.sfx`: zoom out, galaxy travel, zoom in), then the planet loop (`planetLoop`: park on the day side of a planet, scroll in → low orbit, check the sky counts, click the globe and check the ship flew over it at its altitude, scroll out → parked beside the same planet), then the same planet loop for every planet type and a moon in other systems (`planetTypes`, one `planet-<type>.png` screenshot each; `--quick` skips these, e.g. `npm run smoke -- --quick`). It measures FPS and collects console errors, warnings and exceptions. It prints JSON with `ok`, `before`/`after`, `autopilot`, `pick`, `galaxyLoop`, `audio`, `planetLoop`, `planetTypes`, `fps`, `errors`, and `screenshot` (final system) + `galaxyScreenshot` paths, and exits 1 on failure. SwiftShader is slow: expect ~5–15 FPS in the planet level headless. **Read the screenshot file** to check the visuals. This needs no browser extension. Set `CHROME_PATH` if the browser isn't in a standard location.
 
 Extend the script when you add gameplay worth guarding, such as a new control or a new entity that should exist on load.
 
@@ -52,7 +52,7 @@ Load the tools in one ToolSearch call:
 
 - **Mouse**: real clicks work: click a planet and the HUD should show `Autopilot → <name>`, then `Parked at <name>`. Scroll zooms; drag rotates. Hovering a body shows a tooltip.
 - **Keyboard**: click empty space first to focus (this also starts an autopilot move; any WASD key cancels it), then hold keys with `computer` (`key` / hold actions for `w`, `shift+w`, `a`, `e`). Screenshot again and confirm the ship moved and the HUD speed changed.
-- **Direct state** via `javascript_tool` (the dev build exposes `window.game`, `galaxy`, `levels` and, for the current system, `ship` / `world` / `system`):
+- **Direct state** via `javascript_tool` (the dev build exposes `window.game`, `galaxy`, `levels`, `generateSystem`, for the current system `ship` / `world` / `system`, and `planet` for the planet level, or null):
 
 ```js
 // speed, position and scene size
@@ -71,6 +71,15 @@ After ~2 s, `ship.speed` should be > 0 and the position should have moved along 
 // autopilot: fly to a body (or pass any {x, y, z}); poll until parked
 ship.moveTo(world.planets[0]);
 ({ enRoute: ship.enRoute, target: ship.targetBody?.name, speed: ship.speed })
+```
+
+```js
+// planet level: park at a planet, descend, fly over the globe, come back up
+ship.parkAt(world.planets[0], world.stars[0].position.clone().sub(world.planets[0].position)); // day side
+levels.toPlanet();                                   // then, after ~1.3 s: levels.mode === 'planet'
+planet.ship.moveTo(planet.ship.direction.clone().add({ x: 0.3, y: 0, z: 0 }));
+({ sky: planet.skyStats, enRoute: planet.ship.enRoute, speed: planet.ship.speed });
+levels.leavePlanet();
 ```
 
 ```js

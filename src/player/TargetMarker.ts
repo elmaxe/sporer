@@ -38,6 +38,11 @@ export class TargetMarker implements Entity {
     }
   }
 
+  /** Hides the ring until the next update. */
+  hide(): void {
+    this.ring.hide();
+  }
+
   dispose(): void {
     this.ring.dispose();
   }

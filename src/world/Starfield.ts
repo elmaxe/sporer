@@ -40,7 +40,12 @@ export class Starfield implements Entity {
   }
 
   update(): void {
-    this.points.position.copy(this.camera.position);
+    this.centerOn(this.camera.position);
+  }
+
+  /** Recentres the sky on `position` (for rendering the scene from another camera). */
+  centerOn(position: THREE.Vector3): void {
+    this.points.position.copy(position);
   }
 
   dispose(): void {

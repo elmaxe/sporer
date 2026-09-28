@@ -6,6 +6,11 @@ import type { SystemStar } from '../gen/system';
 import { RAPIER, type Physics } from '../physics/Physics';
 import type { CelestialBody } from './CelestialBody';
 
+/** Light intensity for a star's light, from its luminosity. */
+export function starLightIntensity(data: SystemStar): number {
+  return THREE.MathUtils.clamp(1.2 + Math.log2(1 + data.luminosity), 1.2, 5);
+}
+
 /** Gap between a star's surface and where the autopilot parks. */
 const STANDOFF_MARGIN = 25;
 
@@ -25,7 +30,6 @@ export class Star implements Entity, CelestialBody {
   private readonly light: THREE.PointLight;
   private readonly body: RAPIER.RigidBody;
   private readonly orbiting: boolean;
-  private time = 0;
   private readonly prev = new THREE.Vector3();
 
   constructor(
@@ -70,8 +74,7 @@ export class Star implements Entity, CelestialBody {
     };
 
     // decay 0 keeps intensity constant with distance, so outer planets stay lit.
-    const intensity = THREE.MathUtils.clamp(1.2 + Math.log2(1 + data.luminosity), 1.2, 5);
-    this.light = new THREE.PointLight(data.color, intensity, 0, 0);
+    this.light = new THREE.PointLight(data.color, starLightIntensity(data), 0, 0);
 
     this.object.name = `Star (${data.kind})`;
     this.object.add(this.mesh, this.glow, this.light);
@@ -85,13 +88,29 @@ export class Star implements Entity, CelestialBody {
     physics.world.createCollider(RAPIER.ColliderDesc.ball(data.radius), this.body);
   }
 
-  fixedUpdate(dt: number): void {
+  /** Where the star is at system time `time` (binaries orbit their barycentre). */
+  positionAt(time: number, out: THREE.Vector3): THREE.Vector3 {
+    return orbitPosition(this.data.orbit, time, out);
+  }
+
+  /** One fixed step: moves to where the orbit is at `time` (the clock after the step). */
+  step(time: number, dt: number): void {
     if (!this.orbiting) return;
-    this.time += dt;
     this.prev.copy(this.position);
-    orbitPosition(this.data.orbit, this.time, this.position);
+    this.positionAt(time, this.position);
     this.velocity.subVectors(this.position, this.prev).divideScalar(dt);
     this.body.setNextKinematicTranslation(this.position);
+  }
+
+  /** Jumps straight to `time` (the clock was changed elsewhere), with no interpolation from before. */
+  jumpTo(time: number, dt: number): void {
+    if (!this.orbiting) return;
+    // Start one step back, so the step gives the right velocity.
+    this.positionAt(time - dt, this.position);
+    this.step(time, dt);
+    this.prev.copy(this.position);
+    this.body.setTranslation(this.position, true);
+    this.object.position.copy(this.position);
   }
 
   get renderPosition(): THREE.Vector3 {

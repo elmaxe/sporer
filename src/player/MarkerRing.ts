@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 
 const FLAT = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
+/** The ring geometry's normal. */
+const FACING = new THREE.Vector3(0, 0, 1);
 
 /**
  * A pulsing, glowing ring used to mark targets and locations. Not an Entity:
@@ -34,14 +36,15 @@ export class MarkerRing {
   }
 
   /**
-   * Shows the ring at `position` with outer radius `size`. It faces `camera`
-   * (billboard) or, with `camera` null, lies flat in the horizontal plane.
+   * Shows the ring at `position` with outer radius `size`. It faces a camera
+   * (billboard), lies flat on the plane with the given unit normal, or, with
+   * `facing` null, lies flat in the horizontal plane.
    */
   place(
     position: THREE.Vector3,
     size: number,
     opacity: number,
-    camera: THREE.Camera | null,
+    facing: THREE.Camera | THREE.Vector3 | null,
     frameDt: number,
   ): void {
     const { mesh } = this;
@@ -49,7 +52,8 @@ export class MarkerRing {
     mesh.visible = true;
     mesh.position.copy(position);
     // Face the camera's position, not its view plane, so the ring never cuts through a body.
-    if (camera) mesh.lookAt(camera.position);
+    if (facing instanceof THREE.Vector3) mesh.quaternion.setFromUnitVectors(FACING, facing);
+    else if (facing) mesh.lookAt(facing.position);
     else mesh.quaternion.copy(FLAT);
     mesh.scale.setScalar(size * (1 + this.pulse * Math.sin(this.time * 5)));
     mesh.material.opacity = opacity;
