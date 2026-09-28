@@ -108,7 +108,7 @@ export class Game {
     const level = this._level;
     if (level) {
       level.update(frameDt, alpha);
-      this.renderer.render(level.scene, this.camera);
+      level.render(this.renderer, this.camera);
     }
     this.debug.endFrame();
   };

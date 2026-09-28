@@ -13,19 +13,20 @@ Browser game: Vite + TypeScript (strict), `three`, `@dimforge/rapier3d-compat` p
 |---|---|
 | `src/main.ts` | Composition root: read `?seed` / `?star`, generate the galaxy, init Rapier and debug, create `Game` and the `SceneManager`, start. Exposes `window.game` / `galaxy` / `levels` (the `SceneManager`) and live getters `ship` / `world` (the `StarSystem` entity) / `system` (its data) for the current system level in dev. |
 | `src/core/Game.ts` | Renderer, shared camera, input, resize, main loop. Steps and renders only the active `Level` (`game.setLevel`), after a few global entities (`game.add`, e.g. the `SceneManager`). `FIXED_DT = 1/60`. |
-| `src/levels/` | `Level` (own `THREE.Scene`, entity list, optional `Physics`, `enter`/`exit`), `SystemLevel`, `GalaxyLevel`, and `SceneManager` (owns the levels, runs the zoom + fade transitions, blocks input meanwhile). |
+| `src/levels/` | `Level` (own `THREE.Scene`, entity list, optional `Physics`, `enter`/`exit`, overridable `render`), `SystemLevel`, `GalaxyLevel`, `PlanetLevel`, and `SceneManager` (owns the levels, runs the zoom + fade transitions, blocks input meanwhile). |
 | `src/core/Entity.ts` | The only lifecycle contract (see below). |
 | `src/core/FixedStep.ts` | Pure fixed-timestep accumulator. |
 | `src/core/Input.ts` | Polled keys (`KeyboardEvent.code`), pointer position, click-vs-drag, wheel. |
 | `src/core/Debug.ts` | `debug.folder(name)` → lil-gui folder or `undefined` in prod. Re-requesting a name replaces the folder (levels get rebuilt), so give each level's folders distinct names (`System camera`, `Galaxy camera`). |
 | `src/physics/Physics.ts` | Rapier world (zero gravity). Re-exports `RAPIER`. |
 | `src/gen/` | **Procedural generation, pure data, no THREE/DOM/Rapier**: `rng.ts` (seeded PRNG, `hashSeed`), `galaxy.ts`, `stars.ts`, `system.ts`, `planets.ts`, `names.ts`, `color.ts`, plus shared math (`orbit.ts`, `noise.ts`). |
-| `src/world/` | Views that render generated data: `StarSystem` (from `SystemData`), `Star`, `Planet` (also moons, gas bands, rings, atmosphere), `Starfield`. Stars/planets/moons implement `CelestialBody` (name, description, radius, standoff, sim + render position, velocity). |
+| `src/world/` | Views that render generated data: `StarSystem` (from `SystemData`; owns the system clock: `time`, `setTime`, `pose`), `Star`, `Planet` (also moons), `planetGeometry.ts` (terrain, gas bands, rings, atmosphere builders shared with the planet level), `Starfield`. Stars/planets/moons implement `CelestialBody` (name, description, radius, standoff, sim + render position, velocity); their positions are pure functions of the clock (`positionAt`). |
 | `src/player/` | `Ship` (autopilot + WASD nudge), `OrbitCamera`, `Picker` (hover/click → target), `TargetMarker`, and pure steering math in `autopilot.ts`. |
 | `src/ui/` | DOM HUD overlays (markup lives in `index.html`), including `VolumeControl` (speaker button + sliders, M mutes, saved to localStorage). |
 | `src/audio/` | `AudioManager`: Web Audio mixer (master → music / ambience gains), unlocked on the first trusted pointer/key press, paused while the tab is hidden. Not an `Entity` (nothing per frame). Pure `settings.ts` (volumes → gains) and `loop.ts` (crossfade a clip into a seamless loop). Audio files live in `src/assets/audio/` and are imported as URLs. |
 | `tests/` | Vitest unit tests for pure logic. |
 
+| `src/planet/` | Planet-level (low orbit) entities: `PlanetFrame` (the level's clock and body frame ↔ system space), `PlanetGlobe`, `LocalMoons`, `PlanetLights`, `PlanetShip` (scripted, no physics), `PlanetPicker`, `PlanetHud`, and pure maths in `frame.ts` (body frame, sky sizes, light direction) and `surfaceMotion.ts` (great-circle steering). |
 | `src/galaxy/` | Galaxy-map entities: `GalaxyMap` (all stars in one `Points` shader), `GalaxyShip` (scripted travel), `GalaxyPicker`, `GalaxyHud`, pure `pickPoint` / `galaxyStarSize`. |
 
 New feature areas get their own folder under `src/` (e.g. `src/combat/`, `src/audio/`).
@@ -36,7 +37,7 @@ New feature areas get their own folder under `src/` (e.g. `src/combat/`, `src/au
 - **Only `Rng`, never `Math.random`**, anywhere generated or visual content is decided (the starfield is seeded too). The same seed must give the same universe.
 - **Fork per thing:** `rng.fork('planet', i)` gives an independent stream per object. Adding a draw to one planet must not change the next planet or another system. Derive seeds with `hashSeed(...)`.
 - **Lazy by level:** `generateGalaxy(seed)` makes only `StarRef`s (position, name, star types, seed). `generateSystem(ref)` is called on demand and is fully determined by `ref`. Planet-surface detail should follow the same pattern from `PlanetData.seed`.
-- **Scales:** each level has its own units. Galaxy units (`GALAXY_RADIUS = 1000`) and system units (G star r≈30, UFO ≈4 wide) are unrelated. Convert at transitions and never mix them in one scene.
+- **Scales:** each level has its own units. Galaxy units (`GALAXY_RADIUS = 1000`), system units (G star r≈30, UFO ≈4 wide) and planet units (the visited body's radius is `PLANET_RADIUS = 100`, in its own tilted, spinning frame) are unrelated. Convert at transitions (`planet/frame.ts` for planet ↔ system) and never mix them in one scene.
 - **Layout invariants** are covered by `tests/universe.test.ts` (no overlapping orbits or moons, a clear spawn point, Kepler-ordered periods). Extend it when adding generated features. When tuning, print sample systems from a throwaway test rather than guessing.
 - Terrain: `terrainNoise` returns roughly [-1, 1] with a median of ~0. `PlanetStyle.seaLevel` is a threshold in that range (0 ≈ half the surface underwater).
 
@@ -94,7 +95,7 @@ Debug is on in `npm run dev` and in any build with `?debug` in the URL. lil-gui 
 
 Use `input.isDown('KeyW')` / `input.axis('KeyA', 'KeyD')` (codes, not `key`). Mouse: `input.pointer` (NDC + client coords, live object), `consumeClick()` (left press that moved < 5 px), `consumeDrag()` (left/right drag pixels), `consumeWheel()` (pixels, + = zoom out). No pointer lock. Avoid Ctrl-combos (Ctrl+W closes the tab).
 
-Current controls (Spore-style): left-click a star/planet/moon to autopilot there and park beside it, or empty space to fly to that point on the ship's plane. Scroll zooms, drag rotates the camera. WASD nudges relative to the camera (cancels the autopilot), E/Q up/down, Shift boosts (also the autopilot).
+Current controls (Spore-style): left-click a star/planet/moon to autopilot there and park beside it, or empty space to fly to that point on the ship's plane. Scroll zooms, drag rotates the camera. WASD nudges relative to the camera (cancels the autopilot), E/Q up/down, Shift boosts (also the autopilot). Scrolling in past min zoom while parked at a planet or moon (or flying into one) descends to its low orbit; there, clicking the globe flies the great circle to that point and scrolling out past max returns to the system.
 
 Visual-only entities that read the camera (`Picker`, `TargetMarker`, `Hud`) are added after `OrbitCamera`, so they see this frame's camera. Billboards should `lookAt(camera.position)` rather than copy the camera quaternion (or use a `Sprite`): facing the view plane makes them poke through spheres when off-centre.
 

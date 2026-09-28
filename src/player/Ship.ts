@@ -149,6 +149,24 @@ export class Ship implements Entity {
     }
   }
 
+  /**
+   * Teleports the ship to `body`'s standoff distance in direction `side` from
+   * it, moving with the body and parked there (e.g. coming back from the
+   * planet level, after the system clock jumped).
+   */
+  parkAt(body: CelestialBody, side: THREE.Vector3): void {
+    this.pos.copy(side).normalize().multiplyScalar(body.standoff).add(body.position);
+    this.body.setTranslation(this.pos, true);
+    this.body.setLinvel(body.velocity, true);
+    this.currPos.copy(this.pos);
+    this.prevPos.copy(this.pos);
+    this.object.position.copy(this.pos);
+    this.destination.copy(this.pos);
+    this._targetBody = body;
+    this.hasTarget = true;
+    this.arrived = true;
+  }
+
   stop(): void {
     this.hasTarget = false;
     this._targetBody = null;

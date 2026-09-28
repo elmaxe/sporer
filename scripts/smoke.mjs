@@ -2,14 +2,18 @@
 // Usage: npm run smoke [-- http://localhost:5173/]   (dev server must be running)
 // Checks: W moves the ship along -Z, the autopilot flies back to a point, hovering + clicking
 // the star targets it, and the galaxy loop works (scroll out to the galaxy, click the nearest
-// star, travel, scroll in to its system), and a real click on the speaker button starts audio and M mutes. Prints JSON with FPS, console errors and screenshot
-// paths. Exit 1 on failure.
+// star, travel, scroll in to its system), a real click on the speaker button starts audio and M mutes, and
+// the planet loop (park at a planet, scroll in to low orbit, click the globe and fly, scroll back out beside
+// it), then again for every planet type and a moon in other systems (skip those with --quick).
+// Prints JSON with FPS, console errors and screenshot paths. Exit 1 on failure.
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const url = process.argv[2] ?? 'http://localhost:5173/';
+const args = process.argv.slice(2);
+const quick = args.includes('--quick');
+const url = args.find((a) => !a.startsWith('--')) ?? 'http://localhost:5173/';
 const port = 9333;
 const browsers = [
   'C:/Program Files/Google/Chrome/Application/chrome.exe',
@@ -17,6 +21,7 @@ const browsers = [
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   '/usr/bin/google-chrome',
   '/usr/bin/chromium',
+  '/opt/pw-browsers/chromium',
 ];
 const browser = process.env.CHROME_PATH ?? browsers.find(existsSync);
 if (!browser) throw new Error('No Chrome/Edge found; set CHROME_PATH');
@@ -29,6 +34,8 @@ const proc = spawn(browser, [
   '--enable-unsafe-swiftshader',
   '--use-angle=swiftshader',
   '--window-size=1280,720',
+  // Chrome refuses to start as root (e.g. in containers) without this.
+  ...(process.getuid?.() === 0 ? ['--no-sandbox'] : []),
   'about:blank',
 ]);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -74,7 +81,82 @@ await sleep(4000);
 
 const state = `({ speed: +ship.speed.toFixed(1), pos: ship.object.position.toArray().map((n) => +n.toFixed(1)) })`;
 const started = await evaluate(`typeof window.ship !== 'undefined'`);
-let before, after, autopilot, pick, galaxyLoop, fps, audio;
+let before, after, autopilot, pick, galaxyLoop, fps, audio, planetLoop;
+const planetTypes = [];
+const wheel = (deltaY) =>
+  evaluate(`game.renderer.domElement.dispatchEvent(new WheelEvent('wheel', { deltaY: ${deltaY}, bubbles: true, cancelable: true }))`);
+
+/**
+ * Parks the system ship beside the body `bodyExpr` evaluates to, scrolls in to its planet level, clicks the
+ * globe a little way ahead of the ship, lets it fly, then scrolls back out. Returns what it saw.
+ */
+async function runPlanetLoop(bodyExpr, shotName) {
+  const r = await evaluate(`(() => {
+    const body = ${bodyExpr};
+    window.__body = body;
+    // Park on the day side, a little above the orbital plane.
+    const side = world.stars[0].position.clone().sub(body.position).normalize();
+    side.y += 0.5;
+    ship.parkAt(body, side);
+    return { name: body.name, type: body.config.type, moon: body.parent !== null };
+  })()`);
+  await sleep(300);
+  await wheel(-50000); // to min zoom
+  await sleep(1500);
+  await wheel(-300); // keep scrolling in
+  for (let i = 0; i < 20 && (await evaluate(`levels.mode !== 'planet' || levels.transitioning`)); i++) await sleep(250);
+  r.mode = await evaluate(`levels.mode`);
+  if (r.mode !== 'planet') return r;
+  r.sky = await evaluate(`planet.skyStats`);
+  r.expectedSky = await evaluate(`({ bodies: world.planets.length + world.moons.length - 1 - world.moons.filter((m) => m.parent === __body).length })`);
+
+  // Click the globe ~20° ahead of the ship, towards the top of the screen.
+  r.click = await evaluate(`new Promise((resolve) => {
+    const V = game.camera.position.constructor;
+    const u = planet.ship.direction.clone();
+    const up = new V(0, 1, 0).applyQuaternion(game.camera.quaternion);
+    const t = up.sub(u.clone().multiplyScalar(up.dot(u))).normalize();
+    const point = u.clone().multiplyScalar(Math.cos(0.35)).add(t.multiplyScalar(Math.sin(0.35))).multiplyScalar(100);
+    const p = point.clone().project(game.camera);
+    const rect = game.renderer.domElement.getBoundingClientRect();
+    const at = { clientX: rect.left + ((p.x + 1) / 2) * rect.width, clientY: rect.top + ((1 - p.y) / 2) * rect.height, bubbles: true };
+    const canvas = game.renderer.domElement;
+    window.__start = u;
+    canvas.dispatchEvent(new PointerEvent('pointermove', at));
+    canvas.dispatchEvent(new PointerEvent('pointerdown', { ...at, button: 0 }));
+    canvas.dispatchEvent(new PointerEvent('pointerup', { ...at, button: 0 }));
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve({
+      onScreen: Math.abs(p.x) < 1 && Math.abs(p.y) < 1,
+      enRoute: planet.ship.enRoute,
+      targetAngle: +planet.ship.destination.angleTo(point).toFixed(3),
+    })));
+  })`);
+  await sleep(3000);
+  r.flewDegrees = await evaluate(`+(planet.ship.direction.angleTo(__start) * 180 / Math.PI).toFixed(1)`);
+  r.altitudeOk = await evaluate(`Math.abs(planet.ship.object.position.length() - planet.ship.radius) < 0.5`);
+  const shot = await send('Page.captureScreenshot', { format: 'png' });
+  r.screenshot = join(outDir, `${shotName}.png`);
+  writeFileSync(r.screenshot, Buffer.from(shot.result.data, 'base64'));
+
+  await wheel(50000); // to max zoom
+  await sleep(1500);
+  await wheel(300); // keep scrolling out
+  for (let i = 0; i < 20 && (await evaluate(`levels.mode !== 'system' || levels.transitioning`)); i++) await sleep(250);
+  r.modeAfter = await evaluate(`levels.mode`);
+  r.parkedAt = await evaluate(`ship.targetBody?.name ?? null`);
+  r.standoffs = await evaluate(`+(ship.object.position.distanceTo(__body.renderPosition) / __body.standoff).toFixed(2)`);
+  r.ok =
+    r.mode === 'planet' &&
+    r.sky.bodies === r.expectedSky.bodies &&
+    r.click.onScreen &&
+    r.click.enRoute &&
+    r.flewDegrees > 3 &&
+    r.altitudeOk &&
+    r.modeAfter === 'system' &&
+    r.parkedAt === r.name &&
+    Math.abs(r.standoffs - 1) < 0.2;
+  return r;
+}
 const measureFps = `new Promise((r) => { let n = 0; const t0 = performance.now();
   (function f() { if (++n === 120) r(Math.round(120000 / (performance.now() - t0))); else requestAnimationFrame(f); })(); })`;
 if (started) {
@@ -110,8 +192,6 @@ if (started) {
   await evaluate(`ship.stop()`);
 
   // Galaxy loop, driven by real wheel and pointer events.
-  const wheel = (deltaY) =>
-    evaluate(`game.renderer.domElement.dispatchEvent(new WheelEvent('wheel', { deltaY: ${deltaY}, bubbles: true, cancelable: true }))`);
   galaxyLoop = { from: await evaluate(`system.id`) };
   await wheel(50000); // to max zoom
   await sleep(1500);
@@ -162,6 +242,37 @@ if (started) {
   await send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'KeyM', key: 'm' });
   await send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'KeyM', key: 'm' });
   audio.mutedByKey = await evaluate(`document.getElementById('audio').classList.contains('muted')`);
+
+  // Planet loop in the current system: the first terran or ocean world, else the first planet.
+  planetLoop = await runPlanetLoop(
+    `world.planets.find((p) => ['terran', 'ocean'].includes(p.config.type)) ?? world.planets[0]`,
+    'planet',
+  );
+}
+
+if (started && !quick) {
+  // Every planet type (and a moon), each in the first system of this galaxy that has one.
+  const found = await evaluate(`(() => {
+    const want = ['lava', 'barren', 'desert', 'terran', 'ocean', 'ice', 'gas'];
+    const found = {};
+    for (const ref of galaxy.stars) {
+      const sys = generateSystem(ref);
+      sys.planets.forEach((p, i) => {
+        if (want.includes(p.type) && !(p.type in found)) found[p.type] = { star: ref.id, expr: 'world.planets[' + i + ']' };
+        if (p.moons.length && !('moon' in found)) found.moon = { star: ref.id, expr: 'world.moons.find((m) => m.parent === world.planets[' + i + '])' };
+      });
+      if (Object.keys(found).length === want.length + 1) break;
+    }
+    return found;
+  })()`);
+  const base = new URL(url);
+  for (const [type, { star, expr }] of Object.entries(found)) {
+    base.searchParams.set('star', String(star));
+    await send('Page.navigate', { url: base.href });
+    await sleep(4000);
+    const r = await runPlanetLoop(expr, `planet-${type}`);
+    planetTypes.push({ case: type, star, ...r });
+  }
 }
 const screenshot = join(outDir, 'screenshot.png');
 const shot = await send('Page.captureScreenshot', { format: 'png' });
@@ -179,10 +290,11 @@ const looped =
   galaxyLoop.to === galaxyLoop.clicked.nearest &&
   typeof galaxyLoop.shipSpeed === 'number';
 const sounded = started && audio.state === 'running' && audio.panelOpen && audio.mutedByKey;
-const ok = started && moved && autopiloted && picked && looped && sounded && errors.length === 0;
+const planets = started && planetLoop.ok && planetTypes.every((r) => r.ok) && (quick || planetTypes.length === 8);
+const ok = started && moved && autopiloted && picked && looped && sounded && planets && errors.length === 0;
 console.log(
   JSON.stringify(
-    { ok, started, moved, autopiloted, picked, looped, sounded, before, after, autopilot, pick, galaxyLoop, audio, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
+    { ok, started, moved, autopiloted, picked, looped, sounded, planets, before, after, autopilot, pick, galaxyLoop, audio, planetLoop, planetTypes, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
     null,
     2,
   ),

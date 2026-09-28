@@ -22,3 +22,31 @@ export function terrainNoise(x: number, y: number, z: number, seed: number): num
   // The raw sum clusters within ±0.55; stretch it to use the full range.
   return Math.max(-1, Math.min(1, (sum / total) * 1.8));
 }
+
+/** Largest amount `detailedTerrain` differs from `terrainNoise` (before clamping to [-1, 1]). */
+export const DETAIL_AMPLITUDE = 0.15;
+
+/**
+ * `terrainNoise` plus a few higher-frequency octaves at small amplitude, for
+ * the close-up planet surface. Continents and seas stay where the system
+ * view puts them; only hills and coastline wiggles are added.
+ */
+export function detailedTerrain(x: number, y: number, z: number, seed: number): number {
+  let sum = 0;
+  let amp = 1;
+  let freq = 11;
+  let total = 0;
+  for (let octave = 0; octave < 3; octave++) {
+    sum +=
+      amp *
+      Math.sin(x * freq * 1.7 + seed * 3.1) *
+      Math.sin(y * freq * 2.1 + seed * 1.9 + z * freq * 0.6) *
+      Math.sin(z * freq * 1.9 + seed * 0.3 + x * freq);
+    total += amp;
+    amp *= 0.5;
+    freq *= 2.3;
+  }
+  // Stretched like terrainNoise (the raw sum clusters near 0), then scaled down.
+  const detail = DETAIL_AMPLITUDE * Math.max(-1, Math.min(1, (sum / total) * 2.5));
+  return Math.max(-1, Math.min(1, terrainNoise(x, y, z, seed) + detail));
+}
