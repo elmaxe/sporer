@@ -11,16 +11,16 @@ Browser game: Vite + TypeScript (strict), `three`, `@dimforge/rapier3d-compat` p
 
 | Path | Role |
 |---|---|
-| `src/main.ts` | Composition root: read `?seed` / `?star`, generate galaxy and system, init physics and debug, create `Game`, add entities, start. Exposes `window.game` / `ship` / `galaxy` / `system` in dev. |
+| `src/main.ts` | Composition root: read `?seed` / `?star`, generate galaxy and system, init physics and debug, create `Game`, add entities, start. Exposes `window.game` / `ship` / `galaxy` / `system` / `world` (the `StarSystem` entity) in dev. |
 | `src/core/Game.ts` | Renderer, scene, camera, resize, main loop, entity list. `FIXED_DT = 1/60`. |
 | `src/core/Entity.ts` | The only lifecycle contract (see below). |
 | `src/core/FixedStep.ts` | Pure fixed-timestep accumulator. |
-| `src/core/Input.ts` | Polled keys (`KeyboardEvent.code`) + pointer-lock mouse deltas. |
+| `src/core/Input.ts` | Polled keys (`KeyboardEvent.code`), pointer position, click-vs-drag, wheel. |
 | `src/core/Debug.ts` | `debug.folder(name)` → lil-gui folder or `undefined` in prod. |
 | `src/physics/Physics.ts` | Rapier world (zero gravity). Re-exports `RAPIER`. |
 | `src/gen/` | **Procedural generation, pure data, no THREE/DOM/Rapier**: `rng.ts` (seeded PRNG, `hashSeed`), `galaxy.ts`, `stars.ts`, `system.ts`, `planets.ts`, `names.ts`, `color.ts`, plus shared math (`orbit.ts`, `noise.ts`). |
-| `src/world/` | Views that render generated data: `StarSystem` (from `SystemData`), `Star`, `Planet`, `Starfield`. |
-| `src/player/` | Ship controller and chase camera. |
+| `src/world/` | Views that render generated data: `StarSystem` (from `SystemData`), `Star`, `Planet` (also moons, gas bands, rings, atmosphere), `Starfield`. Stars/planets/moons implement `CelestialBody` (name, description, radius, standoff, sim + render position, velocity). |
+| `src/player/` | `Ship` (autopilot + WASD nudge), `OrbitCamera`, `Picker` (hover/click → target), `TargetMarker`, and pure steering math in `autopilot.ts`. |
 | `src/ui/` | DOM HUD overlays (markup lives in `index.html`). |
 | `tests/` | Vitest unit tests for pure logic. |
 
@@ -88,9 +88,11 @@ Debug is on in `npm run dev` and in any build with `?debug` in the URL. lil-gui 
 
 ## Input
 
-Use `input.isDown('KeyW')` / `input.axis('KeyA', 'KeyD')` (codes, not `key`). Mouse look = `input.consumeMouseDelta()` (only accumulates while pointer is locked; click the canvas to lock). Avoid Ctrl-combos (Ctrl+W closes the tab).
+Use `input.isDown('KeyW')` / `input.axis('KeyA', 'KeyD')` (codes, not `key`). Mouse: `input.pointer` (NDC + client coords, live object), `consumeClick()` (left press that moved < 5 px), `consumeDrag()` (left/right drag pixels), `consumeWheel()` (pixels, + = zoom out). No pointer lock. Avoid Ctrl-combos (Ctrl+W closes the tab).
 
-Current controls: mouse steer, W/S thrust, A/D strafe, E/Q up/down, Shift boost.
+Current controls (Spore-style): left-click a star/planet/moon to autopilot there and park beside it, or empty space to fly to that point on the ship's plane. Scroll zooms, drag rotates the camera. WASD nudges relative to the camera (cancels the autopilot), E/Q up/down, Shift boosts (also the autopilot).
+
+Visual-only entities that read the camera (`Picker`, `TargetMarker`, `Hud`) are added after `OrbitCamera`, so they see this frame's camera. Billboards should `lookAt(camera.position)` rather than copy the camera quaternion (or use a `Sprite`): facing the view plane makes them poke through spheres when off-centre.
 
 ## Testing
 

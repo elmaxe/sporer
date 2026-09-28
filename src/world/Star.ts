@@ -1,47 +1,73 @@
 import * as THREE from 'three';
 import type { Entity } from '../core/Entity';
 import { orbitPosition } from '../gen/orbit';
+import { describeStar } from '../gen/stars';
 import type { SystemStar } from '../gen/system';
 import { RAPIER, type Physics } from '../physics/Physics';
+import type { CelestialBody } from './CelestialBody';
+
+/** Gap between a star's surface and where the autopilot parks. */
+const STANDOFF_MARGIN = 25;
 
 /**
- * A star: glowing sphere, additive glow sprite, point light and collider.
+ * A star: glowing sphere, additive glow billboard, point light and collider.
  * In binaries it orbits the barycentre (kinematic body); otherwise it is fixed.
  */
-export class Star implements Entity {
+export class Star implements Entity, CelestialBody {
   readonly object = new THREE.Group();
+  readonly position = new THREE.Vector3();
+  readonly velocity = new THREE.Vector3();
+  readonly description: string;
+  readonly radius: number;
+  readonly standoff: number;
   private readonly mesh: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>;
-  private readonly glow: THREE.Sprite;
+  private readonly glow: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
   private readonly light: THREE.PointLight;
   private readonly body: RAPIER.RigidBody;
   private readonly orbiting: boolean;
   private time = 0;
   private readonly prev = new THREE.Vector3();
-  private readonly curr = new THREE.Vector3();
 
   constructor(
     private readonly scene: THREE.Scene,
     private readonly physics: Physics,
+    readonly name: string,
     readonly data: SystemStar,
     glowTexture: THREE.Texture,
   ) {
     this.orbiting = data.orbit.radius > 0;
+    this.description = describeStar(data);
+    this.radius = data.radius;
+    this.standoff = data.radius + STANDOFF_MARGIN;
+    const giant = data.kind === 'redGiant' || data.kind === 'blueGiant';
 
     this.mesh = new THREE.Mesh(
       new THREE.SphereGeometry(data.radius, 48, 24),
-      new THREE.MeshBasicMaterial({ color: data.color }),
+      // Not tone mapped: ACES would wash the star's colour out towards beige.
+      new THREE.MeshBasicMaterial({ color: data.color, toneMapped: false }),
     );
-    this.glow = new THREE.Sprite(
-      new THREE.SpriteMaterial({
+    this.glow = new THREE.Mesh(
+      new THREE.PlaneGeometry(1, 1),
+      new THREE.MeshBasicMaterial({
         map: glowTexture,
         color: data.color,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
         transparent: true,
+        toneMapped: false,
+        // Giants get a wider but fainter, softer halo.
+        opacity: giant ? 0.6 : 1,
       }),
     );
     // Dim stars get a relatively larger halo so white dwarfs still read as stars.
-    this.glow.scale.setScalar(data.radius * (data.radius < 12 ? 9 : 6));
+    this.glow.scale.setScalar(data.radius * (data.radius < 12 ? 9 : giant ? 8 : 6));
+    // Face the camera's position (a Sprite faces its view plane, which lets the glow
+    // poke out in front of the star when it's off-centre). Runs after the scene's
+    // matrix update, so refresh the matrix here.
+    this.glow.onBeforeRender = (_renderer, _scene, camera) => {
+      this.glow.lookAt(camera.position);
+      this.glow.updateMatrixWorld();
+    };
 
     // decay 0 keeps intensity constant with distance, so outer planets stay lit.
     const intensity = THREE.MathUtils.clamp(1.2 + Math.log2(1 + data.luminosity), 1.2, 5);
@@ -49,32 +75,38 @@ export class Star implements Entity {
 
     this.object.name = `Star (${data.kind})`;
     this.object.add(this.mesh, this.glow, this.light);
-    orbitPosition(data.orbit, 0, this.curr);
-    this.prev.copy(this.curr);
-    this.object.position.copy(this.curr);
+    orbitPosition(data.orbit, 0, this.position);
+    this.prev.copy(this.position);
+    this.object.position.copy(this.position);
     scene.add(this.object);
 
     const desc = this.orbiting ? RAPIER.RigidBodyDesc.kinematicPositionBased() : RAPIER.RigidBodyDesc.fixed();
-    this.body = physics.world.createRigidBody(desc.setTranslation(this.curr.x, this.curr.y, this.curr.z));
+    this.body = physics.world.createRigidBody(desc.setTranslation(this.position.x, this.position.y, this.position.z));
     physics.world.createCollider(RAPIER.ColliderDesc.ball(data.radius), this.body);
   }
 
   fixedUpdate(dt: number): void {
     if (!this.orbiting) return;
     this.time += dt;
-    this.prev.copy(this.curr);
-    orbitPosition(this.data.orbit, this.time, this.curr);
-    this.body.setNextKinematicTranslation(this.curr);
+    this.prev.copy(this.position);
+    orbitPosition(this.data.orbit, this.time, this.position);
+    this.velocity.subVectors(this.position, this.prev).divideScalar(dt);
+    this.body.setNextKinematicTranslation(this.position);
+  }
+
+  get renderPosition(): THREE.Vector3 {
+    return this.object.position;
   }
 
   update(_frameDt: number, alpha: number): void {
-    if (this.orbiting) this.object.position.lerpVectors(this.prev, this.curr, alpha);
+    if (this.orbiting) this.object.position.lerpVectors(this.prev, this.position, alpha);
   }
 
   dispose(): void {
     this.scene.remove(this.object);
     this.mesh.geometry.dispose();
     this.mesh.material.dispose();
+    this.glow.geometry.dispose();
     this.glow.material.dispose(); // the glow texture is shared; its owner disposes it
     this.light.dispose();
     this.physics.world.removeRigidBody(this.body);

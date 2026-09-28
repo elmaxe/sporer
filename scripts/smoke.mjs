@@ -1,6 +1,8 @@
 // Headless browser smoke test over the Chrome DevTools Protocol.
 // Usage: npm run smoke [-- http://localhost:5173/]   (dev server must be running)
-// Prints JSON: movement check, FPS, console errors, screenshot path. Exit 1 on failure.
+// Checks: W moves the ship along -Z, the autopilot flies back to a point, and hovering +
+// clicking the star targets it. Prints JSON with FPS, console errors and a screenshot path.
+// Exit 1 on failure.
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -71,13 +73,38 @@ await sleep(4000);
 
 const state = `({ speed: +ship.speed.toFixed(1), pos: ship.object.position.toArray().map((n) => +n.toFixed(1)) })`;
 const started = await evaluate(`typeof window.ship !== 'undefined'`);
-let before, after, fps;
+let before, after, autopilot, pick, fps;
 if (started) {
   before = await evaluate(state);
   await evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }))`);
   await sleep(2000);
   after = await evaluate(state);
   await evaluate(`window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }))`);
+
+  // Autopilot back to the start (a route known to be clear).
+  const home = `{ x: ${before.pos[0]}, y: ${before.pos[1]}, z: ${before.pos[2]} }`;
+  const distHome = `ship.object.position.distanceTo(${home})`;
+  const startDist = await evaluate(`ship.moveTo(${home}), ${distHome}`);
+  await sleep(4000);
+  autopilot = { startDist: +startDist.toFixed(1), endDist: +(await evaluate(distHome)).toFixed(1) };
+
+  // Hover and click the (first) star at its on-screen position.
+  pick = await evaluate(`new Promise((resolve) => {
+    const canvas = game.renderer.domElement;
+    const rect = canvas.getBoundingClientRect();
+    const star = world.stars[0];
+    const p = star.renderPosition.clone().project(game.camera);
+    const at = { clientX: rect.left + ((p.x + 1) / 2) * rect.width, clientY: rect.top + ((1 - p.y) / 2) * rect.height, bubbles: true };
+    canvas.dispatchEvent(new PointerEvent('pointermove', at));
+    canvas.dispatchEvent(new PointerEvent('pointerdown', { ...at, button: 0 }));
+    canvas.dispatchEvent(new PointerEvent('pointerup', { ...at, button: 0 }));
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve({
+      star: star.name,
+      target: ship.targetBody?.name ?? null,
+      tooltip: document.getElementById('tooltip').hidden ? null : document.getElementById('tooltip-name').textContent,
+    })));
+  })`);
+  await evaluate(`ship.stop()`);
   fps = await evaluate(`new Promise((r) => { let n = 0; const t0 = performance.now();
     (function f() { if (++n === 120) r(Math.round(120000 / (performance.now() - t0))); else requestAnimationFrame(f); })(); })`);
 }
@@ -86,8 +113,12 @@ const shot = await send('Page.captureScreenshot', { format: 'png' });
 writeFileSync(screenshot, Buffer.from(shot.result.data, 'base64'));
 
 const moved = started && after.pos[2] < before.pos[2] - 10 && after.speed > 5;
-const ok = started && moved && errors.length === 0;
-console.log(JSON.stringify({ ok, started, moved, before, after, fps, errors, screenshot }, null, 2));
+const autopiloted = started && autopilot.endDist < Math.max(3, autopilot.startDist * 0.1);
+const picked = started && pick.target === pick.star && pick.tooltip === pick.star;
+const ok = started && moved && autopiloted && picked && errors.length === 0;
+console.log(
+  JSON.stringify({ ok, started, moved, autopiloted, picked, before, after, autopilot, pick, fps, errors, screenshot }, null, 2),
+);
 
 ws.close();
 proc.kill();

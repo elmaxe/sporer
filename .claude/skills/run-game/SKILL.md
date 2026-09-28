@@ -31,7 +31,7 @@ npm run dev -- --strictPort
 npm run smoke            # or: npm run smoke -- http://localhost:4173/
 ```
 
-`scripts/smoke.mjs` launches headless Chrome/Edge (SwiftShader WebGL) over the DevTools protocol. It loads the game, holds W for 2 s and checks that the ship moved along −Z, measures FPS, and collects console errors, warnings and exceptions. It prints JSON with `ok`, `before`/`after`, `fps`, `errors` and a `screenshot` path, and exits 1 on failure. **Read the screenshot file** to check the visuals. This needs no browser extension. Set `CHROME_PATH` if the browser isn't in a standard location.
+`scripts/smoke.mjs` launches headless Chrome/Edge (SwiftShader WebGL) over the DevTools protocol. It loads the game, holds W for 2 s and checks that the ship moved along −Z, autopilots back to the start point (`autopilot`), hovers and clicks the star's screen position and checks it became the target and showed the tooltip (`pick`), measures FPS, and collects console errors, warnings and exceptions. It prints JSON with `ok`, `before`/`after`, `autopilot`, `pick`, `fps`, `errors` and a `screenshot` path, and exits 1 on failure. **Read the screenshot file** to check the visuals. This needs no browser extension. Set `CHROME_PATH` if the browser isn't in a standard location.
 
 Extend the script when you add gameplay worth guarding, such as a new control or a new entity that should exist on load.
 
@@ -43,16 +43,15 @@ Load the tools in one ToolSearch call:
 `select:mcp__claude-in-chrome__tabs_context_mcp,mcp__claude-in-chrome__tabs_create_mcp,mcp__claude-in-chrome__navigate,mcp__claude-in-chrome__computer,mcp__claude-in-chrome__read_console_messages,mcp__claude-in-chrome__javascript_tool`
 
 1. `tabs_context_mcp` → `tabs_create_mcp` (new tab, never reuse the user's tabs) → `navigate` to `http://localhost:5173/`.
-2. Take a **screenshot** with `computer`. Expected: black space with stars, a glowing yellow sun ahead, planets around it, the UFO in the lower centre, the stats meter top-left, the lil-gui panel top-right, and speed + controls help bottom-left.
+2. Take a **screenshot** with `computer`. Expected: black space with stars, a glowing yellow sun ahead, planets around it, the UFO in the centre (the camera orbits it), the stats meter top-left, the lil-gui panel top-right, and speed + controls help bottom-left.
    - Still showing "Loading…" → startup failed; check the console.
    - "Failed to start: …" text → the error is right there.
 3. Read the console with `read_console_messages` and `pattern: "error|Error|warn"`. There should be no errors. Treat any three.js warnings (e.g. deprecated APIs) as work to fix.
 
 ### Exercise gameplay
 
-Pointer lock needs a real user gesture, so mouse look can't be fully automated. Instead:
-
-- **Keyboard**: click the canvas, then hold keys with `computer` (`key` / hold actions for `w`, `shift+w`, `a`, `e`). Screenshot again and confirm the ship moved and the HUD speed changed.
+- **Mouse**: real clicks work: click a planet and the HUD should show `Autopilot → <name>`, then `Parked at <name>`. Scroll zooms; drag rotates. Hovering a body shows a tooltip.
+- **Keyboard**: click empty space first to focus (this also starts an autopilot move; any WASD key cancels it), then hold keys with `computer` (`key` / hold actions for `w`, `shift+w`, `a`, `e`). Screenshot again and confirm the ship moved and the HUD speed changed.
 - **Direct state** via `javascript_tool` (the dev build exposes `window.game` and `window.ship`):
 
 ```js
@@ -66,7 +65,13 @@ window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
 setTimeout(() => window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' })), 1500);
 ```
 
-After ~2 s, `ship.speed` should be > 0 and the position should have moved along −Z (toward the sun).
+After ~2 s, `ship.speed` should be > 0 and the position should have moved along the camera's forward direction (−Z at spawn, toward the sun).
+
+```js
+// autopilot: fly to a body (or pass any {x, y, z}); poll until parked
+ship.moveTo(world.planets[0]);
+({ enRoute: ship.enRoute, target: ship.targetBody?.name, speed: ship.speed })
+```
 
 - **FPS**: stats.js is in the screenshot (top-left). Alternatively measure it:
 

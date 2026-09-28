@@ -59,6 +59,8 @@ export interface PlanetData {
   moons: MoonData[];
   /** Radius of the planet's "neighbourhood": rings and moon orbits included. */
   extent: number;
+  /** Axial tilt in radians (rings lie in the tilted equatorial plane). */
+  tilt: number;
 }
 
 export interface SystemData {
@@ -145,6 +147,8 @@ export function generateSystem(ref: StarRef): SystemData {
       rings,
       moons,
       extent,
+      // Drawn last so adding it didn't change any earlier planet properties.
+      tilt: prng.gaussian(0, 0.2),
     });
     edge = orbitRadius + extent;
   }

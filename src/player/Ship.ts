@@ -2,47 +2,80 @@ import * as THREE from 'three';
 import type { Entity } from '../core/Entity';
 import type { Input } from '../core/Input';
 import type { Debug } from '../core/Debug';
+import type { Vec3Like } from '../gen/orbit';
 import { RAPIER, type Physics } from '../physics/Physics';
+import type { CelestialBody } from '../world/CelestialBody';
+import { arriveImpulse, detourWaypoint, standoffPoint, type ArriveParams, type Obstacle } from './autopilot';
 
 /** Tunables, exposed in the debug panel. */
 export const shipParams = {
-  /** Impulse per second (the ship has mass 1). */
+  /** Manual (WASD) impulse per second; the ship has mass 1. */
   thrust: 60,
   boostMultiplier: 2.5,
-  /** Top speed ≈ thrust / linearDamping. */
+  /** Manual top speed ≈ thrust / linearDamping. */
   linearDamping: 1.2,
-  mouseSensitivity: 0.0025,
+  /** How quickly the ship turns to face where it's going (1/s). */
+  turnRate: 5,
 };
 
-const MAX_PITCH = THREE.MathUtils.degToRad(80);
+export const autopilotParams: ArriveParams = {
+  maxSpeed: 150,
+  accel: 250,
+  gain: 1.2,
+  damping: shipParams.linearDamping,
+};
+
+/** The autopilot counts as arrived within this distance and relative speed. */
+const ARRIVE_DISTANCE = 1.5;
+const ARRIVE_SPEED = 2;
+/** Gap the autopilot keeps from bodies it flies around (the ship's radius is 2). */
+const CLEARANCE = 8;
+const UP = new THREE.Vector3(0, 1, 0);
 
 /**
- * The player's UFO. A dynamic Rapier body with locked rotations: orientation
- * comes directly from mouse yaw/pitch, and movement is impulse-based, so it
- * still collides and bounces off planets.
+ * The player's UFO. A dynamic Rapier body with locked rotations that stays
+ * level and turns to face its velocity. It moves by impulses, from the
+ * autopilot (`moveTo`, which detours around bodies in the way) or from WASD
+ * relative to the camera, so it still collides and bounces off planets.
  */
 export class Ship implements Entity {
   /** Interpolated render transform; read this for cameras and UI. */
   readonly object = new THREE.Group();
+  /** Where the autopilot is heading (simulation state); only meaningful while `autopilotActive`. */
+  readonly destination = new THREE.Vector3();
   private readonly body: RAPIER.RigidBody;
   private readonly ring: THREE.Object3D;
 
+  private hasTarget = false;
+  private _targetBody: CelestialBody | null = null;
+  private arrived = false;
+
   private yaw = 0;
-  private pitch = 0;
   private readonly prevPos = new THREE.Vector3();
   private readonly currPos = new THREE.Vector3();
   private readonly prevRot = new THREE.Quaternion();
   private readonly currRot = new THREE.Quaternion();
 
   // Scratch objects, reused every step to avoid per-frame allocation.
-  private readonly euler = new THREE.Euler(0, 0, 0, 'YXZ');
   private readonly rot = new THREE.Quaternion();
   private readonly move = new THREE.Vector3();
+  private readonly impulse = new THREE.Vector3();
+  private readonly forward = new THREE.Vector3();
+  private readonly right = new THREE.Vector3();
+  private readonly pos = new THREE.Vector3();
+  private readonly vel = new THREE.Vector3();
+  private readonly zero = new THREE.Vector3();
+  private readonly waypoint = new THREE.Vector3();
+  private readonly arrive: ArriveParams = { ...autopilotParams };
 
   constructor(
     private readonly scene: THREE.Scene,
     private readonly physics: Physics,
     private readonly input: Input,
+    /** WASD moves relative to where this camera looks. */
+    private readonly camera: THREE.Camera,
+    /** Bodies the autopilot steers around. */
+    private readonly obstacles: readonly Obstacle[],
     debug: Debug,
     spawn: THREE.Vector3,
   ) {
@@ -67,8 +100,15 @@ export class Ship implements Entity {
     const f = debug.folder('Ship');
     f?.add(shipParams, 'thrust', 0, 300);
     f?.add(shipParams, 'boostMultiplier', 1, 6);
-    f?.add(shipParams, 'linearDamping', 0, 5).onChange((v: number) => this.body.setLinearDamping(v));
-    f?.add(shipParams, 'mouseSensitivity', 0.0005, 0.01);
+    f?.add(shipParams, 'linearDamping', 0, 5).onChange((v: number) => {
+      this.body.setLinearDamping(v);
+      autopilotParams.damping = v;
+    });
+    f?.add(shipParams, 'turnRate', 0.5, 20);
+    const a = debug.folder('Autopilot');
+    a?.add(autopilotParams, 'maxSpeed', 10, 600);
+    a?.add(autopilotParams, 'accel', 10, 1000);
+    a?.add(autopilotParams, 'gain', 0.1, 5);
   }
 
   /** Current speed in units per second. */
@@ -77,25 +117,79 @@ export class Ship implements Entity {
     return Math.hypot(v.x, v.y, v.z);
   }
 
+  /** The body the autopilot is flying to or parked at, if any. */
+  get targetBody(): CelestialBody | null {
+    return this._targetBody;
+  }
+
+  /** True while the autopilot has a target, including while parked at a body. */
+  get autopilotActive(): boolean {
+    return this.hasTarget;
+  }
+
+  /** True while the autopilot is flying somewhere (not idle, not parked). */
+  get enRoute(): boolean {
+    return this.hasTarget && !this.arrived;
+  }
+
+  /**
+   * Autopilot to a point, or to a body: the ship parks at the body's standoff
+   * distance on the side it approaches from and keeps station there until it
+   * gets another order.
+   */
+  moveTo(target: CelestialBody | Vec3Like): void {
+    this.hasTarget = true;
+    this.arrived = false;
+    if ('standoff' in target) {
+      this._targetBody = target;
+      standoffPoint(this.currPos, target.position, target.standoff, this.destination);
+    } else {
+      this._targetBody = null;
+      this.destination.set(target.x, target.y, target.z);
+    }
+  }
+
+  stop(): void {
+    this.hasTarget = false;
+    this._targetBody = null;
+    this.arrived = false;
+  }
+
   fixedUpdate(dt: number): void {
     const { input } = this;
+    const t = this.body.translation();
+    const v = this.body.linvel();
+    this.pos.set(t.x, t.y, t.z);
+    this.vel.set(v.x, v.y, v.z);
+    const boost = input.isDown('ShiftLeft') || input.isDown('ShiftRight') ? shipParams.boostMultiplier : 1;
 
-    const mouse = input.consumeMouseDelta();
-    this.yaw -= mouse.x * shipParams.mouseSensitivity;
-    this.pitch = THREE.MathUtils.clamp(this.pitch - mouse.y * shipParams.mouseSensitivity, -MAX_PITCH, MAX_PITCH);
-    this.rot.setFromEuler(this.euler.set(this.pitch, this.yaw, 0));
-    this.body.setRotation(this.rot, true);
-
-    // Local axes: -Z forward, +X right, +Y up.
-    this.move.set(input.axis('KeyA', 'KeyD'), input.axis('KeyQ', 'KeyE'), input.axis('KeyW', 'KeyS'));
+    // WASD: forward is the camera's view direction flattened onto the horizontal plane.
+    this.move.set(input.axis('KeyA', 'KeyD'), input.axis('KeyQ', 'KeyE'), input.axis('KeyS', 'KeyW'));
     if (this.move.lengthSq() > 0) {
-      const boost = input.isDown('ShiftLeft') || input.isDown('ShiftRight') ? shipParams.boostMultiplier : 1;
-      this.move
-        .normalize()
-        .applyQuaternion(this.rot)
+      this.stop();
+      this.camera.getWorldDirection(this.forward).setY(0);
+      if (this.forward.lengthSq() < 1e-6) this.forward.set(0, 0, -1);
+      this.forward.normalize();
+      this.right.crossVectors(this.forward, UP);
+      this.move.normalize();
+      this.impulse
+        .copy(this.right)
+        .multiplyScalar(this.move.x)
+        .addScaledVector(this.forward, this.move.z)
+        .addScaledVector(UP, this.move.y)
         .multiplyScalar(shipParams.thrust * boost * dt);
-      this.body.applyImpulse(this.move, true);
+      this.body.applyImpulse(this.impulse, true);
+    } else if (this.hasTarget) {
+      this.steer(dt, boost);
     }
+
+    // Stay level and turn to face the horizontal velocity.
+    if (this.vel.x * this.vel.x + this.vel.z * this.vel.z > 1) {
+      const want = Math.atan2(-this.vel.x, -this.vel.z);
+      const diff = Math.atan2(Math.sin(want - this.yaw), Math.cos(want - this.yaw));
+      this.yaw += diff * (1 - Math.exp(-shipParams.turnRate * dt));
+    }
+    this.body.setRotation(this.rot.setFromAxisAngle(UP, this.yaw), true);
   }
 
   afterPhysics(): void {
@@ -122,6 +216,31 @@ export class Ship implements Entity {
       }
     });
     this.physics.world.removeRigidBody(this.body);
+  }
+
+  private steer(dt: number, boost: number): void {
+    const body = this._targetBody;
+    const targetVel = body ? body.velocity : this.zero;
+    if (body) standoffPoint(this.pos, body.position, body.standoff, this.destination);
+
+    Object.assign(this.arrive, autopilotParams).maxSpeed *= boost;
+    if (detourWaypoint(this.pos, this.destination, this.obstacles, CLEARANCE, this.waypoint)) {
+      const remaining = this.pos.distanceTo(this.waypoint) + this.waypoint.distanceTo(this.destination);
+      arriveImpulse(this.pos, this.vel, this.waypoint, targetVel, this.arrive, dt, this.impulse, remaining);
+    } else {
+      arriveImpulse(this.pos, this.vel, this.destination, targetVel, this.arrive, dt, this.impulse);
+    }
+    this.body.applyImpulse(this.impulse, true);
+
+    if (
+      !this.arrived &&
+      this.pos.distanceTo(this.destination) < ARRIVE_DISTANCE &&
+      this.vel.distanceTo(targetVel) < ARRIVE_SPEED
+    ) {
+      // Parked next to a body: keep station. At a point: done.
+      if (body) this.arrived = true;
+      else this.stop();
+    }
   }
 }
 
