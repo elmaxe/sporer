@@ -1,6 +1,6 @@
 # Roadmap
 
-Spore-style space stage in the browser. Each step leaves the game playable and is verified (`typecheck`, `test`, `build`, `smoke`) before it is pushed to `main`.
+Spore-style space stage in the browser. Each step leaves the game playable and is verified (`typecheck`, `test`, `build`, `smoke`) before it is pushed to `main`. Pushing to `main` deploys to GitHub Pages (https://elmaxe.github.io/sporer/) via `.github/workflows/deploy.yml`.
 
 Status: ⬜ todo · 🟨 in progress · ✅ done
 
@@ -38,7 +38,19 @@ Status: ⬜ todo · 🟨 in progress · ✅ done
 
 - Result: `src/levels/` (`Level`, `SystemLevel`, `GalaxyLevel`, `SceneManager`) and `src/galaxy/`. `Game` now renders only the active level; each system level has its own Rapier world (`Physics.init()` once, then `Physics.create()` per level). The system level stays alive while you're in the galaxy (zooming straight back in resumes it, autopilot included) and is rebuilt when you enter a different star. `OrbitCamera` takes per-level params and reports "scrolled past the limit" (~2 notches after reaching it); transitions are a log-space camera zoom plus a CSS fade (`#fade`), with input blocked. Galaxy: 4000 stars in one `Points` shader (size from star radius, min 2 px), disc + bulge glows, rings for the current/destination/hovered star, scripted travel with the same arrive steering (150 u/s). The URL's `?star=` follows the current system, so a reload returns there. Wheel zoom is faster now (`zoomSpeed` 0.0025). The smoke test runs the whole loop with real wheel and pointer events.
 
-### 4. ⬜ Planet approach (low orbit)
+### 4. ⬜ Travel sounds
+- A **whoosh** when the ship sets off: galaxy travel, and the zoom transitions between galaxy and system (and later planet).
+- An **Effects** volume slider next to Master / Music / Ambience.
+- Done when travel and transitions whoosh at a sensible level relative to the music, sounds respect the sliders and mute, and there are no console errors.
+
+**Implementation notes (proposed design; confirm with the user before building):**
+- *Synthesised, no files:* `src/audio/sfx.ts` builds sounds from Web Audio nodes on demand. **Whoosh** = a white-noise buffer (made once, ~2 s, looped from a random offset) → `BiquadFilter` bandpass whose frequency sweeps up then down (e.g. 200 → 1800 → 300 Hz, Q ~1) → gain envelope (fast attack ~0.15 s, long release) → `StereoPanner` sweeping L → R. Under it a low sine/triangle "body" (80 → 40 Hz) at low gain. Parameters in an exported `sfxParams` (duration, sweep, Q, levels) bound to a `debug.folder('Sound FX')` with a "play" button for tuning by ear. Variants per use: a longer, deeper one for galaxy travel (scale the duration with the trip length, capped) and a shorter one for level transitions (up-sweep zooming out, down-sweep zooming in).
+- *Mixer:* add an `sfx` channel to `AudioChannel` / `AudioSettings` (default ~0.7) and a fourth slider in `index.html` / `VolumeControl`. `parseAudioSettings` already falls back per field, so old saved settings still load. Extend `tests/audio.test.ts`.
+- *API:* `AudioManager.play(name, opts?)` → no-op until audio is unlocked (`state !== 'running'`). Nodes are created per play and disconnected on `onended` (cheap, and it's not per frame). Pass the manager into `SceneManager` (constructor dependency, no global) so it can call `play('transitionOut' | 'transitionIn')` when a transition starts, and into `GalaxyLevel` → `GalaxyShip` for `play('travel', { seconds })` in `travelTo`. The system `Ship` autopilot could use a soft whoosh on long boosted trips later. Not required for this step.
+- *Preview:* optionally render the whoosh offline (`OfflineAudioContext`, or a throwaway Node script writing a WAV) so the user can listen before wiring it in.
+- Smoke: after the trusted click that unlocks audio, trigger a transition and check `audio` reports the play (e.g. a `lastPlayed` debug field) with no errors.
+
+### 5. ⬜ Planet approach (low orbit)
 - Getting close to a planet (zooming in or flying at it) moves smoothly to the planet scene.
 - Planet scene: a large, detailed terrain sphere built from the planet's data (oceans, mountains, colours, atmosphere glow), with the ship hovering in low orbit and using the same click-to-move over the globe.
 - The rest of the system stays in view: from low orbit you see the star, the other planets and this planet's own moons in the sky, where they really are and moving along their orbits.
@@ -72,7 +84,7 @@ Status: ⬜ todo · 🟨 in progress · ✅ done
 - Unit-test the sky mapping: direction and angular size from system positions, the minimum pixel size, and that the star direction and the light direction agree.
 - Smoke: park at a planet via `ship.moveTo(world.planets[i])`, scroll in → `levels.mode === 'planet'`; click the globe and check the ship moved over the surface; check the sky shows the star plus one impostor per other planet and moon; scroll out → back in the system beside the same planet. Run for each planet type via a few `?star=` values (the roadmap's "done" criterion).
 
-### 5. ⬜ Galaxy map polish
+### 6. ⬜ Galaxy map polish
 - Background of **distant galaxies** instead of black: small spirals, ellipticals and edge-on discs scattered over the sky, plus one or two larger, closer ones.
 - Stars **twinkle** subtly.
 - The whole galaxy **rotates very slowly**, barely noticeable.
@@ -86,19 +98,19 @@ Status: ⬜ todo · 🟨 in progress · ✅ done
 - *Binaries:* the `GalaxyMap` shader draws both members of a binary: two points per binary `StarRef` (a `member` attribute), coloured and sized per member, orbiting their midpoint slowly (period hashed from the id). Their separation is `max(physicalSep, k·pixels)` in view space, so from afar they merge into one point and zooming in splits them. The hover tooltip already lists both.
 - Tests: `distantGalaxies` determinism and distribution; picking a star while the galaxy is rotated (pure `pickPoint` with a transformed ray).
 
-### 6. ⬜ System sky, orbit lines and rings
+### 7. ⬜ System sky, orbit lines and rings
 - The **galaxy band** in the system sky: the Milky Way as seen from this star, brightest towards the galactic centre, with dark dust lanes.
 - Planet **orbit lines**, faintly visible.
 - **Rings on more planet types**, not just gas giants.
 - Done when every system shows a band consistent with its place in the galaxy, orbit lines read without cluttering, and rocky, ice or lava planets sometimes have rings.
 
 **Implementation notes (proposed design; confirm with the user before building):**
-- *Galactic orientation per system:* add a seeded `galacticTilt` (a rotation from system space into galaxy space) to `SystemData`, drawn last or from `rng.fork('galactic')` so nothing else changes. Real systems' ecliptics are tilted against the galactic plane, which puts the band diagonally across the sky. Step 8 needs this same mapping to line up the views.
+- *Galactic orientation per system:* add a seeded `galacticTilt` (a rotation from system space into galaxy space) to `SystemData`, drawn last or from `rng.fork('galactic')` so nothing else changes. Real systems' ecliptics are tilted against the galactic plane, which puts the band diagonally across the sky. Step 9 needs this same mapping to line up the views.
 - *Band:* a sky-sphere shader in `world/GalaxyBand.ts`, drawn behind `Starfield`. Inputs are the galactic plane normal and the direction to the galactic centre (both in system space, from the star's galaxy position and `galacticTilt`), and how deep in the disc the star is. Brightness is a Gaussian in galactic latitude, stronger towards the centre (a bulge glow) and dimmer towards the rim. Dust lanes come from 3D noise along the plane. Colours come from the galaxy glow palette in `galaxy/appearance.ts`. Also add a denser, faint band of starfield points along the same plane.
 - *Orbit lines:* one `LineLoop` per planet orbit (64–128 segments, built once) in `StarSystem`, additive and low opacity (~0.12), fading with camera distance. Highlight the hovered or targeted planet's orbit. Moon orbits only near their planet. Binary stars' mutual orbit gets no line.
 - *Rings:* non-gas planets get rings with a small chance (~10–15%; more for ice, fewer for lava), decided with a separate `rng.fork('rings')` so gas giants and existing draws don't change. Keep them narrow (outer ≤ ~2 R) and in colours from the planet's palette (icy white for ice, dusty for rocky). Rings widen a planet's reach, so later orbits in those systems shift. That's acceptable, since there are no saves yet. Extend `tests/universe.test.ts` (no overlaps with the new rings).
 
-### 7. ⬜ Living stars and comets
+### 8. ⬜ Living stars and comets
 - The **star is alive**: an animated surface (granulation, drifting sunspots), a pulsing corona, and **solar storms**: prominence loops rising off the limb and occasional flares/CMEs of particles flying outward.
 - **Comets**: a few per system on long elliptical orbits, with a glowing head and a tail pointing away from the star that grows near the star. Not clickable or visitable.
 - Done when every star type visibly lives (at a pace that suits its type) and comets fly through systems, with no FPS regression.
@@ -108,19 +120,19 @@ Status: ⬜ todo · 🟨 in progress · ✅ done
 - *Storms:* one pooled `Points` per star (e.g. 2k particles) animated entirely in the vertex shader from per-particle {spawn time, origin on the surface, velocity, lifetime}. Prominences are particles following a magnetic-loop arc (a half-ellipse rooted at two surface points) that rises, hangs and falls back. Flares/CMEs are bursts moving radially outward that fade with distance. Event timing comes from a seeded `Rng` per star (no `Math.random`). Red dwarfs flare often and small; giants slowly and large. When the pool recycles, only the attribute ranges it rewrites are updated (no per-frame allocation).
 - *Comets:* `CometData` in `gen/` with orbital elements (perihelion outside the star's glow, aphelion beyond the outermost planet, inclination, argument of perihelion, period), generated from `rng.fork('comets')` so existing systems don't change. Add a pure Kepler solver (`solveKepler(M, e)` by Newton iteration) to `gen/orbit.ts` with tests (circular case matches `orbitPosition`, the period closes, speed peaks at perihelion). View: `world/Comet.ts` with a small head plus an additive coma sprite. The tail is two additive ribbons/particle trails: a straight ion tail (anti-sunward, blue) and a curved dust tail (lagging along the orbit, warm). Length and brightness scale with 1/r². Comets are not `CelestialBody` and get no physics body, so the `Picker` and autopilot ignore them.
 
-### 8. ⬜ Seamless galaxy ↔ system zoom
+### 9. ⬜ Seamless galaxy ↔ system zoom
 - Scrolling into a star: the UFO shrinks as it dives towards the star, the star swells from a point into a sun, and the system view takes over **without a cut to black**. Scrolling out plays the reverse.
 - Done when the galaxy → system → galaxy loop has no black frame, the star keeps its screen position and size through the handover, and the smoke loop still passes.
 
 **Implementation notes (proposed design; confirm with the user before building):**
-- *Why it can be seamless:* both scenes are rendered during the handover and crossfaded, and the handover frame is framed identically in both. That means the same view direction (the system ↔ galaxy rotation from step 6's `galacticTilt`), the same screen position and angular size of the star (binary: both members), and a matching background (the step 6 band is the galaxy seen from that star).
+- *Why it can be seamless:* both scenes are rendered during the handover and crossfaded, and the handover frame is framed identically in both. That means the same view direction (the system ↔ galaxy rotation from step 7's `galacticTilt`), the same screen position and angular size of the star (binary: both members), and a matching background (the step 7 band is the galaxy seen from that star).
 - *Rendering:* `SceneManager` gets a blend mode. The outgoing and incoming levels render into two half-float render targets, and a fullscreen quad mixes them (`mix(a, b, t)`). This only runs during the ~0.5 s overlap, so it costs nothing otherwise. The `#fade` overlay stays for the other transitions.
 - *Choreography, galaxy → system (~2.5 s, input blocked):*
   1. Galaxy: the camera zooms at the star in log space. The `GalaxyShip` scales down and flies into the star. A dedicated billboard for the target star grows beyond its point size into a disc plus glow.
   2. Handover (~0.5 s crossfade): the system camera starts on the far side of the system, looking at the sun from the matching direction. Its distance is chosen so the sun's angular size equals the galaxy billboard's (`r_sun / d_sys = size_gal / d_gal`).
-  3. System: the camera keeps zooming in while its focus blends from the sun to the UFO (the `OrbitCamera` focus override from step 4). The UFO grows from nothing back to normal size at the spawn point.
+  3. System: the camera keeps zooming in while its focus blends from the sun to the UFO (the `OrbitCamera` focus override from step 5). The UFO grows from nothing back to normal size at the spawn point.
 - System → galaxy is the same timeline reversed. Put the timeline in a pure module (like `levels/transition.ts`) returning camera distances, ship scale, star billboard size and blend weight at time t, and unit-test it, including the angular-size match at the handover.
-- Step 4's system ↔ planet transition can use the same blend path later.
+- Step 5's system ↔ planet transition can use the same blend path later.
 - Smoke: sample `#fade` opacity and the blend weight through the loop and assert the screen never goes fully black. Screenshot mid-handover.
 
 ## Later / ideas
@@ -128,4 +140,4 @@ Status: ⬜ todo · 🟨 in progress · ✅ done
 - Abduction beam, spice economy, colonising planets
 - Other empires and diplomacy
 - Save/load (only the seed + player state are needed)
-- Audio: music and a looping ambience with volume controls are in (`src/audio/`). Still to add: sound effects (engine hum, clicks, travel whoosh) on a new mixer channel
+- Audio: music, looping ambience and volume controls are in (`src/audio/`); travel whooshes are step 4. Later: engine hum, UI clicks, arrival chimes on the same Effects channel
