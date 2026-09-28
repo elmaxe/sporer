@@ -1,3 +1,4 @@
+import type { SoundEffects } from '../audio/sfx';
 import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
 import type { Game } from '../core/Game';
@@ -27,8 +28,8 @@ interface ActivePhase extends TransitionPhase {
  * the galaxy, framed on the current star; zooming in at a star enters its
  * system (generated on demand). Each transition reads as one continuous zoom:
  * the old camera keeps zooming while the screen fades to black, the levels
- * swap, and the new camera zooms on while it fades back in. Input is blocked
- * meanwhile. A global entity: it runs before the active level each frame.
+ * swap, and the new camera zooms on while it fades back in, under a whoosh.
+ * Input is blocked meanwhile. A global entity: it runs before the active level each frame.
  */
 export class SceneManager implements Entity {
   readonly galaxyLevel: GalaxyLevel;
@@ -43,9 +44,10 @@ export class SceneManager implements Entity {
     galaxy: GalaxyData,
     start: StarRef,
     private readonly debug: Debug,
+    private readonly sfx: SoundEffects,
   ) {
     const { camera, input, renderer } = game;
-    this.galaxyLevel = new GalaxyLevel(galaxy, start, camera, input, renderer.domElement, this.tooltip, debug, () =>
+    this.galaxyLevel = new GalaxyLevel(galaxy, start, camera, input, renderer.domElement, this.tooltip, debug, sfx, () =>
       this.toSystem(),
     );
     this._systemLevel = this.createSystem(start);
@@ -68,6 +70,7 @@ export class SceneManager implements Entity {
   toGalaxy(): void {
     if (this.transitioning || this.mode === 'galaxy') return;
     const from = this._systemLevel.orbit;
+    this.sfx.play('transitionOut');
     this.begin({
       orbit: from,
       from: from.zoom,
@@ -96,6 +99,7 @@ export class SceneManager implements Entity {
     const ship = this.galaxyLevel.ship;
     if (this.transitioning || this.mode === 'system' || ship.travelling) return;
     const from = this.galaxyLevel.orbit;
+    this.sfx.play('transitionIn');
     this.begin({
       orbit: from,
       from: from.zoom,

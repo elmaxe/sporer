@@ -19,10 +19,10 @@ async function main(): Promise<void> {
 
   const [debug] = await Promise.all([Debug.create(), Physics.init()]);
   const game = new Game(document.getElementById('app')!, debug);
-  const levels = game.add(new SceneManager(game, galaxy, start, debug));
   const audioSettings = loadAudioSettings();
-  const audio = new AudioManager(audioSettings);
+  const audio = new AudioManager(audioSettings, debug);
   new VolumeControl(audio, audioSettings);
+  const levels = game.add(new SceneManager(game, galaxy, start, debug, audio));
 
   document.getElementById('loading')?.remove();
   game.start();

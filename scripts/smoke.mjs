@@ -2,8 +2,9 @@
 // Usage: npm run smoke [-- http://localhost:5173/]   (dev server must be running)
 // Checks: W moves the ship along -Z, the autopilot flies back to a point, hovering + clicking
 // the star targets it, and the galaxy loop works (scroll out to the galaxy, click the nearest
-// star, travel, scroll in to its system), and a real click on the speaker button starts audio and M mutes. Prints JSON with FPS, console errors and screenshot
-// paths. Exit 1 on failure.
+// star, travel, scroll in to its system), and a real click on the speaker button starts audio; then the
+// transitions and galaxy travel play their whooshes, and M mutes. Prints JSON with FPS, console errors and
+// screenshot paths. Exit 1 on failure.
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -29,6 +30,8 @@ const proc = spawn(browser, [
   '--enable-unsafe-swiftshader',
   '--use-angle=swiftshader',
   '--window-size=1280,720',
+  // Chrome refuses to run as root (e.g. in containers) with its sandbox on.
+  ...(process.getuid?.() === 0 ? ['--no-sandbox'] : []),
   'about:blank',
 ]);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -158,7 +161,31 @@ if (started) {
     await send('Input.dispatchMouseEvent', { type, ...button, button: 'left', clickCount: 1 });
   }
   await sleep(1000);
-  audio = await evaluate(`({ state: audio.state, panelOpen: !document.getElementById('audio-panel').hidden })`);
+  audio = await evaluate(`({ state: audio.state, panelOpen: !document.getElementById('audio-panel').hidden,
+    effectsSlider: !!document.querySelector('#audio-panel input[data-key="sfx"]') })`);
+
+  // Whooshes: zoom out (transition), travel to a neighbour, zoom back in.
+  const played = `(audio.lastPlayed && { name: audio.lastPlayed.name, seconds: +audio.lastPlayed.seconds.toFixed(2), count: audio.lastPlayed.count })`;
+  audio.sfx = {};
+  await evaluate(`levels.toGalaxy()`);
+  audio.sfx.out = await evaluate(played);
+  await sleep(1500);
+  audio.sfx.travel = await evaluate(`(() => {
+    const ship = levels.galaxyLevel.ship;
+    const here = ship.current.position;
+    let best = null, bestD = Infinity;
+    for (const s of galaxy.stars) {
+      const d = Math.hypot(s.position.x - here.x, s.position.y - here.y, s.position.z - here.z);
+      if (s !== ship.current && d < bestD) { best = s; bestD = d; }
+    }
+    ship.travelTo(best);
+    return ${played};
+  })()`);
+  for (let i = 0; i < 60 && (await evaluate(`levels.galaxyLevel.ship.travelling`)); i++) await sleep(250);
+  await evaluate(`levels.toSystem()`);
+  audio.sfx.in = await evaluate(played);
+  await sleep(1500);
+  audio.sfx.modeAfter = await evaluate(`levels.mode`);
   await send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'KeyM', key: 'm' });
   await send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'KeyM', key: 'm' });
   audio.mutedByKey = await evaluate(`document.getElementById('audio').classList.contains('muted')`);
@@ -178,7 +205,17 @@ const looped =
   galaxyLoop.modeAfterZoomIn === 'system' &&
   galaxyLoop.to === galaxyLoop.clicked.nearest &&
   typeof galaxyLoop.shipSpeed === 'number';
-const sounded = started && audio.state === 'running' && audio.panelOpen && audio.mutedByKey;
+const sounded =
+  started &&
+  audio.state === 'running' &&
+  audio.panelOpen &&
+  audio.effectsSlider &&
+  audio.sfx.out?.name === 'transitionOut' &&
+  audio.sfx.travel?.name === 'travel' &&
+  audio.sfx.in?.name === 'transitionIn' &&
+  audio.sfx.in.count === 3 &&
+  audio.sfx.modeAfter === 'system' &&
+  audio.mutedByKey;
 const ok = started && moved && autopiloted && picked && looped && sounded && errors.length === 0;
 console.log(
   JSON.stringify(

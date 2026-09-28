@@ -2,7 +2,7 @@ import type { AudioManager } from '../audio/AudioManager';
 import { parseAudioSettings, type AudioSettings } from '../audio/settings';
 
 const STORAGE_KEY = 'spore2.audio';
-const SLIDERS = ['master', 'music', 'ambience'] as const;
+const SLIDERS = ['master', 'music', 'ambience', 'sfx'] as const;
 
 /** Volume settings saved in this browser, or the defaults. */
 export function loadAudioSettings(): AudioSettings {
@@ -22,8 +22,8 @@ function saveAudioSettings(s: AudioSettings): void {
 }
 
 /**
- * The speaker button and volume panel (#audio in index.html): master, music
- * and ambience sliders plus mute. M toggles mute anywhere. Changes apply
+ * The speaker button and volume panel (#audio in index.html): master, music,
+ * ambience and effects sliders plus mute. M toggles mute anywhere. Changes apply
  * live and are saved to localStorage.
  */
 export class VolumeControl {
