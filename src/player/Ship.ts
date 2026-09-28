@@ -21,7 +21,7 @@ export const shipParams = {
 export const autopilotParams: ArriveParams = {
   maxSpeed: 150,
   accel: 250,
-  gain: 1.2,
+  gain: 8,
   damping: shipParams.linearDamping,
 };
 
@@ -108,7 +108,7 @@ export class Ship implements Entity {
     const a = debug.folder('Autopilot');
     a?.add(autopilotParams, 'maxSpeed', 10, 600);
     a?.add(autopilotParams, 'accel', 10, 1000);
-    a?.add(autopilotParams, 'gain', 0.1, 5);
+    a?.add(autopilotParams, 'gain', 1, 20);
   }
 
   /** Current speed in units per second. */

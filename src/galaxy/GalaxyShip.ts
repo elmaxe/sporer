@@ -10,7 +10,7 @@ import { buildUfoMesh } from '../player/Ship';
 export const galaxyTravelParams: ArriveParams = {
   maxSpeed: 150,
   accel: 200,
-  gain: 1.5,
+  gain: 8,
   damping: 0,
 };
 
@@ -57,7 +57,7 @@ export class GalaxyShip implements Entity {
     const f = debug.folder('Galaxy travel');
     f?.add(galaxyTravelParams, 'maxSpeed', 10, 1000);
     f?.add(galaxyTravelParams, 'accel', 10, 2000);
-    f?.add(galaxyTravelParams, 'gain', 0.1, 5);
+    f?.add(galaxyTravelParams, 'gain', 1, 20);
   }
 
   /** The star the ship is at, or last left while travelling. */
