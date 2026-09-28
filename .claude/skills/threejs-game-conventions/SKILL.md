@@ -22,7 +22,8 @@ Browser game: Vite + TypeScript (strict), `three`, `@dimforge/rapier3d-compat` p
 | `src/gen/` | **Procedural generation, pure data, no THREE/DOM/Rapier**: `rng.ts` (seeded PRNG, `hashSeed`), `galaxy.ts`, `stars.ts`, `system.ts`, `planets.ts`, `names.ts`, `color.ts`, plus shared math (`orbit.ts`, `noise.ts`). |
 | `src/world/` | Views that render generated data: `StarSystem` (from `SystemData`), `Star`, `Planet` (also moons, gas bands, rings, atmosphere), `Starfield`. Stars/planets/moons implement `CelestialBody` (name, description, radius, standoff, sim + render position, velocity). |
 | `src/player/` | `Ship` (autopilot + WASD nudge), `OrbitCamera`, `Picker` (hover/click → target), `TargetMarker`, and pure steering math in `autopilot.ts`. |
-| `src/ui/` | DOM HUD overlays (markup lives in `index.html`). |
+| `src/ui/` | DOM HUD overlays (markup lives in `index.html`), including `VolumeControl` (speaker button + sliders, M mutes, saved to localStorage). |
+| `src/audio/` | `AudioManager`: Web Audio mixer (master → music / ambience gains), unlocked on the first trusted pointer/key press, paused while the tab is hidden. Not an `Entity` (nothing per frame). Pure `settings.ts` (volumes → gains) and `loop.ts` (crossfade a clip into a seamless loop). Audio files live in `src/assets/audio/` and are imported as URLs. |
 | `tests/` | Vitest unit tests for pure logic. |
 
 | `src/galaxy/` | Galaxy-map entities: `GalaxyMap` (all stars in one `Points` shader), `GalaxyShip` (scripted travel), `GalaxyPicker`, `GalaxyHud`, pure `pickPoint` / `galaxyStarSize`. |

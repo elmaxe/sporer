@@ -18,6 +18,21 @@
       <div id="tooltip-name"></div>
       <div id="tooltip-info"></div>
     </div>
+    <div id="audio">
+      <div id="audio-panel" hidden>
+        <label>Master <input type="range" data-key="master" min="0" max="1" step="0.01" /><output data-key="master"></output></label>
+        <label>Music <input type="range" data-key="music" min="0" max="1" step="0.01" /><output data-key="music"></output></label>
+        <label>Ambience <input type="range" data-key="ambience" min="0" max="1" step="0.01" /><output data-key="ambience"></output></label>
+        <button id="audio-mute" type="button"></button>
+      </div>
+      <button id="audio-toggle" type="button" aria-label="Sound settings" aria-expanded="false">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M11 5 6 9H2v6h4l5 4z" fill="currentColor" />
+          <path class="waves" d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14" />
+          <path class="cross" d="m16 9 6 6m0-6-6 6" />
+        </svg>
+      </button>
+    </div>
     <div id="fade"></div>
     <div id="loading">Loading…</div>
     <script type="module" src="/src/main.ts"></script>

@@ -25,6 +25,8 @@ export class Debug {
       import('stats.js'),
     ]);
     const gui = new GUIClass({ title: 'Debug' });
+    // Leave the bottom-right corner free for the sound button (#audio).
+    gui.domElement.style.maxHeight = 'calc(100% - 72px)';
     const stats = new StatsClass();
     stats.dom.style.cssText = 'position:fixed;top:0;left:0;z-index:100;';
     document.body.appendChild(stats.dom);

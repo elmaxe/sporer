@@ -10,7 +10,7 @@ import type { GalaxyPicker } from './GalaxyPicker';
 import type { GalaxyShip } from './GalaxyShip';
 
 const REFRESH_SECONDS = 0.1;
-const HELP = 'Click a star: travel there · Scroll in at a star: enter its system · Scroll: zoom · Drag: rotate view';
+const HELP = 'Click a star: travel there · Scroll in at a star: enter its system · Scroll: zoom · Drag: rotate view · M: mute';
 
 /**
  * The galaxy level's overlay: HUD text, star tooltip, and rings marking the

@@ -68,4 +68,4 @@ Status: ⬜ todo · 🟨 in progress · ✅ done
 - Abduction beam, spice economy, colonising planets
 - Other empires and diplomacy
 - Save/load (only the seed + player state are needed)
-- Audio
+- Audio: music and a looping ambience with volume controls are in (`src/audio/`). Still to add: sound effects (engine hum, clicks, travel whoosh) on a new mixer channel

@@ -2,7 +2,7 @@
 // Usage: npm run smoke [-- http://localhost:5173/]   (dev server must be running)
 // Checks: W moves the ship along -Z, the autopilot flies back to a point, hovering + clicking
 // the star targets it, and the galaxy loop works (scroll out to the galaxy, click the nearest
-// star, travel, scroll in to its system). Prints JSON with FPS, console errors and screenshot
+// star, travel, scroll in to its system), and a real click on the speaker button starts audio and M mutes. Prints JSON with FPS, console errors and screenshot
 // paths. Exit 1 on failure.
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
@@ -74,7 +74,7 @@ await sleep(4000);
 
 const state = `({ speed: +ship.speed.toFixed(1), pos: ship.object.position.toArray().map((n) => +n.toFixed(1)) })`;
 const started = await evaluate(`typeof window.ship !== 'undefined'`);
-let before, after, autopilot, pick, galaxyLoop, fps;
+let before, after, autopilot, pick, galaxyLoop, fps, audio;
 const measureFps = `new Promise((r) => { let n = 0; const t0 = performance.now();
   (function f() { if (++n === 120) r(Math.round(120000 / (performance.now() - t0))); else requestAnimationFrame(f); })(); })`;
 if (started) {
@@ -150,6 +150,18 @@ if (started) {
   galaxyLoop.to = await evaluate(`system.id`);
   galaxyLoop.shipSpeed = await evaluate(`ship.speed`);
   fps = await evaluate(measureFps);
+
+  // Audio: a real (trusted) click on the speaker button unlocks audio and opens the volume panel.
+  const button = await evaluate(`(() => { const r = document.getElementById('audio-toggle').getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  for (const type of ['mousePressed', 'mouseReleased']) {
+    await send('Input.dispatchMouseEvent', { type, ...button, button: 'left', clickCount: 1 });
+  }
+  await sleep(1000);
+  audio = await evaluate(`({ state: audio.state, panelOpen: !document.getElementById('audio-panel').hidden })`);
+  await send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'KeyM', key: 'm' });
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'KeyM', key: 'm' });
+  audio.mutedByKey = await evaluate(`document.getElementById('audio').classList.contains('muted')`);
 }
 const screenshot = join(outDir, 'screenshot.png');
 const shot = await send('Page.captureScreenshot', { format: 'png' });
@@ -166,10 +178,11 @@ const looped =
   galaxyLoop.modeAfterZoomIn === 'system' &&
   galaxyLoop.to === galaxyLoop.clicked.nearest &&
   typeof galaxyLoop.shipSpeed === 'number';
-const ok = started && moved && autopiloted && picked && looped && errors.length === 0;
+const sounded = started && audio.state === 'running' && audio.panelOpen && audio.mutedByKey;
+const ok = started && moved && autopiloted && picked && looped && sounded && errors.length === 0;
 console.log(
   JSON.stringify(
-    { ok, started, moved, autopiloted, picked, looped, before, after, autopilot, pick, galaxyLoop, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
+    { ok, started, moved, autopiloted, picked, looped, sounded, before, after, autopilot, pick, galaxyLoop, audio, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
     null,
     2,
   ),

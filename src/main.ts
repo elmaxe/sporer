@@ -5,6 +5,8 @@ import { generateGalaxy } from './gen/galaxy';
 import { parseSeed } from './gen/rng';
 import { findHomeSystem } from './gen/system';
 import { SceneManager } from './levels/SceneManager';
+import { AudioManager } from './audio/AudioManager';
+import { VolumeControl, loadAudioSettings } from './ui/VolumeControl';
 
 const DEFAULT_SEED = '1337';
 
@@ -18,6 +20,9 @@ async function main(): Promise<void> {
   const [debug] = await Promise.all([Debug.create(), Physics.init()]);
   const game = new Game(document.getElementById('app')!, debug);
   const levels = game.add(new SceneManager(game, galaxy, start, debug));
+  const audioSettings = loadAudioSettings();
+  const audio = new AudioManager(audioSettings);
+  new VolumeControl(audio, audioSettings);
 
   document.getElementById('loading')?.remove();
   game.start();
@@ -25,7 +30,7 @@ async function main(): Promise<void> {
   // Handles for poking at the game from the browser console / automation.
   // ship / world / system follow the current system level.
   if (import.meta.env.DEV) {
-    Object.assign(window, { game, galaxy, levels });
+    Object.assign(window, { game, galaxy, levels, audio });
     Object.defineProperties(window, {
       ship: { get: () => levels.systemLevel.ship, configurable: true },
       world: { get: () => levels.systemLevel.world, configurable: true },

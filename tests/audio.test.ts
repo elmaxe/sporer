@@ -1,0 +1,80 @@
+import { describe, expect, it } from 'vitest';
+import { crossfadeLoop } from '../src/audio/loop';
+import { channelGain, DEFAULT_AUDIO_SETTINGS, parseAudioSettings, sliderToGain } from '../src/audio/settings';
+
+describe('parseAudioSettings', () => {
+  it('falls back to the defaults for missing or broken input', () => {
+    expect(parseAudioSettings(null)).toEqual(DEFAULT_AUDIO_SETTINGS);
+    expect(parseAudioSettings('not json')).toEqual(DEFAULT_AUDIO_SETTINGS);
+    expect(parseAudioSettings('42')).toEqual(DEFAULT_AUDIO_SETTINGS);
+    expect(parseAudioSettings('null')).toEqual(DEFAULT_AUDIO_SETTINGS);
+  });
+
+  it('keeps valid fields, clamps ranges and ignores wrong types', () => {
+    const s = parseAudioSettings(JSON.stringify({ master: 0.3, music: 7, ambience: 'loud', muted: true }));
+    expect(s).toEqual({ master: 0.3, music: 1, ambience: DEFAULT_AUDIO_SETTINGS.ambience, muted: true });
+    expect(parseAudioSettings('{"master": -1}').master).toBe(0);
+  });
+
+  it('round-trips through JSON', () => {
+    const s = { master: 0.25, music: 0.5, ambience: 0.75, muted: true };
+    expect(parseAudioSettings(JSON.stringify(s))).toEqual(s);
+  });
+});
+
+describe('gains', () => {
+  it('maps sliders to gain on a squared curve', () => {
+    expect(sliderToGain(0)).toBe(0);
+    expect(sliderToGain(0.5)).toBe(0.25);
+    expect(sliderToGain(1)).toBe(1);
+    expect(sliderToGain(2)).toBe(1);
+  });
+
+  it('multiplies master and channel, and mute silences', () => {
+    const s = { master: 0.5, music: 1, ambience: 0.5, muted: false };
+    expect(channelGain(s, 'music')).toBeCloseTo(0.25);
+    expect(channelGain(s, 'ambience')).toBeCloseTo(0.0625);
+    expect(channelGain({ ...s, muted: true }, 'music')).toBe(0);
+  });
+});
+
+describe('crossfadeLoop', () => {
+  const ramp = (n: number) => Float32Array.from({ length: n }, (_, i) => i);
+
+  it('shortens by the overlap and leaves the rest untouched', () => {
+    const [out] = crossfadeLoop([ramp(100)], 10);
+    expect(out.length).toBe(90);
+    for (let i = 10; i < 90; i++) expect(out[i]).toBe(i);
+  });
+
+  it('loops without a jump: the end runs into the old tail, and the head fades in', () => {
+    const n = 1000;
+    const k = 100;
+    const src = Float32Array.from({ length: n }, (_, i) => Math.sin(i * 0.1));
+    const [out] = crossfadeLoop([src], k);
+    // Wrapping from out[899] (= src[899]) lands exactly on what followed it: src[900].
+    expect(out[0]).toBeCloseTo(src[n - k], 6);
+    // By the end of the fade it's back to the original head, joining the untouched rest.
+    expect(Math.abs(out[k - 1] - src[k - 1])).toBeLessThan(0.03);
+    expect(out[k]).toBe(src[k]);
+  });
+
+  it('keeps constant power across the crossfade', () => {
+    // Equal-power fade: sin² + cos² = 1 at every sample.
+    const k = 64;
+    const [a] = crossfadeLoop([new Float32Array(2 * k).fill(1)], k);
+    const [b] = crossfadeLoop([Float32Array.from({ length: 2 * k }, (_, i) => (i < k ? 1 : 0))], k);
+    const [c] = crossfadeLoop([Float32Array.from({ length: 2 * k }, (_, i) => (i < k ? 0 : 1))], k);
+    for (let i = 0; i < k; i++) {
+      expect(b[i] ** 2 + c[i] ** 2).toBeCloseTo(1, 5);
+      expect(a[i]).toBeGreaterThanOrEqual(1 - 1e-6);
+    }
+  });
+
+  it('handles each channel and clamps oversized overlaps', () => {
+    const out = crossfadeLoop([ramp(10), ramp(10)], 50);
+    expect(out).toHaveLength(2);
+    expect(out[0].length).toBe(5);
+    expect(crossfadeLoop([ramp(10)], 0)[0]).toEqual(ramp(10));
+  });
+});
