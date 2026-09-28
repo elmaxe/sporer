@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
 import type { Input } from '../core/Input';
-import type { GalaxyData, StarRef } from '../gen/galaxy';
+import { generateDust, type GalaxyData, type StarRef } from '../gen/galaxy';
+import { GalaxyDust } from '../galaxy/GalaxyDust';
 import { GalaxyHud } from '../galaxy/GalaxyHud';
 import { GalaxyMap } from '../galaxy/GalaxyMap';
 import { GalaxyPicker } from '../galaxy/GalaxyPicker';
@@ -45,6 +46,7 @@ export class GalaxyLevel extends Level {
     this.light = new THREE.HemisphereLight('#cfe3ff', '#302040', 2);
     this.scene.add(this.light);
 
+    this.add(new GalaxyDust(this.scene, generateDust(galaxy), galaxy.radius));
     const map = this.add(new GalaxyMap(this.scene, galaxy));
     this.ship = this.add(new GalaxyShip(this.scene, start, debug));
     this.orbit = this.add(

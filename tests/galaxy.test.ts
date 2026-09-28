@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { galaxyStarSize } from '../src/galaxy/appearance';
 import { pickPoint } from '../src/galaxy/pickPoint';
-import { generateGalaxy, type StarRef } from '../src/gen/galaxy';
+import { generateDust, generateGalaxy, type StarRef } from '../src/gen/galaxy';
 import type { StarKind } from '../src/gen/stars';
 
 describe('galaxyStarSize', () => {
@@ -36,5 +36,33 @@ describe('pickPoint', () => {
   it('ignores points outside the angle and behind the origin', () => {
     expect(pickPoint(origin, { x: 0, y: 0, z: 1 }, points, 0.2)).toBe(2);
     expect(pickPoint(origin, forward, points.slice(0, 3), 0.05)).toBe(-1);
+  });
+});
+
+describe('generateDust', () => {
+  const galaxy = generateGalaxy(1337, 10);
+
+  it('is deterministic', () => {
+    expect(generateDust(galaxy, 50)).toEqual(generateDust(galaxy, 50));
+  });
+
+  it('concentrates along the spiral arms', () => {
+    // Angular distance from the nearest arm's centreline at the cloud's radius
+    // (the inverse of armPosition's layout).
+    const offArm = (p: { x: number; z: number }) => {
+      const t = (Math.hypot(p.x, p.z) / galaxy.radius - 0.08) / 0.92;
+      let best = Infinity;
+      for (let arm = 0; arm < galaxy.arms; arm++) {
+        const centre = galaxy.armOffset + (arm / galaxy.arms) * Math.PI * 2 + t * galaxy.twist;
+        const diff = Math.atan2(Math.sin(Math.atan2(p.z, p.x) - centre), Math.cos(Math.atan2(p.z, p.x) - centre));
+        best = Math.min(best, Math.abs(diff));
+      }
+      return best;
+    };
+    const dust = generateDust(galaxy, 1000);
+    const near = dust.filter((c) => offArm(c.position) < 0.5).length / dust.length;
+    // Uniformly scattered clouds would give arms / π ≈ 0.3–0.6; arm dust is ~90%.
+    expect(near).toBeGreaterThan(0.8);
+    for (const c of dust) expect(Math.abs(c.position.y)).toBeLessThan(galaxy.radius * 0.15);
   });
 });

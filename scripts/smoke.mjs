@@ -75,6 +75,8 @@ await sleep(4000);
 const state = `({ speed: +ship.speed.toFixed(1), pos: ship.object.position.toArray().map((n) => +n.toFixed(1)) })`;
 const started = await evaluate(`typeof window.ship !== 'undefined'`);
 let before, after, autopilot, pick, galaxyLoop, fps;
+const measureFps = `new Promise((r) => { let n = 0; const t0 = performance.now();
+  (function f() { if (++n === 120) r(Math.round(120000 / (performance.now() - t0))); else requestAnimationFrame(f); })(); })`;
 if (started) {
   before = await evaluate(state);
   await evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }))`);
@@ -116,6 +118,7 @@ if (started) {
   await wheel(300); // keep scrolling past it
   await sleep(1800);
   galaxyLoop.modeAfterZoomOut = await evaluate(`levels.mode`);
+  galaxyLoop.fps = await evaluate(measureFps);
   const galaxyShot = await send('Page.captureScreenshot', { format: 'png' });
   writeFileSync(join(outDir, 'galaxy.png'), Buffer.from(galaxyShot.result.data, 'base64'));
 
@@ -146,8 +149,7 @@ if (started) {
   galaxyLoop.modeAfterZoomIn = await evaluate(`levels.mode`);
   galaxyLoop.to = await evaluate(`system.id`);
   galaxyLoop.shipSpeed = await evaluate(`ship.speed`);
-  fps = await evaluate(`new Promise((r) => { let n = 0; const t0 = performance.now();
-    (function f() { if (++n === 120) r(Math.round(120000 / (performance.now() - t0))); else requestAnimationFrame(f); })(); })`);
+  fps = await evaluate(measureFps);
 }
 const screenshot = join(outDir, 'screenshot.png');
 const shot = await send('Page.captureScreenshot', { format: 'png' });

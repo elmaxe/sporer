@@ -1,3 +1,4 @@
+import { hslToHex } from './color';
 import { generateName } from './names';
 import { hashSeed, Rng } from './rng';
 import { generateCompanion, generateStar, type StarData } from './stars';
@@ -5,6 +6,7 @@ import { generateCompanion, generateStar, type StarData } from './stars';
 /** Galaxy-scene units. Unrelated to system units; each level has its own scale. */
 export const GALAXY_RADIUS = 1000;
 export const DEFAULT_STAR_COUNT = 4000;
+export const DEFAULT_DUST_COUNT = 1200;
 const BINARY_CHANCE = 0.15;
 
 /**
@@ -24,7 +26,19 @@ export interface GalaxyData {
   seed: number;
   radius: number;
   arms: number;
+  /** How far each arm winds (radians from the inner to the outer edge). */
+  twist: number;
+  /** Angle of the first arm's inner end. */
+  armOffset: number;
   stars: StarRef[];
+}
+
+/** A soft, glowing dust/gas cloud along a spiral arm (visual only). */
+export interface DustCloud {
+  position: { x: number; y: number; z: number };
+  /** Diameter in galaxy units. */
+  size: number;
+  color: string;
 }
 
 export function generateGalaxy(seed: number, count = DEFAULT_STAR_COUNT): GalaxyData {
@@ -51,7 +65,31 @@ export function generateGalaxy(seed: number, count = DEFAULT_STAR_COUNT): Galaxy
     });
   }
 
-  return { seed, radius: GALAXY_RADIUS, arms, stars };
+  return { seed, radius: GALAXY_RADIUS, arms, twist, armOffset, stars };
+}
+
+/**
+ * Dust clouds that trace the spiral arms, using the same arm layout as the
+ * stars. Generated from its own stream, so it never changes the stars.
+ */
+export function generateDust(galaxy: GalaxyData, count = DEFAULT_DUST_COUNT): DustCloud[] {
+  const rng = new Rng(hashSeed(galaxy.seed, 'dust'));
+  const clouds: DustCloud[] = [];
+  for (let i = 0; i < count; i++) {
+    const position = armPosition(rng, galaxy.arms, galaxy.twist, galaxy.armOffset);
+    // Mostly blue, some violet, the odd pink star-forming region.
+    const hue = rng.weighted<number>([
+      [rng.range(210, 235), 6],
+      [rng.range(255, 280), 3],
+      [rng.range(310, 335), 1],
+    ]);
+    clouds.push({
+      position,
+      size: rng.range(50, 120),
+      color: hslToHex(hue, rng.range(0.5, 0.7), rng.range(0.5, 0.62)),
+    });
+  }
+  return clouds;
 }
 
 /** Logarithmic-ish spiral arm with scatter that shrinks towards the rim. */
