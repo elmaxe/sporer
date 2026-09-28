@@ -41,6 +41,7 @@ Status: ⬜ todo · 🟨 in progress · ✅ done
 ### 4. ⬜ Planet approach (low orbit)
 - Getting close to a planet (zooming in or flying at it) moves smoothly to the planet scene.
 - Planet scene: a large, detailed terrain sphere built from the planet's data (oceans, mountains, colours, atmosphere glow), with the ship hovering in low orbit and using the same click-to-move over the globe.
+- The rest of the system stays in view: from low orbit you see the star, the other planets and this planet's own moons in the sky, where they really are and moving along their orbits.
 - Zooming out returns to the system, next to that planet.
 - Done when the full loop works for every planet type.
 
@@ -54,14 +55,22 @@ Status: ⬜ todo · 🟨 in progress · ✅ done
 *Planet level* (planet units: the body is rescaled to R = 100 whatever its system radius):
 - Terrain: a pure `detailedTerrain(x, y, z, seed)` in `gen/noise.ts` = `terrainNoise` (so continents match the system view) + 2–3 higher-frequency octaves at small amplitude. Unit-test that the large scale matches `terrainNoise`.
 - Mesh: move the `Planet` geometry builders (terrain, gas bands, rings, atmosphere) into a shared module taking a `detail` argument. Planet level uses a much finer icosphere (detail ~60: 20·61² ≈ 74k triangles) plus a flat sea sphere at sea level for water worlds, and the same atmosphere shell (rescaled). Gas giants: the same banded sphere, finer (low orbit over the clouds).
-- Light: one `DirectionalLight` coming from the star's direction (planet position → star in system space) plus the hemisphere ambient. The star itself can be a glow billboard far away in that direction.
+- Light: one `DirectionalLight` coming from the star's direction (planet position → star in system space) plus the hemisphere ambient.
+
+*Rest of the system in the sky* (`levels/SystemSky.ts` or `world/SystemSky.ts`):
+- System distances don't fit in planet units (R = 100). So every other body is drawn as a **sky impostor** on a camera-centred shell at a fixed distance (~5000). Direction = normalize(body − this planet) in system space. Size keeps the true angular radius, `asin(r / d)`, with a minimum of ~2 px so distant planets still show as bright dots, like planets in a night sky. Draw order is by real distance, so a moon passing in front of the star occludes it.
+- The **star(s)**: a disc at its true angular size plus the glow billboard. For binaries, both stars. Its direction drives the `DirectionalLight`, so the terminator on the terrain matches where the sun is.
+- **Other planets and moons**: small spheres with a shader that lights them from *their own* direction to the star, giving correct phases (crescent when a planet is nearly between you and the star). They reuse their system palette (gas bands, rings for ringed ones at larger angular sizes). **This planet's moons** get big enough to be real meshes. They use the same impostor path, just larger.
+- **Clock:** give `StarSystem` one shared time (today each `Planet`/`Star` keeps its own `time` counter, all advancing together) that the planet level reads at entry and keeps advancing with pure `orbitPosition` calls (no Rapier). On return, the system level fast-forwards its bodies to the new time (`StarSystem.setTime(t)`), so everything is where you last saw it in the sky.
+- Picking ignores the sky for now (clicking the globe only). Hovering a sky body could show its name tooltip, which is cheap with the existing `Tooltip`.
 - Ship: scripted, no Rapier needed yet. State = unit direction on the sphere + altitude (~0.12 R above the surface). Click the globe (ray–sphere) to autopilot along the great circle using the same arrive steering on arc length. WASD nudges in the tangent plane relative to the camera. The UFO's up is the local radial direction.
 - Camera: the same orbit rig, but with `up` = the ship's radial direction (add an `up` option to `OrbitCamera`; yaw/pitch are relative to the local tangent plane).
 - HUD: planet name + `describePlanet`, help text for the level.
 
 *Tests / smoke:*
 - Unit-test great-circle stepping (stays on the sphere, arrives, shortest way round) and `detailedTerrain`.
-- Smoke: park at a planet via `ship.moveTo(world.planets[i])`, scroll in → `levels.mode === 'planet'`; click the globe and check the ship moved over the surface; scroll out → back in the system beside the same planet. Run for each planet type via a few `?star=` values (the roadmap's "done" criterion).
+- Unit-test the sky mapping: direction and angular size from system positions, the minimum pixel size, and that the star direction and the light direction agree.
+- Smoke: park at a planet via `ship.moveTo(world.planets[i])`, scroll in → `levels.mode === 'planet'`; click the globe and check the ship moved over the surface; check the sky shows the star plus one impostor per other planet and moon; scroll out → back in the system beside the same planet. Run for each planet type via a few `?star=` values (the roadmap's "done" criterion).
 
 ### 5. ⬜ Galaxy map polish
 - Background of **distant galaxies** instead of black: small spirals, ellipticals and edge-on discs scattered over the sky, plus one or two larger, closer ones.
