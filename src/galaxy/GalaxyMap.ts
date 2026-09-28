@@ -1,24 +1,29 @@
 import * as THREE from 'three';
 import type { Entity } from '../core/Entity';
 import type { GalaxyData } from '../gen/galaxy';
-import { createGlowTexture } from '../world/glowTexture';
 import { galaxyStarSize } from './appearance';
+import { createGlowVolume } from './glowVolume';
 
 /** Dots never get smaller or bigger than this on screen, in CSS pixels. */
 const MIN_DOT_PX = 2;
 const MAX_DOT_PX = 64;
+/**
+ * Glow closer to the camera than this is left out (see createGlowVolume), so
+ * the view from inside the disc isn't fogged; ~10 star spacings.
+ */
+const GLOW_NEAR = 250;
 
 /**
  * The galaxy as seen from outside: every star as one soft, additive dot
- * (a single Points draw), plus a faint glow over the disc and the bulge.
+ * (a single Points draw), plus glowing volumes for the disc and the bulge
+ * (so the glow reads from any angle, including edge-on).
  * Dots have a size in galaxy units, so nearby stars look bigger.
  */
 export class GalaxyMap implements Entity {
   /** Star positions as xyz triples, indexed like `galaxy.stars`. */
   readonly positions: Float32Array;
   private readonly points: THREE.Points<THREE.BufferGeometry, THREE.ShaderMaterial>;
-  private readonly glows: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>[] = [];
-  private readonly glowTexture = createGlowTexture();
+  private readonly glows: THREE.Mesh<THREE.SphereGeometry, THREE.ShaderMaterial>[] = [];
   private readonly bufferSize = new THREE.Vector2();
 
   constructor(
@@ -94,9 +99,11 @@ export class GalaxyMap implements Entity {
     };
     scene.add(this.points);
 
-    // Faint light over the whole disc and a warmer, brighter bulge.
-    this.addGlow(galaxy.radius * 2.6, '#6f86c8', 0.2);
-    this.addGlow(galaxy.radius * 0.9, '#ffd9a0', 0.45);
+    // Faint light over the whole, thin disc and a warmer, brighter, flattened bulge
+    // (matching the star distributions in gen/galaxy.ts).
+    const r = galaxy.radius;
+    this.addGlow(new THREE.Vector3(r * 1.3, r * 0.06, r * 1.3), '#6f86c8', 0.16, 0.28);
+    this.addGlow(new THREE.Vector3(r * 0.45, r * 0.2, r * 0.45), '#ffd9a0', 0.45, 0.8);
   }
 
   dispose(): void {
@@ -108,24 +115,10 @@ export class GalaxyMap implements Entity {
       g.geometry.dispose();
       g.material.dispose();
     }
-    this.glowTexture.dispose();
   }
 
-  private addGlow(size: number, color: string, opacity: number): void {
-    const glow = new THREE.Mesh(
-      new THREE.PlaneGeometry(size, size),
-      new THREE.MeshBasicMaterial({
-        map: this.glowTexture,
-        color,
-        opacity,
-        transparent: true,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-        toneMapped: false,
-      }),
-    );
-    glow.rotation.x = -Math.PI / 2;
+  private addGlow(radii: THREE.Vector3, color: string, faceOnOpacity: number, maxBrightness: number): void {
+    const glow = createGlowVolume(radii, color, faceOnOpacity, maxBrightness, GLOW_NEAR);
     glow.renderOrder = -1;
     this.scene.add(glow);
     this.glows.push(glow);
