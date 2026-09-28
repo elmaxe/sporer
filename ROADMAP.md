@@ -29,6 +29,25 @@ Status: ⬜ todo · 🟨 in progress · ✅ done
 - WASD nudge in camera-relative directions.
 - Done when you can click around a generated system, zoom and rotate, and there are no regressions in the smoke test (updated for the new controls).
 
+**Implementation notes (agreed design; binary stars already render since step 1):**
+
+*Rendering the generated data* (`src/world/`):
+- **Moons:** reuse `Planet` with an optional parent. The moon's position = the parent's interpolated position + `orbitPosition(moon.orbit)`, and its kinematic body follows it in `fixedUpdate` (the parent must update first). `MoonData` already satisfies `PlanetConfig`.
+- **Gas giants:** `PlanetData.bands` → latitude-based vertex colours (band index from `dir.y`, wobbled by `terrainNoise`) instead of terrain height. Smooth shading, no relief.
+- **Rings:** `RingGeometry(rings.inner, rings.outer)`, semi-transparent (`rings.opacity`), double-sided. Tilt with the planet (give planets a small axial tilt via their seed).
+- **Atmosphere:** `PlanetData.atmosphere` → a slightly larger back-face sphere with an additive fresnel rim (small ShaderMaterial).
+- **Stars:** the G star currently looks beige/washed out from ACES tone mapping. Use `toneMapped: false` on star materials. Give giants a larger, softer glow.
+
+*Controls* (replace pointer-lock flight; `ChaseCamera` → orbit rig):
+- `Input`: drop pointer lock. Track mouse buttons, wheel delta, pointer position in NDC and click-vs-drag (a click is a press with less than ~5 px of movement). `preventDefault` on `contextmenu` and `wheel`.
+- **Orbit camera rig:** spherical coordinates (yaw, pitch, distance) around the ship's interpolated position. Wheel changes distance exponentially (min ~12, max ~2500 system units; step 3 hooks "zoom past max" to go to the galaxy). Right-drag changes yaw/pitch (clamp pitch). Smooth damping on all three.
+- **Picking:** raycast the pointer against pickable meshes (`userData.pick = { kind, entity }` on stars, planets and moons). On a hit, the target is that body with standoff = `extent`/`radius` + margin; it tracks the moving body. On a miss, intersect the horizontal plane at the ship's y → point target.
+- **Autopilot** (in `Ship.fixedUpdate`): arrive steering. `desired = dir * min(maxSpeed, dist * gain)`; `impulse = clampLength(desired - vel, thrust * dt)`. The ship yaws to face its velocity (slerp). Clear the target on arrival (speed and distance under threshold).
+- **WASD** = camera-relative nudge (forward = camera forward projected onto the plane). Any WASD input cancels the autopilot. Keep Shift = boost.
+- **Target marker:** a flat ring/sprite at the destination, pulsing, hidden when idle.
+- **HUD:** hover tooltip with the body name + `describePlanet`/`describeStar`. Update the help text for the new controls.
+- **Smoke test** (`scripts/smoke.mjs`): keep the W check (at spawn the camera looks −Z, so W still moves −Z). Add an autopilot check: call `ship.moveTo(...)` via `window.ship`, wait, and assert the ship approached the target.
+
 ### 3. ⬜ Scene manager + galaxy map
 - `SceneManager` owns the active level. Transitions animate the camera and crossfade, and input is blocked while one runs.
 - Galaxy scene: thousands of stars as instanced points/sprites coloured by type, spiral structure, the current star highlighted, and hover shows the star's name/type.
