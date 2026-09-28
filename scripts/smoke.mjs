@@ -2,9 +2,10 @@
 // Usage: npm run smoke [-- http://localhost:5173/]   (dev server must be running)
 // Checks: W moves the ship along -Z, the autopilot flies back to a point, hovering + clicking
 // the star targets it, and the galaxy loop works (scroll out to the galaxy, click the nearest
-// star, travel, scroll in to its system), a real click on the speaker button starts audio and M mutes, and
-// the planet loop (park at a planet, scroll in to low orbit, click the globe and fly, scroll back out beside
-// it), then again for every planet type and a moon in other systems (skip those with --quick).
+// star, travel, scroll in to its system), a real click on the speaker button starts audio; then the
+// transitions and galaxy travel play their whooshes, and M mutes. Then the planet loop (park at a planet,
+// scroll in to low orbit, click the globe and fly, scroll back out beside it), and again for every planet
+// type and a moon in other systems (skip those with --quick).
 // Prints JSON with FPS, console errors and screenshot paths. Exit 1 on failure.
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
@@ -34,7 +35,7 @@ const proc = spawn(browser, [
   '--enable-unsafe-swiftshader',
   '--use-angle=swiftshader',
   '--window-size=1280,720',
-  // Chrome refuses to start as root (e.g. in containers) without this.
+  // Chrome refuses to run as root (e.g. in containers) with its sandbox on.
   ...(process.getuid?.() === 0 ? ['--no-sandbox'] : []),
   'about:blank',
 ]);
@@ -106,6 +107,7 @@ async function runPlanetLoop(bodyExpr, shotName) {
   await wheel(-300); // keep scrolling in
   for (let i = 0; i < 20 && (await evaluate(`levels.mode !== 'planet' || levels.transitioning`)); i++) await sleep(250);
   r.mode = await evaluate(`levels.mode`);
+  r.soundIn = await evaluate(`audio.lastPlayed?.name ?? null`);
   if (r.mode !== 'planet') return r;
   r.sky = await evaluate(`planet.skyStats`);
   r.expectedSky = await evaluate(`({ bodies: world.planets.length + world.moons.length - 1 - world.moons.filter((m) => m.parent === __body).length })`);
@@ -143,6 +145,7 @@ async function runPlanetLoop(bodyExpr, shotName) {
   await wheel(300); // keep scrolling out
   for (let i = 0; i < 20 && (await evaluate(`levels.mode !== 'system' || levels.transitioning`)); i++) await sleep(250);
   r.modeAfter = await evaluate(`levels.mode`);
+  r.soundOut = await evaluate(`audio.lastPlayed?.name ?? null`);
   r.parkedAt = await evaluate(`ship.targetBody?.name ?? null`);
   r.standoffs = await evaluate(`+(ship.object.position.distanceTo(__body.renderPosition) / __body.standoff).toFixed(2)`);
   r.ok =
@@ -238,7 +241,31 @@ if (started) {
     await send('Input.dispatchMouseEvent', { type, ...button, button: 'left', clickCount: 1 });
   }
   await sleep(1000);
-  audio = await evaluate(`({ state: audio.state, panelOpen: !document.getElementById('audio-panel').hidden })`);
+  audio = await evaluate(`({ state: audio.state, panelOpen: !document.getElementById('audio-panel').hidden,
+    effectsSlider: !!document.querySelector('#audio-panel input[data-key="sfx"]') })`);
+
+  // Whooshes: zoom out (transition), travel to a neighbour, zoom back in.
+  const played = `(audio.lastPlayed && { name: audio.lastPlayed.name, seconds: +audio.lastPlayed.seconds.toFixed(2), count: audio.lastPlayed.count })`;
+  audio.sfx = {};
+  await evaluate(`levels.toGalaxy()`);
+  audio.sfx.out = await evaluate(played);
+  await sleep(1500);
+  audio.sfx.travel = await evaluate(`(() => {
+    const ship = levels.galaxyLevel.ship;
+    const here = ship.current.position;
+    let best = null, bestD = Infinity;
+    for (const s of galaxy.stars) {
+      const d = Math.hypot(s.position.x - here.x, s.position.y - here.y, s.position.z - here.z);
+      if (s !== ship.current && d < bestD) { best = s; bestD = d; }
+    }
+    ship.travelTo(best);
+    return ${played};
+  })()`);
+  for (let i = 0; i < 60 && (await evaluate(`levels.galaxyLevel.ship.travelling`)); i++) await sleep(250);
+  await evaluate(`levels.toSystem()`);
+  audio.sfx.in = await evaluate(played);
+  await sleep(1500);
+  audio.sfx.modeAfter = await evaluate(`levels.mode`);
   await send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'KeyM', key: 'm' });
   await send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'KeyM', key: 'm' });
   audio.mutedByKey = await evaluate(`document.getElementById('audio').classList.contains('muted')`);
@@ -289,8 +316,25 @@ const looped =
   galaxyLoop.modeAfterZoomIn === 'system' &&
   galaxyLoop.to === galaxyLoop.clicked.nearest &&
   typeof galaxyLoop.shipSpeed === 'number';
-const sounded = started && audio.state === 'running' && audio.panelOpen && audio.mutedByKey;
-const planets = started && planetLoop.ok && planetTypes.every((r) => r.ok) && (quick || planetTypes.length === 8);
+const sounded =
+  started &&
+  audio.state === 'running' &&
+  audio.panelOpen &&
+  audio.effectsSlider &&
+  audio.sfx.out?.name === 'transitionOut' &&
+  audio.sfx.travel?.name === 'travel' &&
+  audio.sfx.in?.name === 'transitionIn' &&
+  audio.sfx.in.count === 3 &&
+  audio.sfx.modeAfter === 'system' &&
+  audio.mutedByKey;
+// Audio is only unlocked in the first page load, so only the home system's loop can hear its whooshes.
+const planets =
+  started &&
+  planetLoop.ok &&
+  planetLoop.soundIn === 'transitionIn' &&
+  planetLoop.soundOut === 'transitionOut' &&
+  planetTypes.every((r) => r.ok) &&
+  (quick || planetTypes.length === 8);
 const ok = started && moved && autopiloted && picked && looped && sounded && planets && errors.length === 0;
 console.log(
   JSON.stringify(
