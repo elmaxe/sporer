@@ -1,11 +1,60 @@
 import type { StarRef } from '../gen/galaxy';
+import { hashSeed } from '../gen/rng';
+import type { StarData } from '../gen/stars';
 
 /**
- * Diameter of a star's dot on the galaxy map, in galaxy units. Follows the
- * primary's radius (giants big, dwarfs small); binaries are a bit bigger.
- * Neighbouring stars are ~25 units apart, so a G star (~1.25) stays a dot.
+ * Diameter of one star's dot on the galaxy map, in galaxy units. Follows its
+ * radius (giants big, dwarfs small). Neighbouring stars are ~25 units apart,
+ * so a G star (~1.25) stays a dot.
+ */
+export function galaxyMemberSize(star: StarData): number {
+  return 0.5 + star.radius / 40;
+}
+
+/** Distance between a binary's dots, as a multiple of their summed diameters: a clear gap between them. */
+const BINARY_SPACING = 0.6;
+/** Seconds per turn of a binary on the map (hashed per star, so pairs don't turn in step). */
+const BINARY_PERIOD: readonly [number, number] = [30, 90];
+
+/**
+ * How a binary is drawn: each member's distance from the pair's centre of
+ * mass (galaxy units, so heavier stars move less), plus a turn phase and
+ * speed (rad/s). The pair turns in the view plane, so it always reads as two
+ * dots; from far away both shrink to the minimum dot size and merge.
+ */
+export interface BinaryLayout {
+  offsets: readonly [number, number];
+  phase: number;
+  speed: number;
+}
+
+export function binaryLayout(ref: StarRef): BinaryLayout | null {
+  const [a, b] = ref.stars;
+  if (!a || !b) return null;
+  const separation = BINARY_SPACING * (galaxyMemberSize(a) + galaxyMemberSize(b));
+  const total = a.mass + b.mass;
+  // Visual only: hashed from the id rather than drawn from generation streams.
+  const h = hashSeed(ref.id, 'binary');
+  const period = BINARY_PERIOD[0] + (BINARY_PERIOD[1] - BINARY_PERIOD[0]) * ((h & 0xffff) / 0xffff);
+  return {
+    offsets: [(separation * b.mass) / total, (separation * a.mass) / total],
+    phase: ((h >>> 16) / 0xffff) * Math.PI * 2,
+    speed: (Math.PI * 2) / period,
+  };
+}
+
+/**
+ * Diameter of a star system on the map, in galaxy units: its dot, or the
+ * circle that holds both of a binary's dots wherever they are in their turn.
  */
 export function galaxyStarSize(ref: StarRef): number {
-  const size = 0.5 + ref.stars[0]!.radius / 40;
-  return ref.stars.length > 1 ? size * 1.15 : size;
+  const layout = binaryLayout(ref);
+  if (!layout) return galaxyMemberSize(ref.stars[0]!);
+  return (
+    2 *
+    Math.max(
+      layout.offsets[0] + galaxyMemberSize(ref.stars[0]!) / 2,
+      layout.offsets[1] + galaxyMemberSize(ref.stars[1]!) / 2,
+    )
+  );
 }

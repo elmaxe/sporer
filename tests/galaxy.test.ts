@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { galaxyStarSize } from '../src/galaxy/appearance';
+import { binaryLayout, galaxyMemberSize, galaxyStarSize } from '../src/galaxy/appearance';
 import { pickPoint } from '../src/galaxy/pickPoint';
 import { generateDust, generateGalaxy, type StarRef } from '../src/gen/galaxy';
-import type { StarKind } from '../src/gen/stars';
+import type { StarData, StarKind } from '../src/gen/stars';
 
 describe('galaxyStarSize', () => {
   const galaxy = generateGalaxy(1337, 1500);
@@ -17,9 +17,44 @@ describe('galaxyStarSize', () => {
 
   it('keeps every dot small next to the ~25-unit spacing between stars', () => {
     for (const s of galaxy.stars) {
-      expect(galaxyStarSize(s)).toBeGreaterThan(0.5);
-      expect(galaxyStarSize(s)).toBeLessThan(4);
+      for (const star of s.stars) {
+        expect(galaxyMemberSize(star)).toBeGreaterThan(0.5);
+        expect(galaxyMemberSize(star)).toBeLessThan(4);
+      }
+      // A binary's pair, wherever it is in its turn (a giant with a light companion is the widest).
+      expect(galaxyStarSize(s)).toBeLessThan(6);
     }
+  });
+});
+
+describe('binaryLayout', () => {
+  const galaxy = generateGalaxy(1337, 1500);
+  const binaries = galaxy.stars.filter((s) => s.stars.length === 2);
+
+  it('lays out binaries only', () => {
+    expect(binaries.length).toBeGreaterThan(100);
+    for (const s of galaxy.stars) expect(binaryLayout(s) === null).toBe(s.stars.length === 1);
+  });
+
+  it('separates the two dots with a gap, the heavier one nearer the centre of mass', () => {
+    for (const s of binaries) {
+      const { offsets, speed, phase } = binaryLayout(s)!;
+      const [a, b] = s.stars as [StarData, StarData];
+      const gap = offsets[0] + offsets[1] - (galaxyMemberSize(a) + galaxyMemberSize(b)) / 2;
+      expect(gap).toBeGreaterThan(0.1);
+      expect(offsets[0] * a.mass).toBeCloseTo(offsets[1] * b.mass, 9);
+      // One slow turn every 30–90 s.
+      expect((Math.PI * 2) / speed).toBeGreaterThanOrEqual(30);
+      expect((Math.PI * 2) / speed).toBeLessThanOrEqual(90);
+      expect(phase).toBeGreaterThanOrEqual(0);
+      expect(phase).toBeLessThanOrEqual(Math.PI * 2);
+      // The marker ring's size covers both dots.
+      expect(galaxyStarSize(s)).toBeGreaterThanOrEqual(2 * offsets[1] + galaxyMemberSize(b) - 1e-9);
+    }
+  });
+
+  it('is deterministic', () => {
+    expect(binaries.map(binaryLayout)).toEqual(binaries.map(binaryLayout));
   });
 });
 
@@ -36,6 +71,31 @@ describe('pickPoint', () => {
   it('ignores points outside the angle and behind the origin', () => {
     expect(pickPoint(origin, { x: 0, y: 0, z: 1 }, points, 0.2)).toBe(2);
     expect(pickPoint(origin, forward, points.slice(0, 3), 0.05)).toBe(-1);
+  });
+
+  it('picks stars of a rotated galaxy from a ray taken into its local frame', () => {
+    // Galaxy points in local coordinates; the galaxy is turned about +Y by `angle`.
+    const galaxy = generateGalaxy(1337, 300);
+    const local = new Float32Array(galaxy.stars.flatMap((s) => [s.position.x, s.position.y, s.position.z]));
+    const angle = 1.1;
+    // Rotation about +Y (three.js convention): (x, z) → (x cos + z sin, −x sin + z cos).
+    const rotate = (v: { x: number; y: number; z: number }, a: number) => ({
+      x: v.x * Math.cos(a) + v.z * Math.sin(a),
+      y: v.y,
+      z: -v.x * Math.sin(a) + v.z * Math.cos(a),
+    });
+    const eye = { x: 40, y: 300, z: 900 };
+    for (const target of [galaxy.stars[5]!, galaxy.stars[123]!, galaxy.stars[250]!]) {
+      // Aim a world-space ray at where the star appears after the turn...
+      const seen = rotate(target.position, angle);
+      const len = Math.hypot(seen.x - eye.x, seen.y - eye.y, seen.z - eye.z);
+      const dir = { x: (seen.x - eye.x) / len, y: (seen.y - eye.y) / len, z: (seen.z - eye.z) / len };
+      // ...then undo the turn on the ray, as GalaxyPicker does with the root's inverse matrix.
+      const hit = pickPoint(rotate(eye, -angle), rotate(dir, -angle), local, 1e-4);
+      expect(hit).toBe(target.id);
+      // Without undoing it, the ray misses (the star isn't where the ray points in local space).
+      expect(pickPoint(eye, dir, local, 1e-4)).not.toBe(target.id);
+    }
   });
 });
 
