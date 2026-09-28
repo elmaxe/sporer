@@ -57,7 +57,12 @@ export class GalaxyLevel extends Level {
         this.ship.object,
         input,
         galaxyCameraParams,
-        { distance: GALAXY_VIEW_DISTANCE, onZoomPastLimit: (dir) => dir < 0 && onZoomIn() },
+        {
+          distance: GALAXY_VIEW_DISTANCE,
+          onZoomPastLimit: (dir) => dir < 0 && onZoomIn(),
+          // Scrolling in mid-jump zooms into the destination once there.
+          holdZoomIn: () => this.ship.travelling,
+        },
         debug,
         'Galaxy camera',
       ),

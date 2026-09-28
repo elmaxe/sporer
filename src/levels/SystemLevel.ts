@@ -65,7 +65,12 @@ export class SystemLevel extends Level {
         this.ship.object,
         input,
         cameraParams,
-        { distance: 45, onZoomPastLimit: (dir) => (dir > 0 ? onZoomOut() : onZoomIn()) },
+        {
+          distance: 45,
+          onZoomPastLimit: (dir) => (dir > 0 ? onZoomOut() : onZoomIn()),
+          // Zoom in (and descend) where the autopilot is going, not at whatever it passes on the way.
+          holdZoomIn: () => this.ship.enRoute,
+        },
         debug,
         'System camera',
       ),

@@ -82,7 +82,7 @@ await sleep(4000);
 
 const state = `({ speed: +ship.speed.toFixed(1), pos: ship.object.position.toArray().map((n) => +n.toFixed(1)) })`;
 const started = await evaluate(`typeof window.ship !== 'undefined'`);
-let before, after, autopilot, pick, galaxyLoop, fps, audio, planetLoop;
+let before, after, autopilot, pick, galaxyLoop, fps, audio, planetLoop, heldZoom;
 const planetTypes = [];
 const wheel = (deltaY) =>
   evaluate(`game.renderer.domElement.dispatchEvent(new WheelEvent('wheel', { deltaY: ${deltaY}, bubbles: true, cancelable: true }))`);
@@ -222,13 +222,12 @@ if (started) {
     requestAnimationFrame(() => requestAnimationFrame(() =>
       resolve({ nearest: best.id, destination: levels.galaxyLevel.ship.destination?.id ?? null })));
   })`);
+  // Scroll in mid-jump: held until the ship docks, then it zooms into the destination.
+  await wheel(-50000);
+  galaxyLoop.heldWhileTravelling = await evaluate(`levels.galaxyLevel.ship.travelling && levels.mode === 'galaxy'`);
   for (let i = 0; i < 40 && (await evaluate(`levels.galaxyLevel.ship.travelling`)); i++) await sleep(250);
   galaxyLoop.dockedAt = await evaluate(`levels.galaxyLevel.ship.travelling ? null : levels.galaxyLevel.ship.current.id`);
-
-  await wheel(-50000); // to min zoom
-  await sleep(1500);
-  await wheel(-300); // keep scrolling in
-  await sleep(2000);
+  for (let i = 0; i < 20 && (await evaluate(`levels.mode !== 'system' || levels.transitioning`)); i++) await sleep(250);
   galaxyLoop.modeAfterZoomIn = await evaluate(`levels.mode`);
   galaxyLoop.to = await evaluate(`system.id`);
   galaxyLoop.shipSpeed = await evaluate(`ship.speed`);
@@ -275,6 +274,35 @@ if (started) {
     `world.planets.find((p) => ['terran', 'ocean'].includes(p.config.type)) ?? world.planets[0]`,
     'planet',
   );
+
+  // Scrolling in while the autopilot flies is held until it arrives, then descends to the destination.
+  heldZoom = await evaluate(`(() => {
+    const here = ship.targetBody;
+    // The nearest other body at least 150 units away, so the trip lasts a couple of seconds.
+    const dist = (b) => b.position.distanceTo(ship.object.position);
+    const bodies = [...world.planets, ...world.moons].filter((b) => b !== here && dist(b) > 150);
+    const target = bodies.reduce((a, b) => (dist(a) < dist(b) ? a : b));
+    ship.moveTo(target);
+    return { target: target.name, zoomBefore: +levels.systemLevel.orbit.zoom.toFixed(1) };
+  })()`);
+  await wheel(-50000);
+  await sleep(300);
+  await wheel(-300);
+  await sleep(300);
+  heldZoom.whileFlying = await evaluate(
+    `({ enRoute: ship.enRoute, mode: levels.mode, zoom: +levels.systemLevel.orbit.zoom.toFixed(1) })`,
+  );
+  for (let i = 0; i < 80 && (await evaluate(`levels.mode !== 'planet' || levels.transitioning`)); i++) await sleep(250);
+  heldZoom.mode = await evaluate(`levels.mode`);
+  heldZoom.descendedTo = await evaluate(`planet?.body.name ?? null`);
+  heldZoom.ok =
+    heldZoom.whileFlying.enRoute &&
+    heldZoom.whileFlying.mode === 'system' &&
+    Math.abs(heldZoom.whileFlying.zoom - heldZoom.zoomBefore) < 1 &&
+    heldZoom.mode === 'planet' &&
+    heldZoom.descendedTo === heldZoom.target;
+  await evaluate(`levels.leavePlanet()`);
+  for (let i = 0; i < 20 && (await evaluate(`levels.mode !== 'system' || levels.transitioning`)); i++) await sleep(250);
 }
 
 if (started && !quick) {
@@ -312,6 +340,7 @@ const looped =
   started &&
   galaxyLoop.modeAfterZoomOut === 'galaxy' &&
   galaxyLoop.clicked.destination === galaxyLoop.clicked.nearest &&
+  galaxyLoop.heldWhileTravelling &&
   galaxyLoop.dockedAt === galaxyLoop.clicked.nearest &&
   galaxyLoop.modeAfterZoomIn === 'system' &&
   galaxyLoop.to === galaxyLoop.clicked.nearest &&
@@ -333,12 +362,13 @@ const planets =
   planetLoop.ok &&
   planetLoop.soundIn === 'transitionIn' &&
   planetLoop.soundOut === 'transitionOut' &&
+  heldZoom.ok &&
   planetTypes.every((r) => r.ok) &&
   (quick || planetTypes.length === 8);
 const ok = started && moved && autopiloted && picked && looped && sounded && planets && errors.length === 0;
 console.log(
   JSON.stringify(
-    { ok, started, moved, autopiloted, picked, looped, sounded, planets, before, after, autopilot, pick, galaxyLoop, audio, planetLoop, planetTypes, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
+    { ok, started, moved, autopiloted, picked, looped, sounded, planets, before, after, autopilot, pick, galaxyLoop, audio, planetLoop, heldZoom, planetTypes, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
     null,
     2,
   ),
