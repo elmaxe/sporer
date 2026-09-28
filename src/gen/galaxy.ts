@@ -33,11 +33,18 @@ export interface GalaxyData {
   stars: StarRef[];
 }
 
-/** A soft, glowing dust/gas cloud along a spiral arm (visual only). */
+/**
+ * A soft, glowing dust/gas cloud along a spiral arm (visual only): an
+ * ellipsoid stretched along the arm, flat like the disc.
+ */
 export interface DustCloud {
   position: { x: number; y: number; z: number };
-  /** Diameter in galaxy units. */
-  size: number;
+  /** Diameters in galaxy units: along the arm, across it, and vertically. */
+  length: number;
+  width: number;
+  thickness: number;
+  /** Rotation about +Y (radians) that turns the cloud's length (+X) along the arm. */
+  angle: number;
   color: string;
 }
 
@@ -77,6 +84,7 @@ export function generateDust(galaxy: GalaxyData, count = DEFAULT_DUST_COUNT): Du
   const clouds: DustCloud[] = [];
   for (let i = 0; i < count; i++) {
     const position = armPosition(rng, galaxy.arms, galaxy.twist, galaxy.armOffset);
+    const width = rng.range(35, 75);
     // Mostly blue, some violet, the odd pink star-forming region.
     const hue = rng.weighted<number>([
       [rng.range(210, 235), 6],
@@ -85,7 +93,10 @@ export function generateDust(galaxy: GalaxyData, count = DEFAULT_DUST_COUNT): Du
     ]);
     clouds.push({
       position,
-      size: rng.range(50, 120),
+      length: width * rng.range(1.6, 3.2),
+      width,
+      thickness: rng.range(6, 16),
+      angle: armAngle(galaxy, position) + rng.gaussian(0, 0.2),
       color: hslToHex(hue, rng.range(0.5, 0.7), rng.range(0.5, 0.62)),
     });
   }
@@ -103,6 +114,22 @@ function armPosition(rng: Rng, arms: number, twist: number, offset: number) {
     y: rng.gaussian(0, GALAXY_RADIUS * (0.025 * (1 - t) + 0.006)),
     z: Math.sin(angle) * d,
   };
+}
+
+/**
+ * Rotation about +Y that points +X along the spiral arm through `p`
+ * (outwards). An arm's polar angle grows by `twist` while its radius grows by
+ * 0.92 R (see armPosition), so its tangent is 0.92 R·r̂ + d·twist·θ̂.
+ */
+export function armAngle(galaxy: GalaxyData, p: { x: number; z: number }): number {
+  const theta = Math.atan2(p.z, p.x);
+  const d = Math.hypot(p.x, p.z);
+  const radial = 0.92 * galaxy.radius;
+  const tangential = d * galaxy.twist;
+  const tx = radial * Math.cos(theta) - tangential * Math.sin(theta);
+  const tz = radial * Math.sin(theta) + tangential * Math.cos(theta);
+  // A rotation by `angle` about +Y maps +X to (cos angle, 0, -sin angle).
+  return Math.atan2(-tz, tx);
 }
 
 /** Dense, slightly flattened central bulge. */

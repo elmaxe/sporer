@@ -65,4 +65,26 @@ describe('generateDust', () => {
     expect(near).toBeGreaterThan(0.8);
     for (const c of dust) expect(Math.abs(c.position.y)).toBeLessThan(galaxy.radius * 0.15);
   });
+
+  it('shapes clouds as flat ellipsoids lying along their arm', () => {
+    const dust = generateDust(galaxy, 500);
+    const t = { x: 0, z: 0 };
+    let aligned = 0;
+    for (const c of dust) {
+      expect(c.length).toBeGreaterThan(c.width);
+      expect(c.width).toBeGreaterThan(c.thickness);
+      // Direction of the arm here, from two nearby points on the same arm curve.
+      const theta = Math.atan2(c.position.z, c.position.x);
+      const d = Math.hypot(c.position.x, c.position.z);
+      const dt = 0.001;
+      t.x = (d + 0.92 * galaxy.radius * dt) * Math.cos(theta + galaxy.twist * dt) - c.position.x;
+      t.z = (d + 0.92 * galaxy.radius * dt) * Math.sin(theta + galaxy.twist * dt) - c.position.z;
+      // The cloud's long axis (rotation about +Y maps +X to (cos, 0, -sin)).
+      const ax = Math.cos(c.angle);
+      const az = -Math.sin(c.angle);
+      const cos = (ax * t.x + az * t.z) / Math.hypot(t.x, t.z);
+      if (cos > Math.cos(0.5)) aligned++;
+    }
+    expect(aligned / dust.length).toBeGreaterThan(0.9);
+  });
 });
