@@ -63,6 +63,57 @@ Status: ⬜ todo · 🟨 in progress · ✅ done
 - Unit-test great-circle stepping (stays on the sphere, arrives, shortest way round) and `detailedTerrain`.
 - Smoke: park at a planet via `ship.moveTo(world.planets[i])`, scroll in → `levels.mode === 'planet'`; click the globe and check the ship moved over the surface; scroll out → back in the system beside the same planet. Run for each planet type via a few `?star=` values (the roadmap's "done" criterion).
 
+### 5. ⬜ Galaxy map polish
+- Background of **distant galaxies** instead of black: small spirals, ellipticals and edge-on discs scattered over the sky, plus one or two larger, closer ones.
+- Stars **twinkle** subtly.
+- The whole galaxy **rotates very slowly**, barely noticeable.
+- **Binary systems read as two stars**, not one point.
+- Done when all four are visible in the galaxy view, picking and travel still work while it rotates, and the smoke loop passes.
+
+**Implementation notes (proposed design; confirm with the user before building):**
+- *Distant galaxies:* `gen/distantGalaxies.ts` (pure, `rng.fork('distantGalaxies')` from the galaxy seed): ~200 entries of {direction, kind (spiral / elliptical / edge-on / irregular), size, tilt, rotation, colour}. View: a camera-centred sky sphere like `Starfield` (no parallax). Draw with one `Points` or `InstancedMesh` of quads whose shader draws the shape procedurally (spiral arms from a log-spiral + noise, ellipticals as soft Sérsic blobs), so there are no texture files. Most are 4–30 px and faint, with 1–2 large ones. Keep them dim so the real galaxy dominates.
+- *Twinkle:* in the `GalaxyMap` shader, `brightness *= 1 + a·sin(time·f + phase)`, with the phase and frequency hashed from the star id in the shader (no new generation draws). Use a ≈ 0.15, a bit more for small stars. Leave the current and hovered stars steady. Add a `time` uniform and a tunable amplitude.
+- *Rotation:* put the stars, dust, glows, rings and the `GalaxyShip` in one `galaxyRoot` group rotated about +Y by `ω·t` (ω ≈ one turn per ~60 min, tunable in debug). Ship travel stays in local (galaxy) coordinates. `GalaxyPicker` transforms the ray into the group's local space. The camera follows the ship's world position but doesn't rotate with the group, so you see the galaxy turn.
+- *Binaries:* the `GalaxyMap` shader draws both members of a binary: two points per binary `StarRef` (a `member` attribute), coloured and sized per member, orbiting their midpoint slowly (period hashed from the id). Their separation is `max(physicalSep, k·pixels)` in view space, so from afar they merge into one point and zooming in splits them. The hover tooltip already lists both.
+- Tests: `distantGalaxies` determinism and distribution; picking a star while the galaxy is rotated (pure `pickPoint` with a transformed ray).
+
+### 6. ⬜ System sky, orbit lines and rings
+- The **galaxy band** in the system sky: the Milky Way as seen from this star, brightest towards the galactic centre, with dark dust lanes.
+- Planet **orbit lines**, faintly visible.
+- **Rings on more planet types**, not just gas giants.
+- Done when every system shows a band consistent with its place in the galaxy, orbit lines read without cluttering, and rocky, ice or lava planets sometimes have rings.
+
+**Implementation notes (proposed design; confirm with the user before building):**
+- *Galactic orientation per system:* add a seeded `galacticTilt` (a rotation from system space into galaxy space) to `SystemData`, drawn last or from `rng.fork('galactic')` so nothing else changes. Real systems' ecliptics are tilted against the galactic plane, which puts the band diagonally across the sky. Step 8 needs this same mapping to line up the views.
+- *Band:* a sky-sphere shader in `world/GalaxyBand.ts`, drawn behind `Starfield`. Inputs are the galactic plane normal and the direction to the galactic centre (both in system space, from the star's galaxy position and `galacticTilt`), and how deep in the disc the star is. Brightness is a Gaussian in galactic latitude, stronger towards the centre (a bulge glow) and dimmer towards the rim. Dust lanes come from 3D noise along the plane. Colours come from the galaxy glow palette in `galaxy/appearance.ts`. Also add a denser, faint band of starfield points along the same plane.
+- *Orbit lines:* one `LineLoop` per planet orbit (64–128 segments, built once) in `StarSystem`, additive and low opacity (~0.12), fading with camera distance. Highlight the hovered or targeted planet's orbit. Moon orbits only near their planet. Binary stars' mutual orbit gets no line.
+- *Rings:* non-gas planets get rings with a small chance (~10–15%; more for ice, fewer for lava), decided with a separate `rng.fork('rings')` so gas giants and existing draws don't change. Keep them narrow (outer ≤ ~2 R) and in colours from the planet's palette (icy white for ice, dusty for rocky). Rings widen a planet's reach, so later orbits in those systems shift. That's acceptable, since there are no saves yet. Extend `tests/universe.test.ts` (no overlaps with the new rings).
+
+### 7. ⬜ Living stars and comets
+- The **star is alive**: an animated surface (granulation, drifting sunspots), a pulsing corona, and **solar storms**: prominence loops rising off the limb and occasional flares/CMEs of particles flying outward.
+- **Comets**: a few per system on long elliptical orbits, with a glowing head and a tail pointing away from the star that grows near the star. Not clickable or visitable.
+- Done when every star type visibly lives (at a pace that suits its type) and comets fly through systems, with no FPS regression.
+
+**Implementation notes (proposed design; confirm with the user before building):**
+- *Surface:* replace the star's flat material with a shader (still unlit/emissive). Use animated 3D noise for granulation, a few slow dark spots, and limb darkening. Scale detail and colour with star type.
+- *Storms:* one pooled `Points` per star (e.g. 2k particles) animated entirely in the vertex shader from per-particle {spawn time, origin on the surface, velocity, lifetime}. Prominences are particles following a magnetic-loop arc (a half-ellipse rooted at two surface points) that rises, hangs and falls back. Flares/CMEs are bursts moving radially outward that fade with distance. Event timing comes from a seeded `Rng` per star (no `Math.random`). Red dwarfs flare often and small; giants slowly and large. When the pool recycles, only the attribute ranges it rewrites are updated (no per-frame allocation).
+- *Comets:* `CometData` in `gen/` with orbital elements (perihelion outside the star's glow, aphelion beyond the outermost planet, inclination, argument of perihelion, period), generated from `rng.fork('comets')` so existing systems don't change. Add a pure Kepler solver (`solveKepler(M, e)` by Newton iteration) to `gen/orbit.ts` with tests (circular case matches `orbitPosition`, the period closes, speed peaks at perihelion). View: `world/Comet.ts` with a small head plus an additive coma sprite. The tail is two additive ribbons/particle trails: a straight ion tail (anti-sunward, blue) and a curved dust tail (lagging along the orbit, warm). Length and brightness scale with 1/r². Comets are not `CelestialBody` and get no physics body, so the `Picker` and autopilot ignore them.
+
+### 8. ⬜ Seamless galaxy ↔ system zoom
+- Scrolling into a star: the UFO shrinks as it dives towards the star, the star swells from a point into a sun, and the system view takes over **without a cut to black**. Scrolling out plays the reverse.
+- Done when the galaxy → system → galaxy loop has no black frame, the star keeps its screen position and size through the handover, and the smoke loop still passes.
+
+**Implementation notes (proposed design; confirm with the user before building):**
+- *Why it can be seamless:* both scenes are rendered during the handover and crossfaded, and the handover frame is framed identically in both. That means the same view direction (the system ↔ galaxy rotation from step 6's `galacticTilt`), the same screen position and angular size of the star (binary: both members), and a matching background (the step 6 band is the galaxy seen from that star).
+- *Rendering:* `SceneManager` gets a blend mode. The outgoing and incoming levels render into two half-float render targets, and a fullscreen quad mixes them (`mix(a, b, t)`). This only runs during the ~0.5 s overlap, so it costs nothing otherwise. The `#fade` overlay stays for the other transitions.
+- *Choreography, galaxy → system (~2.5 s, input blocked):*
+  1. Galaxy: the camera zooms at the star in log space. The `GalaxyShip` scales down and flies into the star. A dedicated billboard for the target star grows beyond its point size into a disc plus glow.
+  2. Handover (~0.5 s crossfade): the system camera starts on the far side of the system, looking at the sun from the matching direction. Its distance is chosen so the sun's angular size equals the galaxy billboard's (`r_sun / d_sys = size_gal / d_gal`).
+  3. System: the camera keeps zooming in while its focus blends from the sun to the UFO (the `OrbitCamera` focus override from step 4). The UFO grows from nothing back to normal size at the spawn point.
+- System → galaxy is the same timeline reversed. Put the timeline in a pure module (like `levels/transition.ts`) returning camera distances, ship scale, star billboard size and blend weight at time t, and unit-test it, including the angular-size match at the handover.
+- Step 4's system ↔ planet transition can use the same blend path later.
+- Smoke: sample `#fade` opacity and the blend weight through the loop and assert the screen never goes fully black. Screenshot mid-handover.
+
 ## Later / ideas
 
 - Abduction beam, spice economy, colonising planets
