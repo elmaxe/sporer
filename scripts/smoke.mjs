@@ -5,7 +5,8 @@
 // star, travel, scroll in to its system), a real click on the speaker button starts audio; then the
 // transitions and galaxy travel play their whooshes, and M mutes. Then the planet loop (park at a planet,
 // scroll in to low orbit, click the globe and fly, scroll back out beside it), and again for every planet
-// type and a moon in other systems (skip those with --quick).
+// type, a ringed rocky/icy/lava world and a moon in other systems (skip those with --quick). The system sky has
+// the galaxy band (screenshot looking at the galactic centre) and an orbit line per planet and moon.
 // Prints JSON with FPS, console errors and screenshot paths. Exit 1 on failure.
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
@@ -82,7 +83,7 @@ await sleep(4000);
 
 const state = `({ speed: +ship.speed.toFixed(1), pos: ship.object.position.toArray().map((n) => +n.toFixed(1)) })`;
 const started = await evaluate(`typeof window.ship !== 'undefined'`);
-let before, after, autopilot, pick, galaxyLoop, fps, audio, planetLoop;
+let before, after, autopilot, pick, sky, galaxyLoop, fps, audio, planetLoop;
 const planetTypes = [];
 const wheel = (deltaY) =>
   evaluate(`game.renderer.domElement.dispatchEvent(new WheelEvent('wheel', { deltaY: ${deltaY}, bubbles: true, cancelable: true }))`);
@@ -92,6 +93,8 @@ const wheel = (deltaY) =>
  * globe a little way ahead of the ship, lets it fly, then scrolls back out. Returns what it saw.
  */
 async function runPlanetLoop(bodyExpr, shotName) {
+  // Input is blocked during a transition, so let one that's still running (e.g. into this system) finish.
+  for (let i = 0; i < 40 && (await evaluate(`levels.transitioning`)); i++) await sleep(250);
   const r = await evaluate(`(() => {
     const body = ${bodyExpr};
     window.__body = body;
@@ -194,6 +197,25 @@ if (started) {
   })`);
   await evaluate(`ship.stop()`);
 
+  // System sky: the galaxy band and the orbit lines. Look at the galactic centre for a screenshot.
+  sky = await evaluate(`(() => {
+    const scene = levels.systemLevel.scene;
+    const band = scene.getObjectByName('Galaxy band');
+    const lines = scene.getObjectByName('Orbit lines');
+    const c = levels.systemLevel.band.sky.center;
+    levels.systemLevel.orbit.lookFrom(new game.camera.position.constructor(-c.x, -c.y, -c.z));
+    return {
+      band: !!band && !!scene.getObjectByName('Galaxy band stars'),
+      orbitLines: lines?.children.length ?? 0,
+      expectedLines: world.planets.length + world.moons.length,
+    };
+  })()`);
+  await sleep(1500);
+  sky.visibleLines = await evaluate(`levels.systemLevel.scene.getObjectByName('Orbit lines').children.filter((l) => l.visible).length`);
+  const bandShot = await send('Page.captureScreenshot', { format: 'png' });
+  sky.screenshot = join(outDir, 'band.png');
+  writeFileSync(sky.screenshot, Buffer.from(bandShot.result.data, 'base64'));
+
   // Galaxy loop, driven by real wheel and pointer events.
   galaxyLoop = { from: await evaluate(`system.id`) };
   await wheel(50000); // to max zoom
@@ -278,7 +300,7 @@ if (started) {
 }
 
 if (started && !quick) {
-  // Every planet type (and a moon), each in the first system of this galaxy that has one.
+  // Every planet type (plus a ringed solid planet and a moon), each in the first system of this galaxy that has one.
   const found = await evaluate(`(() => {
     const want = ['lava', 'barren', 'desert', 'terran', 'ocean', 'ice', 'gas'];
     const found = {};
@@ -286,9 +308,10 @@ if (started && !quick) {
       const sys = generateSystem(ref);
       sys.planets.forEach((p, i) => {
         if (want.includes(p.type) && !(p.type in found)) found[p.type] = { star: ref.id, expr: 'world.planets[' + i + ']' };
+        if (p.rings && p.type !== 'gas' && !('ringed' in found)) found.ringed = { star: ref.id, expr: 'world.planets[' + i + ']' };
         if (p.moons.length && !('moon' in found)) found.moon = { star: ref.id, expr: 'world.moons.find((m) => m.parent === world.planets[' + i + '])' };
       });
-      if (Object.keys(found).length === want.length + 1) break;
+      if (Object.keys(found).length === want.length + 2) break;
     }
     return found;
   })()`);
@@ -308,6 +331,7 @@ writeFileSync(screenshot, Buffer.from(shot.result.data, 'base64'));
 const moved = started && after.pos[2] < before.pos[2] - 10 && after.speed > 5;
 const autopiloted = started && autopilot.endDist < Math.max(3, autopilot.startDist * 0.1);
 const picked = started && pick.target === pick.star && pick.tooltip === pick.star;
+const skyOk = started && sky.band && sky.orbitLines === sky.expectedLines && sky.visibleLines >= 1;
 const looped =
   started &&
   galaxyLoop.modeAfterZoomOut === 'galaxy' &&
@@ -334,11 +358,11 @@ const planets =
   planetLoop.soundIn === 'transitionIn' &&
   planetLoop.soundOut === 'transitionOut' &&
   planetTypes.every((r) => r.ok) &&
-  (quick || planetTypes.length === 8);
-const ok = started && moved && autopiloted && picked && looped && sounded && planets && errors.length === 0;
+  (quick || planetTypes.length === 9);
+const ok = started && moved && autopiloted && picked && skyOk && looped && sounded && planets && errors.length === 0;
 console.log(
   JSON.stringify(
-    { ok, started, moved, autopiloted, picked, looped, sounded, planets, before, after, autopilot, pick, galaxyLoop, audio, planetLoop, planetTypes, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
+    { ok, started, moved, autopiloted, picked, skyOk, looped, sounded, planets, before, after, autopilot, pick, sky, galaxyLoop, audio, planetLoop, planetTypes, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
     null,
     2,
   ),

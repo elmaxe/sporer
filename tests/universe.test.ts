@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { GALAXY_RADIUS, generateGalaxy } from '../src/gen/galaxy';
-import { findHomeSystem, generateSystem, spawnDistance, type SystemData } from '../src/gen/system';
+import { findHomeSystem, generateSystem, spawnDistance, type PlanetData, type SystemData } from '../src/gen/system';
 import type { StarKind } from '../src/gen/stars';
 
 const galaxy = generateGalaxy(1337);
@@ -92,6 +92,25 @@ describe('generateSystem', () => {
     const types = new Set(planets.map((p) => p.type));
     expect([...types].sort()).toEqual(['barren', 'desert', 'gas', 'ice', 'lava', 'ocean', 'terran']);
     for (const p of planets) expect(p.bands !== null).toBe(p.type === 'gas');
+  });
+
+  it('gives rocky, icy and lava worlds narrow rings sometimes, icy ones most often', () => {
+    const planets = galaxy.stars.slice(0, 1500).map(generateSystem).flatMap((s) => s.planets);
+    const ringed = (type: PlanetData['type']) => {
+      const all = planets.filter((p) => p.type === type);
+      return all.filter((p) => p.rings).length / all.length;
+    };
+    for (const type of ['ice', 'barren', 'lava'] as const) expect(ringed(type)).toBeGreaterThan(0);
+    expect(ringed('ice')).toBeGreaterThan(ringed('barren'));
+    expect(ringed('barren')).toBeGreaterThan(ringed('lava'));
+    expect(ringed('ice')).toBeLessThan(0.35);
+    for (const p of planets) {
+      if (!p.rings || p.type === 'gas') continue;
+      expect(p.rings.inner).toBeGreaterThan(p.radius * 1.2);
+      expect(p.rings.outer).toBeGreaterThan(p.rings.inner);
+      expect(p.rings.outer).toBeLessThanOrEqual(p.radius * 2 + 1e-9);
+      expect(p.rings.color).toMatch(/^#[0-9a-f]{6}$/);
+    }
   });
 
   it('spawns the player in empty space', () => {

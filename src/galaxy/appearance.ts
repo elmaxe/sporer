@@ -9,3 +9,7 @@ export function galaxyStarSize(ref: StarRef): number {
   const size = 0.5 + ref.stars[0]!.radius / 40;
   return ref.stars.length > 1 ? size * 1.15 : size;
 }
+
+/** Glow of the galaxy's disc and of its bulge (the galaxy map's glows, and the band in each system's sky). */
+export const DISC_GLOW_COLOR = '#6f86c8';
+export const BULGE_GLOW_COLOR = '#ffd9a0';

@@ -28,3 +28,16 @@ export function orbitPosition<T extends Vec3Like>(orbit: Orbit, time: number, ou
   out.z = flatZ * Math.cos(orbit.inclination);
   return out;
 }
+
+/** `segments` points evenly spaced around the orbit (a closed loop), as xyz triples. */
+export function orbitPath(orbit: Orbit, segments: number): Float32Array {
+  const out = new Float32Array(segments * 3);
+  const p = { x: 0, y: 0, z: 0 };
+  for (let i = 0; i < segments; i++) {
+    orbitPosition(orbit, (orbit.period * i) / segments, p);
+    out[i * 3] = p.x;
+    out[i * 3 + 1] = p.y;
+    out[i * 3 + 2] = p.z;
+  }
+  return out;
+}
