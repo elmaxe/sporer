@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { Entity } from '../core/Entity';
+import { hashSeed, Rng } from '../gen/rng';
 
 const STAR_COUNT = 6000;
 const SKY_RADIUS = 9000;
@@ -16,11 +17,12 @@ export class Starfield implements Entity {
     const colors = new Float32Array(STAR_COUNT * 3);
     const v = new THREE.Vector3();
     const c = new THREE.Color();
+    const rng = new Rng(hashSeed('starfield'));
     for (let i = 0; i < STAR_COUNT; i++) {
-      v.randomDirection().multiplyScalar(SKY_RADIUS);
+      randomDirection(rng, v).multiplyScalar(SKY_RADIUS);
       v.toArray(positions, i * 3);
       // Mostly white, with some warm and some cool stars of varying brightness.
-      c.setHSL(Math.random() < 0.5 ? 0.6 : 0.08, Math.random() * 0.5, 0.5 + Math.random() * 0.5);
+      c.setHSL(rng.next() < 0.5 ? 0.6 : 0.08, rng.next() * 0.5, 0.5 + rng.next() * 0.5);
       c.toArray(colors, i * 3);
     }
 
@@ -46,4 +48,12 @@ export class Starfield implements Entity {
     this.points.geometry.dispose();
     this.points.material.dispose();
   }
+}
+
+/** Uniform random unit vector (seeded version of Vector3.randomDirection). */
+function randomDirection(rng: Rng, out: THREE.Vector3): THREE.Vector3 {
+  const z = rng.range(-1, 1);
+  const t = rng.range(0, Math.PI * 2);
+  const r = Math.sqrt(1 - z * z);
+  return out.set(r * Math.cos(t), r * Math.sin(t), z);
 }

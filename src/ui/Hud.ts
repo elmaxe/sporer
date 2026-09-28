@@ -1,4 +1,6 @@
 import type { Entity } from '../core/Entity';
+import { describeStar } from '../gen/stars';
+import type { SystemData } from '../gen/system';
 import type { Ship } from '../player/Ship';
 
 const REFRESH_SECONDS = 0.1;
@@ -8,8 +10,15 @@ export class Hud implements Entity {
   private readonly speedEl: HTMLElement;
   private sinceRefresh = REFRESH_SECONDS;
 
-  constructor(private readonly ship: Ship) {
+  constructor(
+    private readonly ship: Ship,
+    system: SystemData,
+  ) {
     this.speedEl = document.getElementById('hud-speed')!;
+    const stars = system.stars.map(describeStar).join(' + ');
+    const planets = system.planets.length === 1 ? '1 planet' : `${system.planets.length} planets`;
+    document.getElementById('hud-location')!.textContent =
+      `${system.name} · ${system.stars.length > 1 ? 'Binary: ' : ''}${stars} · ${planets}`;
   }
 
   update(frameDt: number): void {

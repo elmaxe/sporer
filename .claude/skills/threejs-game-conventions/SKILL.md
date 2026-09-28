@@ -11,19 +11,30 @@ Browser game: Vite + TypeScript (strict), `three`, `@dimforge/rapier3d-compat` p
 
 | Path | Role |
 |---|---|
-| `src/main.ts` | Composition root: init physics and debug, create `Game`, add entities, start. Exposes `window.game` / `window.ship` in dev. |
+| `src/main.ts` | Composition root: read `?seed` / `?star`, generate galaxy and system, init physics and debug, create `Game`, add entities, start. Exposes `window.game` / `ship` / `galaxy` / `system` in dev. |
 | `src/core/Game.ts` | Renderer, scene, camera, resize, main loop, entity list. `FIXED_DT = 1/60`. |
 | `src/core/Entity.ts` | The only lifecycle contract (see below). |
 | `src/core/FixedStep.ts` | Pure fixed-timestep accumulator. |
 | `src/core/Input.ts` | Polled keys (`KeyboardEvent.code`) + pointer-lock mouse deltas. |
 | `src/core/Debug.ts` | `debug.folder(name)` → lil-gui folder or `undefined` in prod. |
 | `src/physics/Physics.ts` | Rapier world (zero gravity). Re-exports `RAPIER`. |
-| `src/world/` | Star systems, planets, starfield + **pure** math (`orbit.ts`, `noise.ts`). |
+| `src/gen/` | **Procedural generation, pure data, no THREE/DOM/Rapier**: `rng.ts` (seeded PRNG, `hashSeed`), `galaxy.ts`, `stars.ts`, `system.ts`, `planets.ts`, `names.ts`, `color.ts`, plus shared math (`orbit.ts`, `noise.ts`). |
+| `src/world/` | Views that render generated data: `StarSystem` (from `SystemData`), `Star`, `Planet`, `Starfield`. |
 | `src/player/` | Ship controller and chase camera. |
 | `src/ui/` | DOM HUD overlays (markup lives in `index.html`). |
 | `tests/` | Vitest unit tests for pure logic. |
 
 New feature areas get their own folder under `src/` (e.g. `src/galaxy/`, `src/combat/`, `src/audio/`).
+
+## Procedural generation (`src/gen/`)
+
+- **Data, then view.** Generators return plain serialisable data (`GalaxyData`, `StarRef`, `SystemData`, `PlanetData`, ...) with colours as hex strings. Classes in `src/world/` turn that data into meshes and bodies. Never put THREE objects in generated data.
+- **Only `Rng`, never `Math.random`**, anywhere generated or visual content is decided (the starfield is seeded too). The same seed must give the same universe.
+- **Fork per thing:** `rng.fork('planet', i)` gives an independent stream per object. Adding a draw to one planet must not change the next planet or another system. Derive seeds with `hashSeed(...)`.
+- **Lazy by level:** `generateGalaxy(seed)` makes only `StarRef`s (position, name, star types, seed). `generateSystem(ref)` is called on demand and is fully determined by `ref`. Planet-surface detail should follow the same pattern from `PlanetData.seed`.
+- **Scales:** each level has its own units. Galaxy units (`GALAXY_RADIUS = 1000`) and system units (G star r≈30, UFO ≈4 wide) are unrelated. Convert at transitions and never mix them in one scene.
+- **Layout invariants** are covered by `tests/universe.test.ts` (no overlapping orbits or moons, a clear spawn point, Kepler-ordered periods). Extend it when adding generated features. When tuning, print sample systems from a throwaway test rather than guessing.
+- Terrain: `terrainNoise` returns roughly [-1, 1] with a median of ~0. `PlanetStyle.seaLevel` is a threshold in that range (0 ≈ half the surface underwater).
 
 ## Entity lifecycle
 

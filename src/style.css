@@ -23,6 +23,11 @@ body {
   text-shadow: 0 0 4px #000;
 }
 
+#hud-location {
+  font-size: 14px;
+  opacity: 0.85;
+}
+
 #hud-speed {
   font-size: 20px;
   font-variant-numeric: tabular-nums;

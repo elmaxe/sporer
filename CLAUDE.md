@@ -7,7 +7,7 @@ Browser game in Three.js inspired by Spore's space stage. Stack: Vite + TypeScri
 - `npm run dev`: dev server on http://localhost:5173 (debug panel on)
 - `npm run typecheck` / `npm test` / `npm run build` / `npm run preview`
 - `npm run smoke`: headless browser check (needs the dev server running): loads the game, flies forward, reports FPS and console errors plus a screenshot
-- Add `?debug` to any URL to enable the debug panel in production builds
+- URL params: `?seed=<number or text>` picks the galaxy (default 1337), `?star=<id>` starts in that system (default: generated home system), `?debug` enables the debug panel in production builds
 
 ## Skills
 

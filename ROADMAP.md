@@ -13,13 +13,14 @@ Status: ⬜ todo · 🟨 in progress · ✅ done
 
 ## Steps
 
-### 1. ⬜ Generation foundation
+### 1. ✅ Generation foundation
 - Seeded PRNG (no `Math.random` in generation) with helpers: range, int, pick, weighted pick, gaussian.
 - Data model: `Galaxy` → `StarRef` (id, position, type, seed) → `SystemData` (1–2 stars, planets, moons) → `PlanetData` (type, radius, colours, terrain params, rings).
-- Star types: main sequence by spectral class (O B A F G K M, realistic colours and frequencies), red dwarf, white dwarf, red giant, and binary (twin) systems.
+- Star types: main sequence by spectral class (O B A F G K M; stylised colours, frequencies weighted for variety rather than realism), red dwarf, white dwarf, red giant, blue giant, and binary (twin) systems.
 - Planet types: lava, rocky/barren, desert, ocean/terran, ice, gas giant (bands, optional rings). Moons around planets.
 - Galaxy layout: spiral arms plus a central bulge.
 - Done when the unit tests prove determinism (same seed → same output), the type distributions look sensible, and the current system is generated from a seed instead of the hard-coded `HOME_SYSTEM`.
+- Result: `src/gen/`. `?seed=` / `?star=` URL params. Moons, rings, gas bands and atmospheres are generated but **not rendered yet**; that's step 2.
 
 ### 2. ⬜ System from data + Spore-style controls
 - System scene built from `SystemData`: binary stars orbiting each other, giant/dwarf visuals, gas giant bands and rings, moons orbiting planets.

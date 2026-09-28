@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { orbitPosition, type Orbit } from '../src/world/orbit';
-import { terrainNoise } from '../src/world/noise';
+import { orbitPosition, type Orbit } from '../src/gen/orbit';
+import { terrainNoise } from '../src/gen/noise';
 
 describe('orbitPosition', () => {
   const flat: Orbit = { radius: 100, period: 10, phase: 0, inclination: 0 };

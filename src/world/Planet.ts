@@ -1,18 +1,11 @@
 import * as THREE from 'three';
 import type { Entity } from '../core/Entity';
 import { RAPIER, type Physics } from '../physics/Physics';
-import { orbitPosition, type Orbit } from './orbit';
-import { terrainNoise } from './noise';
+import { orbitPosition, type Orbit } from '../gen/orbit';
+import { terrainNoise } from '../gen/noise';
+import type { PlanetStyle } from '../gen/planets';
 
-export interface PlanetStyle {
-  /** Ocean colour, or null for no ocean (gas giants, barren rock). */
-  sea: THREE.ColorRepresentation | null;
-  low: THREE.ColorRepresentation;
-  high: THREE.ColorRepresentation;
-  /** Terrain height as a fraction of the radius. */
-  relief: number;
-}
-
+/** What the renderer needs; generated PlanetData and MoonData both satisfy it. */
 export interface PlanetConfig {
   name: string;
   radius: number;
@@ -76,7 +69,7 @@ export class Planet implements Entity {
   }
 }
 
-/** Icosphere displaced by noise, with per-vertex colours and a flat ocean. */
+/** Icosphere displaced by noise, with per-vertex colours and a flat sea. */
 function createPlanetGeometry(radius: number, seed: number, style: PlanetStyle): THREE.BufferGeometry {
   const geometry = new THREE.IcosahedronGeometry(radius, 5);
   const position = geometry.getAttribute('position') as THREE.BufferAttribute;
@@ -86,12 +79,15 @@ function createPlanetGeometry(radius: number, seed: number, style: PlanetStyle):
   const sea = style.sea === null ? null : new THREE.Color(style.sea);
   const low = new THREE.Color(style.low);
   const high = new THREE.Color(style.high);
+  // Without a sea, terrain spans the full noise range [-1, 1].
+  const base = sea === null ? -1 : style.seaLevel;
 
   for (let i = 0; i < position.count; i++) {
     dir.fromBufferAttribute(position, i).normalize();
     const n = terrainNoise(dir.x, dir.y, dir.z, seed);
-    const underwater = sea !== null && n < 0;
-    const height = underwater ? 0 : n;
+    const underwater = sea !== null && n < base;
+    // 0 at sea level (or the lowest point), 1 at the highest peaks.
+    const height = underwater ? 0 : (n - base) / (1 - base);
 
     // The geometry is non-indexed, but shared corners have identical positions
     // and therefore identical noise, so the surface stays watertight.
@@ -99,7 +95,7 @@ function createPlanetGeometry(radius: number, seed: number, style: PlanetStyle):
     position.setXYZ(i, dir.x, dir.y, dir.z);
 
     if (underwater) color.copy(sea);
-    else color.lerpColors(low, high, sea === null ? (n + 1) / 2 : n);
+    else color.lerpColors(low, high, height);
     color.toArray(colors, i * 3);
   }
 

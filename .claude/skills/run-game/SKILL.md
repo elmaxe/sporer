@@ -86,7 +86,8 @@ Open `http://localhost:4173/?debug` to check the production bundle with debug to
 
 ## 6. Clean up
 
-- Stop the background dev/preview servers with TaskStop when you are done, unless the user wants them kept running.
+- Stop the background dev/preview servers when you are done, unless the user wants them kept running. **On Windows, TaskStop kills only the npm wrapper and leaves Vite holding the port.** Afterwards, check with `netstat -ano | grep ":5173 " | grep LISTEN` and kill the PID (`taskkill //PID <pid> //F` from bash) if it is a `vite.js` process you started.
+- Use `?star=<id>` / `?seed=<text>` to smoke-test other systems, e.g. `npm run smoke -- "http://localhost:5173/?star=2"` (a binary).
 - Close the tab you created (`tabs_close_mcp`).
 - Report what you checked, with a screenshot and any console errors quoted verbatim.
 
