@@ -84,6 +84,12 @@ function clickGlobe(angle) {
   })`);
 }
 
+/** Polls until the planet ship's altitude meets `condition` (up to 15 s), then lets the camera finish too. */
+async function settleAltitude(condition) {
+  for (let i = 0; i < 60 && !(await evaluate(condition)); i++) await sleep(250);
+  await sleep(500);
+}
+
 /** The planet ship's altitude and the planet camera's distance and zoom. */
 const planetZoom = `({ altitude: +planet.ship.altitude.toFixed(1), distance: +planet.orbit.distance.toFixed(1), zoom: +planet.orbit.zoom.toFixed(2) })`;
 
@@ -94,13 +100,14 @@ const planetZoom = `({ altitude: +planet.ship.altitude.toFixed(1), distance: +pl
 async function sweepAltitude() {
   const r = { arrival: await evaluate(planetZoom) };
   await wheel(-50000); // to min zoom: down to the peaks
-  await sleep(2000);
+  // Wait for the ship to settle there (game time runs slower than real time at headless frame rates).
+  await settleAltitude(`planet.ship.altitude < 2.5`);
   r.low = await evaluate(planetZoom);
   r.lowClick = await clickGlobe(0.08);
   await sleep(2000);
   r.lowFlewDegrees = await evaluate(`+(planet.ship.direction.angleTo(__start) * 180 / Math.PI).toFixed(1)`);
   await wheel(50000); // to max zoom: up to high orbit
-  await sleep(2500);
+  await settleAltitude(`planet.ship.altitude > 115`);
   r.high = await evaluate(planetZoom);
   // From high up the ship is over the limb, looking down: click back towards the camera.
   r.highClick = await clickGlobe(-0.35);
