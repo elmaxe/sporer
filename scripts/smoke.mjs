@@ -7,7 +7,7 @@
 // transitions and galaxy travel play their whooshes, and M mutes. Then the planet loop (park at a planet,
 // scroll in to low orbit, click the globe and fly, scroll back out beside it), and again for every planet
 // type, a ringed rocky/icy/lava world and a moon in other systems (skip those with --quick). The system sky has
-// the galaxy band (screenshot looking at the galactic centre) and an orbit line per planet and moon.
+// the galaxy band (screenshot looking at the galactic centre) and a smoke trail per planet and moon.
 // Prints JSON with FPS, console errors and screenshot paths. Exit 1 on failure.
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
@@ -203,21 +203,20 @@ if (started) {
   })`);
   await evaluate(`ship.stop()`);
 
-  // System sky: the galaxy band and the orbit lines. Look at the galactic centre for a screenshot.
+  // System sky: the galaxy band and the orbit trails. Look at the galactic centre for a screenshot.
   sky = await evaluate(`(() => {
     const scene = levels.systemLevel.scene;
     const band = scene.getObjectByName('Galaxy band');
-    const lines = scene.getObjectByName('Orbit lines');
     const c = levels.systemLevel.band.sky.center;
     levels.systemLevel.orbit.lookFrom(new game.camera.position.constructor(-c.x, -c.y, -c.z));
     return {
       band: !!band && !!scene.getObjectByName('Galaxy band stars'),
-      orbitLines: lines?.children.length ?? 0,
-      expectedLines: world.planets.length + world.moons.length,
+      trails: levels.systemLevel.trails.count,
+      expectedTrails: world.planets.length + world.moons.length,
     };
   })()`);
   await sleep(1500);
-  sky.visibleLines = await evaluate(`levels.systemLevel.scene.getObjectByName('Orbit lines').children.filter((l) => l.visible).length`);
+  sky.visibleTrails = await evaluate(`levels.systemLevel.trails.visibleCount`);
   const bandShot = await send('Page.captureScreenshot', { format: 'png' });
   sky.screenshot = join(outDir, 'band.png');
   writeFileSync(sky.screenshot, Buffer.from(bandShot.result.data, 'base64'));
@@ -355,7 +354,7 @@ writeFileSync(screenshot, Buffer.from(shot.result.data, 'base64'));
 const moved = started && after.pos[2] < before.pos[2] - 10 && after.speed > 5;
 const autopiloted = started && autopilot.endDist < Math.max(3, autopilot.startDist * 0.1);
 const picked = started && pick.target === pick.star && pick.tooltip === pick.star;
-const skyOk = started && sky.band && sky.orbitLines === sky.expectedLines && sky.visibleLines >= 1;
+const skyOk = started && sky.band && sky.trails === sky.expectedTrails && sky.visibleTrails >= 1;
 const looped =
   started &&
   galaxyLoop.modeAfterZoomOut === 'galaxy' &&

@@ -13,7 +13,7 @@ import { Hud } from '../ui/Hud';
 import type { Tooltip } from '../ui/Tooltip';
 import type { CelestialBody } from '../world/CelestialBody';
 import { GalaxyBand } from '../world/GalaxyBand';
-import { OrbitLines } from '../world/OrbitLines';
+import { OrbitTrails } from '../world/OrbitTrails';
 import type { Planet } from '../world/Planet';
 import { Starfield } from '../world/Starfield';
 import { StarSystem } from '../world/StarSystem';
@@ -41,7 +41,7 @@ export class SystemLevel extends Level {
   private readonly hud: Hud;
   private readonly starfield: Starfield;
   private readonly marker: TargetMarker;
-  private readonly orbitLines: OrbitLines;
+  readonly trails: OrbitTrails;
 
   constructor(
     readonly ref: StarRef,
@@ -76,8 +76,8 @@ export class SystemLevel extends Level {
       ),
     );
     const picker = this.add(new Picker(camera, input, this.ship, this.world.bodies));
-    this.orbitLines = this.add(
-      new OrbitLines(
+    this.trails = this.add(
+      new OrbitTrails(
         this.scene,
         camera,
         this.world.planets,
@@ -123,7 +123,7 @@ export class SystemLevel extends Level {
    * Draws the system as seen from `camera` (in system units) at system time
    * `time`: the sky of the planet level. The player's ship and marker and the
    * `hidden` bodies (the planet being visited, drawn by that level) are left
-   * out, as are the orbit lines, and bodies smaller than `minAngle` are
+   * out, as are the orbit trails, and bodies smaller than `minAngle` are
    * enlarged to it.
    */
   renderSky(
@@ -137,12 +137,12 @@ export class SystemLevel extends Level {
     this.starfield.centerOn(camera.position);
     this.ship.object.visible = false;
     this.marker.hide();
-    const lines = this.orbitLines.visible;
-    this.orbitLines.visible = false;
+    const trails = this.trails.visible;
+    this.trails.visible = false;
     for (const body of hidden) body.object.visible = false;
     renderer.render(this.scene, camera);
     for (const body of hidden) body.object.visible = true;
-    this.orbitLines.visible = lines;
+    this.trails.visible = trails;
     this.ship.object.visible = true;
   }
 

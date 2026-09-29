@@ -6,6 +6,7 @@ import { BAND_SAMPLES, BULGE_FLATTENING, bandStarDirections, galacticSky, type G
 import type { StarRef } from '../gen/galaxy';
 import { hashSeed, Rng } from '../gen/rng';
 import type { SystemData } from '../gen/system';
+import { VALUE_NOISE_GLSL } from './noiseGlsl';
 
 export const galaxyBandParams = {
   /** Peak brightness of the disc band. */
@@ -199,32 +200,7 @@ const BAND_FRAGMENT = /* glsl */ `
   uniform float seed;
   varying vec3 vDir;
 
-  float hash(vec3 p) {
-    p = fract(p * 0.3183099 + 0.1);
-    p *= 17.0;
-    return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
-  }
-
-  float noise(vec3 x) {
-    vec3 i = floor(x);
-    vec3 f = fract(x);
-    f = f * f * (3.0 - 2.0 * f);
-    return mix(
-      mix(mix(hash(i), hash(i + vec3(1, 0, 0)), f.x), mix(hash(i + vec3(0, 1, 0)), hash(i + vec3(1, 1, 0)), f.x), f.y),
-      mix(mix(hash(i + vec3(0, 0, 1)), hash(i + vec3(1, 0, 1)), f.x), mix(hash(i + vec3(0, 1, 1)), hash(i + vec3(1, 1, 1)), f.x), f.y),
-      f.z);
-  }
-
-  float fbm(vec3 p) {
-    float sum = 0.0;
-    float amp = 0.5;
-    for (int i = 0; i < 5; i++) {
-      sum += amp * noise(p);
-      p = p * 2.03 + 1.7;
-      amp *= 0.5;
-    }
-    return sum / 0.97;
-  }
+  ${VALUE_NOISE_GLSL}
 
   void main() {
     vec3 v = normalize(vDir);
@@ -251,8 +227,8 @@ const BAND_FRAGMENT = /* glsl */ `
       // Noise coordinates running along the band (continuous all the way round),
       // finer across it, so clouds and lanes are drawn out along the plane.
       vec3 q = vec3(cos(lon) * 2.5, sin(lon) * 2.5, lat * 9.0) + seed;
-      float clouds = fbm(q * 1.7);
-      float lanes = smoothstep(0.42, 0.62, fbm(q + 7.3));
+      float clouds = fbm(q * 1.7, 5);
+      float lanes = smoothstep(0.42, 0.62, fbm(q + 7.3, 5));
       // The lanes hug the midline, like the Great Rift.
       float y2 = y / 0.6;
       float mid = exp(-0.5 * y2 * y2);
