@@ -30,6 +30,30 @@ export function peakRadius(radius: number, style: PlanetStyle, reliefScale = 1):
   return radius * (1 + style.relief * reliefScale);
 }
 
+/**
+ * Colours a terrain planet's surface from its noise value `n` (see
+ * `terrainNoise`): writes the colour into `out` and returns the height, 0 at
+ * sea level (or the lowest point) to 1 at the highest peaks, and on a
+ * `seaFloor` down to -1 at the deepest point (else 0 underwater, sea-coloured).
+ * Shared by the globe meshes and the planet level's map, so they match.
+ */
+export type TerrainPainter = (n: number, out: THREE.Color) => number;
+
+export function terrainPainter(style: PlanetStyle, seaFloor = false): TerrainPainter {
+  const sea = style.sea === null ? null : new THREE.Color(style.sea);
+  const low = new THREE.Color(style.low);
+  const high = new THREE.Color(style.high);
+  // Without a sea, terrain spans the full noise range [-1, 1].
+  const base = sea === null ? -1 : style.seaLevel;
+  return (n, out) => {
+    const underwater = sea !== null && n < base;
+    const height = !underwater ? (n - base) / (1 - base) : seaFloor ? (n - base) / (base + 1) : 0;
+    if (underwater) out.copy(sea).multiplyScalar(seaFloor ? 0.75 + 0.25 * height : 1);
+    else out.lerpColors(low, high, height);
+    return height;
+  };
+}
+
 /** Icosphere displaced by noise, with per-vertex colours and a flat sea. */
 export function createTerrainGeometry(
   radius: number,
@@ -42,34 +66,49 @@ export function createTerrainGeometry(
   const colors = new Float32Array(position.count * 3);
   const dir = new THREE.Vector3();
   const color = new THREE.Color();
-  const sea = style.sea === null ? null : new THREE.Color(style.sea);
-  const low = new THREE.Color(style.low);
-  const high = new THREE.Color(style.high);
+  const paint = terrainPainter(style, seaFloor);
   const relief = style.relief * reliefScale;
-  // Without a sea, terrain spans the full noise range [-1, 1].
-  const base = sea === null ? -1 : style.seaLevel;
 
   for (let i = 0; i < position.count; i++) {
     dir.fromBufferAttribute(position, i).normalize();
-    const n = noise(dir.x, dir.y, dir.z, seed);
-    const underwater = sea !== null && n < base;
-    // 0 at sea level (or the lowest point), 1 at the highest peaks;
-    // on a sea floor, down to -1 at the deepest point.
-    const height = !underwater ? (n - base) / (1 - base) : seaFloor ? (n - base) / (base + 1) : 0;
+    const height = paint(noise(dir.x, dir.y, dir.z, seed), color);
 
     // The geometry is non-indexed, but shared corners have identical positions
     // and therefore identical noise, so the surface stays watertight.
     dir.multiplyScalar(radius * (1 + relief * (height < 0 ? 0.6 : 1) * height));
     position.setXYZ(i, dir.x, dir.y, dir.z);
-
-    if (underwater) color.copy(sea).multiplyScalar(seaFloor ? 0.75 + 0.25 * height : 1);
-    else color.lerpColors(low, high, height);
     color.toArray(colors, i * 3);
   }
 
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   geometry.computeVertexNormals();
   return geometry;
+}
+
+/**
+ * Colours a gas giant at unit direction (x, y, z) into `out`: stripes by
+ * latitude, their edges wobbled by noise, plus thin wavy cloud streaks with
+ * `streaks`. Shared by the globe meshes and the planet level's map.
+ */
+export type GasPainter = (x: number, y: number, z: number, out: THREE.Color) => void;
+
+export function gasPainter(seed: number, bands: readonly string[], streaks = false): GasPainter {
+  const palette = bands.map((b) => new THREE.Color(b));
+  // Which band colour each stripe uses, seeded so a planet always looks the same.
+  const rng = new Rng(hashSeed(seed, 'stripes'));
+  const stripes = rng.int(7, 12);
+  const order = Array.from({ length: stripes + 1 }, () => palette[rng.int(0, palette.length - 1)]!);
+  return (x, y, z, out) => {
+    const lat = y + 0.05 * terrainNoise(x * 1.2, y * 2, z * 1.2, seed);
+    const s = THREE.MathUtils.clamp((lat + 1) / 2, 0, 0.9999) * stripes;
+    const k = Math.floor(s);
+    out.lerpColors(order[k]!, order[k + 1]!, THREE.MathUtils.smoothstep(s - k, 0.7, 1));
+    if (streaks) {
+      const wave = terrainNoise(x * 4, y * 6, z * 4, seed + 1);
+      const swirl = terrainNoise(x * 12, y * 40, z * 12, seed + 2);
+      out.multiplyScalar(1 + 0.08 * Math.sin(lat * 90 + 4 * wave) + 0.06 * swirl);
+    }
+  };
 }
 
 /**
@@ -88,27 +127,14 @@ export function createGasGeometry(
   const position = geometry.getAttribute('position') as THREE.BufferAttribute;
   const normals = new Float32Array(position.count * 3);
   const colors = new Float32Array(position.count * 3);
-  const palette = bands.map((b) => new THREE.Color(b));
-
-  // Which band colour each stripe uses, seeded so a planet always looks the same.
-  const rng = new Rng(hashSeed(seed, 'stripes'));
-  const stripes = rng.int(7, 12);
-  const order = Array.from({ length: stripes + 1 }, () => palette[rng.int(0, palette.length - 1)]!);
+  const paint = gasPainter(seed, bands, streaks);
 
   const dir = new THREE.Vector3();
   const color = new THREE.Color();
   for (let i = 0; i < position.count; i++) {
     dir.fromBufferAttribute(position, i).normalize();
     dir.toArray(normals, i * 3);
-    const lat = dir.y + 0.05 * terrainNoise(dir.x * 1.2, dir.y * 2, dir.z * 1.2, seed);
-    const s = THREE.MathUtils.clamp((lat + 1) / 2, 0, 0.9999) * stripes;
-    const k = Math.floor(s);
-    color.lerpColors(order[k]!, order[k + 1]!, THREE.MathUtils.smoothstep(s - k, 0.7, 1));
-    if (streaks) {
-      const wave = terrainNoise(dir.x * 4, dir.y * 6, dir.z * 4, seed + 1);
-      const swirl = terrainNoise(dir.x * 12, dir.y * 40, dir.z * 12, seed + 2);
-      color.multiplyScalar(1 + 0.08 * Math.sin(lat * 90 + 4 * wave) + 0.06 * swirl);
-    }
+    paint(dir.x, dir.y, dir.z, color);
     color.toArray(colors, i * 3);
   }
 

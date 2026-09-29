@@ -116,7 +116,8 @@ body {
   font-size: 13px;
 }
 
-#audio-toggle {
+#audio-toggle,
+#fullscreen-toggle {
   display: grid;
   place-items: center;
   width: 40px;
@@ -130,9 +131,112 @@ body {
 }
 
 #audio-toggle:hover,
-#audio-toggle[aria-expanded='true'] {
+#audio-toggle[aria-expanded='true'],
+#fullscreen-toggle:hover {
   border-color: rgba(102, 255, 204, 0.8);
   color: #66ffcc;
+}
+
+/* Left of the sound button. */
+#fullscreen-toggle {
+  position: fixed;
+  right: calc(max(16px, env(safe-area-inset-right)) + 48px);
+  bottom: max(16px, env(safe-area-inset-bottom));
+  z-index: 1002;
+}
+
+#fullscreen-toggle[hidden],
+#fullscreen-hint[hidden] {
+  display: none;
+}
+
+#fullscreen-toggle .collapse,
+#fullscreen-toggle.on .expand {
+  display: none;
+}
+
+#fullscreen-toggle.on .collapse {
+  display: inline;
+}
+
+#fullscreen-hint {
+  position: fixed;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: calc(max(16px, env(safe-area-inset-bottom)) + 52px);
+  z-index: 1003;
+  max-width: min(260px, calc(100vw - 32px));
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(8, 14, 28, 0.96);
+  border: 1px solid rgba(102, 255, 204, 0.35);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+/* The planet level's map (mouse players only), above the sound button. The map itself is drawn into the
+   game's canvas under #planet-map-marks (PlanetMap.render), which carries the markers. */
+#planet-map {
+  position: fixed;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: calc(max(16px, env(safe-area-inset-bottom)) + 52px);
+  width: min(320px, 40vw);
+  border-radius: 8px;
+  border: 1px solid rgba(102, 255, 204, 0.35);
+  overflow: hidden;
+}
+
+#planet-map[hidden],
+html.touch #planet-map {
+  display: none;
+}
+
+#planet-map-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 4px 3px 10px;
+  font-size: 12px;
+  background: rgba(8, 14, 28, 0.72);
+}
+
+#planet-map-title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  opacity: 0.9;
+}
+
+#planet-map-toggle {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+#planet-map-toggle:hover {
+  color: #66ffcc;
+}
+
+#planet-map.folded #planet-map-toggle svg {
+  transform: rotate(180deg);
+}
+
+#planet-map.folded #planet-map-body {
+  display: none;
+}
+
+#planet-map-marks {
+  display: block;
+  width: 100%;
+  height: auto;
+  cursor: crosshair;
 }
 
 #audio .cross,
