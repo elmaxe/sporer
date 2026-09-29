@@ -150,9 +150,29 @@ Status: ⬜ todo · 🟨 in progress · ✅ done
 - *Galaxy level:* unchanged (camera only), since the ship is a marker there.
 - Tests: the zoom curve, and the planet ship's altitude easing staying above the terrain. Smoke: scroll in and out over a planet and check `planet.ship.altitude` follows the camera.
 
-### 11. ⬜ Climate: temperature and atmosphere for every solid body
+### 11. ⬜ More varied body sizes
+- Solid bodies come in **clearly different sizes**: tiny rocks, Mercury-like small worlds, Earth-sized ones and big super-Earths. Gas giants range from Neptune-like ice giants to huge Jupiters, and moons from pebbles to the odd moon bigger than a small planet (like Ganymede).
+- Today each type is drawn uniformly from a narrow range, so solid planets are nearly all the same size. Measured over 1,500 systems: radius 3–12, but 80% fall between 4.6 and 9.9; moons are all 1.2–3.5 and gas giants 14–24, only ~2× an Earth-like world.
+- Done when a system's planets visibly differ in size, the size spread is pinned down by tests, and layouts stay valid.
+
+**Implementation notes (proposed design; confirm with the user before building):**
+- *Size classes:* pick a class first, then a radius inside it, log-uniform so small bodies aren't crowded out:
+  - dwarf ~2–3.5
+  - small ~3.5–6 (Mercury, Mars)
+  - Earth-like ~6–10
+  - super-Earth ~10–15
+  - ice giant ~14–20
+  - gas giant ~20–34
+  - moons ~0.8–6, with a small chance of a big one on gas giants
+- *Size and type go together:* super-Earths are mostly ocean or terran (deep oceans, thick air), dwarfs and small worlds mostly barren, ice or lava (they can't hold air). Draw the class from the same zone-dependent weights `choosePlanetType` uses, then the type given the class, or add a size factor to the type weights. Keep system variety: at most one or two giants of each kind per system on average.
+- *Consistency:* use a separate stream (`prng.fork('size')`) so the other draws stay put. Sizes change extents, so orbits in most systems shift, which is accepted since there are no saves yet. The home-system search (`findHomeSystem`) keeps its guarantee of a habitable world.
+- *What it touches:* moon counts and orbits scale with the planet (a super-Earth can hold two moons, a dwarf rarely one). Ring extents, the autopilot standoffs and the trails' widths already follow the radius. Picking is fine at any size (it has a minimum angular radius). In the planet level every body is rescaled to R = 100, so size could also show there, e.g. the ship's altitude and the terrain detail relative to the true radius, so a super-Earth's horizon looks flatter than a dwarf's (optional).
+- Step 12's climate uses the radius for gravity: which bodies keep an atmosphere, and how much geothermal heat they have.
+- Tests: the class distribution (every class appears, the right proportions), types follow size classes, the moon size range and big moons appearing, plus the existing `tests/universe.test.ts` layout invariants. Print a sample table while tuning.
+
+### 12. ⬜ Climate: temperature and atmosphere for every solid body
 - Every planet and moon except gas giants gets a **climate**: surface temperature, atmosphere thickness (surface pressure) and composition, and geothermal heat. It's shown in the hover tooltip and the planet HUD (e.g. "Ice world · −140 °C · thin N₂ atmosphere").
-- The later steps read it: atmosphere looks (12), lava (13) and geysers (14).
+- The later steps read it: atmosphere looks (13), lava (14) and geysers (15).
 - Done when every solid body has a plausible climate that follows its star, distance and size, tests pin the relationships down, and the HUD shows it.
 
 **Implementation notes (proposed design; confirm with the user before building):**
@@ -162,9 +182,9 @@ Status: ⬜ todo · 🟨 in progress · ✅ done
 - *Geothermal heat:* internal heat from size (bigger = hotter inside) plus tidal heating for moons close to big planets (∝ parent radius / orbit radius³), plus lava worlds always high. Step 14 turns this into geysers.
 - Tests: warmer closer in and around brighter stars, the habitable radius near 288 K, a greenhouse raises temperature, small hot bodies are airless, gas giants get no climate, determinism. Extend `tests/universe.test.ts` with the distributions (print a sample table from a throwaway test while tuning).
 
-### 12. ⬜ Taller, softer atmospheres
+### 13. ⬜ Taller, softer atmospheres
 - Atmospheres reach **higher above the ground** with a gradual falloff, instead of the thin, sharp rim they have now. From orbit the planet sits in a soft halo; from low orbit the horizon hazes into the sky. It's less physically exact than today, but it looks right.
-- Thickness and tint come from the climate (step 11): a thick atmosphere is tall and hazy, a thin one a faint rim.
+- Thickness and tint come from the climate (step 12): a thick atmosphere is tall and hazy, a thin one a faint rim.
 - Done when atmospheres read as a soft gradient in both the system view and the planet level, from outside and from inside the shell, with no visible edge.
 
 **Implementation notes (proposed design; confirm with the user before building):**
@@ -174,7 +194,7 @@ Status: ⬜ todo · 🟨 in progress · ✅ done
 - Shared builder in `world/planetGeometry.ts` for both views. Keep the cost down: it covers a lot of screen in the planet level, so check headless FPS.
 - Tests: the pure optical-depth function (thicker along the limb than straight down, zero outside the shell, monotonic in density).
 
-### 13. ⬜ Living lava
+### 14. ⬜ Living lava
 - **Lava gets its own animated shader**, like the stars' surfaces: slow-flowing, glowing molten rock with a cooling crust that cracks and drifts, brightest in the cracks. It applies to lava seas on lava worlds and moons, in the planet level and (more simply) in the system view.
 - **Lava flies up:** fountains and eruptions throw glowing blobs up in ballistic arcs that cool and darken as they fall back, with the odd big eruption leaving a hanging glow.
 - Done when lava worlds visibly churn from orbit and erupt up close, at a pace that doesn't distract, with no FPS regression.
@@ -182,12 +202,12 @@ Status: ⬜ todo · 🟨 in progress · ✅ done
 **Implementation notes (proposed design; confirm with the user before building):**
 - *Shader:* in `world/lavaMaterial.ts`, emissive and not lit (like the star surface). Animated 3D noise advected slowly (domain-warped by time) for the flow, cellular or ridged noise for the crust plates with bright seams, colour ramp dark crust → red → orange → yellow-white by heat, and a glow that stays visible on the night side. Reuse `noiseGlsl.ts` and the star's simplex noise. The planet level's `createSea('lava')` sphere and the system view's lava vertex colours both switch to it; in the system view, sample the low-frequency parts per vertex (as the star does for spots) to keep it cheap.
 - *Eruptions:* a pooled `Points` in the planet level, animated in the vertex shader like `StarStorms`: event slots on a seeded time grid (`stormSlots`/`stormEvent` pattern, generalised if it fits), vents at seeded points in the lava seas, particles launched with a velocity cone and pulled back by gravity (a ballistic arc in the shader), colour cooling with age. Big eruptions add a short-lived glow sprite and light flicker on nearby terrain. In the system view, only a faint pulsing glow on the day and night side.
-- Rates and sizes scale with the geothermal heat from step 11.
+- Rates and sizes scale with the geothermal heat from step 12.
 - Tests: the ballistic particle maths (lands back on the surface, peak height from launch speed and gravity) and event determinism.
 
-### 14. ⬜ Geothermal activity: geysers
-- Bodies with geothermal heat (step 11) get **geysers**: plumes shooting up from vents on the surface, erupting on and off.
-- **Both cold and hot worlds have them.** On icy bodies, **cryogeysers** (like Saturn's moon Enceladus or Neptune's Triton) throw up tall plumes of water vapour and ice crystals, driven by tidal heating. In low gravity with little air they climb very high and hang as a faint fan. On warm worlds with liquid water near hot rock (terran, ocean, some desert), **hot-spring geysers** (like Iceland or Yellowstone) are shorter white steam plumes that drift with the wind. Lava worlds already erupt lava (step 13), and very hot moons can have Io-style sulphur plumes.
+### 15. ⬜ Geothermal activity: geysers
+- Bodies with geothermal heat (step 12) get **geysers**: plumes shooting up from vents on the surface, erupting on and off.
+- **Both cold and hot worlds have them.** On icy bodies, **cryogeysers** (like Saturn's moon Enceladus or Neptune's Triton) throw up tall plumes of water vapour and ice crystals, driven by tidal heating. In low gravity with little air they climb very high and hang as a faint fan. On warm worlds with liquid water near hot rock (terran, ocean, some desert), **hot-spring geysers** (like Iceland or Yellowstone) are shorter white steam plumes that drift with the wind. Lava worlds already erupt lava (step 14), and very hot moons can have Io-style sulphur plumes.
 - Done when geyser plumes show up on the bodies whose climate says they should, look different for cryo and steam geysers, and cost little.
 
 **Implementation notes (proposed design; confirm with the user before building):**
