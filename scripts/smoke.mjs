@@ -673,7 +673,7 @@ const planets =
   planetLoop.handoverShot !== null &&
   seamless.ok &&
   planetTypes.every((r) => r.ok) &&
-  (quick || planetTypes.length === 9);
+  (quick || planetTypes.length === 13); // 7 types, ringed, moon and 4 geyser kinds
 const touched = started && touch.ok;
 const ok = started && moved && autopiloted && picked && skyOk && alive && looped && sounded && planets && touched && errors.length === 0;
 console.log(
