@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ease,
   galaxyScale,
   handoverIn,
   handoverOut,
+  planetHandoverIn,
+  planetHandoverOut,
+  planetZoomParams,
   sampleSeamlessZoom,
   seamlessZoomParams as params,
   zoomDuration,
@@ -93,5 +97,45 @@ describe('seamless zoom timeline', () => {
   it('hands over zooming out well beyond where the system camera starts', () => {
     expect(handoverOut(zone, 100)).toBe(handoverIn(zone));
     expect(handoverOut(zone, 2500)).toBeCloseTo(2500 * params.handoverOut);
+  });
+});
+
+describe('planet zoom', () => {
+  const planetTiming = { lead: planetZoomParams.lead, overlap: planetZoomParams.overlap, tail: planetZoomParams.tail };
+
+  it('hands over with the whole body in view, never farther than the camera already is', () => {
+    // A small world seen from far off: framed at the handover angle.
+    expect(Math.asin(8 / planetHandoverIn(8, 200))).toBeCloseTo(planetZoomParams.handoverAngle);
+    // A gas giant with the camera close: nearer than it started, but still outside the body.
+    const d = planetHandoverIn(24, 60);
+    expect(d).toBeLessThan(60);
+    expect(d).toBeGreaterThanOrEqual(24 * planetZoomParams.minRadii);
+    expect(planetHandoverOut(8, 30)).toBeGreaterThanOrEqual(30 * planetZoomParams.outFactor);
+  });
+
+  it("doesn't stop at the handover when the lead heads the other way", () => {
+    // Min zoom next to a gas giant: 12 from the ship, handing over farther out from the planet, then down to low orbit.
+    const zoom = { ...planetTiming, start: 12, handover: planetHandoverIn(24, 60), end: 45 / (100 / 24) };
+    const th = zoom.lead + zoom.overlap / 2;
+    const a = sampleSeamlessZoom(zoom, th - 0.01).distance;
+    const b = sampleSeamlessZoom(zoom, th + 0.01).distance;
+    expect(b).toBeLessThan(a);
+    expect(Math.abs(Math.log(b / a))).toBeGreaterThan(0.01);
+    // The tail (where both levels measure from the body) only moves one way.
+    for (let t = th; t < zoomDuration(zoom); t += 1 / 240) {
+      expect(sampleSeamlessZoom(zoom, t + 1 / 240).distance).toBeLessThanOrEqual(sampleSeamlessZoom(zoom, t).distance + 1e-9);
+    }
+    expect(sampleSeamlessZoom(zoom, zoomDuration(zoom)).distance).toBeCloseTo(zoom.end);
+  });
+});
+
+describe('ease', () => {
+  it('eases in and out', () => {
+    expect(ease(0)).toBe(0);
+    expect(ease(1)).toBe(1);
+    expect(ease(0.1)).toBeLessThan(0.1);
+    expect(ease(0.9)).toBeGreaterThan(0.9);
+    expect(ease(-1)).toBe(0);
+    expect(ease(2)).toBe(1);
   });
 });

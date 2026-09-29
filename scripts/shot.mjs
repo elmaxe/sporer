@@ -25,6 +25,9 @@
 //   freeze:<expression>          stop the game loop on the first frame (after drawing) where the expression
 //                                is truthy, so the next shot shows exactly that frame; `resume` restarts it
 //   resume                       game.start() after a freeze
+//   solo:<outgoing|incoming>:<name>
+//                                while frozen mid-crossfade: redraw showing only that level, screenshot → <name>.png,
+//                                then redraw the blend (compare the two sides of a handover)
 //   fps                          measure frames per second over 120 frames
 //   goto:<url or ?params>        load another page (e.g. goto:?star=2) and wait for the game
 //
@@ -187,6 +190,16 @@ async function run(step) {
         let hit = false; try { hit = !!(${rest}); } catch {}
         if (hit) { game.stop(); game.afterFrame = null; window.__shotFrozen = true; } }`);
       if (!(await page.waitFor(`window.__shotFrozen`, 30000))) throw new Error('the expression never became true');
+      return;
+    }
+    case 'solo': {
+      const [side, name] = rest.split(':');
+      if (side !== 'outgoing' && side !== 'incoming') throw new Error('solo takes outgoing or incoming');
+      if (!(await page.evaluate(`levels.crossfade !== null`))) throw new Error('no crossfade is running (freeze mid-handover first)');
+      await page.evaluate(`game.crossfadeSolo = '${side}'; game.redraw(); game.crossfadeSolo = null`);
+      last = await page.screenshot();
+      save(name || side, last);
+      await page.evaluate(`game.redraw()`);
       return;
     }
     case 'resume':

@@ -144,6 +144,7 @@ export class SystemLevel extends Level {
   ): void {
     this.world.pose(time, camera.position, minAngle);
     this.starfield.centerOn(camera.position);
+    const shipVisible = this.ship.object.visible;
     this.ship.object.visible = false;
     this.marker.hide();
     const trails = this.trails.visible;
@@ -152,7 +153,9 @@ export class SystemLevel extends Level {
     renderer.render(this.scene, camera);
     for (const body of hidden) body.object.visible = true;
     this.trails.visible = trails;
-    this.ship.object.visible = true;
+    this.ship.object.visible = shipVisible;
+    // This level may be drawn itself in the same frame (crossfading with the planet level).
+    this.world.unpose();
   }
 
   /**

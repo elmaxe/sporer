@@ -39,6 +39,7 @@ Steps run in order. With no steps, you get `shot:view`.
 | `galaxy` / `system` | `levels.toGalaxy()` / `levels.toSystem()` and settle |
 | `freeze:<expression>` | stop the game loop on the first frame where the expression is true (checked after drawing), so the next `shot` is exactly that frame |
 | `resume` | restart the loop after a freeze |
+| `solo:<outgoing\|incoming>:<name>` | while frozen mid-crossfade: redraw with only that level showing and shoot it; compare the two sides of a handover (same place, same size?) |
 | `fps` | frames per second over 120 frames (headless SwiftShader: expect ~5–25) |
 | `goto:<url or ?params>` | load another page, e.g. `goto:?star=2`, and wait for the game |
 
@@ -65,6 +66,10 @@ npm run shot -- --out $OUT --clean --star 5 shot:red-giant
 # Mid-transition: freeze on a state, not a time (headless frame rates vary; a frame advances the clock by at most 0.25 s)
 npm run shot -- --out $OUT --clean "js:levels.toGalaxy()" "freeze:levels.crossfade > 0.4" shot:handover resume settle shot:after
 # the seamless zoom's own clock: "freeze:levels.seamless?.elapsed > 1.2"
+
+# Both sides of a handover, to check they line up (then crop both around the subject and compare)
+npm run shot -- --out $OUT --clean --sheet "js:levels.toGalaxy()" "freeze:levels.crossfade > 0.4" \
+  solo:outgoing:system-side solo:incoming:galaxy-side resume
 
 # A detail up close: shoot, then crop around it (here the screen centre, ×3)
 npm run shot -- --out $OUT --clean shot:view crop:centre:540,260,200,200:3

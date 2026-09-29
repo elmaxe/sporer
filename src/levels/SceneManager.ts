@@ -4,51 +4,42 @@ import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
 import type { Game } from '../core/Game';
 import type { GalaxyData, StarRef } from '../gen/galaxy';
-import type { OrbitCamera } from '../player/OrbitCamera';
-import { Fade } from '../ui/Fade';
 import { Tooltip } from '../ui/Tooltip';
 import type { Planet } from '../world/Planet';
 import { GALAXY_VIEW_DISTANCE, GalaxyLevel } from './GalaxyLevel';
-import { PLANET_VIEW_DISTANCE, PlanetLevel, planetCameraParams } from './PlanetLevel';
+import { PLANET_VIEW_DISTANCE, PlanetLevel } from './PlanetLevel';
 import type { Level } from './Level';
 import {
   galaxyScale,
   handoverIn,
   handoverOut,
+  planetHandoverIn,
+  planetHandoverOut,
+  planetZoomParams,
   sampleSeamlessZoom,
   seamlessZoomParams,
   type SeamlessSample,
   type SeamlessZoom,
 } from './seamlessZoom';
 import { ARRIVAL_DISTANCE, SystemLevel } from './SystemLevel';
-import { ease, samplePhase, type TransitionPhase } from './transition';
 
-/** Seconds for each half of a planet transition (zoom + fade out, swap, zoom + fade in). */
-const OUT_SECONDS = 0.45;
-const IN_SECONDS = 0.8;
-/** The system's barycentre, where the system camera looks during the galaxy zoom. Never modified. */
-const BARYCENTRE = new THREE.Vector3();
+/**
+ * The origin: the system's barycentre, where the system camera looks during the
+ * galaxy zoom, and the globe's centre in the planet level. Never modified.
+ */
+const ORIGIN = new THREE.Vector3();
 /** A camera looks along its local -Z, so +Z points from what it looks at back to it. */
 const BACK = new THREE.Vector3(0, 0, 1);
-/** System camera distance from a planet's centre where a planet transition starts or ends, in radii. */
-const PLANET_CLOSE_RADII = 1.5;
-/** How far (in its own zoom) the planet camera pulls away while leaving. */
-const PLANET_LEAVE_ZOOM = 3;
 
 export type LevelMode = 'system' | 'galaxy' | 'planet';
-interface ActivePhase extends TransitionPhase {
-  orbit: OrbitCamera;
-  /** Called every frame with the eased progress in [0, 1]. */
-  tick?: (u: number) => void;
-  /** Runs when the phase ends; returns the next phase, if any. */
-  then: () => ActivePhase | null;
-}
 
-/** A running galaxy ↔ system zoom: one timeline (seamlessZoom.ts) driving both levels. */
+/** A running zoom between two levels: one timeline (seamlessZoom.ts) driving both. */
 interface SeamlessTransition {
   zoom: SeamlessZoom;
   elapsed: number;
+  started: boolean;
   outgoing: Level;
+  incoming: Level;
   swapped: boolean;
   /** Poses both levels for this point of the timeline (before they update this frame). */
   apply: (s: SeamlessSample) => void;
@@ -62,18 +53,21 @@ interface SeamlessTransition {
  * the galaxy, framed on the current star; zooming in at a star enters its
  * system (generated on demand). Zooming in while parked at a planet or moon
  * descends to its low orbit (a planet level, built on demand and dropped on
- * the way back up). Each transition reads as one continuous zoom, under a
- * whoosh, with input blocked meanwhile.
+ * the way back up). Each transition is one continuous zoom with no cut, under
+ * a whoosh, with input blocked meanwhile: the outgoing level plays alone, then
+ * both are drawn and crossfaded, framed identically, then the incoming one
+ * plays alone.
  *
- * Galaxy ↔ system is seamless: the galaxy camera dives at the star while the
+ * Galaxy ↔ system: the galaxy camera dives at the star while the
  * UFO shrinks into it and a close-up of the system's star(s) grows out of its
  * dot; then both levels are drawn and crossfaded, framed identically (same
  * distance in each level's units, the view turned by the system's galactic
  * tilt), and the system camera zooms on while turning back to its own orbit
  * and over to the UFO, which grows back. Zooming out is the same in reverse.
- * Planet transitions fade through black: the old camera keeps zooming while
- * the screen fades out, the levels swap, and the new camera zooms on while it
- * fades back in. A global entity: it runs before the active level each frame.
+ * System ↔ planet works the same way, framed on the body: the planet level
+ * shows the same globe (in its own units and spinning frame), with the rest
+ * of the system as its sky. A global entity: it runs before the active level
+ * each frame.
  */
 export class SceneManager implements Entity {
   readonly galaxyLevel: GalaxyLevel;
@@ -81,14 +75,13 @@ export class SceneManager implements Entity {
   private _planetLevel: PlanetLevel | null = null;
   private readonly side = new THREE.Vector3();
   private readonly tooltip = new Tooltip();
-  private readonly fade = new Fade();
-  private phase: ActivePhase | null = null;
-  private elapsed = 0;
   private seamless: SeamlessTransition | null = null;
   // Scratch for the seamless zoom (live: the cameras read them every frame).
   private readonly view = new THREE.Quaternion();
   private readonly rotation = new THREE.Quaternion();
   private readonly direction = new THREE.Vector3();
+  /** The visited body's spin, from the planet level's frame (see Planet.spinAt). */
+  private readonly planetSpin = (time: number) => this._planetLevel?.frame.spinAt(time) ?? 0;
 
   constructor(
     private readonly game: Game,
@@ -119,7 +112,7 @@ export class SceneManager implements Entity {
   }
 
   get transitioning(): boolean {
-    return this.phase !== null || this.seamless !== null;
+    return this.seamless !== null;
   }
 
   /** The incoming level's weight while two levels are crossfaded, else null (for tests). */
@@ -148,9 +141,10 @@ export class SceneManager implements Entity {
     this.beginSeamless({
       zoom: this.seamlessZoom(from.zoom, handover, GALAXY_VIEW_DISTANCE / scale),
       outgoing: system,
+      incoming: galaxy,
       apply: (s) => {
         if (s.blend < 1) {
-          from.setFocus(BARYCENTRE, s.lead);
+          from.setFocus(ORIGIN, s.lead);
           from.setDistance(s.distance);
           system.ship.setScale(1 - s.lead);
         }
@@ -205,6 +199,7 @@ export class SceneManager implements Entity {
     this.beginSeamless({
       zoom: this.seamlessZoom(from.zoom / scale, handover, ARRIVAL_DISTANCE),
       outgoing: galaxy,
+      incoming: system,
       apply: (s) => {
         if (s.blend < 1) {
           // The camera follows the ship into the star.
@@ -212,7 +207,7 @@ export class SceneManager implements Entity {
           galaxy.setDive(s.lead);
         }
         if (s.blend > 0) {
-          to.setFocus(BARYCENTRE, 1 - s.tail);
+          to.setFocus(ORIGIN, 1 - s.tail);
           to.setDistance(s.distance);
           to.setView(matchView(), 1 - s.tail);
           system.ship.setScale(s.tail);
@@ -237,83 +232,119 @@ export class SceneManager implements Entity {
 
   /**
    * System → low orbit over `body`, by default the planet or moon the ship is
-   * parked at (or right next to). The camera flies at the body, not the ship,
-   * as the screen fades. Does nothing away from planets.
+   * parked at (or right next to). Does nothing away from planets. The camera
+   * flies at the body as the UFO shrinks away, then the planet level (built
+   * as the zoom starts) takes over, framed identically through the body
+   * frame, and zooms on down to the UFO, which grows back above the part of
+   * the globe the camera was looking at.
    */
   toPlanet(body: Planet | null = this._systemLevel.approachableBody()): void {
     if (this.transitioning || this.mode !== 'system' || !body) return;
     const system = this._systemLevel;
-    this.sfx.play('transitionIn');
     const from = system.orbit;
-    this.begin({
-      orbit: from,
-      from: from.zoom,
-      to: body.radius * PLANET_CLOSE_RADII,
-      duration: OUT_SECONDS,
-      fadeFrom: 0,
-      fadeTo: 1,
-      tick: (u) => from.setFocus(body.renderPosition, u),
-      then: () => {
-        from.setFocus(null);
-        // Arrive over the side of the body the ship was on.
-        this.side.subVectors(system.ship.object.position, body.renderPosition);
-        const level = this.createPlanet(body, this.side);
+    const camera = this.game.camera;
+    const handover = planetHandoverIn(body.radius, camera.position.distanceTo(body.renderPosition));
+    // Arrive under the camera: its orbit keeps its direction while it flies at the body.
+    const side = this.side.copy(BACK).applyQuaternion(from.orientation(this.view));
+    const level = this.createPlanet(body, side);
+    const to = level.orbit;
+    const { frame } = level;
+    const scale = frame.scale;
+    // Body frame from system space.
+    const matchView = () => from.orientation(this.view).premultiply(frame.inverse);
+    this.sfx.play('transitionIn');
+    this.beginSeamless({
+      zoom: this.planetZoom(from.zoom, handover, PLANET_VIEW_DISTANCE / scale),
+      outgoing: system,
+      incoming: level,
+      apply: (s) => {
+        if (s.blend < 1) {
+          from.setFocus(body.renderPosition, s.lead);
+          from.setDistance(s.distance);
+          system.ship.setScale(1 - s.lead);
+        }
+        if (s.blend > 0) {
+          to.setFocus(ORIGIN, 1 - s.tail);
+          to.setDistance(s.distance * scale);
+          to.setView(matchView(), 1 - s.tail);
+          level.ship.setScale(s.tail);
+        }
+        // Both show the same globe: the system's turns with the planet level's (slower) spin.
+        body.spinAt = s.blend > 0 && s.blend < 1 ? this.planetSpin : null;
+      },
+      swap: () => {
+        // The system ran on during the lead: start the planet level's clock and spin from here.
+        level.restart(system.world.time, side);
         this.game.setLevel(level);
-        const to = level.orbit;
-        return {
-          orbit: to,
-          from: planetCameraParams.maxDistance,
-          to: PLANET_VIEW_DISTANCE,
-          duration: IN_SECONDS,
-          fadeFrom: 1,
-          fadeTo: 0,
-          then: () => (to.zoomTo(PLANET_VIEW_DISTANCE), null),
-        };
+        // Settle behind the ship facing the way the screen's top pointed (the camera looks down on it now).
+        to.lookFrom(this.direction.set(0, -1, 0).applyQuaternion(matchView()), true);
+      },
+      finish: () => {
+        body.spinAt = null;
+        from.setFocus(null);
+        system.ship.setScale(1);
+        to.setFocus(null);
+        to.setView(null);
+        to.zoomTo(PLANET_VIEW_DISTANCE);
+        level.ship.setScale(1);
       },
     });
   }
 
   /**
    * Low orbit → back to the system, which catches up with the time spent at
-   * the planet. The ship reappears parked beside the body, on the side it
-   * was flying over, and the camera pulls back from the body to the ship.
+   * the planet. The planet camera pulls back to take in the globe as the UFO
+   * shrinks away, the system takes over framed identically, and its camera
+   * pulls on back and over to the ship, parked beside the body on the side it
+   * was flying over.
    */
   leavePlanet(): void {
     const planet = this._planetLevel;
     if (this.transitioning || !planet || this.mode !== 'planet') return;
+    const system = this._systemLevel;
+    const { body, frame } = planet;
     const from = planet.orbit;
+    const to = system.orbit;
+    const scale = frame.scale;
+    const handover = planetHandoverOut(body.radius, from.zoom / scale);
+    const end = Math.max(ARRIVAL_DISTANCE / 2, body.radius * 3);
+    // System space from the body frame.
+    const matchView = () => from.orientation(this.view).premultiply(frame.quaternion);
     this.sfx.play('transitionOut');
-    this.begin({
-      orbit: from,
-      from: from.zoom,
-      to: from.zoom * PLANET_LEAVE_ZOOM,
-      duration: OUT_SECONDS,
-      fadeFrom: 0,
-      fadeTo: 1,
-      then: () => {
-        const system = this._systemLevel;
-        const { body } = planet;
+    this.beginSeamless({
+      zoom: this.planetZoom(from.zoom / scale, handover, end),
+      outgoing: planet,
+      incoming: system,
+      apply: (s) => {
+        if (s.blend < 1) {
+          from.setFocus(ORIGIN, s.lead);
+          from.setDistance(s.distance * scale);
+          planet.ship.setScale(1 - s.lead);
+        }
+        if (s.blend > 0) {
+          to.setFocus(body.renderPosition, 1 - s.tail);
+          to.setDistance(s.distance);
+          to.setView(matchView(), 1 - s.tail);
+          system.ship.setScale(s.tail);
+        }
+        body.spinAt = s.blend > 0 && s.blend < 1 ? this.planetSpin : null;
+      },
+      swap: () => {
         system.world.setTime(planet.time);
-        body.spinAngle = planet.frame.spinAngle;
+        body.spinAngle = frame.spinAngle;
         planet.exitSide(this.side);
         system.ship.parkAt(body, this.side);
-        const to = system.orbit;
-        // Look past the ship at the body, then pull back and over to the ship.
-        to.lookFrom(this.side);
-        to.setFocus(body.renderPosition, 1);
         this.game.setLevel(system);
+        system.eye.settleNext();
+        to.lookFrom(this.direction.copy(BACK).applyQuaternion(matchView()));
+      },
+      finish: () => {
+        body.spinAt = null;
         this.dropPlanet();
-        const distance = Math.max(ARRIVAL_DISTANCE / 2, body.radius * 3);
-        return {
-          orbit: to,
-          from: body.radius * PLANET_CLOSE_RADII,
-          to: distance,
-          duration: IN_SECONDS,
-          fadeFrom: 1,
-          fadeTo: 0,
-          tick: (u) => to.setFocus(body.renderPosition, 1 - u),
-          then: () => (to.setFocus(null), to.zoomTo(distance), null),
-        };
+        to.setFocus(null);
+        to.setView(null);
+        to.zoomTo(end);
+        system.ship.setScale(1);
       },
     });
   }
@@ -324,22 +355,7 @@ export class SceneManager implements Entity {
       const body = this._systemLevel.bodyInReach();
       if (body) this.toPlanet(body);
     }
-    if (this.seamless) {
-      this.stepSeamless(frameDt);
-      return;
-    }
-    const phase = this.phase;
-    if (!phase) return;
-    this.elapsed += frameDt;
-    const { distance, fade } = samplePhase(phase, this.elapsed);
-    phase.orbit.setDistance(distance);
-    phase.tick?.(ease(phase.duration > 0 ? this.elapsed / phase.duration : 1));
-    this.fade.set(fade);
-    if (this.elapsed < phase.duration) return;
-
-    this.elapsed = 0;
-    this.phase = phase.then();
-    if (!this.phase) this.game.input.blocked = false;
+    if (this.seamless) this.stepSeamless(frameDt);
   }
 
   dispose(): void {
@@ -353,15 +369,24 @@ export class SceneManager implements Entity {
     return { lead, overlap, tail, start, handover, end };
   }
 
-  private beginSeamless(t: Omit<SeamlessTransition, 'elapsed' | 'swapped'>): void {
-    this.seamless = { ...t, elapsed: 0, swapped: false };
+  private planetZoom(start: number, handover: number, end: number): SeamlessZoom {
+    const { lead, overlap, tail } = planetZoomParams;
+    return { lead, overlap, tail, start, handover, end };
+  }
+
+  private beginSeamless(t: Omit<SeamlessTransition, 'elapsed' | 'swapped' | 'started'>): void {
+    this.seamless = { ...t, elapsed: 0, swapped: false, started: false };
     this.game.input.blocked = true;
     t.apply(sampleSeamlessZoom(t.zoom, 0));
+    // Compile the incoming level's shaders now, not on its first frame mid-crossfade (a visible stall).
+    this.game.renderer.compile(t.incoming.scene, this.game.camera);
   }
 
   private stepSeamless(frameDt: number): void {
     const t = this.seamless!;
-    t.elapsed += frameDt;
+    // The first frame's time went into setting the zoom up (building a level, compiling): don't skip ahead by it.
+    if (t.started) t.elapsed += frameDt;
+    t.started = true;
     const s = sampleSeamlessZoom(t.zoom, t.elapsed);
     if (!t.swapped && s.blend > 0) {
       t.swapped = true;
@@ -374,12 +399,6 @@ export class SceneManager implements Entity {
     t.finish();
     this.seamless = null;
     this.game.input.blocked = false;
-  }
-
-  private begin(phase: ActivePhase): void {
-    this.phase = phase;
-    this.elapsed = 0;
-    this.game.input.blocked = true;
   }
 
   private createPlanet(body: Planet, side: THREE.Vector3): PlanetLevel {

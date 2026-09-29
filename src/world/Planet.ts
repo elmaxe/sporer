@@ -42,6 +42,12 @@ export class Planet implements Entity, CelestialBody {
   readonly object = new THREE.Group();
   readonly position = new THREE.Vector3();
   readonly velocity = new THREE.Vector3();
+  /**
+   * When set, the surface's spin is this function of the system (render)
+   * time instead of turning at the body's own rate, e.g. to follow the planet
+   * level's slower spin while both show the same globe.
+   */
+  spinAt: ((time: number) => number) | null = null;
   private readonly surface: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
   private readonly body: RAPIER.RigidBody;
   private readonly prev = new THREE.Vector3();

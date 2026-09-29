@@ -13,6 +13,7 @@ export class PlanetHud implements Entity {
   private readonly targetEl = document.getElementById('hud-target')!;
   private readonly helpEl = document.getElementById('hud-help')!;
   private sinceRefresh = REFRESH_SECONDS;
+  private active = false;
 
   constructor(
     private readonly ship: PlanetShip,
@@ -21,12 +22,19 @@ export class PlanetHud implements Entity {
   ) {}
 
   activate(): void {
+    this.active = true;
     this.locationEl.textContent = `${this.location} · low orbit`;
     this.helpEl.textContent = HELP;
     this.sinceRefresh = REFRESH_SECONDS;
   }
 
+  deactivate(): void {
+    this.active = false;
+  }
+
   update(frameDt: number): void {
+    // Still updated while crossfading out, but the DOM belongs to the level taking over.
+    if (!this.active) return;
     this.sinceRefresh += frameDt;
     if (this.sinceRefresh < REFRESH_SECONDS) return;
     this.sinceRefresh = 0;

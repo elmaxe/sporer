@@ -153,11 +153,21 @@ export class OrbitCamera implements Entity {
     return out.setFromRotationMatrix(this.look.lookAt(this.offset, ORIGIN, this.options.up ?? WORLD_UP));
   }
 
-  /** Jumps to the yaw and pitch that put the camera in world direction `dir` from the centre. */
-  lookFrom(dir: THREE.Vector3): void {
-    const d = this.offset.copy(dir).normalize();
+  /**
+   * Jumps to the yaw and pitch that put the camera in world direction `dir`
+   * from the centre (measured against the live `up` if there is one). With
+   * `keepPitch`, only the heading is taken from `dir`.
+   */
+  lookFrom(dir: THREE.Vector3, keepPitch = false): void {
+    const d = this.back.copy(dir).normalize();
+    const { up } = this.options;
+    if (up) {
+      // Into the yaw/pitch frame as the next update will carry it to `up`.
+      const frame = this.orient.copy(this.frame).premultiply(this.turn.setFromUnitVectors(this.frameUp, up));
+      d.applyQuaternion(frame.invert());
+    }
     this.yaw = this.targetYaw = Math.atan2(d.x, d.z);
-    this.pitch = this.targetPitch = THREE.MathUtils.clamp(Math.asin(d.y), this.minPitch, MAX_PITCH);
+    if (!keepPitch) this.pitch = this.targetPitch = THREE.MathUtils.clamp(Math.asin(d.y), this.minPitch, MAX_PITCH);
   }
 
   /** Smoothly zooms to `distance` (clamped to the limits). */

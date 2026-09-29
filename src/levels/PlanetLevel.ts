@@ -144,7 +144,21 @@ export class PlanetLevel extends Level {
     renderer.autoClear = true;
   }
 
+  /**
+   * Restarts the level's clock at system time `time` and puts the ship above
+   * `side` (a system-space direction from the body), e.g. when the level was
+   * built at the start of a zoom and takes over a moment later.
+   */
+  restart(time: number, side: THREE.Vector3): void {
+    this.frame.restart(time);
+    this.ship.placeAt(this.frame.toLocalDirection(side, this.start));
+  }
+
   override enter(): void {
     this.hud.activate();
+  }
+
+  override exit(): void {
+    this.hud.deactivate();
   }
 }

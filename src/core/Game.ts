@@ -23,6 +23,8 @@ export class Game {
   readonly input: Input;
   /** Called after each frame is drawn, before it's shown (for automation, e.g. reading pixels). */
   afterFrame: (() => void) | null = null;
+  /** Shows only one side of a running crossfade (for inspecting a handover, e.g. while stopped). */
+  crossfadeSolo: 'outgoing' | 'incoming' | null = null;
 
   private _level: Level | null = null;
   /** The outgoing level while crossfading to the active one, and the active one's weight. */
@@ -98,6 +100,11 @@ export class Game {
     this.renderer.setAnimationLoop(null);
   }
 
+  /** Draws the frame again without advancing time (e.g. while stopped, to inspect it). */
+  redraw(): void {
+    this.frame(Math.max(this.lastTime, 0) * 1000);
+  }
+
   /** Disposes the global entities (which own the levels), then the renderer. */
   dispose(): void {
     this.stop();
@@ -143,7 +150,10 @@ export class Game {
       level.update(frameDt, alpha);
       level.render(this.renderer, this.camera);
     }
-    if (from) this.crossfade.draw(this.renderer, 1 - this.fadeWeight);
+    if (from) {
+      const solo = this.crossfadeSolo;
+      this.crossfade.draw(this.renderer, solo === 'outgoing' ? 1 : solo === 'incoming' ? 0 : 1 - this.fadeWeight);
+    }
     this.afterFrame?.();
     this.debug.endFrame();
   };

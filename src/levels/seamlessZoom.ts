@@ -1,4 +1,3 @@
-import { ease } from './transition';
 
 /*
  * The seamless galaxy ↔ system zoom as a pure timeline. Both levels share
@@ -24,6 +23,21 @@ export const seamlessZoomParams = {
   galaxyHandover: 3,
 };
 
+/** The system ↔ planet zoom (the same timeline, framed on the body instead of the star). */
+export const planetZoomParams = {
+  lead: 0.9,
+  overlap: 0.45,
+  tail: 0.85,
+  /** Angular radius (radians) of the body at the handover, going down: big, but the whole globe in view. */
+  handoverAngle: 0.3,
+  /** Never hand over closer than this many radii from the body's centre. */
+  minRadii: 1.3,
+  /** Going down, the handover is at most this fraction of the camera's starting distance from the body. */
+  inFraction: 0.7,
+  /** Going up, the handover is at least this many times the planet camera's starting distance. */
+  outFactor: 1.3,
+};
+
 export interface SeamlessZoom {
   lead: number;
   overlap: number;
@@ -46,6 +60,12 @@ export interface SeamlessSample {
   done: boolean;
 }
 
+/** Ease-in-out on [0, 1]. */
+export function ease(u: number): number {
+  const t = Math.min(1, Math.max(0, u));
+  return t * t * (3 - 2 * t);
+}
+
 /** Total length in seconds. */
 export function zoomDuration(z: SeamlessZoom): number {
   return z.lead + z.overlap + z.tail;
@@ -66,6 +86,21 @@ export function galaxyScale(handover: number, params = seamlessZoomParams): numb
   return params.galaxyHandover / handover;
 }
 
+/**
+ * Camera distance from a body's centre for the handover going down to it
+ * (system units), with the camera starting `cameraDistance` from it: the body
+ * at `handoverAngle`, but never farther than the camera already is.
+ */
+export function planetHandoverIn(radius: number, cameraDistance: number, params = planetZoomParams): number {
+  const framed = radius / Math.sin(params.handoverAngle);
+  return Math.max(params.minRadii * radius, Math.min(framed, params.inFraction * cameraDistance));
+}
+
+/** Going back up, from a planet camera starting `start` from its ship (system units): the same framing or farther. */
+export function planetHandoverOut(radius: number, start: number, params = planetZoomParams): number {
+  return Math.max(radius / Math.sin(params.handoverAngle), params.outFactor * start, params.minRadii * radius);
+}
+
 /** Where the timeline is `t` seconds in. */
 export function sampleSeamlessZoom(z: SeamlessZoom, t: number): SeamlessSample {
   const total = zoomDuration(z);
@@ -81,8 +116,10 @@ export function sampleSeamlessZoom(z: SeamlessZoom, t: number): SeamlessSample {
 /**
  * Log distance: two cubic Hermite pieces meeting at the handover, at rest at
  * both ends. The slope at the handover is the average of the two pieces'
- * mean slopes, limited so neither piece overshoots (Fritsch–Carlson), and
- * zero if the zoom turns round there.
+ * mean slopes, limited so neither piece overshoots (Fritsch–Carlson). If the
+ * lead heads the other way (it measures from a centre still moving towards
+ * the one the tail uses, e.g. from the ship to a big planet), the tail's own
+ * slope is used, so the camera doesn't stop at the handover.
  */
 function logDistance(z: SeamlessZoom, t: number): number {
   const l0 = Math.log(z.start);
@@ -92,7 +129,8 @@ function logDistance(z: SeamlessZoom, t: number): number {
   const t1 = zoomDuration(z);
   const m1 = th > 0 ? (lh - l0) / th : 0;
   const m2 = t1 > th ? (l1 - lh) / (t1 - th) : 0;
-  const slope = m1 * m2 > 0 ? Math.sign(m1) * Math.min(Math.abs(m1 + m2) / 2, 3 * Math.abs(m1), 3 * Math.abs(m2)) : 0;
+  const slope =
+    m1 * m2 > 0 ? Math.sign(m1) * Math.min(Math.abs(m1 + m2) / 2, 3 * Math.abs(m1), 3 * Math.abs(m2)) : m2;
   return t < th ? hermite(l0, 0, lh, slope, 0, th, t) : hermite(lh, slope, l1, 0, th, t1, t);
 }
 
