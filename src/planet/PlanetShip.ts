@@ -20,7 +20,7 @@ export const planetShipParams = {
 export const planetAutopilotParams: ArriveParams = {
   maxSpeed: 60,
   accel: 120,
-  gain: 1.2,
+  gain: 8,
   damping: planetShipParams.damping,
 };
 
@@ -101,7 +101,7 @@ export class PlanetShip implements Entity {
     const a = debug.folder('Planet autopilot');
     a?.add(planetAutopilotParams, 'maxSpeed', 10, 300);
     a?.add(planetAutopilotParams, 'accel', 10, 600);
-    a?.add(planetAutopilotParams, 'gain', 0.1, 5);
+    a?.add(planetAutopilotParams, 'gain', 1, 20);
   }
 
   /** Current speed in units per second. */

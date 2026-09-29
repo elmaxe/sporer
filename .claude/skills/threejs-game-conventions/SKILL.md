@@ -27,7 +27,7 @@ Browser game: Vite + TypeScript (strict), `three`, `@dimforge/rapier3d-compat` p
 | `tests/` | Vitest unit tests for pure logic. |
 
 | `src/planet/` | Planet-level (low orbit) entities: `PlanetFrame` (the level's clock and body frame ↔ system space), `PlanetGlobe`, `LocalMoons`, `PlanetLights`, `PlanetShip` (scripted, no physics), `PlanetPicker`, `PlanetHud`, and pure maths in `frame.ts` (body frame, sky sizes, light direction) and `surfaceMotion.ts` (great-circle steering). |
-| `src/galaxy/` | Galaxy-map entities: `GalaxyMap` (all stars in one `Points` shader), `GalaxyShip` (scripted travel), `GalaxyPicker`, `GalaxyHud`, pure `pickPoint` / `galaxyStarSize`. |
+| `src/galaxy/` | Galaxy-map entities: `GalaxyMap` (all stars in one `Points` shader, one dot per binary member, twinkle), `GalaxyDust`, `GalaxyShip` (scripted travel), `GalaxyPicker`, `GalaxyHud`, `GalaxySpin` (turns the level's `root`), `DistantGalaxies` (procedural sky of other galaxies), pure `pickPoint` / `galaxyStarSize` / `binaryLayout`. The stars, glows, dust and ship live in `GalaxyLevel.root`, which rotates: work in its local (galaxy) coordinates and convert with `root.matrixWorld` for anything in world space (picking rays, marker rings, the camera via `getWorldPosition`). |
 
 New feature areas get their own folder under `src/` (e.g. `src/combat/`, `src/audio/`).
 
@@ -97,7 +97,7 @@ Debug is on in `npm run dev` and in any build with `?debug` in the URL. lil-gui 
 
 Use `input.isDown('KeyW')` / `input.axis('KeyA', 'KeyD')` (codes, not `key`). Mouse: `input.pointer` (NDC + client coords, live object), `consumeClick()` (left press that moved < 5 px), `consumeDrag()` (left/right drag pixels), `consumeWheel()` (pixels, + = zoom out). No pointer lock. Avoid Ctrl-combos (Ctrl+W closes the tab).
 
-Current controls (Spore-style): left-click a star/planet/moon to autopilot there and park beside it, or empty space to fly to that point on the ship's plane. Scroll zooms, drag rotates the camera. WASD nudges relative to the camera (cancels the autopilot), E/Q up/down, Shift boosts (also the autopilot). Scrolling in past min zoom while parked at a planet or moon (or flying into one) descends to its low orbit; there, clicking the globe flies the great circle to that point and scrolling out past max returns to the system.
+Current controls (Spore-style): left-click a star/planet/moon to autopilot there and park beside it, or empty space to fly to that point on the ship's plane. Scroll zooms, drag rotates the camera. WASD nudges relative to the camera (cancels the autopilot), E/Q up/down, Shift boosts (also the autopilot). Scrolling in past min zoom while parked at a planet or moon (or flying into one) descends to its low orbit. While the autopilot (or a galaxy jump) is under way, scrolling in is held and played out on arrival (`holdZoomIn` in `OrbitCamera`), so you zoom into the destination rather than something passed on the way; there, clicking the globe flies the great circle to that point and scrolling out past max returns to the system.
 
 Visual-only entities that read the camera (`Picker`, `TargetMarker`, `Hud`) are added after `OrbitCamera`, so they see this frame's camera. Billboards should `lookAt(camera.position)` rather than copy the camera quaternion (or use a `Sprite`): facing the view plane makes them poke through spheres when off-centre.
 
