@@ -1,3 +1,4 @@
+import { generateComets, type CometData } from './comets';
 import type { GalaxyData, StarRef } from './galaxy';
 import { romanNumeral } from './names';
 import type { Orbit } from './orbit';
@@ -73,6 +74,8 @@ export interface SystemData {
   starZone: number;
   /** Distance with Earth-like temperatures. Drives planet types. */
   habitableRadius: number;
+  /** On long elliptical orbits; scenery only (not visitable). */
+  comets: CometData[];
 }
 
 /** G-class period at the reference distance; other orbits follow Kepler's third law. */
@@ -153,7 +156,17 @@ export function generateSystem(ref: StarRef): SystemData {
     edge = orbitRadius + extent;
   }
 
-  return { id: ref.id, name: ref.name, seed: ref.seed, stars, planets, starZone, habitableRadius };
+  // Own stream, so adding comets changed nothing above.
+  const last = planets[planets.length - 1];
+  const comets = generateComets(rng.fork('comets'), {
+    systemName: ref.name,
+    starZone,
+    starRadius: Math.max(...stars.map((s) => s.radius)),
+    outerEdge: last ? last.orbit.radius + last.extent : 0,
+    period: (a) => keplerPeriod(a, totalMass),
+  });
+
+  return { id: ref.id, name: ref.name, seed: ref.seed, stars, planets, starZone, habitableRadius, comets };
 }
 
 /** Where to put the player when arriving: in the first gap between planets, clear of moons. */
@@ -287,4 +300,4 @@ export function describePlanet(type: PlanetType): string {
 }
 
 // Re-exported so callers can import all generation types from one place.
-export type { PlanetStyle, PlanetType, MoonType };
+export type { CometData, PlanetStyle, PlanetType, MoonType };
