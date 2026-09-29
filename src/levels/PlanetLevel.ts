@@ -14,6 +14,7 @@ import { PlanetPicker } from '../planet/PlanetPicker';
 import { PlanetShip } from '../planet/PlanetShip';
 import { maxViewDistance, travelScale } from '../planet/frame';
 import { OrbitCamera, type OrbitParams } from '../player/OrbitCamera';
+import { flightAltitude, minPitchAt, zoomFraction } from '../player/zoomCurve';
 import type { Planet } from '../world/Planet';
 import { Level } from './Level';
 import type { SystemLevel } from './SystemLevel';
@@ -29,8 +30,6 @@ export const planetCameraParams: OrbitParams = {
 
 /** Where the camera settles after descending. */
 export const PLANET_VIEW_DISTANCE = 45;
-/** How high above the highest terrain the ship flies. */
-const ALTITUDE = 12;
 /** Bodies in the sky are drawn at least this many pixels in radius. */
 const SKY_MIN_PIXELS = 1.5;
 /** The sky camera's clipping range, in system units. */
@@ -65,6 +64,9 @@ export class PlanetLevel extends Level {
   private readonly hidden: readonly Planet[];
   private readonly skyCamera = new THREE.PerspectiveCamera(65, 1, SKY_NEAR, SKY_FAR);
   private readonly start = new THREE.Vector3();
+  private readonly cameraParams: OrbitParams;
+  /** Radius of the highest terrain: the ship's altitude is measured from it. */
+  private readonly top: number;
 
   constructor(
     private readonly system: SystemLevel,
@@ -101,15 +103,17 @@ export class PlanetLevel extends Level {
 
     this.frame.toLocalDirection(side, this.start);
     this.radius = globe.radius;
+    this.top = globe.top;
+    this.cameraParams = { ...planetCameraParams, maxDistance: maxViewDistance(globe.radius, planetCameraParams.maxDistance) };
     this.ship = this.add(
-      new PlanetShip(this.scene, input, camera, debug, globe.top + ALTITUDE, this.start, travelScale(globe.radius)),
+      new PlanetShip(this.scene, input, camera, debug, this.flyingRadius(PLANET_VIEW_DISTANCE), this.start, travelScale(globe.radius)),
     );
     this.orbit = this.add(
       new OrbitCamera(
         camera,
         this.ship.object,
         input,
-        { ...planetCameraParams, maxDistance: maxViewDistance(globe.radius, planetCameraParams.maxDistance) },
+        this.cameraParams,
         {
           distance: PLANET_VIEW_DISTANCE,
           up: this.ship.up,
@@ -126,6 +130,21 @@ export class PlanetLevel extends Level {
     const { climate } = config;
     const detail = climate ? describeClimateDetail(climate) + (geysers ? ` · ${describeGeysers(geysers.kind)}` : '') : null;
     this.hud = this.add(new PlanetHud(this.ship, `${body.name} · ${body.description}`, input, detail));
+  }
+
+  /** The ship's distance from the centre with the camera `view` from it: the zoom sets the altitude. */
+  flyingRadius(view: number): number {
+    const { minDistance, maxDistance } = this.cameraParams;
+    return this.top + flightAltitude(zoomFraction(view, minDistance, maxDistance), this.radius);
+  }
+
+  override update(frameDt: number, alpha: number): void {
+    super.update(frameDt, alpha);
+    if (this.zoomLocked) return;
+    // Scrolling lifts or lowers the ship, and high up the camera tips over to look down on the globe.
+    const { minDistance, maxDistance } = this.cameraParams;
+    this.ship.setRadius(this.flyingRadius(this.orbit.zoom));
+    this.orbit.setMinPitch(minPitchAt(zoomFraction(this.orbit.zoom, minDistance, maxDistance)));
   }
 
   /** System time here; the system level catches up to it on return. */

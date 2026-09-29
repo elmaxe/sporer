@@ -116,4 +116,48 @@ describe('detourWaypoint', () => {
     expect(closest).toBeGreaterThan(sun.radius + 2); // the ship's own radius is 2
     expect(dist(pos, goal)).toBeLessThan(1);
   });
+
+  /** Flies from `start` to `goal` around `obstacle` and returns the closest pass to its surface and the miss. */
+  function flyAround(start: Vec3Like, goal: Vec3Like, obstacle: { position: Vec3Like; radius: number }) {
+    const pos = { ...start };
+    const vel = v3();
+    const aim = v3();
+    const impulse = v3();
+    let closest = Infinity;
+    for (let i = 0; i < 20 / DT; i++) {
+      const detour = detourWaypoint(pos, goal, [obstacle], 8, aim);
+      const remaining = detour ? dist(pos, aim) + dist(aim, goal) : undefined;
+      arriveImpulse(pos, vel, detour ? aim : goal, v3(), params, DT, impulse, remaining);
+      for (const k of ['x', 'y', 'z'] as const) {
+        vel[k] = (vel[k] + impulse[k]) / (1 + params.damping * DT);
+        pos[k] += vel[k] * DT;
+      }
+      closest = Math.min(closest, dist(pos, obstacle.position) - obstacle.radius);
+    }
+    return { closest, miss: dist(pos, goal) };
+  }
+
+  it('flies round a planet it is parked beside, to a moon on the far side', () => {
+    // Parked at the standoff (radius + 10); the moon's parking spot is behind the planet.
+    const planet = { position: v3(0, 0, 0), radius: 40 };
+    const { closest, miss } = flyAround(v3(50, 0, 0), v3(-75, 0, 3), planet);
+    // Flying into a body (within 3 of its surface) descends to it.
+    expect(closest).toBeGreaterThan(3);
+    expect(miss).toBeLessThan(1);
+  });
+
+  it('flies round a big planet from right beside it', () => {
+    const giant = { position: v3(0, 20, 0), radius: 120 };
+    for (const goal of [v3(-140, 20, 0), v3(0, 20, -150), v3(-100, 110, 30)]) {
+      const { closest, miss } = flyAround(v3(130, 20, 0), goal, giant);
+      expect(closest).toBeGreaterThan(3);
+      expect(miss).toBeLessThan(1);
+    }
+  });
+
+  it('detours round an obstacle even when the ship is inside its clearance', () => {
+    const planet = { position: v3(0, 0, 0), radius: 40 };
+    // 5 from the surface (inside the 8 of clearance), destination straight through it.
+    expect(detourWaypoint(v3(45, 0, 0), v3(-60, 0, 0), [planet], 8, v3())).toBe(true);
+  });
 });

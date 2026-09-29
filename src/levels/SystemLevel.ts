@@ -122,10 +122,19 @@ export class SystemLevel extends Level {
     return best;
   }
 
-  /** A planet or moon the ship is flying into (all but touching its surface), if any. */
+  /**
+   * A planet or moon the ship is flying into (all but touching its surface),
+   * if any. While the autopilot has an order, only the body it's flying to
+   * or parked at counts: it steers round the others on the way.
+   */
   bodyInReach(): Planet | null {
-    for (const body of this.world.planets) if (this.touching(body)) return body;
-    for (const body of this.world.moons) if (this.touching(body)) return body;
+    const only = this.ship.autopilotActive ? this.ship.targetBody : null;
+    for (const bodies of [this.world.planets, this.world.moons]) {
+      for (const body of bodies) {
+        if (this.ship.autopilotActive && body !== only) continue;
+        if (this.touching(body)) return body;
+      }
+    }
     return null;
   }
 
@@ -157,6 +166,12 @@ export class SystemLevel extends Level {
     this.ship.object.visible = shipVisible;
     // This level may be drawn itself in the same frame (crossfading with the planet level).
     this.world.unpose();
+  }
+
+  override update(frameDt: number, alpha: number): void {
+    super.update(frameDt, alpha);
+    // The zoom sets how far from the body it's at the ship parks (read in the next fixed step).
+    if (!this.zoomLocked) this.ship.viewDistance = this.orbit.zoom;
   }
 
   /**

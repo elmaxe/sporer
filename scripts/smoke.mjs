@@ -2,10 +2,12 @@
 // Usage: npm run smoke [-- http://localhost:5173/]   (dev server must be running)
 // Checks: W moves the ship along -Z, the autopilot flies back to a point, hovering + clicking
 // the star targets it, and the galaxy loop works (scroll out to the galaxy, click the nearest
-// star, travel, scroll in to its system; the galaxy shows distant galaxies, twinkles, spins and draws binaries
-// as two dots, and picking works while it's turned), a real click on the speaker button starts audio; then the
-// transitions and galaxy travel play their whooshes, and M mutes. Then the planet loop (park at a planet,
-// scroll in to low orbit, click the globe and fly, scroll back out beside it), and again for every planet
+// star, travel, scroll in to its system, where the ship flies in and parks a few star diameters out; the galaxy
+// shows distant galaxies, twinkles, spins and draws binaries as two dots, and picking works while it's turned), a
+// real click on the speaker button starts audio; then the transitions and galaxy travel play their whooshes, and M
+// mutes. Then the planet loop (park at a planet, scroll in to low orbit, click the globe and fly, scroll all the way
+// in and out and check the ship's altitude follows, scroll back out beside it, parked as far out as the zoom says),
+// and again for every planet
 // type, a ringed rocky/icy/lava world and a moon in other systems (skip those with --quick). The system sky has
 // the galaxy band (screenshot looking at the galactic centre) and a smoke trail per planet and moon. Living stars: the
 // surface clock advances and storms have particles under way (and keep animating in the planet level's sky); comets
@@ -121,6 +123,11 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
   r.skyClock = +(skyAfter[1] - skyBefore[1]).toFixed(2);
   r.flewDegrees = await evaluate(`+(planet.ship.direction.angleTo(__start) * 180 / Math.PI).toFixed(1)`);
   r.altitudeOk = await evaluate(`Math.abs(planet.ship.object.position.length() - planet.ship.radius) < 0.5`);
+  // The zoom sets the altitude: all the way in skims the peaks, all the way out climbs to high orbit.
+  await wheel(-50000);
+  await sleep(1500);
+  const altitude = `+(planet.ship.object.position.length() - planet.radius).toFixed(1)`;
+  r.altitude = { low: await evaluate(altitude) };
   r.lava = await evaluate(
     `planet.eruptions && { vents: planet.eruptions.activity.vents.length, events: planet.eruptions.events.length, blobs: planet.eruptions.liveBlobs }`,
   );
@@ -137,12 +144,14 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
 
   await wheel(50000); // to max zoom
   await sleep(1500);
+  r.altitude.high = await evaluate(altitude);
   await wheel(300); // keep scrolling out
   for (let i = 0; i < 20 && (await evaluate(`levels.mode !== 'system' || levels.transitioning`)); i++) await sleep(250);
   r.modeAfter = await evaluate(`levels.mode`);
   r.soundOut = await evaluate(`audio.lastPlayed?.name ?? null`);
   r.parkedAt = await evaluate(`ship.targetBody?.name ?? null`);
-  r.standoffs = await evaluate(`+(ship.object.position.distanceTo(__body.renderPosition) / __body.standoff).toFixed(2)`);
+  // Parked as far from the body as the system camera's zoom puts it.
+  r.standoffs = await evaluate(`+(ship.object.position.distanceTo(__body.renderPosition) / ship.parkDistance(__body)).toFixed(2)`);
   r.ok =
     r.mode === 'planet' &&
     r.sky.bodies === r.expectedSky.bodies &&
@@ -152,6 +161,7 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
     r.skyClock > 0.3 &&
     Math.abs(r.skyStarTime - r.skyClock) < 0.25 &&
     r.altitudeOk &&
+    r.altitude.high > r.altitude.low + 20 &&
     (r.type !== 'lava' || (r.lava && r.lava.vents > 0 && r.lava.events > 0 && r.lava.blobs > 0)) &&
     (r.expectedGeysers ?? null) === (r.geysers?.kind ?? null) &&
     (!r.geysers || (r.geysers.vents > 0 && r.geysers.events > 0 && (r.geysers.erupting === 0 || r.geysers.particles > 0))) &&
@@ -359,6 +369,13 @@ if (started) {
   galaxyLoop.modeAfterZoomIn = await evaluate(`levels.mode`);
   galaxyLoop.to = await evaluate(`system.id`);
   galaxyLoop.shipSpeed = await evaluate(`ship.speed`);
+  // Arriving, the ship flies in from far out and brakes to park a few star diameters from the star.
+  const arrival = `({ target: ship.targetBody?.name ?? null, star: world.stars[0].name, enRoute: ship.enRoute,
+    distance: +ship.object.position.distanceTo(world.stars[0].position).toFixed(0),
+    park: +ship.parkDistance(world.stars[0]).toFixed(0), zone: +system.starZone.toFixed(0) })`;
+  galaxyLoop.arrival = { flying: await evaluate(arrival) };
+  for (let i = 0; i < 60 && (await evaluate(`ship.enRoute`)); i++) await sleep(250);
+  galaxyLoop.arrival.parked = await evaluate(arrival);
   fps = await evaluate(measureFps);
 
   // Audio: a real (trusted) click on the speaker button unlocks audio and opens the volume panel.
@@ -651,6 +668,11 @@ const looped =
   galaxyLoop.handoverShot !== null &&
   galaxyLoop.modeAfterZoomIn === 'system' &&
   galaxyLoop.to === galaxyLoop.clicked.nearest &&
+  galaxyLoop.arrival.flying.target === galaxyLoop.arrival.flying.star &&
+  galaxyLoop.arrival.parked.target === galaxyLoop.arrival.parked.star &&
+  !galaxyLoop.arrival.parked.enRoute &&
+  Math.abs(galaxyLoop.arrival.parked.distance - galaxyLoop.arrival.parked.park) < 3 &&
+  galaxyLoop.arrival.parked.distance > 2 * galaxyLoop.arrival.parked.zone &&
   typeof galaxyLoop.shipSpeed === 'number';
 const sounded =
   started &&
