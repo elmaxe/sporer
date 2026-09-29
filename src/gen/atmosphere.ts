@@ -103,8 +103,8 @@ export function groundDensity(look: AtmosphereLook): number {
 
 type Vec3 = readonly [number, number, number];
 
-/** Samples per half of the ray (the shader uses the same). */
-export const PATH_SAMPLES = 6;
+/** Samples per half of the ray (the shader uses the same): within ~2% of the exact integral, 6 gets 1.5%, 4 3.5%. */
+export const PATH_SAMPLES = 5;
 
 /**
  * Optical depth along a ray from `origin` (planet radii, planet at the origin)

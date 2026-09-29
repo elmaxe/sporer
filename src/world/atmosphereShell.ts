@@ -76,6 +76,8 @@ export function createAtmosphere(
       top: { value: radius * look.top },
       meshRadius: { value: meshRadius },
       scaleHeight: { value: radius * look.scaleHeight },
+      // The density's value at the top, subtracted so it reaches exactly zero there.
+      edge: { value: Math.exp(-(look.top - 1) / look.scaleHeight) },
       density: { value: groundDensity(look) / radius },
       sun: { value: sun.vector },
       sunIsPoint: { value: sun.point ? 1 : 0 },
@@ -100,6 +102,7 @@ export function createAtmosphere(
       uniform float top;
       uniform float meshRadius;
       uniform float scaleHeight;
+      uniform float edge;
       uniform float density;
       uniform vec3 sun;
       uniform float sunIsPoint;
@@ -113,7 +116,6 @@ export function createAtmosphere(
 
       // 1 at the ground, exactly 0 at the top (gen/atmosphere.ts relativeDensity).
       float relativeDensity(float r) {
-        float edge = exp(-(top - radius) / scaleHeight);
         return max(0.0, (exp(-(r - radius) / scaleHeight) - edge) / (1.0 - edge));
       }
 
@@ -153,7 +155,8 @@ export function createAtmosphere(
             float mu = dot(p, L) / r;
             column += w;
             lit += w * smoothstep(-0.3, 0.25, mu);
-            warm += w * exp(-pow((mu - 0.03) / 0.15, 2.0));
+            float band = max(0.0, 1.0 - abs(mu - 0.03) * 5.0);
+            warm += w * band * band;
           }
         }
         if (column <= 0.0) discard;
