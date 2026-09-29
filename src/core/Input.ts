@@ -1,3 +1,5 @@
+import { TouchGestures } from './touch';
+
 /** A press that moves less than this many pixels before release counts as a click. */
 const CLICK_SLOP_PX = 5;
 /** Converts line/page wheel deltas to roughly pixel-sized units. */
@@ -24,9 +26,16 @@ export interface PointerState {
  * (drained with `consumeClick`). Wheel movement accumulates until
  * `consumeWheel`. While `blocked` (e.g. during a level transition) keys read
  * as released and consumers get nothing; input arriving meanwhile is dropped.
+ *
+ * Touch makes the same gestures (see `TouchGestures`): one finger drags or
+ * taps, two fingers pinch as the wheel, and a finger held still is the
+ * hovering pointer. On-screen controls feed keys in as analog values
+ * (`setAnalog`), so `isDown` / `axis` read them like the keyboard.
  */
 export class Input {
   private readonly keys = new Set<string>();
+  /** Analog presses in [0, 1] from on-screen controls, by key code. */
+  private readonly analog = new Map<string, number>();
   private readonly buttons = new Set<number>();
   private readonly pointerState = { ndcX: 0, ndcY: 0, clientX: 0, clientY: 0, inside: false };
 
@@ -39,6 +48,20 @@ export class Input {
   private click: { ndcX: number; ndcY: number } | null = null;
   private readonly delta = { x: 0, y: 0 };
   private _blocked = false;
+  private _touchMode = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+  private readonly gestures = new TouchGestures({
+    drag: (dx, dy) => {
+      this.dragDx += dx;
+      this.dragDy += dy;
+    },
+    zoom: (px) => {
+      this.wheel += px;
+    },
+    tap: (x, y) => {
+      this.setPointer(x, y);
+      this.click = { ndcX: this.pointerState.ndcX, ndcY: this.pointerState.ndcY };
+    },
+  });
 
   constructor(private readonly element: HTMLElement) {
     window.addEventListener('keydown', this.onKeyDown);
@@ -47,6 +70,9 @@ export class Input {
     element.addEventListener('pointerdown', this.onPointerDown);
     window.addEventListener('pointermove', this.onPointerMove);
     window.addEventListener('pointerup', this.onPointerUp);
+    window.addEventListener('pointercancel', this.onPointerCancel);
+    // Seen for presses anywhere (the on-screen controls too), to tell touch from mouse.
+    window.addEventListener('pointerdown', this.onAnyPointerDown, true);
     element.addEventListener('pointerleave', this.onPointerLeave);
     element.addEventListener('wheel', this.onWheel, { passive: false });
     element.addEventListener('contextmenu', this.onContextMenu);
@@ -62,13 +88,26 @@ export class Input {
     this.click = null;
   }
 
-  isDown(code: string): boolean {
-    return !this._blocked && this.keys.has(code);
+  /** True while the player last used touch (starts from whether the device's main pointer is coarse). */
+  get touchMode(): boolean {
+    return this._touchMode;
   }
 
-  /** -1, 0 or 1 from a pair of keys. */
+  isDown(code: string): boolean {
+    return !this._blocked && (this.keys.has(code) || (this.analog.get(code) ?? 0) > 0);
+  }
+
+  /** In [-1, 1] from a pair of keys: -1, 0 or 1 from the keyboard, anything between from analog presses. */
   axis(negative: string, positive: string): number {
-    return (this.isDown(positive) ? 1 : 0) - (this.isDown(negative) ? 1 : 0);
+    if (this._blocked) return 0;
+    const value = (key: string) => (this.keys.has(key) ? 1 : 0) + (this.analog.get(key) ?? 0);
+    return Math.max(-1, Math.min(1, value(positive) - value(negative)));
+  }
+
+  /** Presses key `code` by `amount` in [0, 1] (0 releases it), for on-screen controls. */
+  setAnalog(code: string, amount: number): void {
+    if (amount > 0) this.analog.set(code, Math.min(amount, 1));
+    else this.analog.delete(code);
   }
 
   /** Where the pointer is. The returned object is live and reused. */
@@ -78,7 +117,7 @@ export class Input {
 
   /** True while a button is held and the pointer has moved past the click threshold. */
   get isDragging(): boolean {
-    return this.dragging;
+    return this.dragging || this.gestures.dragging;
   }
 
   /** Drag movement in pixels since the last call. The returned object is reused. */
@@ -111,6 +150,8 @@ export class Input {
     this.element.removeEventListener('pointerdown', this.onPointerDown);
     window.removeEventListener('pointermove', this.onPointerMove);
     window.removeEventListener('pointerup', this.onPointerUp);
+    window.removeEventListener('pointercancel', this.onPointerCancel);
+    window.removeEventListener('pointerdown', this.onAnyPointerDown, true);
     this.element.removeEventListener('pointerleave', this.onPointerLeave);
     this.element.removeEventListener('wheel', this.onWheel);
     this.element.removeEventListener('contextmenu', this.onContextMenu);
@@ -128,9 +169,20 @@ export class Input {
     this.keys.clear();
     this.buttons.clear();
     this.dragging = false;
+    this.gestures.reset();
+  };
+
+  private onAnyPointerDown = (e: PointerEvent) => {
+    this._touchMode = e.pointerType === 'touch';
   };
 
   private onPointerDown = (e: PointerEvent) => {
+    if (e.pointerType === 'touch') {
+      // The first finger is the hovering pointer (hold still on something to see what it is).
+      if (this.gestures.count === 0) this.updatePointer(e);
+      this.gestures.down(e.pointerId, e.clientX, e.clientY);
+      return;
+    }
     if (e.button !== 0 && e.button !== 2) return;
     this.updatePointer(e);
     if (this.buttons.size === 0) {
@@ -142,6 +194,10 @@ export class Input {
   };
 
   private onPointerMove = (e: PointerEvent) => {
+    if (e.pointerType === 'touch') {
+      if (this.gestures.move(e.pointerId, e.clientX, e.clientY) && this.gestures.count === 1) this.updatePointer(e);
+      return;
+    }
     this.updatePointer(e);
     if (this.buttons.size === 0) return;
     if (!this.dragging && Math.hypot(e.clientX - this.pressX, e.clientY - this.pressY) >= CLICK_SLOP_PX) {
@@ -154,10 +210,25 @@ export class Input {
   };
 
   private onPointerUp = (e: PointerEvent) => {
+    if (e.pointerType === 'touch') {
+      this.gestures.up(e.pointerId, e.clientX, e.clientY);
+      // Nothing hovers once the fingers lift.
+      if (this.gestures.count === 0) this.pointerState.inside = false;
+      return;
+    }
     if (!this.buttons.delete(e.button)) return;
     this.updatePointer(e);
     if (e.button === 0 && !this.dragging) this.click = { ndcX: this.pointerState.ndcX, ndcY: this.pointerState.ndcY };
     if (this.buttons.size === 0) this.dragging = false;
+  };
+
+  private onPointerCancel = (e: PointerEvent) => {
+    if (e.pointerType === 'touch') {
+      this.gestures.up(e.pointerId, e.clientX, e.clientY, true);
+      if (this.gestures.count === 0) this.pointerState.inside = false;
+    } else if (this.buttons.delete(e.button) && this.buttons.size === 0) {
+      this.dragging = false;
+    }
   };
 
   private onPointerLeave = () => {
@@ -175,12 +246,16 @@ export class Input {
   };
 
   private updatePointer(e: PointerEvent): void {
+    this.setPointer(e.clientX, e.clientY);
+  }
+
+  private setPointer(clientX: number, clientY: number): void {
     const rect = this.element.getBoundingClientRect();
     const p = this.pointerState;
-    p.clientX = e.clientX;
-    p.clientY = e.clientY;
-    p.ndcX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-    p.ndcY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-    p.inside = e.clientX >= rect.left && e.clientX < rect.right && e.clientY >= rect.top && e.clientY < rect.bottom;
+    p.clientX = clientX;
+    p.clientY = clientY;
+    p.ndcX = ((clientX - rect.left) / rect.width) * 2 - 1;
+    p.ndcY = -((clientY - rect.top) / rect.height) * 2 + 1;
+    p.inside = clientX >= rect.left && clientX < rect.right && clientY >= rect.top && clientY < rect.bottom;
   }
 }

@@ -7,6 +7,7 @@ import { findHomeSystem, generateSystem } from './gen/system';
 import { SceneManager } from './levels/SceneManager';
 import { AudioManager } from './audio/AudioManager';
 import { VolumeControl, loadAudioSettings } from './ui/VolumeControl';
+import { TouchControls } from './ui/TouchControls';
 
 const DEFAULT_SEED = '1337';
 
@@ -23,6 +24,7 @@ async function main(): Promise<void> {
   const audio = new AudioManager(audioSettings, debug);
   new VolumeControl(audio, audioSettings);
   const levels = game.add(new SceneManager(game, galaxy, start, debug, audio));
+  game.add(new TouchControls(game));
 
   document.getElementById('loading')?.remove();
   game.start();
