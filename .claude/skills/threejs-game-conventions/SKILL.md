@@ -27,7 +27,7 @@ Browser game: Vite + TypeScript (strict), `three`, `@dimforge/rapier3d-compat` p
 | `tests/` | Vitest unit tests for pure logic. |
 
 | `src/planet/` | Planet-level (low orbit) entities: `PlanetFrame` (the level's clock and body frame ↔ system space), `PlanetGlobe`, `LocalMoons`, `PlanetLights`, `PlanetShip` (scripted, no physics), `PlanetPicker`, `PlanetHud`, and pure maths in `frame.ts` (body frame, sky sizes, light direction) and `surfaceMotion.ts` (great-circle steering). |
-| `src/galaxy/` | Galaxy-map entities: `GalaxyMap` (all stars in one `Points` shader), `GalaxyShip` (scripted travel), `GalaxyPicker`, `GalaxyHud`, pure `pickPoint` / `galaxyStarSize`. |
+| `src/galaxy/` | Galaxy-map entities: `GalaxyMap` (all stars in one `Points` shader, one dot per binary member, twinkle), `GalaxyDust`, `GalaxyShip` (scripted travel), `GalaxyPicker`, `GalaxyHud`, `GalaxySpin` (turns the level's `root`), `DistantGalaxies` (procedural sky of other galaxies), pure `pickPoint` / `galaxyStarSize` / `binaryLayout`. The stars, glows, dust and ship live in `GalaxyLevel.root`, which rotates: work in its local (galaxy) coordinates and convert with `root.matrixWorld` for anything in world space (picking rays, marker rings, the camera via `getWorldPosition`). |
 
 New feature areas get their own folder under `src/` (e.g. `src/combat/`, `src/audio/`).
 

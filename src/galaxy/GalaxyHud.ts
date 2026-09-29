@@ -6,6 +6,7 @@ import { describeStars } from '../gen/stars';
 import { MarkerRing } from '../player/MarkerRing';
 import type { Tooltip } from '../ui/Tooltip';
 import { galaxyStarSize } from './appearance';
+import type { GalaxyMap } from './GalaxyMap';
 import type { GalaxyPicker } from './GalaxyPicker';
 import type { GalaxyShip } from './GalaxyShip';
 
@@ -35,6 +36,9 @@ export class GalaxyHud implements Entity {
     private readonly ship: GalaxyShip,
     private readonly picker: GalaxyPicker,
     private readonly tooltip: Tooltip,
+    private readonly map: GalaxyMap,
+    /** The galaxy's rotating root; star positions are in its frame, the rings in the scene's. */
+    private readonly root: THREE.Object3D,
   ) {
     this.currentRing = new MarkerRing(scene, '#66ffcc', 0, 0.08);
     this.destinationRing = new MarkerRing(scene, '#66ffcc', 0.08, 0.08);
@@ -57,6 +61,8 @@ export class GalaxyHud implements Entity {
     this.mark(this.currentRing, ship.travelling ? null : ship.current, 0.5, frameDt);
     this.mark(this.destinationRing, ship.destination, 0.9, frameDt);
     this.mark(this.hoverRing, hovered !== ship.current && hovered !== ship.destination ? hovered : null, 0.35, frameDt);
+    // The star you're at (or heading to) and the one under the pointer shine steadily.
+    this.map.holdSteady(ship.destination ?? ship.current, hovered);
 
     if (hovered) {
       const here = hovered === ship.current && !ship.travelling ? ' · you are here' : '';
@@ -87,7 +93,7 @@ export class GalaxyHud implements Entity {
       ring.hide();
       return;
     }
-    this.at.set(star.position.x, star.position.y, star.position.z);
+    this.at.set(star.position.x, star.position.y, star.position.z).applyMatrix4(this.root.matrixWorld);
     // At least 2% of the view distance, so rings stay visible when zoomed out.
     const size = Math.max(galaxyStarSize(star) * 1.2 + 0.6, this.at.distanceTo(this.camera.position) * 0.02);
     ring.place(this.at, size, opacity, this.camera, frameDt);
