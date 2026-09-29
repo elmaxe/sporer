@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "shot": "node scripts/shot.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.21.0",

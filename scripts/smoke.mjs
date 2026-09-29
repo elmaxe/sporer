@@ -12,81 +12,22 @@
 // Seamless zoom: through the galaxy loop, every frame's #fade opacity, crossfade weight and canvas brightness
 // are sampled; the screen must never go black and both zooms must crossfade (screenshot mid-handover).
 // Prints JSON with FPS, console errors and screenshot paths. Exit 1 on failure.
-import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { launch, sleep } from './lib/browser.mjs';
 
 const args = process.argv.slice(2);
 const quick = args.includes('--quick');
 const url = args.find((a) => !a.startsWith('--')) ?? 'http://localhost:5173/';
-const port = 9333;
-const browsers = [
-  'C:/Program Files/Google/Chrome/Application/chrome.exe',
-  'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
-  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  '/usr/bin/google-chrome',
-  '/usr/bin/chromium',
-  '/opt/pw-browsers/chromium',
-];
-const browser = process.env.CHROME_PATH ?? browsers.find(existsSync);
-if (!browser) throw new Error('No Chrome/Edge found; set CHROME_PATH');
-
-// A browser left on the port (e.g. from a crashed run) would be reused with its old state (saved volume, mute).
-if (await fetch(`http://127.0.0.1:${port}/json/version`).then(() => true, () => false)) {
-  throw new Error(`A browser is already listening on port ${port}; close it first`);
-}
 
 const outDir = mkdtempSync(join(tmpdir(), 'spore2-smoke-'));
-const proc = spawn(browser, [
-  '--headless=new',
-  `--remote-debugging-port=${port}`,
-  `--user-data-dir=${join(outDir, 'profile')}`,
-  '--enable-unsafe-swiftshader',
-  '--use-angle=swiftshader',
-  '--window-size=1280,720',
-  // Chrome refuses to run as root (e.g. in containers) with its sandbox on.
-  ...(process.getuid?.() === 0 ? ['--no-sandbox'] : []),
-  'about:blank',
-]);
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// A fresh browser and profile every run (so no saved volume or mute carries over), at 1280x720.
+const page = await launch({ width: 1280, height: 720 });
+const { send, errors } = page;
+// Never throws: a failed expression reads as undefined and fails the checks that use it.
+const evaluate = page.tryEvaluate;
 
-let target;
-for (let i = 0; i < 40 && !target; i++) {
-  await sleep(250);
-  try {
-    const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
-    target = targets.find((t) => t.type === 'page');
-  } catch {}
-}
-if (!target) throw new Error('Could not connect to headless browser');
-
-const ws = new WebSocket(target.webSocketDebuggerUrl);
-await new Promise((r) => ws.addEventListener('open', r));
-let nextId = 0;
-const pending = new Map();
-const errors = [];
-ws.addEventListener('message', (e) => {
-  const m = JSON.parse(e.data);
-  if (m.id && pending.has(m.id)) pending.get(m.id)(m);
-  if (m.method === 'Runtime.consoleAPICalled' && ['error', 'warning', 'assert'].includes(m.params.type)) {
-    errors.push(`${m.params.type}: ${m.params.args.map((a) => a.value ?? a.description).join(' ')}`);
-  }
-  if (m.method === 'Runtime.exceptionThrown') {
-    errors.push(`exception: ${m.params.exceptionDetails.exception?.description ?? m.params.exceptionDetails.text}`);
-  }
-});
-const send = (method, params = {}) =>
-  new Promise((r) => {
-    const id = ++nextId;
-    pending.set(id, r);
-    ws.send(JSON.stringify({ id, method, params }));
-  });
-const evaluate = async (expression) =>
-  (await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })).result?.result?.value;
-
-await send('Runtime.enable');
-await send('Page.enable');
 await send('Page.navigate', { url });
 await sleep(4000);
 
@@ -534,6 +475,5 @@ console.log(
   ),
 );
 
-ws.close();
-proc.kill();
+await page.close();
 process.exit(ok ? 0 : 1);

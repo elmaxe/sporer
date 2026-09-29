@@ -7,6 +7,7 @@ Browser game in Three.js inspired by Spore's space stage. Stack: Vite + TypeScri
 - `npm run dev`: dev server on http://localhost:5173 (debug panel on)
 - `npm run typecheck` / `npm test` / `npm run build` / `npm run preview`
 - `npm run smoke`: headless browser check (needs the dev server running): loads the game, flies forward, checks the stars and comets are alive, runs the galaxy loop (the seamless zoom must never go black) and the planet loops (every planet type; `-- --quick` for just the home system), reports FPS and console errors plus screenshots
+- `npm run shot -- --out <dir> --clean <steps...>`: screenshots of the running game after scripted steps (see the `screenshot` skill)
 - Deploy: every push to `main` runs typecheck/test/build in GitHub Actions (`.github/workflows/deploy.yml`) and publishes to https://elmaxe.github.io/sporer/
 - URL params: `?seed=<number or text>` picks the galaxy (default 1337), `?star=<id>` starts in that system (default: generated home system; the URL follows you as you change systems), `?debug` enables the debug panel in production builds
 
@@ -14,6 +15,7 @@ Browser game in Three.js inspired by Spore's space stage. Stack: Vite + TypeScri
 
 - `threejs-game-conventions`: architecture, Entity lifecycle, physics/perf rules. Read before writing game code.
 - `run-game`: start the server and verify in Chrome. Use after changes.
+- `screenshot`: take in-game screenshots with `npm run shot` whenever something needs checking by eye.
 
 ## Roadmap
 

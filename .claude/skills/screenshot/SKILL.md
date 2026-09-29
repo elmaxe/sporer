@@ -1,0 +1,102 @@
+---
+name: screenshot
+description: Take screenshots of this Three.js game in a headless browser with the ready-made `npm run shot` tool (steps for moving between levels, running JS, freezing a frame mid-transition, cropping and contact sheets). Use it any time something in-game needs to be checked by eye (a new visual, a shader, a camera move, a transition, a bug report about how something looks), before and after a visual change, and when the user asks for a screenshot. Never write a one-off browser/CDP script for this; extend scripts/shot.mjs instead.
+---
+
+# Screenshots of the game
+
+`scripts/shot.mjs` (`npm run shot`) loads the game in headless Chrome, runs a list of **steps** and prints JSON with the PNG paths, JS results and console errors. Then **Read the PNGs** to look at them. It uses the same browser helper as the smoke test (`scripts/lib/browser.mjs`), and needs the dev server running.
+
+## 1. Start the dev server (if it isn't already)
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:5173/   # 200 = already running, reuse it
+npm run dev -- --strictPort                                        # else: run_in_background: true
+```
+
+## 2. Take the screenshots
+
+```bash
+npm run shot -- --out <dir> --clean [--sheet] [--star <id>] <steps...>
+```
+
+- **`--out`**: in a cloud session, use a folder in your scratchpad directory so the user can open the files too. Otherwise any folder works; the default is a new temp dir.
+- **`--clean`** hides the debug panel and FPS meter. Leave it off when you want to see the FPS meter or debug values.
+- **`--sheet`** also writes `sheet.png`: every shot in one labelled grid. Use it for sequences, so a single Read shows them all. Read single shots for detail.
+- **`--star <id>` / `--seed <s>`**: which system/galaxy to start in (`--url` for anything else, e.g. a preview build on :4173). Default page size is 1280×720 (`--size`).
+- **`--steps <file>`**: steps from a file, one per line, `#` comments. Use it when the JS gets long or needs quotes; put the file in the scratchpad.
+
+Steps run in order. With no steps, you get `shot:view`.
+
+| Step | Does |
+|---|---|
+| `shot:<name>` | screenshot → `<name>.png` |
+| `crop:<name>:<x>,<y>,<w>,<h>[:<zoom>]` | crop of the **last** shot (CSS px), scaled up ×zoom (default 2, pixelated): for small details |
+| `js:<expression>` | runs in the page, promises awaited; the value is printed in `results` |
+| `wait:<ms>` | sleep |
+| `until:<expression>[@<ms>]` | poll until truthy (default 20 s) |
+| `settle` | wait until no level transition runs, plus a few frames |
+| `galaxy` / `system` | `levels.toGalaxy()` / `levels.toSystem()` and settle |
+| `freeze:<expression>` | stop the game loop on the first frame where the expression is true (checked after drawing), so the next `shot` is exactly that frame |
+| `resume` | restart the loop after a freeze |
+| `fps` | frames per second over 120 frames (headless SwiftShader: expect ~5–25) |
+| `goto:<url or ?params>` | load another page, e.g. `goto:?star=2`, and wait for the game |
+
+The page has the dev globals: `game`, `levels` (the `SceneManager`), `galaxy`, `ship`, `world` (the `StarSystem`), `system` (its data), `planet` (the planet level or null), `audio`, `generateSystem`. See `threejs-game-conventions` for what the classes offer.
+
+## 3. Look, and report
+
+- Read each PNG (or the sheet) and check the thing you changed is visibly right. Check nothing else broke: HUD text, the sun, planets, the UFO.
+- `errors` in the JSON must be empty. Quote any entry verbatim.
+- If a step fails, the run stops, saves `failure.png` (what was on screen) and exits 1 with `failure` saying which step failed.
+- Send the user the most telling shot (or the sheet) when it helps them see the result.
+
+## Recipes
+
+```bash
+# The start view, then the galaxy map
+npm run shot -- --out $OUT --clean --sheet shot:system galaxy shot:galaxy
+
+# A star type: find its id, then start there
+npm run shot -- "js:galaxy.stars.find((s) => s.stars[0].kind === 'redGiant').id"   # → results[0].value
+npm run shot -- --out $OUT --clean --star 5 shot:red-giant
+# kinds: mainSequence, redDwarf, whiteDwarf, redGiant, blueGiant; binaries: s.stars.length === 2 (star 2 at seed 1337)
+
+# Mid-transition: freeze on a state, not a time (headless frame rates vary; a frame advances the clock by at most 0.25 s)
+npm run shot -- --out $OUT --clean "js:levels.toGalaxy()" "freeze:levels.crossfade > 0.4" shot:handover resume settle shot:after
+# the seamless zoom's own clock: "freeze:levels.seamless?.elapsed > 1.2"
+
+# A detail up close: shoot, then crop around it (here the screen centre, ×3)
+npm run shot -- --out $OUT --clean shot:view crop:centre:540,260,200,200:3
+```
+
+A steps file for camera work and the planet level (`npm run shot -- --out $OUT --clean --sheet --steps $OUT/steps.txt`):
+
+```text
+# Look at a planet from close up (the orbit camera's focus override), then give the camera back
+js:(() => { const p = world.planets[2], o = levels.systemLevel.orbit; o.setFocus(p.renderPosition); o.setDistance(p.radius * 5); })()
+wait:500
+shot:planet-close
+js:levels.systemLevel.orbit.setFocus(null)
+# Down to low orbit over the first planet, arriving on its day side
+js:(() => { const p = world.planets[0]; ship.parkAt(p, world.stars[0].position.clone().sub(p.position)); levels.toPlanet(p); })()
+until:levels.mode === 'planet'
+settle
+shot:low-orbit
+```
+
+More hooks:
+- Galaxy camera: `levels.galaxyLevel.orbit`.
+- Planet camera: `planet.orbit`.
+- Galaxy spin: `levels.galaxyLevel.root.rotation.y`.
+- Travel: `levels.galaxyLevel.ship.travelTo(galaxy.stars[42])`, then `until:!levels.galaxyLevel.ship.travelling`.
+- Autopilot: `ship.moveTo(world.planets[1])`, then `until:!ship.enRoute`.
+
+## Tips
+
+- **Compare before/after.** Take the same steps on both versions, e.g. stash the change, shoot into `before/`, unstash, shoot into `after/`, and look at them side by side.
+- **Timing.** Prefer `until:` and `freeze:` on game state over `wait:`. Headless rendering is slow, so the game runs slower than real time.
+- **Input is blocked** during level transitions (wheel, clicks, keys). Drive things with `js:` calls, or `settle` first.
+- **Animated things** (twinkle, storms, comets) differ between runs and frames. Freeze on a state, or compare structure rather than pixels.
+- **Missing a step?** If a step you need is missing, add it to `scripts/shot.mjs`, keep the usage comment at its top and the table above in sync, and don't fork a new script.
+- **When to use the smoke test instead.** `npm run smoke` is the pass/fail regression check (see `run-game`). This tool is for looking.
