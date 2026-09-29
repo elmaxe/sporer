@@ -5,6 +5,7 @@ import type { Debug } from '../core/Debug';
 import type { Vec3Like } from '../gen/orbit';
 import { RAPIER, type Physics } from '../physics/Physics';
 import type { CelestialBody } from '../world/CelestialBody';
+import { parkingDistance } from './zoomCurve';
 import { arriveImpulse, detourWaypoint, standoffPoint, type ArriveParams, type Obstacle } from './autopilot';
 
 /** Tunables, exposed in the debug panel. */
@@ -43,6 +44,11 @@ export class Ship implements Entity {
   readonly object = new THREE.Group();
   /** Where the autopilot is heading (simulation state); only meaningful while `autopilotActive`. */
   readonly destination = new THREE.Vector3();
+  /**
+   * Multiple of a body's usual clearance above its surface to park at (see
+   * `parkingScale`): the zoom sets it, so the ship dives in as you scroll in.
+   */
+  parkingScale = 1;
   private readonly body: RAPIER.RigidBody;
   private readonly ring: THREE.Object3D;
 
@@ -133,16 +139,16 @@ export class Ship implements Entity {
   }
 
   /**
-   * Autopilot to a point, or to a body: the ship parks at the body's standoff
-   * distance on the side it approaches from and keeps station there until it
-   * gets another order.
+   * Autopilot to a point, or to a body: the ship parks at the body's parking
+   * distance (its standoff, nearer or farther with the zoom) on the side it
+   * approaches from and keeps station there until it gets another order.
    */
   moveTo(target: CelestialBody | Vec3Like): void {
     this.hasTarget = true;
     this.arrived = false;
     if ('standoff' in target) {
       this._targetBody = target;
-      standoffPoint(this.currPos, target.position, target.standoff, this.destination);
+      standoffPoint(this.currPos, target.position, this.parkingDistance(target), this.destination);
     } else {
       this._targetBody = null;
       this.destination.set(target.x, target.y, target.z);
@@ -150,12 +156,12 @@ export class Ship implements Entity {
   }
 
   /**
-   * Teleports the ship to `body`'s standoff distance in direction `side` from
+   * Teleports the ship to `body`'s parking distance in direction `side` from
    * it, moving with the body and parked there (e.g. coming back from the
    * planet level, after the system clock jumped).
    */
   parkAt(body: CelestialBody, side: THREE.Vector3): void {
-    this.pos.copy(side).normalize().multiplyScalar(body.standoff).add(body.position);
+    this.pos.copy(side).normalize().multiplyScalar(this.parkingDistance(body)).add(body.position);
     this.body.setTranslation(this.pos, true);
     this.body.setLinvel(body.velocity, true);
     this.currPos.copy(this.pos);
@@ -242,10 +248,15 @@ export class Ship implements Entity {
     this.physics.world.removeRigidBody(this.body);
   }
 
+  /** How far from `body`'s centre to park, at the current `parkingScale`. */
+  parkingDistance(body: CelestialBody): number {
+    return parkingDistance(body.radius, body.standoff, this.parkingScale, body.keepOut);
+  }
+
   private steer(dt: number, boost: number): void {
     const body = this._targetBody;
     const targetVel = body ? body.velocity : this.zero;
-    if (body) standoffPoint(this.pos, body.position, body.standoff, this.destination);
+    if (body) standoffPoint(this.pos, body.position, this.parkingDistance(body), this.destination);
 
     Object.assign(this.arrive, autopilotParams).maxSpeed *= boost;
     if (detourWaypoint(this.pos, this.destination, this.obstacles, CLEARANCE, this.waypoint)) {

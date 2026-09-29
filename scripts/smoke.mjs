@@ -5,7 +5,8 @@
 // star, travel, scroll in to its system; the galaxy shows distant galaxies, twinkles, spins and draws binaries
 // as two dots, and picking works while it's turned), a real click on the speaker button starts audio; then the
 // transitions and galaxy travel play their whooshes, and M mutes. Then the planet loop (park at a planet,
-// scroll in to low orbit, click the globe and fly, scroll back out beside it), and again for every planet
+// scroll in to low orbit (the ship dives in towards it first), click the globe and fly, in the home system also
+// scroll down to the peaks and up to high orbit (the ship's altitude follows) and fly at both, scroll back out), and again for every planet
 // type, a ringed rocky/icy/lava world and a moon in other systems (skip those with --quick). The system sky has
 // the galaxy band (screenshot looking at the galactic centre) and a smoke trail per planet and moon. Living stars: the
 // surface clock advances and storms have particles under way (and keep animating in the planet level's sky); comets
@@ -57,44 +58,16 @@ async function freezeShot(name) {
 }
 
 /**
- * Parks the system ship beside the body `bodyExpr` evaluates to, scrolls in to its planet level, clicks the
- * globe a little way ahead of the ship, lets it fly, then scrolls back out. Returns what it saw.
+ * Clicks the globe `angle` radians from the ship along the ground, towards the top of the screen (negative: towards
+ * the bottom), and reports whether the point was on screen, the autopilot took it and hit that point.
  */
-async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
-  // Input is blocked during a level transition (slow under SwiftShader), which would swallow the wheel below.
-  for (let i = 0; i < 40 && (await evaluate(`levels.transitioning`)); i++) await sleep(250);
-  const r = await evaluate(`(() => {
-    const body = ${bodyExpr};
-    window.__body = body;
-    // Park on the day side, a little above the orbital plane.
-    const side = world.stars[0].position.clone().sub(body.position).normalize();
-    side.y += 0.5;
-    ship.parkAt(body, side);
-    return { name: body.name, type: body.config.type, moon: body.parent !== null };
-  })()`);
-  await sleep(300);
-  await wheel(-50000); // to min zoom
-  await sleep(1500);
-  if (handoverShot) await evaluate(`__seamless.freezeWhen = 'planet'`);
-  await wheel(-300); // keep scrolling in
-  if (handoverShot) r.handoverShot = await freezeShot(handoverShot);
-  for (let i = 0; i < 20 && (await evaluate(`levels.mode !== 'planet' || levels.transitioning`)); i++) await sleep(250);
-  r.mode = await evaluate(`levels.mode`);
-  r.soundIn = await evaluate(`audio.lastPlayed?.name ?? null`);
-  if (r.mode !== 'planet') return r;
-  r.sky = await evaluate(`planet.skyStats`);
-  // The sky star's clock and the planet level's own clock (its time is the system time down here).
-  const skyTime = `[world.stars[0].storms.shownTime, planet.time]`;
-  const skyBefore = await evaluate(skyTime);
-  r.expectedSky = await evaluate(`({ bodies: world.planets.length + world.moons.length - 1 - world.moons.filter((m) => m.parent === __body).length })`);
-
-  // Click the globe ~20° ahead of the ship, towards the top of the screen.
-  r.click = await evaluate(`new Promise((resolve) => {
+function clickGlobe(angle) {
+  return evaluate(`new Promise((resolve) => {
     const V = game.camera.position.constructor;
     const u = planet.ship.direction.clone();
     const up = new V(0, 1, 0).applyQuaternion(game.camera.quaternion);
     const t = up.sub(u.clone().multiplyScalar(up.dot(u))).normalize();
-    const point = u.clone().multiplyScalar(Math.cos(0.35)).add(t.multiplyScalar(Math.sin(0.35))).multiplyScalar(100);
+    const point = u.clone().multiplyScalar(Math.cos(${angle})).add(t.multiplyScalar(Math.sin(${angle}))).multiplyScalar(100);
     const p = point.clone().project(game.camera);
     const rect = game.renderer.domElement.getBoundingClientRect();
     const at = { clientX: rect.left + ((p.x + 1) / 2) * rect.width, clientY: rect.top + ((1 - p.y) / 2) * rect.height, bubbles: true };
@@ -109,6 +82,87 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
       targetAngle: +planet.ship.destination.angleTo(point).toFixed(3),
     })));
   })`);
+}
+
+/** Polls until the planet ship's altitude meets `condition` (up to 15 s), then lets the camera finish too. */
+async function settleAltitude(condition) {
+  for (let i = 0; i < 60 && !(await evaluate(condition)); i++) await sleep(250);
+  await sleep(500);
+}
+
+/** The planet ship's altitude and the planet camera's distance and zoom. */
+const planetZoom = `({ altitude: +planet.ship.altitude.toFixed(1), distance: +planet.orbit.distance.toFixed(1), zoom: +planet.orbit.zoom.toFixed(2) })`;
+
+/**
+ * Scrolls the planet level all the way in, then all the way out: the ship's altitude must follow the camera (down to
+ * skimming the peaks, up to high orbit), and a click on the globe must fly the ship at both ends.
+ */
+async function sweepAltitude() {
+  const r = { arrival: await evaluate(planetZoom) };
+  await wheel(-50000); // to min zoom: down to the peaks
+  // Wait for the ship to settle there (game time runs slower than real time at headless frame rates).
+  await settleAltitude(`planet.ship.altitude < 2.5`);
+  r.low = await evaluate(planetZoom);
+  r.lowClick = await clickGlobe(0.08);
+  await sleep(2000);
+  r.lowFlewDegrees = await evaluate(`+(planet.ship.direction.angleTo(__start) * 180 / Math.PI).toFixed(1)`);
+  await wheel(50000); // to max zoom: up to high orbit
+  await settleAltitude(`planet.ship.altitude > 115`);
+  r.high = await evaluate(planetZoom);
+  // From high up the ship is over the limb, looking down: click back towards the camera.
+  r.highClick = await clickGlobe(-0.35);
+  await sleep(2500);
+  r.highFlewDegrees = await evaluate(`+(planet.ship.direction.angleTo(__start) * 180 / Math.PI).toFixed(1)`);
+  const clicked = (c) => c.onScreen && c.enRoute && c.targetAngle < 0.02;
+  r.ok =
+    r.low.altitude < r.arrival.altitude &&
+    r.low.altitude < 4 &&
+    r.low.distance < r.arrival.distance &&
+    r.high.altitude > 80 &&
+    r.high.distance > r.arrival.distance &&
+    clicked(r.lowClick) &&
+    r.lowFlewDegrees > 1 &&
+    clicked(r.highClick) &&
+    r.highFlewDegrees > 3;
+  return r;
+}
+
+/**
+ * Parks the system ship beside the body `bodyExpr` evaluates to, scrolls in to its planet level, clicks the
+ * globe a little way ahead of the ship, lets it fly, then scrolls back out. Returns what it saw.
+ */
+async function runPlanetLoop(bodyExpr, shotName, handoverShot = null, sweep = false) {
+  // Input is blocked during a level transition (slow under SwiftShader), which would swallow the wheel below.
+  for (let i = 0; i < 40 && (await evaluate(`levels.transitioning`)); i++) await sleep(250);
+  const r = await evaluate(`(() => {
+    const body = ${bodyExpr};
+    window.__body = body;
+    // Park on the day side, a little above the orbital plane.
+    const side = world.stars[0].position.clone().sub(body.position).normalize();
+    side.y += 0.5;
+    ship.parkAt(body, side);
+    return { name: body.name, type: body.config.type, moon: body.parent !== null };
+  })()`);
+  await sleep(300);
+  // Scrolled all the way in, the ship dives in from its usual standoff (as far as the clearance allows).
+  r.standoff = await evaluate(`+__body.standoff.toFixed(1)`);
+  await wheel(-50000); // to min zoom
+  await sleep(1500);
+  r.dived = await evaluate(`+ship.object.position.distanceTo(__body.renderPosition).toFixed(1)`);
+  if (handoverShot) await evaluate(`__seamless.freezeWhen = 'planet'`);
+  await wheel(-300); // keep scrolling in
+  if (handoverShot) r.handoverShot = await freezeShot(handoverShot);
+  for (let i = 0; i < 20 && (await evaluate(`levels.mode !== 'planet' || levels.transitioning`)); i++) await sleep(250);
+  r.mode = await evaluate(`levels.mode`);
+  r.soundIn = await evaluate(`audio.lastPlayed?.name ?? null`);
+  if (r.mode !== 'planet') return r;
+  r.sky = await evaluate(`planet.skyStats`);
+  // The sky star's clock and the planet level's own clock (its time is the system time down here).
+  const skyTime = `[world.stars[0].storms.shownTime, planet.time]`;
+  const skyBefore = await evaluate(skyTime);
+  r.expectedSky = await evaluate(`({ bodies: world.planets.length + world.moons.length - 1 - world.moons.filter((m) => m.parent === __body).length })`);
+
+  r.click = await clickGlobe(0.35);
   await sleep(3000);
   // The sky's star keeps living, and its clock follows the planet level's (compared with that clock, not the
   // wall clock: at headless frame rates game time runs slower than real time).
@@ -120,6 +174,7 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
   const shot = await send('Page.captureScreenshot', { format: 'png' });
   r.screenshot = join(outDir, `${shotName}.png`);
   writeFileSync(r.screenshot, Buffer.from(shot.result.data, 'base64'));
+  if (sweep) r.sweep = await sweepAltitude();
 
   await wheel(50000); // to max zoom
   await sleep(1500);
@@ -128,9 +183,11 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
   r.modeAfter = await evaluate(`levels.mode`);
   r.soundOut = await evaluate(`audio.lastPlayed?.name ?? null`);
   r.parkedAt = await evaluate(`ship.targetBody?.name ?? null`);
-  r.standoffs = await evaluate(`+(ship.object.position.distanceTo(__body.renderPosition) / __body.standoff).toFixed(2)`);
+  r.standoffs = await evaluate(`+(ship.object.position.distanceTo(__body.renderPosition) / ship.parkingDistance(__body)).toFixed(2)`);
   r.ok =
+    r.dived < r.standoff - 1 &&
     r.mode === 'planet' &&
+    (!sweep || r.sweep.ok) &&
     r.sky.bodies === r.expectedSky.bodies &&
     r.click.onScreen &&
     r.click.enRoute &&
@@ -387,6 +444,7 @@ if (started) {
     `world.planets.find((p) => ['terran', 'ocean'].includes(p.config.type)) ?? world.planets[0]`,
     'planet',
     'planet-handover',
+    true,
   );
 
   // Scrolling in while the autopilot flies is held until it arrives, then descends to the destination.
@@ -397,14 +455,14 @@ if (started) {
     const bodies = [...world.planets, ...world.moons].filter((b) => b !== here && dist(b) > 150);
     const target = bodies.reduce((a, b) => (dist(a) < dist(b) ? a : b));
     ship.moveTo(target);
-    return { target: target.name, zoomBefore: +levels.systemLevel.orbit.zoom.toFixed(1) };
+    return { target: target.name, zoomBefore: +levels.systemLevel.orbit.distance.toFixed(1) };
   })()`);
   await wheel(-50000);
   await sleep(300);
   await wheel(-300);
   await sleep(300);
   heldZoom.whileFlying = await evaluate(
-    `({ enRoute: ship.enRoute, mode: levels.mode, zoom: +levels.systemLevel.orbit.zoom.toFixed(1) })`,
+    `({ enRoute: ship.enRoute, mode: levels.mode, zoom: +levels.systemLevel.orbit.distance.toFixed(1) })`,
   );
   for (let i = 0; i < 80 && (await evaluate(`levels.mode !== 'planet' || levels.transitioning`)); i++) await sleep(250);
   heldZoom.mode = await evaluate(`levels.mode`);

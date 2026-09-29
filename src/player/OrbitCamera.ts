@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Entity } from '../core/Entity';
 import type { Input } from '../core/Input';
 import type { Debug } from '../core/Debug';
+import { distanceZoom } from './zoomCurve';
 
 export interface OrbitParams {
   minDistance: number;
@@ -47,6 +48,11 @@ export interface OrbitOptions {
   minPitch?: number;
   /** Starting pitch in radians (default 22°). */
   pitch?: number;
+  /**
+   * The pitch (radians) to lean to at each zoom value: as the zoom changes,
+   * the pitch moves by the change in this, on top of any dragging.
+   */
+  pitchForZoom?: (zoom: number) => number;
 }
 
 const MIN_PITCH = THREE.MathUtils.degToRad(-80);
@@ -75,14 +81,16 @@ const HELD_RELEASE_RATE = 1000;
 export class OrbitCamera implements Entity {
   private yaw = 0;
   private pitch: number;
-  private distance: number;
+  private dist: number;
   private targetYaw = 0;
   private targetPitch: number;
-  private targetDistance: number;
+  private targetDist: number;
   private pastLimit = 0;
   /** Scroll-in (negative wheel pixels) held back by `holdZoomIn`, still to be played out. */
   private heldWheel = 0;
   private readonly minPitch: number;
+  /** `options.pitchForZoom` at the zoom last seen. */
+  private followedPitch = 0;
   private focus: THREE.Vector3 | null = null;
   private focusBlend = 0;
   private view: THREE.Quaternion | null = null;
@@ -106,9 +114,10 @@ export class OrbitCamera implements Entity {
     debug: Debug,
     debugName: string,
   ) {
-    this.distance = this.targetDistance = options.distance;
+    this.dist = this.targetDist = options.distance;
     this.pitch = this.targetPitch = options.pitch ?? THREE.MathUtils.degToRad(22);
     this.minPitch = options.minPitch ?? MIN_PITCH;
+    this.followedPitch = options.pitchForZoom?.(this.zoom) ?? 0;
     const f = debug.folder(debugName);
     f?.add(params, 'minDistance', 0.5, 100);
     f?.add(params, 'maxDistance', 100, 10000);
@@ -118,13 +127,22 @@ export class OrbitCamera implements Entity {
   }
 
   /** Current (smoothed) distance from the target. */
+  get distance(): number {
+    return this.dist;
+  }
+
+  /**
+   * The zoom value (see zoomCurve.ts): 0 at `minDistance` to 1 at
+   * `maxDistance`, log-scaled, from the smoothed distance (clamped, so a
+   * scripted distance past a limit reads as that limit).
+   */
   get zoom(): number {
-    return this.distance;
+    return distanceZoom(this.dist, this.params.minDistance, this.params.maxDistance);
   }
 
   /** Jumps to `distance`, ignoring the zoom limits (for scripted transitions). */
   setDistance(distance: number): void {
-    this.distance = this.targetDistance = distance;
+    this.dist = this.targetDist = distance;
     this.pastLimit = 0;
     this.heldWheel = 0;
   }
@@ -172,7 +190,7 @@ export class OrbitCamera implements Entity {
 
   /** Smoothly zooms to `distance` (clamped to the limits). */
   zoomTo(distance: number): void {
-    this.targetDistance = THREE.MathUtils.clamp(distance, this.params.minDistance, this.params.maxDistance);
+    this.targetDist = THREE.MathUtils.clamp(distance, this.params.minDistance, this.params.maxDistance);
   }
 
   update(frameDt: number): void {
@@ -183,8 +201,8 @@ export class OrbitCamera implements Entity {
 
     const wheel = this.holdZoomIn(this.input.consumeWheel(), frameDt);
     this.trackPastLimit(wheel, frameDt);
-    this.targetDistance = THREE.MathUtils.clamp(
-      this.targetDistance * Math.exp(wheel * p.zoomSpeed),
+    this.targetDist = THREE.MathUtils.clamp(
+      this.targetDist * Math.exp(wheel * p.zoomSpeed),
       p.minDistance,
       p.maxDistance,
     );
@@ -193,7 +211,8 @@ export class OrbitCamera implements Entity {
     this.yaw += (this.targetYaw - this.yaw) * k;
     this.pitch += (this.targetPitch - this.pitch) * k;
     // Smooth the distance in log space so zooming feels even at every scale.
-    this.distance *= Math.pow(this.targetDistance / this.distance, k);
+    this.dist *= Math.pow(this.targetDist / this.dist, k);
+    this.followZoomPitch();
 
     const cosPitch = Math.cos(this.pitch);
     this.offset.set(Math.sin(this.yaw) * cosPitch, Math.sin(this.pitch), Math.cos(this.yaw) * cosPitch);
@@ -212,14 +231,25 @@ export class OrbitCamera implements Entity {
     if (this.view && this.viewBlend > 0) {
       const q = this.orientation(this.orient).slerp(this.view, this.viewBlend);
       this.camera.quaternion.copy(q);
-      this.camera.position.copy(this.center).addScaledVector(this.back.copy(BACK).applyQuaternion(q), this.distance);
+      this.camera.position.copy(this.center).addScaledVector(this.back.copy(BACK).applyQuaternion(q), this.dist);
       return;
     }
-    this.camera.position.copy(this.center).addScaledVector(this.offset, this.distance);
+    this.camera.position.copy(this.center).addScaledVector(this.offset, this.dist);
     this.camera.lookAt(this.center);
   }
 
   dispose(): void {}
+
+  /** Leans the pitch with the zoom (`options.pitchForZoom`), keeping whatever the player dragged. */
+  private followZoomPitch(): void {
+    const { pitchForZoom } = this.options;
+    if (!pitchForZoom) return;
+    const pitch = pitchForZoom(this.zoom);
+    const delta = pitch - this.followedPitch;
+    this.followedPitch = pitch;
+    this.pitch = THREE.MathUtils.clamp(this.pitch + delta, this.minPitch, MAX_PITCH);
+    this.targetPitch = THREE.MathUtils.clamp(this.targetPitch + delta, this.minPitch, MAX_PITCH);
+  }
 
   /**
    * Holds back scroll-in while `options.holdZoomIn` says so, and plays it out
@@ -248,8 +278,8 @@ export class OrbitCamera implements Entity {
     if (wheel === 0) return;
 
     // Only once the view has (almost) arrived at the limit, so the zoom is seen to finish first.
-    const atMax = this.targetDistance >= this.params.maxDistance && this.distance > this.params.maxDistance * 0.8;
-    const atMin = this.targetDistance <= this.params.minDistance && this.distance < this.params.minDistance * 1.25;
+    const atMax = this.targetDist >= this.params.maxDistance && this.dist > this.params.maxDistance * 0.8;
+    const atMin = this.targetDist <= this.params.minDistance && this.dist < this.params.minDistance * 1.25;
     if ((wheel > 0 && atMax) || (wheel < 0 && atMin)) {
       this.pastLimit += Math.abs(wheel);
       if (this.pastLimit >= PAST_LIMIT_PX) {

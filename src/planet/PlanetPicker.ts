@@ -5,8 +5,9 @@ import { MarkerRing } from '../player/MarkerRing';
 import { PLANET_RADIUS } from './frame';
 import type { PlanetShip } from './PlanetShip';
 
-/** Target ring size, in planet-level units. */
+/** Target ring size, in planet-level units, and at least this share of its distance from the camera (high up). */
 const MARKER_SIZE = 3;
+const MARKER_SCREEN_SIZE = 0.05;
 
 /**
  * Click the globe to fly there: the click ray is tested against the sea-level
@@ -43,7 +44,8 @@ export class PlanetPicker implements Entity {
       return;
     }
     const { destination } = this.ship;
-    this.ring.place(destination, MARKER_SIZE, 0.9, this.normal.copy(destination).normalize(), frameDt);
+    const size = Math.max(MARKER_SIZE, MARKER_SCREEN_SIZE * this.camera.position.distanceTo(destination));
+    this.ring.place(destination, size, 0.9, this.normal.copy(destination).normalize(), frameDt);
   }
 
   dispose(): void {

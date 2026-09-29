@@ -9,23 +9,27 @@ import { PlanetLights } from '../planet/PlanetLights';
 import { PlanetPicker } from '../planet/PlanetPicker';
 import { PlanetShip } from '../planet/PlanetShip';
 import { OrbitCamera, type OrbitParams } from '../player/OrbitCamera';
+import { distanceZoom, planetAltitude, planetPitch, planetZoomCurve } from '../player/zoomCurve';
 import type { Planet } from '../world/Planet';
 import { Level } from './Level';
 import type { SystemLevel } from './SystemLevel';
 
-/** Low-orbit camera, in planet-level units (the globe's radius is 100). */
+/**
+ * Low-orbit camera, in planet-level units (the globe's radius is 100). Its
+ * zoom also sets the ship's altitude (see zoomCurve.ts): skimming the peaks
+ * with the camera close behind at `minDistance`, high orbit with the whole
+ * globe below at `maxDistance`.
+ */
 export const planetCameraParams: OrbitParams = {
   minDistance: 8,
-  maxDistance: 260,
+  maxDistance: 300,
   zoomSpeed: 0.0025,
   rotateSpeed: 0.005,
   damping: 0.1,
 };
 
-/** Where the camera settles after descending. */
+/** Where the camera settles after descending (the ship ~14 above the peaks). */
 export const PLANET_VIEW_DISTANCE = 45;
-/** How high above the highest terrain the ship flies. */
-const ALTITUDE = 12;
 /** Bodies in the sky are drawn at least this many pixels in radius. */
 const SKY_MIN_PIXELS = 1.5;
 /** The sky camera's clipping range, in system units. */
@@ -79,7 +83,13 @@ export class PlanetLevel extends Level {
     this.add(new PlanetLights(this.scene, this.frame, system.world.stars, globe.sun));
 
     this.frame.toLocalDirection(side, this.start);
-    this.ship = this.add(new PlanetShip(this.scene, input, camera, debug, globe.top + ALTITUDE, this.start));
+    const z = debug.folder('Planet zoom');
+    z?.add(planetZoomCurve, 'minAltitude', 0.5, 20);
+    z?.add(planetZoomCurve, 'maxAltitude', 20, 300);
+    z?.add(planetZoomCurve, 'minPitch', 5, 60);
+    z?.add(planetZoomCurve, 'maxPitch', 10, 85);
+    const arrival = distanceZoom(PLANET_VIEW_DISTANCE, planetCameraParams.minDistance, planetCameraParams.maxDistance);
+    this.ship = this.add(new PlanetShip(this.scene, input, camera, debug, globe.top, planetAltitude(arrival), this.start));
     this.orbit = this.add(
       new OrbitCamera(
         camera,
@@ -91,13 +101,17 @@ export class PlanetLevel extends Level {
           up: this.ship.up,
           // Stay above the ship's horizon, so the camera never dips into the ground.
           minPitch: THREE.MathUtils.degToRad(5),
-          pitch: THREE.MathUtils.degToRad(40),
+          pitch: planetPitch(arrival),
+          // Flatter down low, looking along the ground; more top-down higher up.
+          pitchForZoom: (zoom) => planetPitch(zoom),
           onZoomPastLimit: (dir) => dir > 0 && onZoomOut(),
         },
         debug,
         'Planet camera',
       ),
     );
+    // The zoom sets the altitude (after the camera has read the wheel; the ship glides there in its fixed steps).
+    this.add({ update: () => this.ship.setAltitude(planetAltitude(this.orbit.zoom)), dispose: () => {} });
     this.add(new PlanetPicker(this.scene, camera, input, this.ship));
     this.hud = this.add(new PlanetHud(this.ship, `${body.name} · ${body.description}`));
   }

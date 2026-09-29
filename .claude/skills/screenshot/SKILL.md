@@ -92,7 +92,7 @@ shot:low-orbit
 
 More hooks:
 - Galaxy camera: `levels.galaxyLevel.orbit`.
-- Planet camera: `planet.orbit`.
+- Planet camera: `planet.orbit`. Its zoom sets the ship's altitude: `planet.orbit.zoomTo(8)` skims the peaks, `zoomTo(300)` is high orbit (`planet.ship.altitude` follows, gliding over ~0.25 s of game time).
 - Galaxy spin: `levels.galaxyLevel.root.rotation.y`.
 - Travel: `levels.galaxyLevel.ship.travelTo(galaxy.stars[42])`, then `until:!levels.galaxyLevel.ship.travelling`.
 - Autopilot: `ship.moveTo(world.planets[1])`, then `until:!ship.enRoute`.

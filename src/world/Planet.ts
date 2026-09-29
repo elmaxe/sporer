@@ -3,6 +3,7 @@ import type { Entity } from '../core/Entity';
 import { RAPIER, type Physics } from '../physics/Physics';
 import { orbitPosition, type Orbit } from '../gen/orbit';
 import type { PlanetStyle, PlanetType, RingData } from '../gen/system';
+import type { Shell } from '../player/zoomCurve';
 import type { CelestialBody } from './CelestialBody';
 import { createAtmosphere, createGasGeometry, createRings, createTerrainGeometry } from './planetGeometry';
 
@@ -48,6 +49,8 @@ export class Planet implements Entity, CelestialBody {
    * level's slower spin while both show the same globe.
    */
   spinAt: ((time: number) => number) | null = null;
+  /** Its moons' orbits, which the ship never parks in (filled in by StarSystem). */
+  readonly keepOut: Shell[] = [];
   private readonly surface: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
   private readonly body: RAPIER.RigidBody;
   private readonly prev = new THREE.Vector3();

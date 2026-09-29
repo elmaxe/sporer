@@ -70,3 +70,13 @@ export function surfaceArriveImpulse(
   out.addScaledVector(u, -out.dot(u));
   return arc;
 }
+
+/**
+ * One step of gliding from flying radius `radius` towards `target`: closes
+ * ~63% of the gap every `time` seconds (0 = jump). It never passes the
+ * target, so it stays between the two, above the terrain whenever both are.
+ */
+export function climbToward(radius: number, target: number, dt: number, time: number): number {
+  if (time <= 0) return target;
+  return target + (radius - target) * Math.exp(-dt / time);
+}
