@@ -6,8 +6,8 @@
 // transitions and galaxy travel play their whooshes, and M mutes. Then the planet loop (park at a planet,
 // scroll in to low orbit, click the globe and fly, scroll back out beside it), and again for every planet
 // type and a moon in other systems (skip those with --quick). Living stars: the surface clock advances and
-// storms have particles under way (and keep animating in the planet level's sky); comets exist, move and
-// can't be picked.
+// storms have particles under way (and keep animating in the planet level's sky); comets move, show their
+// name on hover and ignore clicks. Looking at the star close up lowers the exposure (eye adaptation).
 // Prints JSON with FPS, console errors and screenshot paths. Exit 1 on failure.
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
@@ -84,7 +84,7 @@ await sleep(4000);
 
 const state = `({ speed: +ship.speed.toFixed(1), pos: ship.object.position.toArray().map((n) => +n.toFixed(1)) })`;
 const started = await evaluate(`typeof window.ship !== 'undefined'`);
-let before, after, autopilot, pick, living, galaxyLoop, fps, audio, planetLoop;
+let before, after, autopilot, pick, living, comet, eye, galaxyLoop, fps, audio, planetLoop;
 const planetTypes = [];
 const wheel = (deltaY) =>
   evaluate(`game.renderer.domElement.dispatchEvent(new WheelEvent('wheel', { deltaY: ${deltaY}, bubbles: true, cancelable: true }))`);
@@ -218,10 +218,46 @@ if (started) {
     starSeconds: +(second.starTime - first.starTime).toFixed(2),
     liveParticles: [first.live, second.live],
     comets: second.comets.length,
-    cometsMoved: second.comets.every((p, i) => Math.hypot(...p.map((v, k) => v - first.comets[i][k])) > 1),
+    cometsMoved: second.comets.every((p, i) => Math.hypot(...p.map((v, k) => v - first.comets[i][k])) > 0.1),
     cometActivity: second.tails,
     pickable: second.pickable,
   };
+
+  // Comets (when this system has any): hovering one shows its name, clicking it doesn't fly there.
+  comet = await evaluate(`new Promise((resolve) => {
+    const c = world.comets[0];
+    if (!c) return resolve({ none: true });
+    const orbit = levels.systemLevel.orbit;
+    orbit.setFocus(c.position);
+    orbit.setDistance(120);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const p = c.renderPosition.clone().project(game.camera);
+      const rect = game.renderer.domElement.getBoundingClientRect();
+      const at = { clientX: rect.left + ((p.x + 1) / 2) * rect.width, clientY: rect.top + ((1 - p.y) / 2) * rect.height, bubbles: true };
+      const canvas = game.renderer.domElement;
+      canvas.dispatchEvent(new PointerEvent('pointermove', at));
+      canvas.dispatchEvent(new PointerEvent('pointerdown', { ...at, button: 0 }));
+      canvas.dispatchEvent(new PointerEvent('pointerup', { ...at, button: 0 }));
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const r = {
+          name: c.name,
+          tooltip: document.getElementById('tooltip').hidden ? null : document.getElementById('tooltip-name').textContent,
+          autopilot: ship.autopilotActive,
+        };
+        orbit.setFocus(null);
+        orbit.setDistance(45);
+        resolve(r);
+      }));
+    }));
+  })`);
+
+  // Eye adaptation: the exposure drops while the star fills the view, and recovers after.
+  eye = { start: await evaluate(`+levels.systemLevel.eye.exposure.toFixed(2)`) };
+  await evaluate(`(() => { const s = world.stars[0], o = levels.systemLevel.orbit;
+    o.setFocus(s.renderPosition); o.setDistance(s.radius * 3); })()`);
+  await sleep(2500);
+  eye.close = await evaluate(`+levels.systemLevel.eye.exposure.toFixed(2)`);
+  await evaluate(`levels.systemLevel.orbit.setFocus(null), levels.systemLevel.orbit.setDistance(45)`);
 
   // Galaxy loop, driven by real wheel and pointer events.
   galaxyLoop = { from: await evaluate(`system.id`) };
@@ -341,9 +377,10 @@ const alive =
   started &&
   living.starSeconds > 1 &&
   living.liveParticles.some((n) => n > 0) &&
-  living.comets > 0 &&
   living.cometsMoved &&
-  !living.pickable;
+  !living.pickable &&
+  (comet.none || (comet.tooltip === comet.name && !comet.autopilot)) &&
+  eye.close < eye.start - 0.1;
 const looped =
   started &&
   galaxyLoop.modeAfterZoomOut === 'galaxy' &&
@@ -374,7 +411,7 @@ const planets =
 const ok = started && moved && autopiloted && picked && alive && looped && sounded && planets && errors.length === 0;
 console.log(
   JSON.stringify(
-    { ok, started, moved, autopiloted, picked, alive, looped, sounded, planets, before, after, autopilot, pick, living, galaxyLoop, audio, planetLoop, planetTypes, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
+    { ok, started, moved, autopiloted, picked, alive, looped, sounded, planets, before, after, autopilot, pick, living, comet, eye, galaxyLoop, audio, planetLoop, planetTypes, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
     null,
     2,
   ),

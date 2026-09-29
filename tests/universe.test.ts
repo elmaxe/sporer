@@ -108,10 +108,22 @@ describe('generateSystem', () => {
 });
 
 describe('comets', () => {
-  it('gives every system a few', () => {
+  it('gives systems up to three, often none', () => {
+    const counts = [0, 0, 0, 0];
+    for (const system of systems) counts[system.comets.length]!++;
+    expect(counts.reduce((a, b) => a + b)).toBe(systems.length);
+    // Roughly 4 : 4 : 2 : 1.
+    expect(counts[0]! / systems.length).toBeGreaterThan(0.25);
+    expect(counts[0]! / systems.length).toBeLessThan(0.5);
+    expect(counts[3]! / systems.length).toBeGreaterThan(0.03);
+    expect(counts[3]! / systems.length).toBeLessThan(0.18);
+  });
+
+  it('names them, uniquely within a system', () => {
     for (const system of systems) {
-      expect(system.comets.length).toBeGreaterThanOrEqual(1);
-      expect(system.comets.length).toBeLessThanOrEqual(4);
+      const names = system.comets.map((c) => c.name);
+      for (const n of names) expect(n).toMatch(/^Comet [A-Z][a-z]{2,}$/);
+      expect(new Set(names).size).toBe(names.length);
     }
   });
 
@@ -143,6 +155,7 @@ describe('comets', () => {
 
   it('sends the first comet of each system inbound', () => {
     for (const system of systems) {
+      if (system.comets.length === 0) continue;
       const m = system.comets[0]!.orbit.phase;
       expect(m).toBeLessThan(0);
       expect(m).toBeGreaterThan(-Math.PI);

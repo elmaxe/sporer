@@ -1,3 +1,4 @@
+import { generateName } from './names';
 import type { KeplerOrbit } from './orbit';
 import type { Rng } from './rng';
 
@@ -28,16 +29,16 @@ export interface CometContext {
 export const COMET_MIN_PERIHELION_RADII = 3.5;
 
 /**
- * A few comets on long, inclined elliptical orbits: perihelion just outside
+ * Up to three comets (often none) on long, inclined elliptical orbits: perihelion just outside
  * the star's glow, aphelion beyond the outermost planet. Uses its own Rng
  * stream (`rng.fork('comets')`), so adding comets changed nothing else.
  */
 export function generateComets(rng: Rng, ctx: CometContext): CometData[] {
   const count = rng.weighted<number>([
-    [1, 3],
-    [2, 4],
-    [3, 3],
-    [4, 1],
+    [0, 4],
+    [1, 4],
+    [2, 2],
+    [3, 1],
   ]);
   const minPerihelion = Math.max(ctx.starZone + ctx.starRadius * 2, ctx.starRadius * COMET_MIN_PERIHELION_RADII);
   const outer = Math.max(ctx.outerEdge, minPerihelion * 4);
@@ -48,7 +49,8 @@ export function generateComets(rng: Rng, ctx: CometContext): CometData[] {
     const Q = outer * rng.range(1.1, 1.6);
     const semiMajor = (q + Q) / 2;
     comets.push({
-      name: `Comet ${ctx.systemName} ${String.fromCharCode(65 + i)}`,
+      // Named like a discoverer's comet; a separate stream so the orbit draws don't depend on it.
+      name: `Comet ${generateName(rng.fork('name', i))}`,
       radius: rng.range(0.8, 1.8),
       orbit: {
         semiMajor,

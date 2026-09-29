@@ -105,6 +105,7 @@ const surfaceVertex = /* glsl */ `
 
 const surfaceFragment = /* glsl */ `
   uniform vec3 uColor;
+  uniform float uExposure;    // star intensity × eye adaptation
   uniform float uTime;
   uniform float uGranulation;
   uniform float uContrast;
@@ -140,6 +141,12 @@ const surfaceFragment = /* glsl */ `
     float limb = mix(1.0, 0.35 + 0.65 * pow(mu, 0.55), uLimb);
     vec3 col = uColor * bright * limb;
     col *= mix(vec3(1.0, 0.72, 0.55), vec3(1.0), smoothstep(0.0, 0.6, mu) * 0.6 + 0.4);
+    // Overexposed light bleeds into white, like a bright light on film: before
+    // the eye adapts the disc is white-hot with a coloured limb; adapted, the
+    // surface shows at its plain colours.
+    col *= uExposure;
+    float over = max(max(col.r, col.g), col.b);
+    col = mix(min(col, vec3(1.0)), vec3(1.0), smoothstep(1.0, 2.4, over));
     gl_FragColor = vec4(col, 1.0);
     #include <colorspace_fragment>
   }
@@ -176,10 +183,11 @@ const coronaFragment = /* glsl */ `
   uniform sampler2D uMap;
   uniform vec3 uColor;
   uniform float uOpacity;
+  uniform float uGlare;       // from the exposure: a blazing star has a stronger halo
   varying vec2 vUv;
   varying float vGain;
   void main() {
-    gl_FragColor = vec4(uColor * texture2D(uMap, vUv).a * vGain * uOpacity, 1.0);
+    gl_FragColor = vec4(uColor * texture2D(uMap, vUv).a * vGain * uOpacity * uGlare, 1.0);
     #include <colorspace_fragment>
   }
 `;
@@ -210,6 +218,7 @@ export function createStarSurfaceMaterial(color: string, activity: StarActivity,
       uSpots: { value: activity.spots },
       uLimb: { value: starParams.limbDarkening },
       uOffset: { value: noiseOffset(seed) },
+      uExposure: { value: 1 },
     },
   });
 }
@@ -232,6 +241,7 @@ export function createCoronaMaterial(
       uPulse: { value: 1 },
       uStreamers: { value: 0.35 },
       uOffset: { value: noiseOffset(seed ^ 0x5bd1e995) },
+      uGlare: { value: 1 },
     },
     blending: THREE.AdditiveBlending,
     depthWrite: false,
@@ -257,4 +267,14 @@ export function animateStarMaterials(
   c.uTime!.value = t;
   c.uPulse!.value = 1 + activity.pulse * starParams.corona * Math.sin((2 * Math.PI * time) / activity.pulsePeriod);
   c.uStreamers!.value = 0.35 * starParams.corona;
+}
+
+/**
+ * Sets how bright the star looks: `exposure` is the surface brightness
+ * multiplier (star intensity × eye adaptation; 1 = plain colours). The halo
+ * grows with its square root.
+ */
+export function setStarExposure(surface: THREE.ShaderMaterial, corona: THREE.ShaderMaterial, exposure: number): void {
+  surface.uniforms.uExposure!.value = exposure;
+  corona.uniforms.uGlare!.value = Math.sqrt(exposure);
 }

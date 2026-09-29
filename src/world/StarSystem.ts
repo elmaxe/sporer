@@ -3,6 +3,7 @@ import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
 import { FIXED_DT } from '../core/Game';
 import { hashSeed } from '../gen/rng';
+import { exposureParams } from '../player/exposure';
 import { describePlanet, type PlanetData, type SystemData } from '../gen/system';
 import { skyScale } from '../planet/frame';
 import type { Physics } from '../physics/Physics';
@@ -69,6 +70,7 @@ export class StarSystem implements Entity {
     this.ambient = new THREE.HemisphereLight('#9bb8ff', '#1a1020', 0.35);
     scene.add(this.ambient);
     this.animate(this._time);
+    this.setExposure(1);
 
     const stars = debug?.folder('Stars');
     stars?.add(starParams, 'pace', 0, 5);
@@ -107,11 +109,21 @@ export class StarSystem implements Entity {
   }
 
   /**
+   * How the eye sees the star(s): 1 = dark-adapted (blazing), lower once
+   * adapted to a star filling the view (see player/exposure.ts).
+   */
+  setExposure(adaptation: number): void {
+    for (const s of this.stars) s.setExposure(exposureParams.starIntensity * adaptation);
+  }
+
+  /**
    * Places the rendered bodies where they are at `time` (render state only;
    * `setTime` restores the rest), enlarging planets and moons that would look
-   * smaller than `minAngle` from `observer` so they still show as dots.
+   * smaller than `minAngle` from `observer` so they still show as dots. The
+   * star(s) blaze, as seen from a planet's sky.
    */
   pose(time: number, observer: THREE.Vector3, minAngle: number): void {
+    this.setExposure(1);
     for (const s of this.stars) s.positionAt(time, s.object.position);
     for (const p of this.planets) this.posePlanet(p, time, observer, minAngle);
     for (const m of this.moons) this.posePlanet(m, time, observer, minAngle);

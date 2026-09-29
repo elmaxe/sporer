@@ -12,6 +12,7 @@ import {
   createCoronaGeometry,
   createCoronaMaterial,
   createStarSurfaceMaterial,
+  setStarExposure,
 } from './starMaterials';
 
 /** Light intensity for a star's light, from its luminosity. */
@@ -124,6 +125,11 @@ export class Star implements Entity, CelestialBody {
 
   get renderPosition(): THREE.Vector3 {
     return this.object.position;
+  }
+
+  /** Surface brightness multiplier (see setStarExposure): intensity × eye adaptation. */
+  setExposure(exposure: number): void {
+    setStarExposure(this.mesh.material, this.glow.material, exposure);
   }
 
   /** Shows the surface, corona and storms as they are at system time `time`. */

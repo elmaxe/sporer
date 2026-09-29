@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { CometData } from '../gen/comets';
-import { keplerPosition } from '../gen/orbit';
+import { keplerPosition, perihelion } from '../gen/orbit';
+import type { Sight } from './CelestialBody';
 
 export const cometParams = {
   /** Distance (in habitable radii) at which the tail is at `tailLength`; it scales with 1/r². */
@@ -101,15 +102,17 @@ function tailGeometry(): THREE.BufferGeometry {
 }
 
 /**
- * A comet on its Kepler orbit (scenery: not a CelestialBody, no physics, so
- * picking and the autopilot ignore it). A small rocky nucleus in a glowing
+ * A comet on its Kepler orbit. Scenery: a `Sight`, not a `CelestialBody`, so
+ * hovering shows its name but it can't be flown to, and it has no physics. A small rocky nucleus in a glowing
  * coma, with a straight blue ion tail pointing away from the star and a
  * curved dust tail lagging along the orbit. Both grow and brighten with 1/r²
  * as it nears the star. Its pose is a pure function of the system clock.
  */
-export class Comet {
+export class Comet implements Sight {
   readonly object = new THREE.Group();
   readonly position = new THREE.Vector3();
+  readonly name: string;
+  readonly description: string;
   /** 0 far out, 1 at `activeDistance` or closer: drives the tails and coma. */
   activity = 0;
   private readonly nucleus: THREE.Mesh<THREE.IcosahedronGeometry, THREE.MeshStandardMaterial>;
@@ -124,6 +127,9 @@ export class Comet {
     private readonly habitableRadius: number,
     glowTexture: THREE.Texture,
   ) {
+    this.name = data.name;
+    const minutes = Math.max(1, Math.round(data.orbit.period / 60));
+    this.description = `Comet · returns every ${minutes} min · closest pass ${Math.round(perihelion(data.orbit))} u`;
     this.nucleus = new THREE.Mesh(
       new THREE.IcosahedronGeometry(data.radius, 1),
       new THREE.MeshStandardMaterial({ color: '#8a8f99', roughness: 1, flatShading: true }),
@@ -175,6 +181,15 @@ export class Comet {
     this.object.name = data.name;
     scene.add(this.object);
     this.poseAt(0);
+  }
+
+  get renderPosition(): THREE.Vector3 {
+    return this.position;
+  }
+
+  /** Hover radius: the coma, which is what you see. */
+  get radius(): number {
+    return this.coma.scale.x / 2;
   }
 
   /** Places the comet and shapes its tails for system time `time`. The star is at the barycentre. */

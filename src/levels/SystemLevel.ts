@@ -5,6 +5,8 @@ import type { Input } from '../core/Input';
 import type { StarRef } from '../gen/galaxy';
 import { generateSystem, spawnDistance, type SystemData } from '../gen/system';
 import { Physics } from '../physics/Physics';
+import { EyeAdaptation } from '../player/EyeAdaptation';
+import { sceneExposure } from '../player/exposure';
 import { OrbitCamera, cameraParams } from '../player/OrbitCamera';
 import { Picker } from '../player/Picker';
 import { Ship } from '../player/Ship';
@@ -35,6 +37,7 @@ export class SystemLevel extends Level {
   readonly world: StarSystem;
   readonly ship: Ship;
   readonly orbit: OrbitCamera;
+  readonly eye: EyeAdaptation;
   private readonly hud: Hud;
   private readonly starfield: Starfield;
   private readonly marker: TargetMarker;
@@ -70,7 +73,8 @@ export class SystemLevel extends Level {
         'System camera',
       ),
     );
-    const picker = this.add(new Picker(camera, input, this.ship, this.world.bodies));
+    this.eye = this.add(new EyeAdaptation(camera, this.world.stars, debug));
+    const picker = this.add(new Picker(camera, input, this.ship, this.world.bodies, this.world.comets));
     this.marker = this.add(new TargetMarker(this.scene, camera, this.ship));
     this.hud = this.add(new Hud(this.ship, picker, input, this.data, tooltip));
   }
@@ -125,6 +129,17 @@ export class SystemLevel extends Level {
     renderer.render(this.scene, camera);
     for (const body of hidden) body.object.visible = true;
     this.ship.object.visible = true;
+  }
+
+  /**
+   * Draws the scene at the eye's exposure: the star's own brightness, and
+   * the rest (tone mapped) dimmed part of the way along.
+   */
+  override render(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera): void {
+    this.world.setExposure(this.eye.exposure);
+    renderer.toneMappingExposure = sceneExposure(this.eye.exposure);
+    renderer.render(this.scene, camera);
+    renderer.toneMappingExposure = 1;
   }
 
   /** Distance from the ship to `body` in standoff distances (1 = parked beside it). */
