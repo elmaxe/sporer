@@ -32,6 +32,12 @@ export interface OrbitOptions {
    */
   onZoomPastLimit?: (direction: 1 | -1) => void;
   /**
+   * While this returns true (e.g. the autopilot is still flying), scrolling in
+   * is held back rather than applied, and played out smoothly once it turns
+   * false, so zooming in (and descending) happens at the destination.
+   */
+  holdZoomIn?: () => boolean;
+  /**
    * Live "up" direction (e.g. a ship's radial direction over a planet). Yaw and
    * pitch are then measured in the plane perpendicular to it, and that plane
    * is carried along as `up` turns, so the view doesn't spin. Default +Y.
@@ -50,6 +56,10 @@ const MAX_PITCH = THREE.MathUtils.degToRad(85);
 const PAST_LIMIT_PX = 180;
 /** Seconds for the past-limit tally to fade, so slow, stray scrolling doesn't add up. */
 const PAST_LIMIT_DECAY = 0.6;
+/** Most scroll-in (wheel pixels) kept while zooming in is held: min to max zoom and past the limit. */
+const MAX_HELD_WHEEL = 2500;
+/** How fast held scroll-in is played out once released, in wheel pixels per second. */
+const HELD_RELEASE_RATE = 1000;
 
 /**
  * Spore-style orbit camera, always centred on the target. Scroll zooms
@@ -65,6 +75,8 @@ export class OrbitCamera implements Entity {
   private targetPitch: number;
   private targetDistance: number;
   private pastLimit = 0;
+  /** Scroll-in (negative wheel pixels) held back by `holdZoomIn`, still to be played out. */
+  private heldWheel = 0;
   private readonly minPitch: number;
   private focus: THREE.Vector3 | null = null;
   private focusBlend = 0;
@@ -104,6 +116,7 @@ export class OrbitCamera implements Entity {
   setDistance(distance: number): void {
     this.distance = this.targetDistance = distance;
     this.pastLimit = 0;
+    this.heldWheel = 0;
   }
 
   /**
@@ -133,7 +146,7 @@ export class OrbitCamera implements Entity {
     this.targetYaw -= drag.x * p.rotateSpeed;
     this.targetPitch = THREE.MathUtils.clamp(this.targetPitch + drag.y * p.rotateSpeed, this.minPitch, MAX_PITCH);
 
-    const wheel = this.input.consumeWheel();
+    const wheel = this.holdZoomIn(this.input.consumeWheel(), frameDt);
     this.trackPastLimit(wheel, frameDt);
     this.targetDistance = THREE.MathUtils.clamp(
       this.targetDistance * Math.exp(wheel * p.zoomSpeed),
@@ -166,6 +179,25 @@ export class OrbitCamera implements Entity {
   }
 
   dispose(): void {}
+
+  /**
+   * Holds back scroll-in while `options.holdZoomIn` says so, and plays it out
+   * after. Returns the wheel movement to apply this frame. Scrolling out
+   * applies at once and drops whatever was held.
+   */
+  private holdZoomIn(wheel: number, frameDt: number): number {
+    if (wheel > 0) {
+      this.heldWheel = 0;
+      return wheel;
+    }
+    if (this.options.holdZoomIn?.()) {
+      this.heldWheel = Math.max(this.heldWheel + wheel, -MAX_HELD_WHEEL);
+      return 0;
+    }
+    const release = Math.max(this.heldWheel, -HELD_RELEASE_RATE * frameDt);
+    this.heldWheel -= release;
+    return wheel + release;
+  }
 
   /** Tallies wheel movement that pushes against a limit already reached, and reports it. */
   private trackPastLimit(wheel: number, frameDt: number): void {

@@ -71,7 +71,7 @@ describe('detailedTerrain', () => {
 });
 
 describe('great-circle motion', () => {
-  const params: ArriveParams = { maxSpeed: 60, accel: 120, gain: 1.2, damping: 1.2 };
+  const params: ArriveParams = { maxSpeed: 60, accel: 120, gain: 8, damping: 1.2 };
   const radius = 112;
 
   /** Flies from `start` to `target` like PlanetShip; returns the path's angles to the target. */
