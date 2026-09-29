@@ -5,6 +5,8 @@ export interface Sight {
   readonly name: string;
   /** One-line summary for the HUD tooltip, e.g. "Gas giant · rings · 2 moons". */
   readonly description: string;
+  /** Optional second tooltip line, e.g. a planet's climate. */
+  readonly details?: string;
   /** Visual radius, used for picking. */
   readonly radius: number;
   /** Interpolated position of the rendered object. */
