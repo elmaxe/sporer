@@ -16,6 +16,7 @@ Browser game in Three.js inspired by Spore's space stage. Stack: Vite + TypeScri
 - `threejs-game-conventions`: architecture, Entity lifecycle, physics/perf rules. Read before writing game code.
 - `run-game`: start the server and verify in Chrome. Use after changes.
 - `screenshot`: take in-game screenshots with `npm run shot` whenever something needs checking by eye.
+- `research`: researching anything real-world (climate, atmospheres, physics, techniques): look it up, measure it against reference cases, record it in `docs/research/`. Never guess numbers.
 
 ## Roadmap
 
