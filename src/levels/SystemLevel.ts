@@ -5,6 +5,8 @@ import type { Input } from '../core/Input';
 import type { StarRef } from '../gen/galaxy';
 import { generateSystem, spawnDistance, type SystemData } from '../gen/system';
 import { Physics } from '../physics/Physics';
+import { EyeAdaptation } from '../player/EyeAdaptation';
+import { sceneExposure } from '../player/exposure';
 import { OrbitCamera, cameraParams } from '../player/OrbitCamera';
 import { Picker } from '../player/Picker';
 import { Ship } from '../player/Ship';
@@ -38,6 +40,7 @@ export class SystemLevel extends Level {
   readonly ship: Ship;
   readonly orbit: OrbitCamera;
   readonly band: GalaxyBand;
+  readonly eye: EyeAdaptation;
   private readonly hud: Hud;
   private readonly starfield: Starfield;
   private readonly marker: TargetMarker;
@@ -60,7 +63,7 @@ export class SystemLevel extends Level {
 
     this.band = this.add(new GalaxyBand(this.scene, ref, this.data, debug));
     this.starfield = this.add(new Starfield(this.scene, camera));
-    this.world = this.add(new StarSystem(this.scene, physics, this.data));
+    this.world = this.add(new StarSystem(this.scene, physics, this.data, debug));
     const spawn = new THREE.Vector3(0, 15, spawnDistance(this.data));
     this.ship = this.add(new Ship(this.scene, physics, input, camera, this.world.bodies, debug, spawn));
     // Visual-only entities below run in this order each frame: camera first, then what reads it.
@@ -80,7 +83,8 @@ export class SystemLevel extends Level {
         'System camera',
       ),
     );
-    const picker = this.add(new Picker(camera, input, this.ship, this.world.bodies));
+    this.eye = this.add(new EyeAdaptation(camera, this.world.stars, debug));
+    const picker = this.add(new Picker(camera, input, this.ship, this.world.bodies, this.world.comets));
     this.trails = this.add(
       new OrbitTrails(
         this.scene,
@@ -149,6 +153,17 @@ export class SystemLevel extends Level {
     for (const body of hidden) body.object.visible = true;
     this.trails.visible = trails;
     this.ship.object.visible = true;
+  }
+
+  /**
+   * Draws the scene at the eye's exposure: the star's own brightness, and
+   * the rest (tone mapped) dimmed part of the way along.
+   */
+  override render(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera): void {
+    this.world.setExposure(this.eye.exposure);
+    renderer.toneMappingExposure = sceneExposure(this.eye.exposure);
+    renderer.render(this.scene, camera);
+    renderer.toneMappingExposure = 1;
   }
 
   /** Distance from the ship to `body` in standoff distances (1 = parked beside it). */

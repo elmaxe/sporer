@@ -1,10 +1,19 @@
 import * as THREE from 'three';
 import type { Entity } from '../core/Entity';
 import { orbitPosition } from '../gen/orbit';
+import { starActivity, type StarActivity } from '../gen/starActivity';
 import { describeStar } from '../gen/stars';
 import type { SystemStar } from '../gen/system';
 import { RAPIER, type Physics } from '../physics/Physics';
 import type { CelestialBody } from './CelestialBody';
+import { StarStorms } from './StarStorms';
+import {
+  animateStarMaterials,
+  createCoronaGeometry,
+  createCoronaMaterial,
+  createStarSurfaceMaterial,
+  setStarExposure,
+} from './starMaterials';
 
 /** Light intensity for a star's light, from its luminosity. */
 export function starLightIntensity(data: SystemStar): number {
@@ -15,8 +24,11 @@ export function starLightIntensity(data: SystemStar): number {
 const STANDOFF_MARGIN = 25;
 
 /**
- * A star: glowing sphere, additive glow billboard, point light and collider.
- * In binaries it orbits the barycentre (kinematic body); otherwise it is fixed.
+ * A star: an animated surface (granulation, spots, limb darkening), a pulsing
+ * corona billboard, storms (prominences and flares, see StarStorms), point
+ * light and collider. In binaries it orbits the barycentre (kinematic body);
+ * otherwise it is fixed. Its look is a pure function of the system clock
+ * (`animate`), so the planet level's sky shows it alive too.
  */
 export class Star implements Entity, CelestialBody {
   readonly object = new THREE.Group();
@@ -25,8 +37,12 @@ export class Star implements Entity, CelestialBody {
   readonly description: string;
   readonly radius: number;
   readonly standoff: number;
-  private readonly mesh: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>;
-  private readonly glow: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
+  readonly activity: StarActivity;
+  readonly storms: StarStorms;
+  /** Turns with the star's rotation: the surface and its storms. */
+  private readonly spin = new THREE.Group();
+  private readonly mesh: THREE.Mesh<THREE.SphereGeometry, THREE.ShaderMaterial>;
+  private readonly glow: THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial>;
   private readonly light: THREE.PointLight;
   private readonly body: RAPIER.RigidBody;
   private readonly orbiting: boolean;
@@ -37,6 +53,8 @@ export class Star implements Entity, CelestialBody {
     private readonly physics: Physics,
     readonly name: string,
     readonly data: SystemStar,
+    /** Seeds the surface pattern and storm events. */
+    readonly seed: number,
     glowTexture: THREE.Texture,
   ) {
     this.orbiting = data.orbit.radius > 0;
@@ -44,25 +62,16 @@ export class Star implements Entity, CelestialBody {
     this.radius = data.radius;
     this.standoff = data.radius + STANDOFF_MARGIN;
     const giant = data.kind === 'redGiant' || data.kind === 'blueGiant';
+    this.activity = starActivity(data);
 
+    // Not tone mapped (the shaders skip it): ACES would wash the colour out towards beige.
     this.mesh = new THREE.Mesh(
-      new THREE.SphereGeometry(data.radius, 48, 24),
-      // Not tone mapped: ACES would wash the star's colour out towards beige.
-      new THREE.MeshBasicMaterial({ color: data.color, toneMapped: false }),
+      new THREE.SphereGeometry(data.radius, 64, 32),
+      createStarSurfaceMaterial(data.color, this.activity, seed),
     );
-    this.glow = new THREE.Mesh(
-      new THREE.PlaneGeometry(1, 1),
-      new THREE.MeshBasicMaterial({
-        map: glowTexture,
-        color: data.color,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        transparent: true,
-        toneMapped: false,
-        // Giants get a wider but fainter, softer halo.
-        opacity: giant ? 0.6 : 1,
-      }),
-    );
+    // Giants get a wider but fainter, softer halo.
+    this.glow = new THREE.Mesh(createCoronaGeometry(), createCoronaMaterial(data.color, giant ? 0.6 : 1, seed, glowTexture));
+    this.storms = new StarStorms(this.activity, seed, data.radius, data.color);
     // Dim stars get a relatively larger halo so white dwarfs still read as stars.
     this.glow.scale.setScalar(data.radius * (data.radius < 12 ? 9 : giant ? 8 : 6));
     // Face the camera's position (a Sprite faces its view plane, which lets the glow
@@ -77,7 +86,8 @@ export class Star implements Entity, CelestialBody {
     this.light = new THREE.PointLight(data.color, starLightIntensity(data), 0, 0);
 
     this.object.name = `Star (${data.kind})`;
-    this.object.add(this.mesh, this.glow, this.light);
+    this.spin.add(this.mesh, this.storms.points);
+    this.object.add(this.spin, this.glow, this.light);
     orbitPosition(data.orbit, 0, this.position);
     this.prev.copy(this.position);
     this.object.position.copy(this.position);
@@ -117,6 +127,18 @@ export class Star implements Entity, CelestialBody {
     return this.object.position;
   }
 
+  /** Surface brightness multiplier (see setStarExposure): intensity × eye adaptation. */
+  setExposure(exposure: number): void {
+    setStarExposure(this.mesh.material, this.glow.material, exposure);
+  }
+
+  /** Shows the surface, corona and storms as they are at system time `time`. */
+  animate(time: number): void {
+    this.spin.rotation.y = ((2 * Math.PI * time) / this.activity.rotationPeriod) % (2 * Math.PI);
+    animateStarMaterials(this.mesh.material, this.glow.material, this.activity, time);
+    this.storms.update(time);
+  }
+
   update(_frameDt: number, alpha: number): void {
     if (this.orbiting) this.object.position.lerpVectors(this.prev, this.position, alpha);
   }
@@ -127,6 +149,7 @@ export class Star implements Entity, CelestialBody {
     this.mesh.material.dispose();
     this.glow.geometry.dispose();
     this.glow.material.dispose(); // the glow texture is shared; its owner disposes it
+    this.storms.dispose();
     this.light.dispose();
     this.physics.world.removeRigidBody(this.body);
   }

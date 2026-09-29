@@ -1,4 +1,5 @@
 import { randomRotation, type Quat } from './galactic';
+import { generateComets, type CometData } from './comets';
 import type { GalaxyData, StarRef } from './galaxy';
 import { hexToRgb, hslToHex, rgbToHex } from './color';
 import { romanNumeral } from './names';
@@ -80,6 +81,8 @@ export interface SystemData {
    * is tilted against the galactic plane (see gen/galactic.ts).
    */
   galacticTilt: Quat;
+  /** On long elliptical orbits; scenery only (not visitable). */
+  comets: CometData[];
 }
 
 /** G-class period at the reference distance; other orbits follow Kepler's third law. */
@@ -167,6 +170,16 @@ export function generateSystem(ref: StarRef): SystemData {
     edge = orbitRadius + extent;
   }
 
+  // Own stream, so adding comets changed nothing above.
+  const last = planets[planets.length - 1];
+  const comets = generateComets(rng.fork('comets'), {
+    systemName: ref.name,
+    starZone,
+    starRadius: Math.max(...stars.map((s) => s.radius)),
+    outerEdge: last ? last.orbit.radius + last.extent : 0,
+    period: (a) => keplerPeriod(a, totalMass),
+  });
+
   return {
     id: ref.id,
     name: ref.name,
@@ -176,6 +189,7 @@ export function generateSystem(ref: StarRef): SystemData {
     starZone,
     habitableRadius,
     galacticTilt: randomRotation(rng.fork('galactic')),
+    comets,
   };
 }
 
@@ -345,4 +359,4 @@ export function describePlanet(type: PlanetType): string {
 }
 
 // Re-exported so callers can import all generation types from one place.
-export type { PlanetStyle, PlanetType, MoonType };
+export type { CometData, PlanetStyle, PlanetType, MoonType };
