@@ -30,6 +30,16 @@ export function orbitPosition<T extends Vec3Like>(orbit: Orbit, time: number, ou
 }
 
 /**
+ * The inverse of orbitPosition: the angle (radians, in [-π, π]) of a point on
+ * the orbit, e.g. where a body is actually drawn.
+ */
+export function orbitAngleOf(orbit: Orbit, p: Vec3Like): number {
+  // Undo the tilt about X to get the in-plane coordinate that was sin(angle).
+  const flatZ = p.y * Math.sin(orbit.inclination) + p.z * Math.cos(orbit.inclination);
+  return Math.atan2(flatZ, p.x);
+}
+
+/**
  * Elliptical (Kepler) orbit around the origin, for comets. The orbital plane
  * starts as XZ like `Orbit`, is tilted about X by `inclination`, then turned
  * about +Y by `node`; the perihelion lies `argPerihelion` along the orbit

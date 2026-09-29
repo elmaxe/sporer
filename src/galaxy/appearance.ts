@@ -58,3 +58,7 @@ export function galaxyStarSize(ref: StarRef): number {
     )
   );
 }
+
+/** Glow of the galaxy's disc and of its bulge (the galaxy map's glows, and the band in each system's sky). */
+export const DISC_GLOW_COLOR = '#6f86c8';
+export const BULGE_GLOW_COLOR = '#ffd9a0';
