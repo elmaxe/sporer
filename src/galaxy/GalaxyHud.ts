@@ -27,6 +27,9 @@ export class GalaxyHud implements Entity {
   private readonly hoverRing: MarkerRing;
   private readonly at = new THREE.Vector3();
   private sinceRefresh = REFRESH_SECONDS;
+  private active = false;
+  /** Hides the rings (e.g. while diving into a star). */
+  hideMarkers = false;
 
   constructor(
     scene: THREE.Scene,
@@ -46,21 +49,26 @@ export class GalaxyHud implements Entity {
   }
 
   activate(): void {
+    this.active = true;
     this.helpEl.textContent = HELP;
     this.speedEl.textContent = '';
     this.sinceRefresh = REFRESH_SECONDS;
   }
 
   deactivate(): void {
+    this.active = false;
     this.tooltip.hide();
   }
 
   update(frameDt: number): void {
     const { ship } = this;
     const hovered = this.picker.hovered;
-    this.mark(this.currentRing, ship.travelling ? null : ship.current, 0.5, frameDt);
-    this.mark(this.destinationRing, ship.destination, 0.9, frameDt);
-    this.mark(this.hoverRing, hovered !== ship.current && hovered !== ship.destination ? hovered : null, 0.35, frameDt);
+    const show = !this.hideMarkers;
+    this.mark(this.currentRing, show && !ship.travelling ? ship.current : null, 0.5, frameDt);
+    this.mark(this.destinationRing, show ? ship.destination : null, 0.9, frameDt);
+    this.mark(this.hoverRing, show && hovered !== ship.current && hovered !== ship.destination ? hovered : null, 0.35, frameDt);
+    // Still drawn while crossfading out, but the DOM belongs to the level taking over.
+    if (!this.active) return;
     // The star you're at (or heading to) and the one under the pointer shine steadily.
     this.map.holdSteady(ship.destination ?? ship.current, hovered);
 

@@ -1,4 +1,5 @@
 import { generateComets, type CometData } from './comets';
+import { galacticTilt, type QuatLike } from './galactic';
 import type { GalaxyData, StarRef } from './galaxy';
 import { romanNumeral } from './names';
 import type { Orbit } from './orbit';
@@ -76,6 +77,8 @@ export interface SystemData {
   habitableRadius: number;
   /** On long elliptical orbits; scenery only (not visitable). */
   comets: CometData[];
+  /** Rotation from system space into galaxy space (the ecliptic is tilted against the galactic plane). */
+  galacticTilt: QuatLike;
 }
 
 /** G-class period at the reference distance; other orbits follow Kepler's third law. */
@@ -166,7 +169,18 @@ export function generateSystem(ref: StarRef): SystemData {
     period: (a) => keplerPeriod(a, totalMass),
   });
 
-  return { id: ref.id, name: ref.name, seed: ref.seed, stars, planets, starZone, habitableRadius, comets };
+  return {
+    id: ref.id,
+    name: ref.name,
+    seed: ref.seed,
+    stars,
+    planets,
+    starZone,
+    habitableRadius,
+    comets,
+    // Own stream too: nothing above changed.
+    galacticTilt: galacticTilt(rng.fork('galactic')),
+  };
 }
 
 /** Where to put the player when arriving: in the first gap between planets, clear of moons. */

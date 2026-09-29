@@ -9,6 +9,8 @@
 // type and a moon in other systems (skip those with --quick). Living stars: the surface clock advances and
 // storms have particles under way (and keep animating in the planet level's sky); comets move, show their
 // name on hover and ignore clicks. Looking at the star close up lowers the exposure (eye adaptation).
+// Seamless zoom: through the galaxy loop, every frame's #fade opacity, crossfade weight and canvas brightness
+// are sampled; the screen must never go black and both zooms must crossfade (screenshot mid-handover).
 // Prints JSON with FPS, console errors and screenshot paths. Exit 1 on failure.
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
@@ -90,7 +92,7 @@ await sleep(4000);
 
 const state = `({ speed: +ship.speed.toFixed(1), pos: ship.object.position.toArray().map((n) => +n.toFixed(1)) })`;
 const started = await evaluate(`typeof window.ship !== 'undefined'`);
-let before, after, autopilot, pick, living, comet, eye, galaxyLoop, fps, audio, planetLoop, heldZoom;
+let before, after, autopilot, pick, living, comet, eye, galaxyLoop, fps, audio, planetLoop, heldZoom, seamless;
 const planetTypes = [];
 const wheel = (deltaY) =>
   evaluate(`game.renderer.domElement.dispatchEvent(new WheelEvent('wheel', { deltaY: ${deltaY}, bubbles: true, cancelable: true }))`);
@@ -267,10 +269,34 @@ if (started) {
 
   // Galaxy loop, driven by real wheel and pointer events.
   galaxyLoop = { from: await evaluate(`system.id`) };
+  // Seamless zoom: sample every drawn frame (after drawing, before it's shown) through the loop. The canvas
+  // brightness is the mean over a sparse grid; #fade is the DOM overlay the other transitions fade through.
+  // Freezes the game once mid-handover of the zoom back in, for a screenshot.
+  await evaluate(`(() => {
+    const fade = document.getElementById('fade');
+    const gl = game.renderer.getContext();
+    window.__seamless = { frames: [], freezeOnZoomIn: true, frozen: false };
+    game.afterFrame = () => {
+      const s = window.__seamless;
+      const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
+      if (!s.px || s.px.length !== w * h * 4) s.px = new Uint8Array(w * h * 4);
+      gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, s.px);
+      let sum = 0, n = 0;
+      for (let y = 2; y < h; y += 8) for (let x = 2; x < w; x += 8) {
+        const i = 4 * (y * w + x); sum += s.px[i] + s.px[i + 1] + s.px[i + 2]; n++;
+      }
+      const weight = levels.crossfade;
+      s.frames.push({ transitioning: levels.transitioning, mode: levels.mode, fade: +getComputedStyle(fade).opacity, weight, brightness: sum / (3 * n) });
+      if (s.freezeOnZoomIn && weight !== null && weight > 0.35 && levels.mode === 'system') {
+        s.freezeOnZoomIn = false; s.frozen = true; game.stop();
+      }
+    };
+  })()`);
   await wheel(50000); // to max zoom
   await sleep(1500);
   await wheel(300); // keep scrolling past it
   await sleep(1800);
+  for (let i = 0; i < 40 && (await evaluate(`levels.transitioning`)); i++) await sleep(250);
   galaxyLoop.modeAfterZoomOut = await evaluate(`levels.mode`);
   galaxyLoop.fps = await evaluate(measureFps);
   // Step 6 polish: distant galaxies, twinkle, a slow spin, binaries as two dots.
@@ -316,7 +342,30 @@ if (started) {
   galaxyLoop.heldWhileTravelling = await evaluate(`levels.galaxyLevel.ship.travelling && levels.mode === 'galaxy'`);
   for (let i = 0; i < 60 && (await evaluate(`levels.galaxyLevel.ship.travelling`)); i++) await sleep(250);
   galaxyLoop.dockedAt = await evaluate(`levels.galaxyLevel.ship.travelling ? null : levels.galaxyLevel.ship.current.id`);
+  for (let i = 0; i < 40 && !(await evaluate(`__seamless.frozen`)); i++) await sleep(100);
+  const handoverShot = join(outDir, 'handover.png');
+  if (await evaluate(`__seamless.frozen`)) {
+    const shot = await send('Page.captureScreenshot', { format: 'png' });
+    writeFileSync(handoverShot, Buffer.from(shot.result.data, 'base64'));
+    await evaluate(`__seamless.frozen = false, game.start()`);
+  }
   for (let i = 0; i < 20 && (await evaluate(`levels.mode !== 'system' || levels.transitioning`)); i++) await sleep(250);
+  await sleep(300);
+  seamless = await evaluate(`(() => {
+    game.afterFrame = null;
+    __seamless.px = null;
+    const f = __seamless.frames.filter((x) => x.transitioning);
+    const blended = f.filter((x) => x.weight !== null && x.weight > 0 && x.weight < 1);
+    return {
+      frames: f.length,
+      crossfadeFrames: blended.length,
+      zoomedOut: blended.some((x) => x.mode === 'galaxy'),
+      zoomedIn: blended.some((x) => x.mode === 'system'),
+      maxFade: Math.max(...__seamless.frames.map((x) => x.fade)),
+      minBrightness: +Math.min(...f.map((x) => x.brightness)).toFixed(2),
+    };
+  })()`);
+  seamless.screenshot = handoverShot;
   galaxyLoop.modeAfterZoomIn = await evaluate(`levels.mode`);
   galaxyLoop.to = await evaluate(`system.id`);
   galaxyLoop.shipSpeed = await evaluate(`ship.speed`);
@@ -349,10 +398,12 @@ if (started) {
     ship.travelTo(best);
     return ${played};
   })()`);
-  for (let i = 0; i < 60 && (await evaluate(`levels.galaxyLevel.ship.travelling`)); i++) await sleep(250);
+  for (let i = 0; i < 60 && (await evaluate(`levels.galaxyLevel.ship.travelling || levels.transitioning`)); i++) await sleep(250);
   await evaluate(`levels.toSystem()`);
   audio.sfx.in = await evaluate(played);
-  await sleep(1500);
+  await sleep(500);
+  // The zoom runs slower than real time at headless frame rates (each frame advances it by at most 0.25 s).
+  for (let i = 0; i < 40 && (await evaluate(`levels.transitioning`)); i++) await sleep(250);
   audio.sfx.modeAfter = await evaluate(`levels.mode`);
   await send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'KeyM', key: 'm' });
   await send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'KeyM', key: 'm' });
@@ -448,7 +499,12 @@ const looped =
   galaxyLoop.dockedAt === galaxyLoop.clicked.nearest &&
   galaxyLoop.modeAfterZoomIn === 'system' &&
   galaxyLoop.to === galaxyLoop.clicked.nearest &&
-  typeof galaxyLoop.shipSpeed === 'number';
+  typeof galaxyLoop.shipSpeed === 'number' &&
+  seamless.frames > 0 &&
+  seamless.zoomedOut &&
+  seamless.zoomedIn &&
+  seamless.maxFade < 0.99 &&
+  seamless.minBrightness > 0.5;
 const sounded =
   started &&
   audio.state === 'running' &&
@@ -472,7 +528,7 @@ const planets =
 const ok = started && moved && autopiloted && picked && alive && looped && sounded && planets && errors.length === 0;
 console.log(
   JSON.stringify(
-    { ok, started, moved, autopiloted, picked, alive, looped, sounded, planets, before, after, autopilot, pick, living, comet, eye, galaxyLoop, audio, planetLoop, heldZoom, planetTypes, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
+    { ok, started, moved, autopiloted, picked, alive, looped, sounded, planets, before, after, autopilot, pick, living, comet, eye, galaxyLoop, seamless, audio, planetLoop, heldZoom, planetTypes, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
     null,
     2,
   ),

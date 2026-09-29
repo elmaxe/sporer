@@ -6,14 +6,8 @@ import { describeStar } from '../gen/stars';
 import type { SystemStar } from '../gen/system';
 import { RAPIER, type Physics } from '../physics/Physics';
 import type { CelestialBody } from './CelestialBody';
+import { StarLook } from './StarLook';
 import { StarStorms } from './StarStorms';
-import {
-  animateStarMaterials,
-  createCoronaGeometry,
-  createCoronaMaterial,
-  createStarSurfaceMaterial,
-  setStarExposure,
-} from './starMaterials';
 
 /** Light intensity for a star's light, from its luminosity. */
 export function starLightIntensity(data: SystemStar): number {
@@ -39,10 +33,8 @@ export class Star implements Entity, CelestialBody {
   readonly standoff: number;
   readonly activity: StarActivity;
   readonly storms: StarStorms;
-  /** Turns with the star's rotation: the surface and its storms. */
-  private readonly spin = new THREE.Group();
-  private readonly mesh: THREE.Mesh<THREE.SphereGeometry, THREE.ShaderMaterial>;
-  private readonly glow: THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial>;
+  /** The surface and corona; the storms turn with its surface. */
+  private readonly look: StarLook;
   private readonly light: THREE.PointLight;
   private readonly body: RAPIER.RigidBody;
   private readonly orbiting: boolean;
@@ -61,33 +53,16 @@ export class Star implements Entity, CelestialBody {
     this.description = describeStar(data);
     this.radius = data.radius;
     this.standoff = data.radius + STANDOFF_MARGIN;
-    const giant = data.kind === 'redGiant' || data.kind === 'blueGiant';
     this.activity = starActivity(data);
-
-    // Not tone mapped (the shaders skip it): ACES would wash the colour out towards beige.
-    this.mesh = new THREE.Mesh(
-      new THREE.SphereGeometry(data.radius, 64, 32),
-      createStarSurfaceMaterial(data.color, this.activity, seed),
-    );
-    // Giants get a wider but fainter, softer halo.
-    this.glow = new THREE.Mesh(createCoronaGeometry(), createCoronaMaterial(data.color, giant ? 0.6 : 1, seed, glowTexture));
+    this.look = new StarLook(data, this.activity, seed, glowTexture);
     this.storms = new StarStorms(this.activity, seed, data.radius, data.color);
-    // Dim stars get a relatively larger halo so white dwarfs still read as stars.
-    this.glow.scale.setScalar(data.radius * (data.radius < 12 ? 9 : giant ? 8 : 6));
-    // Face the camera's position (a Sprite faces its view plane, which lets the glow
-    // poke out in front of the star when it's off-centre). Runs after the scene's
-    // matrix update, so refresh the matrix here.
-    this.glow.onBeforeRender = (_renderer, _scene, camera) => {
-      this.glow.lookAt(camera.position);
-      this.glow.updateMatrixWorld();
-    };
 
     // decay 0 keeps intensity constant with distance, so outer planets stay lit.
     this.light = new THREE.PointLight(data.color, starLightIntensity(data), 0, 0);
 
     this.object.name = `Star (${data.kind})`;
-    this.spin.add(this.mesh, this.storms.points);
-    this.object.add(this.spin, this.glow, this.light);
+    this.look.spin.add(this.storms.points);
+    this.object.add(this.look.object, this.light);
     orbitPosition(data.orbit, 0, this.position);
     this.prev.copy(this.position);
     this.object.position.copy(this.position);
@@ -129,13 +104,12 @@ export class Star implements Entity, CelestialBody {
 
   /** Surface brightness multiplier (see setStarExposure): intensity × eye adaptation. */
   setExposure(exposure: number): void {
-    setStarExposure(this.mesh.material, this.glow.material, exposure);
+    this.look.setExposure(exposure);
   }
 
   /** Shows the surface, corona and storms as they are at system time `time`. */
   animate(time: number): void {
-    this.spin.rotation.y = ((2 * Math.PI * time) / this.activity.rotationPeriod) % (2 * Math.PI);
-    animateStarMaterials(this.mesh.material, this.glow.material, this.activity, time);
+    this.look.animate(time);
     this.storms.update(time);
   }
 
@@ -145,10 +119,7 @@ export class Star implements Entity, CelestialBody {
 
   dispose(): void {
     this.scene.remove(this.object);
-    this.mesh.geometry.dispose();
-    this.mesh.material.dispose();
-    this.glow.geometry.dispose();
-    this.glow.material.dispose(); // the glow texture is shared; its owner disposes it
+    this.look.dispose(); // the glow texture is shared; its owner disposes it
     this.storms.dispose();
     this.light.dispose();
     this.physics.world.removeRigidBody(this.body);

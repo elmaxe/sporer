@@ -167,6 +167,12 @@ export class Ship implements Entity {
     this.arrived = true;
   }
 
+  /** Draws the UFO at `scale` × its size (visual only; e.g. growing out of the star on arrival). */
+  setScale(scale: number): void {
+    this.object.scale.setScalar(Math.max(scale, 1e-3));
+    this.object.visible = scale > 1e-3;
+  }
+
   stop(): void {
     this.hasTarget = false;
     this._targetBody = null;

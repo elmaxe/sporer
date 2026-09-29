@@ -12,6 +12,7 @@ import { adaptExposure, exposureParams, starGlare, targetExposure } from './expo
 export class EyeAdaptation implements Entity {
   /** 1 = dark-adapted (stars blaze); lower when a star fills the view. */
   exposure = 1;
+  private settling = false;
   private readonly forward = new THREE.Vector3();
   private readonly toStar = new THREE.Vector3();
 
@@ -43,13 +44,14 @@ export class EyeAdaptation implements Entity {
     return targetExposure(glare);
   }
 
-  /** Jumps straight to the adapted exposure (no fade). */
-  settle(): void {
-    this.exposure = this.target;
+  /** Jumps to the adapted exposure on the next update, once the camera is in place. */
+  settleNext(): void {
+    this.settling = true;
   }
 
   update(frameDt: number): void {
-    this.exposure = adaptExposure(this.exposure, this.target, frameDt);
+    this.exposure = this.settling ? this.target : adaptExposure(this.exposure, this.target, frameDt);
+    this.settling = false;
   }
 
   dispose(): void {}

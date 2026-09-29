@@ -5,20 +5,31 @@ import type { Entity } from '../core/Entity';
 import type { Game } from '../core/Game';
 import type { GalaxyData, StarRef } from '../gen/galaxy';
 import type { OrbitCamera } from '../player/OrbitCamera';
-import { cameraParams } from '../player/OrbitCamera';
 import { Fade } from '../ui/Fade';
 import { Tooltip } from '../ui/Tooltip';
 import type { Planet } from '../world/Planet';
 import { GALAXY_VIEW_DISTANCE, GalaxyLevel } from './GalaxyLevel';
 import { PLANET_VIEW_DISTANCE, PlanetLevel, planetCameraParams } from './PlanetLevel';
+import type { Level } from './Level';
+import {
+  galaxyScale,
+  handoverIn,
+  handoverOut,
+  sampleSeamlessZoom,
+  seamlessZoomParams,
+  type SeamlessSample,
+  type SeamlessZoom,
+} from './seamlessZoom';
 import { ARRIVAL_DISTANCE, SystemLevel } from './SystemLevel';
 import { ease, samplePhase, type TransitionPhase } from './transition';
 
-/** Seconds for each half of a transition (zoom + fade out, swap, zoom + fade in). */
+/** Seconds for each half of a planet transition (zoom + fade out, swap, zoom + fade in). */
 const OUT_SECONDS = 0.45;
 const IN_SECONDS = 0.8;
-/** Galaxy camera distance where a system transition starts or ends: right at the star. */
-const GALAXY_CLOSE_DISTANCE = 2.5;
+/** The system's barycentre, where the system camera looks during the galaxy zoom. Never modified. */
+const BARYCENTRE = new THREE.Vector3();
+/** A camera looks along its local -Z, so +Z points from what it looks at back to it. */
+const BACK = new THREE.Vector3(0, 0, 1);
 /** System camera distance from a planet's centre where a planet transition starts or ends, in radii. */
 const PLANET_CLOSE_RADII = 1.5;
 /** How far (in its own zoom) the planet camera pulls away while leaving. */
@@ -33,15 +44,36 @@ interface ActivePhase extends TransitionPhase {
   then: () => ActivePhase | null;
 }
 
+/** A running galaxy ↔ system zoom: one timeline (seamlessZoom.ts) driving both levels. */
+interface SeamlessTransition {
+  zoom: SeamlessZoom;
+  elapsed: number;
+  outgoing: Level;
+  swapped: boolean;
+  /** Poses both levels for this point of the timeline (before they update this frame). */
+  apply: (s: SeamlessSample) => void;
+  /** Once, as the crossfade starts: the incoming level becomes the active one. */
+  swap: () => void;
+  finish: () => void;
+}
+
 /**
  * Owns the levels and moves between them. Zooming out past a system shows
  * the galaxy, framed on the current star; zooming in at a star enters its
  * system (generated on demand). Zooming in while parked at a planet or moon
  * descends to its low orbit (a planet level, built on demand and dropped on
- * the way back up). Each transition reads as one continuous zoom:
- * the old camera keeps zooming while the screen fades to black, the levels
- * swap, and the new camera zooms on while it fades back in, under a whoosh.
- * Input is blocked meanwhile. A global entity: it runs before the active level each frame.
+ * the way back up). Each transition reads as one continuous zoom, under a
+ * whoosh, with input blocked meanwhile.
+ *
+ * Galaxy ↔ system is seamless: the galaxy camera dives at the star while the
+ * UFO shrinks into it and a close-up of the system's star(s) grows out of its
+ * dot; then both levels are drawn and crossfaded, framed identically (same
+ * distance in each level's units, the view turned by the system's galactic
+ * tilt), and the system camera zooms on while turning back to its own orbit
+ * and over to the UFO, which grows back. Zooming out is the same in reverse.
+ * Planet transitions fade through black: the old camera keeps zooming while
+ * the screen fades out, the levels swap, and the new camera zooms on while it
+ * fades back in. A global entity: it runs before the active level each frame.
  */
 export class SceneManager implements Entity {
   readonly galaxyLevel: GalaxyLevel;
@@ -52,6 +84,11 @@ export class SceneManager implements Entity {
   private readonly fade = new Fade();
   private phase: ActivePhase | null = null;
   private elapsed = 0;
+  private seamless: SeamlessTransition | null = null;
+  // Scratch for the seamless zoom (live: the cameras read them every frame).
+  private readonly view = new THREE.Quaternion();
+  private readonly rotation = new THREE.Quaternion();
+  private readonly direction = new THREE.Vector3();
 
   constructor(
     private readonly game: Game,
@@ -82,66 +119,118 @@ export class SceneManager implements Entity {
   }
 
   get transitioning(): boolean {
-    return this.phase !== null;
+    return this.phase !== null || this.seamless !== null;
   }
 
-  /** System → galaxy, framed on the current star. */
+  /** The incoming level's weight while two levels are crossfaded, else null (for tests). */
+  get crossfade(): number | null {
+    return this.game.crossfadeWeight;
+  }
+
+  /**
+   * System → galaxy, framed on the current star: the camera pulls back to the
+   * star(s) as the UFO shrinks away, then the galaxy takes over (its ship
+   * rising out of the star) and zooms out to the usual view.
+   */
   toGalaxy(): void {
     if (this.transitioning || this.mode !== 'system') return;
-    const from = this._systemLevel.orbit;
+    const system = this._systemLevel;
+    const galaxy = this.galaxyLevel;
+    const from = system.orbit;
+    const to = galaxy.orbit;
+    const handover = handoverOut(system.data.starZone, from.zoom);
+    const scale = galaxyScale(handover);
+    // As the system's eye sees it (it may still be adapted to a star close up).
+    galaxy.showCloseUp(system.data, scale, () => system.world.time, () => system.eye.exposure);
+    // Galaxy space from system space: the system's tilt, turned with the galaxy.
+    const matchView = () => from.orientation(this.view).premultiply(galaxy.systemRotation(system.data, this.rotation));
     this.sfx.play('transitionOut');
-    this.begin({
-      orbit: from,
-      from: from.zoom,
-      to: from.zoom * 4,
-      duration: OUT_SECONDS,
-      fadeFrom: 0,
-      fadeTo: 1,
-      then: () => {
-        this.game.setLevel(this.galaxyLevel);
-        const to = this.galaxyLevel.orbit;
-        return {
-          orbit: to,
-          from: GALAXY_CLOSE_DISTANCE,
-          to: GALAXY_VIEW_DISTANCE,
-          duration: IN_SECONDS,
-          fadeFrom: 1,
-          fadeTo: 0,
-          then: () => (to.zoomTo(GALAXY_VIEW_DISTANCE), null),
-        };
+    this.beginSeamless({
+      zoom: this.seamlessZoom(from.zoom, handover, GALAXY_VIEW_DISTANCE / scale),
+      outgoing: system,
+      apply: (s) => {
+        if (s.blend < 1) {
+          from.setFocus(BARYCENTRE, s.lead);
+          from.setDistance(s.distance);
+          system.ship.setScale(1 - s.lead);
+        }
+        if (s.blend > 0) {
+          // The camera follows the ship, which rises out of the star.
+          to.setDistance(s.distance * scale);
+          to.setView(matchView(), 1 - s.tail);
+          galaxy.setDive(1 - s.tail);
+        }
+      },
+      swap: () => {
+        this.game.setLevel(galaxy);
+        // Settle on the orbit closest to the matched view.
+        to.lookFrom(this.direction.copy(BACK).applyQuaternion(matchView()));
+      },
+      finish: () => {
+        galaxy.hideCloseUp();
+        galaxy.setDive(0);
+        to.setView(null);
+        to.zoomTo(GALAXY_VIEW_DISTANCE);
+        from.setFocus(null);
+        system.ship.setScale(1);
       },
     });
   }
 
-  /** Galaxy → the system of the star the ship is docked at. Ignored while travelling. */
+  /**
+   * Galaxy → the system of the star the ship is docked at. Ignored while
+   * travelling. The camera dives at the star as the UFO shrinks into it and
+   * the star swells into a sun, then the system takes over and zooms on in,
+   * over to the UFO growing back at its place.
+   */
   toSystem(): void {
-    const ship = this.galaxyLevel.ship;
+    const galaxy = this.galaxyLevel;
+    const ship = galaxy.ship;
     if (this.transitioning || this.mode !== 'galaxy' || ship.travelling) return;
-    const from = this.galaxyLevel.orbit;
+    if (this._systemLevel.ref !== ship.current) {
+      this._systemLevel.dispose();
+      this._systemLevel = this.createSystem(ship.current);
+    }
+    const system = this._systemLevel;
+    const from = galaxy.orbit;
+    const to = system.orbit;
+    const handover = handoverIn(system.data.starZone);
+    const scale = galaxyScale(handover);
+    // Dark-adapted, as the system's eye will be (it settles at the handover, with the star small).
+    galaxy.showCloseUp(system.data, scale, () => system.world.time, () => 1);
+    // System space from galaxy space: undo the galaxy's turn and the system's tilt.
+    const matchView = () =>
+      from.orientation(this.view).premultiply(galaxy.systemRotation(system.data, this.rotation).invert());
     this.sfx.play('transitionIn');
-    this.begin({
-      orbit: from,
-      from: from.zoom,
-      to: GALAXY_CLOSE_DISTANCE,
-      duration: OUT_SECONDS,
-      fadeFrom: 0,
-      fadeTo: 1,
-      then: () => {
-        if (this._systemLevel.ref !== ship.current) {
-          this._systemLevel.dispose();
-          this._systemLevel = this.createSystem(ship.current);
+    this.beginSeamless({
+      zoom: this.seamlessZoom(from.zoom / scale, handover, ARRIVAL_DISTANCE),
+      outgoing: galaxy,
+      apply: (s) => {
+        if (s.blend < 1) {
+          // The camera follows the ship into the star.
+          from.setDistance(s.distance * scale);
+          galaxy.setDive(s.lead);
         }
-        this.game.setLevel(this._systemLevel);
-        const to = this._systemLevel.orbit;
-        return {
-          orbit: to,
-          from: cameraParams.maxDistance,
-          to: ARRIVAL_DISTANCE,
-          duration: IN_SECONDS,
-          fadeFrom: 1,
-          fadeTo: 0,
-          then: () => (to.zoomTo(ARRIVAL_DISTANCE), null),
-        };
+        if (s.blend > 0) {
+          to.setFocus(BARYCENTRE, 1 - s.tail);
+          to.setDistance(s.distance);
+          to.setView(matchView(), 1 - s.tail);
+          system.ship.setScale(s.tail);
+        }
+      },
+      swap: () => {
+        this.game.setLevel(system);
+        system.eye.settleNext();
+        // Settle on the orbit closest to the matched view.
+        to.lookFrom(this.direction.copy(BACK).applyQuaternion(matchView()));
+      },
+      finish: () => {
+        galaxy.hideCloseUp();
+        galaxy.setDive(0);
+        to.setFocus(null);
+        to.setView(null);
+        to.zoomTo(ARRIVAL_DISTANCE);
+        system.ship.setScale(1);
       },
     });
   }
@@ -231,9 +320,13 @@ export class SceneManager implements Entity {
 
   update(frameDt: number): void {
     // Flying into a planet or moon takes you down to it too.
-    if (!this.phase && this.mode === 'system') {
+    if (!this.transitioning && this.mode === 'system') {
       const body = this._systemLevel.bodyInReach();
       if (body) this.toPlanet(body);
+    }
+    if (this.seamless) {
+      this.stepSeamless(frameDt);
+      return;
     }
     const phase = this.phase;
     if (!phase) return;
@@ -253,6 +346,34 @@ export class SceneManager implements Entity {
     this.dropPlanet();
     this._systemLevel.dispose();
     this.galaxyLevel.dispose();
+  }
+
+  private seamlessZoom(start: number, handover: number, end: number): SeamlessZoom {
+    const { lead, overlap, tail } = seamlessZoomParams;
+    return { lead, overlap, tail, start, handover, end };
+  }
+
+  private beginSeamless(t: Omit<SeamlessTransition, 'elapsed' | 'swapped'>): void {
+    this.seamless = { ...t, elapsed: 0, swapped: false };
+    this.game.input.blocked = true;
+    t.apply(sampleSeamlessZoom(t.zoom, 0));
+  }
+
+  private stepSeamless(frameDt: number): void {
+    const t = this.seamless!;
+    t.elapsed += frameDt;
+    const s = sampleSeamlessZoom(t.zoom, t.elapsed);
+    if (!t.swapped && s.blend > 0) {
+      t.swapped = true;
+      t.swap();
+    }
+    t.apply(s);
+    // Both levels are drawn only while both show.
+    this.game.setCrossfade(s.blend > 0 && s.blend < 1 ? t.outgoing : null, s.blend);
+    if (!s.done) return;
+    t.finish();
+    this.seamless = null;
+    this.game.input.blocked = false;
   }
 
   private begin(phase: ActivePhase): void {
