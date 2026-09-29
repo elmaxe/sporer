@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
 import type { Input } from '../core/Input';
+import { describeClimateDetail } from '../gen/climate';
 import { LocalMoons } from '../planet/LocalMoons';
 import { PlanetFrame } from '../planet/PlanetFrame';
 import { PlanetGlobe } from '../planet/PlanetGlobe';
@@ -105,7 +106,10 @@ export class PlanetLevel extends Level {
       ),
     );
     this.add(new PlanetPicker(this.scene, camera, input, this.ship, globe.radius));
-    this.hud = this.add(new PlanetHud(this.ship, `${body.name} · ${body.description}`));
+    const { climate } = body.config;
+    this.hud = this.add(
+      new PlanetHud(this.ship, `${body.name} · ${body.description}`, climate ? describeClimateDetail(climate) : null),
+    );
   }
 
   /** System time here; the system level catches up to it on return. */
