@@ -4,7 +4,7 @@ import type { Entity } from '../core/Entity';
 import { FIXED_DT } from '../core/Game';
 import { hashSeed } from '../gen/rng';
 import { exposureParams } from '../player/exposure';
-import { describePlanet, type PlanetData, type SystemData } from '../gen/system';
+import { describePlanet, describeSized, type PlanetData, type SystemData } from '../gen/system';
 import { skyScale } from '../planet/frame';
 import type { Physics } from '../physics/Physics';
 import type { CelestialBody } from './CelestialBody';
@@ -170,7 +170,7 @@ export class StarSystem implements Entity {
 }
 
 function describe(p: PlanetData): string {
-  const parts = [describePlanet(p.type)];
+  const parts = [describeSized(p.type, p.size)];
   if (p.rings) parts.push('rings');
   if (p.moons.length > 0) parts.push(p.moons.length === 1 ? '1 moon' : `${p.moons.length} moons`);
   return parts.join(' · ');
