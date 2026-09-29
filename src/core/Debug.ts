@@ -27,6 +27,8 @@ export class Debug {
     const gui = new GUIClass({ title: 'Debug' });
     // Leave the bottom-right corner free for the sound button (#audio).
     gui.domElement.style.maxHeight = 'calc(100% - 72px)';
+    // On a phone the open panel would cover the whole screen (and swallow every touch).
+    if (matchMedia('(max-width: 600px)').matches) gui.close();
     const stats = new StatsClass();
     stats.dom.id = 'stats';
     stats.dom.style.cssText = 'position:fixed;top:0;left:0;z-index:100;';
