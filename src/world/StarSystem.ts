@@ -14,6 +14,7 @@ import { Star } from './Star';
 import { addAtmosphereDebug, type AtmosphereSun } from './atmosphereShell';
 import { stormParams } from './StarStorms';
 import { createGlowTexture } from './glowTexture';
+import { addLavaDebug } from './lavaMaterial';
 import { starParams } from './starMaterials';
 
 /** Gap between a body's neighbourhood (rings, moon orbits) and where the autopilot parks. */
@@ -75,7 +76,10 @@ export class StarSystem implements Entity {
     this.animate(this._time);
     this.setExposure(1);
 
-    if (debug) addAtmosphereDebug(debug);
+    if (debug) {
+      addAtmosphereDebug(debug);
+      addLavaDebug(debug);
+    }
     const stars = debug?.folder('Stars');
     stars?.add(starParams, 'pace', 0, 5);
     stars?.add(starParams, 'granulation', 0.2, 3);
@@ -151,9 +155,11 @@ export class StarSystem implements Entity {
     this.animate(time);
   }
 
-  /** Living stars and comets: pure functions of the (render) time. */
+  /** Living stars, lava and comets: pure functions of the (render) time. */
   private animate(time: number): void {
     for (const s of this.stars) s.animate(time);
+    for (const p of this.planets) p.animate(time);
+    for (const m of this.moons) m.animate(time);
     for (const c of this.comets) c.poseAt(time);
   }
 

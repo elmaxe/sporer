@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
 import type { Input } from '../core/Input';
 import { describeClimateDetail } from '../gen/climate';
+import { LavaEruptions } from '../planet/LavaEruptions';
 import { LocalMoons } from '../planet/LocalMoons';
 import { PlanetFrame } from '../planet/PlanetFrame';
 import { PlanetGlobe } from '../planet/PlanetGlobe';
@@ -52,6 +53,8 @@ export class PlanetLevel extends Level {
   /** The globe's sea-level radius in planet-level units: the body's true size (see planet/frame.ts). */
   readonly radius: number;
   private readonly moons: LocalMoons;
+  /** Lava worlds and moons only. */
+  readonly eruptions: LavaEruptions | null;
   private readonly hud: PlanetHud;
   /** Bodies drawn by this level, left out of the sky: the planet and its moons. */
   private readonly hidden: readonly Planet[];
@@ -71,7 +74,10 @@ export class PlanetLevel extends Level {
   ) {
     super();
     this.frame = this.add(new PlanetFrame(body, system.world.time, debug));
-    const globe = this.add(new PlanetGlobe(this.scene, body.config));
+    const globe = this.add(new PlanetGlobe(this.scene, body.config, this.frame));
+    this.eruptions = globe.lava
+      ? this.add(new LavaEruptions(this.scene, this.frame, globe.lava.activity, body.config.seed, body.config.style.sea!, debug))
+      : null;
     this.moons = this.add(
       new LocalMoons(
         this.scene,
@@ -81,7 +87,7 @@ export class PlanetLevel extends Level {
       ),
     );
     this.hidden = [body, ...this.moons.moons];
-    this.add(new PlanetLights(this.scene, this.frame, system.world.stars, globe.sun));
+    this.add(new PlanetLights(this.scene, this.frame, system.world.stars, globe.sun, globe.sunLight, globe.ambientLight));
 
     this.frame.toLocalDirection(side, this.start);
     this.radius = globe.radius;

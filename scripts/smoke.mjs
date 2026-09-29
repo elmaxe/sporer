@@ -10,6 +10,7 @@
 // the galaxy band (screenshot looking at the galactic centre) and a smoke trail per planet and moon. Living stars: the
 // surface clock advances and storms have particles under way (and keep animating in the planet level's sky); comets
 // move, show their name on hover and ignore clicks. Looking at the star close up lowers the exposure (eye adaptation).
+// Living lava: in low orbit over the lava world, the eruptions have vents, events and blobs in the air.
 // Seamless zooms: through the galaxy and planet loops, every frame of every level transition records the crossfade
 // weight and canvas brightness; each transition must crossfade and never go black (screenshots mid-handover).
 // Prints JSON with FPS, console errors and screenshot paths. Exit 1 on failure.
@@ -117,6 +118,9 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
   r.skyClock = +(skyAfter[1] - skyBefore[1]).toFixed(2);
   r.flewDegrees = await evaluate(`+(planet.ship.direction.angleTo(__start) * 180 / Math.PI).toFixed(1)`);
   r.altitudeOk = await evaluate(`Math.abs(planet.ship.object.position.length() - planet.ship.radius) < 0.5`);
+  r.lava = await evaluate(
+    `planet.eruptions && { vents: planet.eruptions.activity.vents.length, events: planet.eruptions.events.length, blobs: planet.eruptions.liveBlobs }`,
+  );
   const shot = await send('Page.captureScreenshot', { format: 'png' });
   r.screenshot = join(outDir, `${shotName}.png`);
   writeFileSync(r.screenshot, Buffer.from(shot.result.data, 'base64'));
@@ -138,6 +142,7 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
     r.skyClock > 0.3 &&
     Math.abs(r.skyStarTime - r.skyClock) < 0.25 &&
     r.altitudeOk &&
+    (r.type !== 'lava' || (r.lava && r.lava.vents > 0 && r.lava.events > 0 && r.lava.blobs > 0)) &&
     r.modeAfter === 'system' &&
     r.parkedAt === r.name &&
     Math.abs(r.standoffs - 1) < 0.2;
