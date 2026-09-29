@@ -33,9 +33,12 @@ const HULL_SCALE = 1.15;
  */
 export class GalaxyDust implements Entity {
   private readonly mesh: THREE.Mesh<THREE.InstancedBufferGeometry, THREE.ShaderMaterial>;
+  /** The camera in the parent's (galaxy) coordinates, where the clouds are defined. */
+  private readonly cameraLocal = new THREE.Vector3();
+  private readonly inverse = new THREE.Matrix4();
 
   constructor(
-    private readonly scene: THREE.Scene,
+    private readonly parent: THREE.Object3D,
     clouds: readonly DustCloud[],
     galaxyRadius: number,
   ) {
@@ -65,18 +68,20 @@ export class GalaxyDust implements Entity {
     geometry.instanceCount = n;
 
     const material = new THREE.ShaderMaterial({
+      uniforms: { cameraLocal: { value: this.cameraLocal } },
       vertexShader: /* glsl */ `
+        uniform vec3 cameraLocal;
         attribute vec3 center;
         attribute vec3 radii;
         attribute float angle;
         attribute vec3 cloudColor;
-        varying vec3 vWorld;
+        varying vec3 vLocal;
         varying vec3 vCenter;
         varying vec3 vRadii;
         varying vec2 vRot;
         varying vec3 vColor;
         void main() {
-          float fade = smoothstep(${FADE_NEAR.toFixed(1)}, ${FADE_FAR.toFixed(1)}, distance(center, cameraPosition));
+          float fade = smoothstep(${FADE_NEAR.toFixed(1)}, ${FADE_FAR.toFixed(1)}, distance(center, cameraLocal));
           if (fade <= 0.0) {
             gl_Position = vec4(2.0, 2.0, 2.0, 1.0); // outside the clip volume: nothing drawn
             return;
@@ -85,30 +90,31 @@ export class GalaxyDust implements Entity {
           float c = cos(angle);
           float s = sin(angle);
           vec3 local = position * radii * ${HULL_SCALE};
-          vec3 world = center + vec3(c * local.x + s * local.z, local.y, -s * local.x + c * local.z);
-          vWorld = world;
+          vec3 galaxy = center + vec3(c * local.x + s * local.z, local.y, -s * local.x + c * local.z);
+          vLocal = galaxy;
           vCenter = center;
           vRadii = radii;
           vRot = vec2(c, s);
           vColor = cloudColor * ${CLOUD_INTENSITY} * fade;
-          gl_Position = projectionMatrix * viewMatrix * vec4(world, 1.0);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(galaxy, 1.0);
         }`,
       fragmentShader: /* glsl */ `
-        varying vec3 vWorld;
+        uniform vec3 cameraLocal;
+        varying vec3 vLocal;
         varying vec3 vCenter;
         varying vec3 vRadii;
         varying vec2 vRot;
         varying vec3 vColor;
         ${GAUSSIAN_PATH_GLSL}
 
-        // World → the cloud's frame (the inverse of the rotation in the vertex shader).
+        // Galaxy → the cloud's frame (the inverse of the rotation in the vertex shader).
         vec3 toLocal(vec3 v) {
           return vec3(vRot.x * v.x - vRot.y * v.z, v.y, vRot.y * v.x + vRot.x * v.z);
         }
 
         void main() {
-          vec3 o = toLocal(cameraPosition - vCenter) / vRadii;
-          vec3 d = toLocal(normalize(vWorld - cameraPosition)) / vRadii;
+          vec3 o = toLocal(cameraLocal - vCenter) / vRadii;
+          vec3 d = toLocal(normalize(vLocal - cameraLocal)) / vRadii;
           float path = gaussianPath(o, d, ${GAUSSIAN_K.toFixed(1)}, 0.0);
           // 1 through the centre seen face-on (along y), more along longer paths.
           float n = path / (vRadii.y * ${Math.sqrt(Math.PI / GAUSSIAN_K).toFixed(6)});
@@ -126,11 +132,15 @@ export class GalaxyDust implements Entity {
     this.mesh = new THREE.Mesh(geometry, material);
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = -1;
-    scene.add(this.mesh);
+    this.mesh.onBeforeRender = (_renderer, _scene, camera) => {
+      this.inverse.copy(this.mesh.matrixWorld).invert();
+      this.cameraLocal.setFromMatrixPosition(camera.matrixWorld).applyMatrix4(this.inverse);
+    };
+    parent.add(this.mesh);
   }
 
   dispose(): void {
-    this.scene.remove(this.mesh);
+    this.parent.remove(this.mesh);
     this.mesh.geometry.dispose();
     this.mesh.material.dispose();
   }

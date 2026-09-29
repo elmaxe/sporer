@@ -2,7 +2,8 @@
 // Usage: npm run smoke [-- http://localhost:5173/]   (dev server must be running)
 // Checks: W moves the ship along -Z, the autopilot flies back to a point, hovering + clicking
 // the star targets it, and the galaxy loop works (scroll out to the galaxy, click the nearest
-// star, travel, scroll in to its system), a real click on the speaker button starts audio; then the
+// star, travel, scroll in to its system; the galaxy shows distant galaxies, twinkles, spins and draws binaries
+// as two dots, and picking works while it's turned), a real click on the speaker button starts audio; then the
 // transitions and galaxy travel play their whooshes, and M mutes. Then the planet loop (park at a planet,
 // scroll in to low orbit, click the globe and fly, scroll back out beside it), and again for every planet
 // type and a moon in other systems (skip those with --quick).
@@ -26,6 +27,11 @@ const browsers = [
 ];
 const browser = process.env.CHROME_PATH ?? browsers.find(existsSync);
 if (!browser) throw new Error('No Chrome/Edge found; set CHROME_PATH');
+
+// A browser left on the port (e.g. from a crashed run) would be reused with its old state (saved volume, mute).
+if (await fetch(`http://127.0.0.1:${port}/json/version`).then(() => true, () => false)) {
+  throw new Error(`A browser is already listening on port ${port}; close it first`);
+}
 
 const outDir = mkdtempSync(join(tmpdir(), 'spore2-smoke-'));
 const proc = spawn(browser, [
@@ -92,6 +98,8 @@ const wheel = (deltaY) =>
  * globe a little way ahead of the ship, lets it fly, then scrolls back out. Returns what it saw.
  */
 async function runPlanetLoop(bodyExpr, shotName) {
+  // Input is blocked during a level transition (slow under SwiftShader), which would swallow the wheel below.
+  for (let i = 0; i < 40 && (await evaluate(`levels.transitioning`)); i++) await sleep(250);
   const r = await evaluate(`(() => {
     const body = ${bodyExpr};
     window.__body = body;
@@ -202,6 +210,23 @@ if (started) {
   await sleep(1800);
   galaxyLoop.modeAfterZoomOut = await evaluate(`levels.mode`);
   galaxyLoop.fps = await evaluate(measureFps);
+  // Step 6 polish: distant galaxies, twinkle, a slow spin, binaries as two dots.
+  galaxyLoop.polish = await evaluate(`new Promise((resolve) => {
+    const level = levels.galaxyLevel;
+    const a0 = level.spin.angle, t0 = performance.now();
+    setTimeout(() => resolve({
+      distantGalaxies: level.distantGalaxies.count,
+      spinRadPerSec: (level.spin.angle - a0) / ((performance.now() - t0) / 1000),
+      dots: level.map.dotCount,
+      expectedDots: galaxy.stars.reduce((t, s) => t + s.stars.length, 0),
+      stars: galaxy.stars.length,
+      twinkle: level.map.points.material.uniforms.twinkle.value,
+      twinkleTime: level.map.points.material.uniforms.time.value,
+    }), 1000);
+  })`);
+  // Turn the galaxy well away from its start, so the click below also checks picking and travel while rotated.
+  await evaluate(`levels.galaxyLevel.root.rotation.y += 1.2`);
+  await sleep(200);
   const galaxyShot = await send('Page.captureScreenshot', { format: 'png' });
   writeFileSync(join(outDir, 'galaxy.png'), Buffer.from(galaxyShot.result.data, 'base64'));
 
@@ -212,7 +237,8 @@ if (started) {
       const d = Math.hypot(s.position.x - here.x, s.position.y - here.y, s.position.z - here.z);
       if (s.id !== system.id && d < bestD) { best = s; bestD = d; }
     }
-    const p = new game.camera.position.constructor(best.position.x, best.position.y, best.position.z).project(game.camera);
+    const p = new game.camera.position.constructor(best.position.x, best.position.y, best.position.z)
+      .applyMatrix4(levels.galaxyLevel.root.matrixWorld).project(game.camera);
     const rect = game.renderer.domElement.getBoundingClientRect();
     const at = { clientX: rect.left + ((p.x + 1) / 2) * rect.width, clientY: rect.top + ((1 - p.y) / 2) * rect.height, bubbles: true };
     const canvas = game.renderer.domElement;
@@ -222,7 +248,7 @@ if (started) {
     requestAnimationFrame(() => requestAnimationFrame(() =>
       resolve({ nearest: best.id, destination: levels.galaxyLevel.ship.destination?.id ?? null })));
   })`);
-  for (let i = 0; i < 40 && (await evaluate(`levels.galaxyLevel.ship.travelling`)); i++) await sleep(250);
+  for (let i = 0; i < 60 && (await evaluate(`levels.galaxyLevel.ship.travelling`)); i++) await sleep(250);
   galaxyLoop.dockedAt = await evaluate(`levels.galaxyLevel.ship.travelling ? null : levels.galaxyLevel.ship.current.id`);
 
   await wheel(-50000); // to min zoom
@@ -311,6 +337,13 @@ const picked = started && pick.target === pick.star && pick.tooltip === pick.sta
 const looped =
   started &&
   galaxyLoop.modeAfterZoomOut === 'galaxy' &&
+  galaxyLoop.polish.distantGalaxies >= 100 &&
+  galaxyLoop.polish.spinRadPerSec > 0 &&
+  galaxyLoop.polish.spinRadPerSec < 0.01 &&
+  galaxyLoop.polish.dots === galaxyLoop.polish.expectedDots &&
+  galaxyLoop.polish.dots > galaxyLoop.polish.stars &&
+  galaxyLoop.polish.twinkle > 0 &&
+  galaxyLoop.polish.twinkleTime > 0 &&
   galaxyLoop.clicked.destination === galaxyLoop.clicked.nearest &&
   galaxyLoop.dockedAt === galaxyLoop.clicked.nearest &&
   galaxyLoop.modeAfterZoomIn === 'system' &&

@@ -13,6 +13,7 @@ export class GalaxyPicker implements Entity {
   hovered: StarRef | null = null;
   private readonly raycaster = new THREE.Raycaster();
   private readonly ndc = new THREE.Vector2();
+  private readonly inverse = new THREE.Matrix4();
 
   constructor(
     private readonly camera: THREE.PerspectiveCamera,
@@ -21,6 +22,8 @@ export class GalaxyPicker implements Entity {
     private readonly galaxy: GalaxyData,
     private readonly positions: Float32Array,
     private readonly ship: GalaxyShip,
+    /** The galaxy's rotating root, whose local frame `positions` are in. */
+    private readonly root: THREE.Object3D,
   ) {}
 
   update(): void {
@@ -39,6 +42,8 @@ export class GalaxyPicker implements Entity {
   private pick(ndcX: number, ndcY: number): StarRef | null {
     this.raycaster.setFromCamera(this.ndc.set(ndcX, ndcY), this.camera);
     const { ray } = this.raycaster;
+    // Into galaxy coordinates. A pure rotation, so angles (and the pick radius) are unchanged.
+    ray.applyMatrix4(this.inverse.copy(this.root.matrixWorld).invert());
     // Angle subtended by one CSS pixel at the centre of the view.
     const pixelAngle = (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2)) / this.canvas.clientHeight;
     const i = pickPoint(ray.origin, ray.direction, this.positions, PICK_RADIUS_PX * pixelAngle);
