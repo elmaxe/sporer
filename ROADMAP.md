@@ -139,6 +139,63 @@ Status: ⬜ todo · 🟨 in progress · ✅ done
 - Step 5's system ↔ planet transition can use the same blend path later.
 - Smoke: sample `#fade` opacity and the blend weight through the loop and assert the screen never goes fully black. Screenshot mid-handover.
 
+### 10. ⬜ Zoom moves the ship, not just the camera
+- As in Spore, the scroll wheel sets **how close the ship is to what you're looking at**, not only the camera distance. Over a planet, scrolling in lowers the UFO towards the ground and scrolling out lifts it up to high orbit and then out into the system. In the system, scrolling in near a body brings the ship in towards it.
+- Done when scrolling in and out over a planet visibly changes the ship's altitude along with the camera, the system ↔ planet handover still triggers at the ends of the range, and click-to-move keeps working at every altitude.
+
+**Implementation notes (proposed design; confirm with the user before building):**
+- *One zoom parameter:* each level keeps a single `zoom` value in [0, 1] (log-scaled), driven by the wheel, and maps it to both the ship's altitude and the camera distance through a pure curve (`player/zoomCurve.ts`, unit-tested: monotonic, continuous, hits the handover thresholds at the ends). `OrbitCamera` stops owning the wheel and just follows the distance it's given.
+- *Planet level:* altitude goes from just above the highest terrain (~2 units) up to ~2.5 R. The camera distance grows faster than the altitude, so zoomed in you're low over the ground looking along it, and zoomed out you see the whole globe below the ship. Pitch can follow the zoom too (flatter down low, more top-down up high). `PlanetShip`'s radius becomes live, eased towards the target so it glides rather than jumps. The ship's altitude replaces the fixed `ALTITUDE`, and the scrolled-past-max exit to the system happens at zoom 1.
+- *System level:* while parked at (or heading for) a body, the zoom also scales the parking standoff between ~0.5× and 1.5× of today's, so the ship dives in towards the body as you scroll in, which leads naturally into the planet descent at zoom 0. Away from bodies it stays camera-only, like now. The held scroll-in (wait for the autopilot to arrive) keeps working on the shared zoom value.
+- *Galaxy level:* unchanged (camera only), since the ship is a marker there.
+- Tests: the zoom curve, and the planet ship's altitude easing staying above the terrain. Smoke: scroll in and out over a planet and check `planet.ship.altitude` follows the camera.
+
+### 11. ⬜ Climate: temperature and atmosphere for every solid body
+- Every planet and moon except gas giants gets a **climate**: surface temperature, atmosphere thickness (surface pressure) and composition, and geothermal heat. It's shown in the hover tooltip and the planet HUD (e.g. "Ice world · −140 °C · thin N₂ atmosphere").
+- The later steps read it: atmosphere looks (12), lava (13) and geysers (14).
+- Done when every solid body has a plausible climate that follows its star, distance and size, tests pin the relationships down, and the HUD shows it.
+
+**Implementation notes (proposed design; confirm with the user before building):**
+- *Pure data:* `gen/climate.ts` with `ClimateData { temperature (K), pressure (bar), composition, greenhouse, geothermal (0–1) }` on `PlanetData` and `MoonData`, from `prng.fork('climate')` so nothing else generated changes.
+- *Temperature:* equilibrium temperature from the stars' luminosity and the orbit distance (moons use their planet's), T_eq ∝ L^¼ / √d, calibrated so the habitable radius is ~288 K for an Earth-like atmosphere. Albedo comes from the type (ice high, lava low), and a greenhouse boost grows with pressure. Tidally locked or slow-spinning worlds get a day/night spread later if needed.
+- *Atmosphere:* the chance and thickness depend on the type, on the body's size (small bodies hold less) and on heat (hot small bodies lose theirs). Terran/ocean worlds ~0.5–2 bar, desert thin to medium, ice mostly thin or none (sometimes a thick hazy one, like Titan), lava sometimes a thick toxic one (like Venus), barren none or a trace. The existing `atmosphere` colour becomes derived from the composition, so bodies with no atmosphere keep none. Consistency with today's looks: keep the colour draw where it is and only change whether and how thick.
+- *Geothermal heat:* internal heat from size (bigger = hotter inside) plus tidal heating for moons close to big planets (∝ parent radius / orbit radius³), plus lava worlds always high. Step 14 turns this into geysers.
+- Tests: warmer closer in and around brighter stars, the habitable radius near 288 K, a greenhouse raises temperature, small hot bodies are airless, gas giants get no climate, determinism. Extend `tests/universe.test.ts` with the distributions (print a sample table from a throwaway test while tuning).
+
+### 12. ⬜ Taller, softer atmospheres
+- Atmospheres reach **higher above the ground** with a gradual falloff, instead of the thin, sharp rim they have now. From orbit the planet sits in a soft halo; from low orbit the horizon hazes into the sky. It's less physically exact than today, but it looks right.
+- Thickness and tint come from the climate (step 11): a thick atmosphere is tall and hazy, a thin one a faint rim.
+- Done when atmospheres read as a soft gradient in both the system view and the planet level, from outside and from inside the shell, with no visible edge.
+
+**Implementation notes (proposed design; confirm with the user before building):**
+- *Why it's cut off today:* the planet level's shell is at 1.08 R so the camera always stays outside it, and the glow is a back-face fresnel with a hard-ish limb. The system view's shell is 1.2 R with the same shader.
+- *Shader:* replace the fresnel shell with an analytic density integral, like the galaxy's `gaussianPath`. Density falls off as exp(−h/H) above the surface (scale height H ~ 4–12% of R from the climate), and each pixel integrates it along the view ray in closed form (or with ~8 samples) from the camera or the shell's entry point to the ground or the exit. Brightness is the optical depth mapped through 1 − e^(−τ), tinted by the atmosphere colour and lit by the sun direction (bright day side, a rim of dusk at the terminator, a faint night side). One shader works from outside and inside, so the shell can go up to ~1.35–1.5 R.
+- *Inside:* in the planet level the camera is often inside the shell. The same integral gives the haze towards the horizon for free, and a faint sky tint over the system sky behind it (additive, before the planet scene) stops the sky looking airless.
+- Shared builder in `world/planetGeometry.ts` for both views. Keep the cost down: it covers a lot of screen in the planet level, so check headless FPS.
+- Tests: the pure optical-depth function (thicker along the limb than straight down, zero outside the shell, monotonic in density).
+
+### 13. ⬜ Living lava
+- **Lava gets its own animated shader**, like the stars' surfaces: slow-flowing, glowing molten rock with a cooling crust that cracks and drifts, brightest in the cracks. It applies to lava seas on lava worlds and moons, in the planet level and (more simply) in the system view.
+- **Lava flies up:** fountains and eruptions throw glowing blobs up in ballistic arcs that cool and darken as they fall back, with the odd big eruption leaving a hanging glow.
+- Done when lava worlds visibly churn from orbit and erupt up close, at a pace that doesn't distract, with no FPS regression.
+
+**Implementation notes (proposed design; confirm with the user before building):**
+- *Shader:* in `world/lavaMaterial.ts`, emissive and not lit (like the star surface). Animated 3D noise advected slowly (domain-warped by time) for the flow, cellular or ridged noise for the crust plates with bright seams, colour ramp dark crust → red → orange → yellow-white by heat, and a glow that stays visible on the night side. Reuse `noiseGlsl.ts` and the star's simplex noise. The planet level's `createSea('lava')` sphere and the system view's lava vertex colours both switch to it; in the system view, sample the low-frequency parts per vertex (as the star does for spots) to keep it cheap.
+- *Eruptions:* a pooled `Points` in the planet level, animated in the vertex shader like `StarStorms`: event slots on a seeded time grid (`stormSlots`/`stormEvent` pattern, generalised if it fits), vents at seeded points in the lava seas, particles launched with a velocity cone and pulled back by gravity (a ballistic arc in the shader), colour cooling with age. Big eruptions add a short-lived glow sprite and light flicker on nearby terrain. In the system view, only a faint pulsing glow on the day and night side.
+- Rates and sizes scale with the geothermal heat from step 11.
+- Tests: the ballistic particle maths (lands back on the surface, peak height from launch speed and gravity) and event determinism.
+
+### 14. ⬜ Geothermal activity: geysers
+- Bodies with geothermal heat (step 11) get **geysers**: plumes shooting up from vents on the surface, erupting on and off.
+- **Both cold and hot worlds have them.** On icy bodies, **cryogeysers** (like Saturn's moon Enceladus or Neptune's Triton) throw up tall plumes of water vapour and ice crystals, driven by tidal heating. In low gravity with little air they climb very high and hang as a faint fan. On warm worlds with liquid water near hot rock (terran, ocean, some desert), **hot-spring geysers** (like Iceland or Yellowstone) are shorter white steam plumes that drift with the wind. Lava worlds already erupt lava (step 13), and very hot moons can have Io-style sulphur plumes.
+- Done when geyser plumes show up on the bodies whose climate says they should, look different for cryo and steam geysers, and cost little.
+
+**Implementation notes (proposed design; confirm with the user before building):**
+- *Data:* `gen/geysers.ts` places vents from the climate: count and eruption rate from geothermal heat, kind from temperature and type (ice → cryo, liquid water + heat → steam, very hot + sulphur → volcanic plume). Seeded (`rng.fork('geysers')`), vents on land for steam geysers, anywhere on ice (clustered in "tiger stripe" cracks near a pole for strongly tidally heated moons, as on Enceladus).
+- *View:* planet level only at first. One pooled `Points` (or soft billboards) per body, animated in the vertex shader with event slots like the storms. Cryo: fast, narrow, very tall jets that spread into a fan and fade slowly, bluish white. Steam: puffy, shorter, rising then drifting sideways and dissipating. Height from launch speed and the body's gravity (∝ radius for the same density). The plume is lit by the sun (bright on the day side, faint at night).
+- From orbit, a strongly active icy moon could show a faint haze or ring of ice along its orbit (as Enceladus feeds Saturn's E ring). Only a nice extra.
+- Tests: vent placement (on the right terrain, deterministic), plume kind by climate, plume height scaling with gravity.
+
 ## Later / ideas
 
 - Abduction beam, spice economy, colonising planets
