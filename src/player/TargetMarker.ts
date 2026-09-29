@@ -24,17 +24,19 @@ export class TargetMarker implements Entity {
 
   update(frameDt: number): void {
     const { ship } = this;
-    if (!ship.autopilotActive) {
+    // Fades with the UFO while it shrinks away or grows back (level transitions).
+    const fade = ship.object.visible ? ship.object.scale.x : 0;
+    if (!ship.autopilotActive || fade < 0.01) {
       this.ring.hide();
       return;
     }
     const body = ship.targetBody;
     if (body) {
       // 1.45 radii keeps it clear of the atmosphere glow (1.2 radii).
-      this.ring.place(body.renderPosition, body.radius * 1.45 + 1, ship.enRoute ? 0.9 : 0.35, this.camera, frameDt);
+      this.ring.place(body.renderPosition, body.radius * 1.45 + 1, (ship.enRoute ? 0.9 : 0.35) * fade, this.camera, frameDt);
     } else {
       const size = Math.max(1.5, ship.destination.distanceTo(this.camera.position) * POINT_MARKER_SIZE);
-      this.ring.place(ship.destination, size, 0.9, null, frameDt);
+      this.ring.place(ship.destination, size, 0.9 * fade, null, frameDt);
     }
   }
 

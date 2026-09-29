@@ -31,8 +31,8 @@ export class PlanetFrame implements Entity {
   private _time: number;
   private prevTime: number;
   private _renderTime: number;
-  private readonly startTime: number;
-  private readonly startSpin: number;
+  private startTime: number;
+  private startSpin: number;
   private _spinAngle = 0;
 
   constructor(
@@ -42,10 +42,20 @@ export class PlanetFrame implements Entity {
   ) {
     this.scale = planetScale(body.radius);
     this._time = this.prevTime = this._renderTime = this.startTime = time;
-    // Carry on from the system view's spin, so the ground below is what was below there.
     this.startSpin = body.spinAngle;
-    this.pose(time);
+    this.restart(time);
     debug.folder('Planet')?.add(planetParams, 'spinScale', 0, 1);
+  }
+
+  /**
+   * Starts the clock at system time `time`, carrying on from the system view's
+   * spin, so the ground below is what was below there (e.g. when the level was
+   * built a moment before it took over).
+   */
+  restart(time: number): void {
+    this._time = this.prevTime = this._renderTime = this.startTime = time;
+    this.startSpin = this.body.spinAngle;
+    this.pose(time);
   }
 
   /** System time after the latest fixed step. */
@@ -73,6 +83,11 @@ export class PlanetFrame implements Entity {
     return this._spinAngle;
   }
 
+  /** The body's spin about its axis at system time `time`. */
+  spinAt(time: number): number {
+    return this.startSpin + this.body.config.spin * planetParams.spinScale * (time - this.startTime);
+  }
+
   /** A planet-level point in system space. */
   toSystemPoint(local: THREE.Vector3, out: THREE.Vector3): THREE.Vector3 {
     return localToSystem(local, this.center, this.quaternion, this.scale, out);
@@ -93,7 +108,7 @@ export class PlanetFrame implements Entity {
   private pose(time: number): void {
     const { config } = this.body;
     this.body.positionAt(time, this.center);
-    this._spinAngle = this.startSpin + config.spin * planetParams.spinScale * (time - this.startTime);
+    this._spinAngle = this.spinAt(time);
     bodyFrame(config.tilt ?? 0, this._spinAngle, this.quaternion);
     this.inverse.copy(this.quaternion).invert();
   }

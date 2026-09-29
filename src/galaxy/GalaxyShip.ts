@@ -29,7 +29,9 @@ const ARRIVE_SPEED = 0.5;
 export class GalaxyShip implements Entity {
   /** Interpolated render transform (in the galaxy root); the galaxy camera orbits this. */
   readonly object = new THREE.Group();
+  private readonly hull: THREE.Object3D;
   private readonly ring: THREE.Object3D;
+  private dive = 0;
   private _current: StarRef;
   private _destination: StarRef | null = null;
 
@@ -50,6 +52,7 @@ export class GalaxyShip implements Entity {
     const { group, ring } = buildUfoMesh();
     group.scale.setScalar(UFO_SCALE);
     this.object.add(group);
+    this.hull = group;
     this.ring = ring;
     parent.add(this.object);
     this._current = start;
@@ -77,6 +80,17 @@ export class GalaxyShip implements Entity {
 
   get speed(): number {
     return this.vel.length();
+  }
+
+  /**
+   * Dives into the star it's docked at, 0–1: sinks from its hover height into
+   * the star while shrinking to nothing (entering the system; reversed on
+   * the way out).
+   */
+  setDive(u: number): void {
+    this.dive = u;
+    this.hull.scale.setScalar(UFO_SCALE * (1 - u));
+    this.hull.visible = u < 1;
   }
 
   /** Sets course for `ref` (also mid-flight). Asking for the star it's docked at does nothing. */
@@ -108,6 +122,7 @@ export class GalaxyShip implements Entity {
 
   update(frameDt: number, alpha: number): void {
     this.object.position.lerpVectors(this.prev, this.curr, alpha);
+    this.object.position.y -= HOVER * this.dive;
     if (this.vel.lengthSq() > 1) {
       const want = Math.atan2(-this.vel.x, -this.vel.z);
       const diff = Math.atan2(Math.sin(want - this.object.rotation.y), Math.cos(want - this.object.rotation.y));

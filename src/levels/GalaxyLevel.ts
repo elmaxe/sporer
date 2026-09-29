@@ -4,6 +4,7 @@ import type { Debug } from '../core/Debug';
 import type { Input } from '../core/Input';
 import { generateDistantGalaxies } from '../gen/distantGalaxies';
 import { generateDust, type GalaxyData, type StarRef } from '../gen/galaxy';
+import type { SystemData } from '../gen/system';
 import { DistantGalaxies } from '../galaxy/DistantGalaxies';
 import { GalaxyDust } from '../galaxy/GalaxyDust';
 import { GalaxyHud } from '../galaxy/GalaxyHud';
@@ -11,6 +12,7 @@ import { GalaxyMap } from '../galaxy/GalaxyMap';
 import { GalaxyPicker } from '../galaxy/GalaxyPicker';
 import { GalaxyShip } from '../galaxy/GalaxyShip';
 import { GalaxySpin } from '../galaxy/GalaxySpin';
+import { StarCloseUp } from '../galaxy/StarCloseUp';
 import { OrbitCamera, type OrbitParams } from '../player/OrbitCamera';
 import type { Tooltip } from '../ui/Tooltip';
 import { Level } from './Level';
@@ -31,6 +33,8 @@ export const GALAXY_VIEW_DISTANCE = 60;
  * The galaxy map in galaxy units. No physics: travel is scripted. The galaxy
  * (stars, glows, dust and the ship) lives in `root`, which turns slowly
  * (`GalaxySpin`); other galaxies fill the sky behind it and stay put.
+ * While zooming into or out of a system, the ship dives into its star and a
+ * close-up of the system's star(s) takes over from the star's dot.
  */
 export class GalaxyLevel extends Level {
   /** The rotating galaxy; its local frame is galaxy coordinates (StarRef positions). */
@@ -42,6 +46,8 @@ export class GalaxyLevel extends Level {
   readonly distantGalaxies: DistantGalaxies;
   private readonly hud: GalaxyHud;
   private readonly light: THREE.HemisphereLight;
+  private closeUp: StarCloseUp | null = null;
+  private readonly tilt = new THREE.Quaternion();
 
   constructor(
     galaxy: GalaxyData,
@@ -89,6 +95,44 @@ export class GalaxyLevel extends Level {
     );
   }
 
+  /**
+   * Shows the star(s) of `system` (the ship's current star) up close, `scale`
+   * galaxy units per system unit, animated by the system's `clock` and
+   * seen at its eye `adaptation`.
+   */
+  showCloseUp(system: SystemData, scale: number, clock: () => number, adaptation: () => number): void {
+    this.hideCloseUp();
+    this.closeUp = new StarCloseUp(this.root, this.ship.current, system, scale, clock, adaptation);
+  }
+
+  hideCloseUp(): void {
+    this.closeUp?.dispose();
+    this.closeUp = null;
+  }
+
+  /**
+   * How far the ship has dived into its current star, 0–1: the ship sinks in
+   * (at 1 it's at the star's centre, so the camera looks at the star) and
+   * shrinks, the star's dot fades (the close-up takes over), and the rings
+   * are hidden.
+   */
+  setDive(u: number): void {
+    this.ship.setDive(u);
+    this.map.fade(this.ship.current, u);
+    this.hud.hideMarkers = u > 0;
+  }
+
+  /** Rotation from `system`'s space into world (scene) space: its galactic tilt, turned with the galaxy. */
+  systemRotation(system: SystemData, out: THREE.Quaternion): THREE.Quaternion {
+    const q = system.galacticTilt;
+    return out.copy(this.root.quaternion).multiply(this.tilt.set(q.x, q.y, q.z, q.w));
+  }
+
+  override update(frameDt: number, alpha: number): void {
+    super.update(frameDt, alpha);
+    this.closeUp?.update();
+  }
+
   override enter(): void {
     this.hud.activate();
   }
@@ -98,6 +142,7 @@ export class GalaxyLevel extends Level {
   }
 
   override dispose(): void {
+    this.hideCloseUp();
     super.dispose();
     this.scene.remove(this.root);
     this.scene.remove(this.light);

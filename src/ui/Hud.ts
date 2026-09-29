@@ -23,6 +23,7 @@ export class Hud implements Entity {
   private readonly targetEl = document.getElementById('hud-target')!;
   private readonly helpEl = document.getElementById('hud-help')!;
   private sinceRefresh = REFRESH_SECONDS;
+  private active = false;
 
   constructor(
     private readonly ship: Ship,
@@ -33,6 +34,7 @@ export class Hud implements Entity {
   ) {}
 
   activate(): void {
+    this.active = true;
     const { system } = this;
     const planets = system.planets.length === 1 ? '1 planet' : `${system.planets.length} planets`;
     this.locationEl.textContent = `${system.name} · ${describeStars(system.stars)} · ${planets}`;
@@ -41,10 +43,13 @@ export class Hud implements Entity {
   }
 
   deactivate(): void {
+    this.active = false;
     this.tooltip.hide();
   }
 
   update(frameDt: number): void {
+    // Still updated while crossfading out, but the DOM belongs to the level taking over.
+    if (!this.active) return;
     const body = this.picker.hovered;
     if (body) {
       const { clientX, clientY } = this.input.pointer;

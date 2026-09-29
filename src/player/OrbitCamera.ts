@@ -51,6 +51,9 @@ export interface OrbitOptions {
 
 const MIN_PITCH = THREE.MathUtils.degToRad(-80);
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
+const ORIGIN = new THREE.Vector3();
+/** A camera looks along its local -Z, so +Z points from what it looks at back to it. */
+const BACK = new THREE.Vector3(0, 0, 1);
 const MAX_PITCH = THREE.MathUtils.degToRad(85);
 /** Wheel pixels past a limit (about two notches) that count as "keep scrolling". */
 const PAST_LIMIT_PX = 180;
@@ -65,7 +68,9 @@ const HELD_RELEASE_RATE = 1000;
  * Spore-style orbit camera, always centred on the target. Scroll zooms
  * (exponentially), left- or right-drag orbits. Yaw 0 looks along -Z.
  * A focus override (`setFocus`) can pull the centre over to another point,
- * e.g. to fly at a planet during a level transition.
+ * e.g. to fly at a planet during a level transition, and a view override
+ * (`setView`) can turn the camera to any orientation about the centre, e.g.
+ * to match another level's camera.
  */
 export class OrbitCamera implements Entity {
   private yaw = 0;
@@ -80,12 +85,17 @@ export class OrbitCamera implements Entity {
   private readonly minPitch: number;
   private focus: THREE.Vector3 | null = null;
   private focusBlend = 0;
+  private view: THREE.Quaternion | null = null;
+  private viewBlend = 0;
   /** Carries the yaw/pitch frame along with `options.up` (identity for world up). */
   private readonly frame = new THREE.Quaternion();
   private readonly frameUp = new THREE.Vector3(0, 1, 0);
   private readonly turn = new THREE.Quaternion();
   private readonly offset = new THREE.Vector3();
   private readonly center = new THREE.Vector3();
+  private readonly back = new THREE.Vector3();
+  private readonly look = new THREE.Matrix4();
+  private readonly orient = new THREE.Quaternion();
 
   constructor(
     private readonly camera: THREE.PerspectiveCamera,
@@ -128,11 +138,36 @@ export class OrbitCamera implements Entity {
     this.focusBlend = point ? blend : 0;
   }
 
-  /** Jumps to the yaw and pitch that put the camera in world direction `dir` from the centre. */
-  lookFrom(dir: THREE.Vector3): void {
-    const d = this.offset.copy(dir).normalize();
+  /**
+   * Turns the camera to orientation `view` (a live quaternion; any roll),
+   * still `distance` from the centre and looking at it, mixed with its own
+   * orbit by `blend` (0 = own, 1 = `view`). `null` returns to the orbit.
+   */
+  setView(view: THREE.Quaternion | null, blend = 1): void {
+    this.view = view;
+    this.viewBlend = view ? blend : 0;
+  }
+
+  /** The camera orientation of the orbit's current yaw and pitch (ignoring any view override). */
+  orientation(out: THREE.Quaternion): THREE.Quaternion {
+    return out.setFromRotationMatrix(this.look.lookAt(this.offset, ORIGIN, this.options.up ?? WORLD_UP));
+  }
+
+  /**
+   * Jumps to the yaw and pitch that put the camera in world direction `dir`
+   * from the centre (measured against the live `up` if there is one). With
+   * `keepPitch`, only the heading is taken from `dir`.
+   */
+  lookFrom(dir: THREE.Vector3, keepPitch = false): void {
+    const d = this.back.copy(dir).normalize();
+    const { up } = this.options;
+    if (up) {
+      // Into the yaw/pitch frame as the next update will carry it to `up`.
+      const frame = this.orient.copy(this.frame).premultiply(this.turn.setFromUnitVectors(this.frameUp, up));
+      d.applyQuaternion(frame.invert());
+    }
     this.yaw = this.targetYaw = Math.atan2(d.x, d.z);
-    this.pitch = this.targetPitch = THREE.MathUtils.clamp(Math.asin(d.y), this.minPitch, MAX_PITCH);
+    if (!keepPitch) this.pitch = this.targetPitch = THREE.MathUtils.clamp(Math.asin(d.y), this.minPitch, MAX_PITCH);
   }
 
   /** Smoothly zooms to `distance` (clamped to the limits). */
@@ -174,6 +209,12 @@ export class OrbitCamera implements Entity {
     if (this.focus) this.center.lerp(this.focus, this.focusBlend);
     // The camera is shared between levels, so always set its up.
     this.camera.up.copy(up ?? WORLD_UP);
+    if (this.view && this.viewBlend > 0) {
+      const q = this.orientation(this.orient).slerp(this.view, this.viewBlend);
+      this.camera.quaternion.copy(q);
+      this.camera.position.copy(this.center).addScaledVector(this.back.copy(BACK).applyQuaternion(q), this.distance);
+      return;
+    }
     this.camera.position.copy(this.center).addScaledVector(this.offset, this.distance);
     this.camera.lookAt(this.center);
   }

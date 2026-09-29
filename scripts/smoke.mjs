@@ -10,97 +10,57 @@
 // the galaxy band (screenshot looking at the galactic centre) and a smoke trail per planet and moon. Living stars: the
 // surface clock advances and storms have particles under way (and keep animating in the planet level's sky); comets
 // move, show their name on hover and ignore clicks. Looking at the star close up lowers the exposure (eye adaptation).
+// Seamless zooms: through the galaxy and planet loops, every frame of every level transition records the crossfade
+// weight and canvas brightness; each transition must crossfade and never go black (screenshots mid-handover).
 // Prints JSON with FPS, console errors and screenshot paths. Exit 1 on failure.
-import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { launch, sleep } from './lib/browser.mjs';
 
 const args = process.argv.slice(2);
 const quick = args.includes('--quick');
 const url = args.find((a) => !a.startsWith('--')) ?? 'http://localhost:5173/';
-const port = 9333;
-const browsers = [
-  'C:/Program Files/Google/Chrome/Application/chrome.exe',
-  'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
-  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  '/usr/bin/google-chrome',
-  '/usr/bin/chromium',
-  '/opt/pw-browsers/chromium',
-];
-const browser = process.env.CHROME_PATH ?? browsers.find(existsSync);
-if (!browser) throw new Error('No Chrome/Edge found; set CHROME_PATH');
-
-// A browser left on the port (e.g. from a crashed run) would be reused with its old state (saved volume, mute).
-if (await fetch(`http://127.0.0.1:${port}/json/version`).then(() => true, () => false)) {
-  throw new Error(`A browser is already listening on port ${port}; close it first`);
-}
 
 const outDir = mkdtempSync(join(tmpdir(), 'spore2-smoke-'));
-const proc = spawn(browser, [
-  '--headless=new',
-  `--remote-debugging-port=${port}`,
-  `--user-data-dir=${join(outDir, 'profile')}`,
-  '--enable-unsafe-swiftshader',
-  '--use-angle=swiftshader',
-  '--window-size=1280,720',
-  // Chrome refuses to run as root (e.g. in containers) with its sandbox on.
-  ...(process.getuid?.() === 0 ? ['--no-sandbox'] : []),
-  'about:blank',
-]);
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// A fresh browser and profile every run (so no saved volume or mute carries over), at 1280x720.
+const page = await launch({ width: 1280, height: 720 });
+const { send, errors } = page;
+// Never throws: a failed expression reads as undefined and fails the checks that use it.
+const evaluate = page.tryEvaluate;
 
-let target;
-for (let i = 0; i < 40 && !target; i++) {
-  await sleep(250);
-  try {
-    const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
-    target = targets.find((t) => t.type === 'page');
-  } catch {}
-}
-if (!target) throw new Error('Could not connect to headless browser');
-
-const ws = new WebSocket(target.webSocketDebuggerUrl);
-await new Promise((r) => ws.addEventListener('open', r));
-let nextId = 0;
-const pending = new Map();
-const errors = [];
-ws.addEventListener('message', (e) => {
-  const m = JSON.parse(e.data);
-  if (m.id && pending.has(m.id)) pending.get(m.id)(m);
-  if (m.method === 'Runtime.consoleAPICalled' && ['error', 'warning', 'assert'].includes(m.params.type)) {
-    errors.push(`${m.params.type}: ${m.params.args.map((a) => a.value ?? a.description).join(' ')}`);
-  }
-  if (m.method === 'Runtime.exceptionThrown') {
-    errors.push(`exception: ${m.params.exceptionDetails.exception?.description ?? m.params.exceptionDetails.text}`);
-  }
-});
-const send = (method, params = {}) =>
-  new Promise((r) => {
-    const id = ++nextId;
-    pending.set(id, r);
-    ws.send(JSON.stringify({ id, method, params }));
-  });
-const evaluate = async (expression) =>
-  (await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })).result?.result?.value;
-
-await send('Runtime.enable');
-await send('Page.enable');
 await send('Page.navigate', { url });
 await sleep(4000);
 
+// Let the first frames draw (shader compiles, the sky's one-off bake) before timing anything.
+await page.waitFor(`typeof window.levels !== 'undefined'`, 30000);
+await evaluate(`new Promise((r) => { let n = 0; (function f() { if (++n > 20) r(); else requestAnimationFrame(f); })(); })`);
+
 const state = `({ speed: +ship.speed.toFixed(1), pos: ship.object.position.toArray().map((n) => +n.toFixed(1)) })`;
 const started = await evaluate(`typeof window.ship !== 'undefined'`);
-let before, after, autopilot, pick, sky, living, comet, eye, galaxyLoop, fps, audio, planetLoop, heldZoom;
+let before, after, autopilot, pick, sky, living, comet, eye, galaxyLoop, fps, audio, planetLoop, heldZoom, seamless;
 const planetTypes = [];
 const wheel = (deltaY) =>
   evaluate(`game.renderer.domElement.dispatchEvent(new WheelEvent('wheel', { deltaY: ${deltaY}, bubbles: true, cancelable: true }))`);
 
 /**
+ * Waits for the game to freeze mid-handover (see __seamless.freezeWhen), screenshots it as `<name>.png` and resumes.
+ * Returns the screenshot's path, or null if it never froze.
+ */
+async function freezeShot(name) {
+  for (let i = 0; i < 80 && !(await evaluate(`__seamless.frozen`)); i++) await sleep(100);
+  if (!(await evaluate(`__seamless.frozen`))) return null;
+  const path = join(outDir, `${name}.png`);
+  writeFileSync(path, await page.screenshot());
+  await evaluate(`__seamless.frozen = false, game.start()`);
+  return path;
+}
+
+/**
  * Parks the system ship beside the body `bodyExpr` evaluates to, scrolls in to its planet level, clicks the
  * globe a little way ahead of the ship, lets it fly, then scrolls back out. Returns what it saw.
  */
-async function runPlanetLoop(bodyExpr, shotName) {
+async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
   // Input is blocked during a level transition (slow under SwiftShader), which would swallow the wheel below.
   for (let i = 0; i < 40 && (await evaluate(`levels.transitioning`)); i++) await sleep(250);
   const r = await evaluate(`(() => {
@@ -115,14 +75,17 @@ async function runPlanetLoop(bodyExpr, shotName) {
   await sleep(300);
   await wheel(-50000); // to min zoom
   await sleep(1500);
+  if (handoverShot) await evaluate(`__seamless.freezeWhen = 'planet'`);
   await wheel(-300); // keep scrolling in
+  if (handoverShot) r.handoverShot = await freezeShot(handoverShot);
   for (let i = 0; i < 20 && (await evaluate(`levels.mode !== 'planet' || levels.transitioning`)); i++) await sleep(250);
   r.mode = await evaluate(`levels.mode`);
   r.soundIn = await evaluate(`audio.lastPlayed?.name ?? null`);
   if (r.mode !== 'planet') return r;
   r.sky = await evaluate(`planet.skyStats`);
-  const skyTime = `world.stars[0].storms.shownTime`;
-  r.skyStarTime = await evaluate(skyTime);
+  // The sky star's clock and the planet level's own clock (its time is the system time down here).
+  const skyTime = `[world.stars[0].storms.shownTime, planet.time]`;
+  const skyBefore = await evaluate(skyTime);
   r.expectedSky = await evaluate(`({ bodies: world.planets.length + world.moons.length - 1 - world.moons.filter((m) => m.parent === __body).length })`);
 
   // Click the globe ~20° ahead of the ship, towards the top of the screen.
@@ -147,8 +110,11 @@ async function runPlanetLoop(bodyExpr, shotName) {
     })));
   })`);
   await sleep(3000);
-  // The sky's star keeps living (and its clock follows the planet level's).
-  r.skyStarTime = +((await evaluate(skyTime)) - r.skyStarTime).toFixed(2);
+  // The sky's star keeps living, and its clock follows the planet level's (compared with that clock, not the
+  // wall clock: at headless frame rates game time runs slower than real time).
+  const skyAfter = await evaluate(skyTime);
+  r.skyStarTime = +(skyAfter[0] - skyBefore[0]).toFixed(2);
+  r.skyClock = +(skyAfter[1] - skyBefore[1]).toFixed(2);
   r.flewDegrees = await evaluate(`+(planet.ship.direction.angleTo(__start) * 180 / Math.PI).toFixed(1)`);
   r.altitudeOk = await evaluate(`Math.abs(planet.ship.object.position.length() - planet.ship.radius) < 0.5`);
   const shot = await send('Page.captureScreenshot', { format: 'png' });
@@ -169,7 +135,8 @@ async function runPlanetLoop(bodyExpr, shotName) {
     r.click.onScreen &&
     r.click.enRoute &&
     r.flewDegrees > 3 &&
-    r.skyStarTime > 1 &&
+    r.skyClock > 0.3 &&
+    Math.abs(r.skyStarTime - r.skyClock) < 0.25 &&
     r.altitudeOk &&
     r.modeAfter === 'system' &&
     r.parkedAt === r.name &&
@@ -213,6 +180,7 @@ if (started) {
   // Living stars and comets: sample twice, a couple of seconds apart.
   const sample = `({
     starTime: world.stars[0].storms.shownTime,
+    clock: world.time,
     live: world.stars.reduce((n, s) => n + s.storms.liveParticles, 0),
     comets: world.comets.map((c) => c.position.toArray()),
     tails: world.comets.map((c) => +c.activity.toFixed(3)),
@@ -223,6 +191,8 @@ if (started) {
   const second = await evaluate(sample);
   living = {
     starSeconds: +(second.starTime - first.starTime).toFixed(2),
+    // The star's clock against the system's own (not the wall clock, which runs ahead at headless frame rates).
+    clockSeconds: +(second.clock - first.clock).toFixed(2),
     liveParticles: [first.live, second.live],
     comets: second.comets.length,
     cometsMoved: second.comets.every((p, i) => Math.hypot(...p.map((v, k) => v - first.comets[i][k])) > 0.1),
@@ -286,10 +256,40 @@ if (started) {
 
   // Galaxy loop, driven by real wheel and pointer events.
   galaxyLoop = { from: await evaluate(`system.id`) };
+  // Seamless zooms: while a level transition runs, sample every drawn frame (after drawing, before it's shown):
+  // the crossfade weight and the canvas brightness (mean over a sparse grid). Each transition is one segment,
+  // from the level it left to the one it reached. Setting __seamless.freezeWhen to a mode stops the game once
+  // mid-handover into that level, for a screenshot (see freezeShot).
+  await evaluate(`(() => {
+    const gl = game.renderer.getContext();
+    window.__seamless = { segments: [], current: null, freezeWhen: null, frozen: false, lastMode: levels.mode };
+    game.afterFrame = () => {
+      const s = window.__seamless;
+      if (!levels.transitioning) {
+        if (s.current) { s.current.to = levels.mode; s.segments.push(s.current); s.current = null; }
+        s.lastMode = levels.mode;
+        return;
+      }
+      s.current ??= { from: s.lastMode, frames: [] };
+      const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
+      if (!s.px || s.px.length !== w * h * 4) s.px = new Uint8Array(w * h * 4);
+      gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, s.px);
+      let sum = 0, n = 0;
+      for (let y = 2; y < h; y += 8) for (let x = 2; x < w; x += 8) {
+        const i = 4 * (y * w + x); sum += s.px[i] + s.px[i + 1] + s.px[i + 2]; n++;
+      }
+      const weight = levels.crossfade;
+      s.current.frames.push({ weight, brightness: sum / (3 * n) });
+      if (s.freezeWhen && weight !== null && weight > 0.35 && levels.mode === s.freezeWhen) {
+        s.freezeWhen = null; s.frozen = true; game.stop();
+      }
+    };
+  })()`);
   await wheel(50000); // to max zoom
   await sleep(1500);
   await wheel(300); // keep scrolling past it
   await sleep(1800);
+  for (let i = 0; i < 40 && (await evaluate(`levels.transitioning`)); i++) await sleep(250);
   galaxyLoop.modeAfterZoomOut = await evaluate(`levels.mode`);
   galaxyLoop.fps = await evaluate(measureFps);
   // Step 6 polish: distant galaxies, twinkle, a slow spin, binaries as two dots.
@@ -331,11 +331,14 @@ if (started) {
       resolve({ nearest: best.id, destination: levels.galaxyLevel.ship.destination?.id ?? null })));
   })`);
   // Scroll in mid-jump: held until the ship docks, then it zooms into the destination.
+  await evaluate(`__seamless.freezeWhen = 'system'`);
   await wheel(-50000);
   galaxyLoop.heldWhileTravelling = await evaluate(`levels.galaxyLevel.ship.travelling && levels.mode === 'galaxy'`);
   for (let i = 0; i < 60 && (await evaluate(`levels.galaxyLevel.ship.travelling`)); i++) await sleep(250);
   galaxyLoop.dockedAt = await evaluate(`levels.galaxyLevel.ship.travelling ? null : levels.galaxyLevel.ship.current.id`);
+  galaxyLoop.handoverShot = await freezeShot('handover');
   for (let i = 0; i < 20 && (await evaluate(`levels.mode !== 'system' || levels.transitioning`)); i++) await sleep(250);
+  await sleep(300);
   galaxyLoop.modeAfterZoomIn = await evaluate(`levels.mode`);
   galaxyLoop.to = await evaluate(`system.id`);
   galaxyLoop.shipSpeed = await evaluate(`ship.speed`);
@@ -368,10 +371,12 @@ if (started) {
     ship.travelTo(best);
     return ${played};
   })()`);
-  for (let i = 0; i < 60 && (await evaluate(`levels.galaxyLevel.ship.travelling`)); i++) await sleep(250);
+  for (let i = 0; i < 60 && (await evaluate(`levels.galaxyLevel.ship.travelling || levels.transitioning`)); i++) await sleep(250);
   await evaluate(`levels.toSystem()`);
   audio.sfx.in = await evaluate(played);
-  await sleep(1500);
+  await sleep(500);
+  // The zoom runs slower than real time at headless frame rates (each frame advances it by at most 0.25 s).
+  for (let i = 0; i < 40 && (await evaluate(`levels.transitioning`)); i++) await sleep(250);
   audio.sfx.modeAfter = await evaluate(`levels.mode`);
   await send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'KeyM', key: 'm' });
   await send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'KeyM', key: 'm' });
@@ -381,6 +386,7 @@ if (started) {
   planetLoop = await runPlanetLoop(
     `world.planets.find((p) => ['terran', 'ocean'].includes(p.config.type)) ?? world.planets[0]`,
     'planet',
+    'planet-handover',
   );
 
   // Scrolling in while the autopilot flies is held until it arrives, then descends to the destination.
@@ -411,6 +417,26 @@ if (started) {
     heldZoom.descendedTo === heldZoom.target;
   await evaluate(`levels.leavePlanet()`);
   for (let i = 0; i < 20 && (await evaluate(`levels.mode !== 'system' || levels.transitioning`)); i++) await sleep(250);
+  await sleep(300);
+
+  seamless = await evaluate(`(() => {
+    game.afterFrame = null;
+    const segments = __seamless.segments.map((seg) => {
+      const blended = seg.frames.filter((x) => x.weight !== null && x.weight > 0 && x.weight < 1);
+      return {
+        zoom: seg.from + ' → ' + seg.to,
+        frames: seg.frames.length,
+        crossfadeFrames: blended.length,
+        minBrightness: +Math.min(...seg.frames.map((x) => x.brightness)).toFixed(2),
+      };
+    });
+    const kinds = [...new Set(segments.map((x) => x.zoom))];
+    return { segments, kinds };
+  })()`);
+  seamless.handoverShots = [galaxyLoop.handoverShot, planetLoop.handoverShot];
+  seamless.ok =
+    ['system → galaxy', 'galaxy → system', 'system → planet', 'planet → system'].every((k) => seamless.kinds.includes(k)) &&
+    seamless.segments.every((x) => x.crossfadeFrames > 0 && x.minBrightness > 0.5);
 }
 
 if (started && !quick) {
@@ -448,7 +474,8 @@ const picked = started && pick.target === pick.star && pick.tooltip === pick.sta
 const skyOk = started && sky.band && sky.trails === sky.expectedTrails && sky.visibleTrails >= 1;
 const alive =
   started &&
-  living.starSeconds > 1 &&
+  living.clockSeconds > 0.3 &&
+  Math.abs(living.starSeconds - living.clockSeconds) < 0.25 &&
   living.liveParticles.some((n) => n > 0) &&
   living.cometsMoved &&
   !living.pickable &&
@@ -467,6 +494,7 @@ const looped =
   galaxyLoop.clicked.destination === galaxyLoop.clicked.nearest &&
   galaxyLoop.heldWhileTravelling &&
   galaxyLoop.dockedAt === galaxyLoop.clicked.nearest &&
+  galaxyLoop.handoverShot !== null &&
   galaxyLoop.modeAfterZoomIn === 'system' &&
   galaxyLoop.to === galaxyLoop.clicked.nearest &&
   typeof galaxyLoop.shipSpeed === 'number';
@@ -488,17 +516,18 @@ const planets =
   planetLoop.soundIn === 'transitionIn' &&
   planetLoop.soundOut === 'transitionOut' &&
   heldZoom.ok &&
+  planetLoop.handoverShot !== null &&
+  seamless.ok &&
   planetTypes.every((r) => r.ok) &&
   (quick || planetTypes.length === 9);
 const ok = started && moved && autopiloted && picked && skyOk && alive && looped && sounded && planets && errors.length === 0;
 console.log(
   JSON.stringify(
-    { ok, started, moved, autopiloted, picked, skyOk, alive, looped, sounded, planets, before, after, autopilot, pick, sky, living, comet, eye, galaxyLoop, audio, planetLoop, heldZoom, planetTypes, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
+    { ok, started, moved, autopiloted, picked, skyOk, alive, looped, sounded, planets, before, after, autopilot, pick, sky, living, comet, eye, galaxyLoop, seamless, audio, planetLoop, heldZoom, planetTypes, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
     null,
     2,
   ),
 );
 
-ws.close();
-proc.kill();
+await page.close();
 process.exit(ok ? 0 : 1);

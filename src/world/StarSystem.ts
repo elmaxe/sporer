@@ -130,12 +130,21 @@ export class StarSystem implements Entity {
     this.animate(time);
   }
 
+  /** Undoes `pose`'s enlarging of distant bodies (positions and the rest come back with the next update). */
+  unpose(): void {
+    for (const p of this.planets) p.object.scale.setScalar(1);
+    for (const m of this.moons) m.object.scale.setScalar(1);
+  }
+
   update(frameDt: number, alpha: number): void {
     for (const s of this.stars) s.update(frameDt, alpha);
     for (const p of this.planets) p.update(frameDt, alpha);
     for (const m of this.moons) m.update(frameDt, alpha);
     // The clock between the last two fixed steps, as the bodies are interpolated.
-    this.animate(this._time - FIXED_DT * (1 - alpha));
+    const time = this._time - FIXED_DT * (1 - alpha);
+    for (const p of this.planets) if (p.spinAt) p.spinAngle = p.spinAt(time);
+    for (const m of this.moons) if (m.spinAt) m.spinAngle = m.spinAt(time);
+    this.animate(time);
   }
 
   /** Living stars and comets: pure functions of the (render) time. */

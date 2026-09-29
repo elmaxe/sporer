@@ -43,6 +43,7 @@ export class PlanetShip implements Entity {
   readonly up = new THREE.Vector3();
   /** Where the autopilot is heading, on the flying sphere; only meaningful while `enRoute`. */
   readonly destination = new THREE.Vector3();
+  private readonly hull: THREE.Object3D;
   private readonly ring: THREE.Object3D;
   private hasTarget = false;
 
@@ -79,19 +80,10 @@ export class PlanetShip implements Entity {
   ) {
     const { group, ring } = buildUfoMesh();
     this.object.add(group);
+    this.hull = group;
     this.ring = ring;
     scene.add(this.object);
-
-    this.u.copy(start).normalize();
-    // Face any direction along the ground to begin with.
-    this.heading.set(0, 1, 0).cross(this.u);
-    if (this.heading.lengthSq() < 1e-6) this.heading.set(1, 0, 0);
-    this.heading.normalize();
-    this.orient(this.currRot);
-    this.currPos.copy(this.u).multiplyScalar(radius);
-    this.prevPos.copy(this.currPos);
-    this.prevRot.copy(this.currRot);
-    this.update(0, 0);
+    this.placeAt(start);
 
     const f = debug.folder('Planet ship');
     f?.add(planetShipParams, 'thrust', 0, 300);
@@ -117,6 +109,28 @@ export class PlanetShip implements Entity {
   /** The (simulation) direction from the planet's centre. */
   get direction(): THREE.Vector3 {
     return this.u;
+  }
+
+  /** Puts the ship above `start` (a direction from the centre), at rest and with no autopilot target. */
+  placeAt(start: THREE.Vector3): void {
+    this.u.copy(start).normalize();
+    this.vel.set(0, 0, 0);
+    this.hasTarget = false;
+    // Face any direction along the ground to begin with.
+    this.heading.set(0, 1, 0).cross(this.u);
+    if (this.heading.lengthSq() < 1e-6) this.heading.set(1, 0, 0);
+    this.heading.normalize();
+    this.orient(this.currRot);
+    this.currPos.copy(this.u).multiplyScalar(this.radius);
+    this.prevPos.copy(this.currPos);
+    this.prevRot.copy(this.currRot);
+    this.update(0, 0);
+  }
+
+  /** Draws the UFO at `scale` × its size (visual only; e.g. growing out of nothing on arrival). */
+  setScale(scale: number): void {
+    this.hull.scale.setScalar(Math.max(scale, 1e-3));
+    this.hull.visible = scale > 1e-3;
   }
 
   /** Autopilot to the point of the flying sphere above `point` (any point off the centre). */

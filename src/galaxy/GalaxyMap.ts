@@ -38,6 +38,7 @@ export class GalaxyMap implements Entity {
   private readonly glows: THREE.Mesh<THREE.SphereGeometry, THREE.ShaderMaterial>[] = [];
   private readonly bufferSize = new THREE.Vector2();
   private readonly steady = new THREE.Vector2(-1, -1);
+  private readonly faded = new THREE.Vector2(-1, 0);
   private time = 0;
 
   constructor(
@@ -89,6 +90,8 @@ export class GalaxyMap implements Entity {
         twinkleSpeed: { value: galaxyMapParams.twinkleSpeed },
         // Ids of up to two stars that don't twinkle (-1: none).
         steady: { value: this.steady },
+        // A star (id) whose dots fade out by the given amount, 0–1.
+        faded: { value: this.faded },
       },
       vertexShader: /* glsl */ `
         attribute float size;
@@ -102,6 +105,7 @@ export class GalaxyMap implements Entity {
         uniform float twinkle;
         uniform float twinkleSpeed;
         uniform vec2 steady;
+        uniform vec2 faded;
         varying vec3 vColor;
         varying float vDim;
         void main() {
@@ -122,6 +126,7 @@ export class GalaxyMap implements Entity {
           float small = 1.0 - smoothstep(minSize, minSize * 4.0, px);
           bool held = abs(starId - steady.x) < 0.5 || abs(starId - steady.y) < 0.5;
           vDim *= held ? 1.0 : 1.0 + twinkle * (1.0 + 0.6 * small) * wave;
+          if (abs(starId - faded.x) < 0.5) vDim *= 1.0 - faded.y;
 
           vColor = color;
           gl_Position = projectionMatrix * mv;
@@ -179,6 +184,11 @@ export class GalaxyMap implements Entity {
   /** Stars (by id) that shine steadily instead of twinkling, e.g. the current and hovered one. */
   holdSteady(a: StarRef | null, b: StarRef | null): void {
     this.steady.set(a?.id ?? -1, b?.id ?? -1);
+  }
+
+  /** Fades `star`'s dot(s) out by `amount` (0–1), e.g. while a close-up of it takes over. */
+  fade(star: StarRef | null, amount: number): void {
+    this.faded.set(star && amount > 0 ? star.id : -1, amount);
   }
 
   update(frameDt: number): void {
