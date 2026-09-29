@@ -5,10 +5,25 @@ export interface ArriveParams {
   maxSpeed: number;
   /** Largest velocity change per second the autopilot may apply. */
   accel: number;
-  /** How early to slow down: desired closing speed = distance * gain (1/s). */
+  /**
+   * Stiffness of the final settle (1/s): within the last few units the closing
+   * speed is distance * gain, so the ship eases in without overshooting.
+   */
   gain: number;
   /** The body's linear damping, compensated so the ship can hold cruise speed. */
   damping: number;
+}
+
+/** Share of `accel` the braking curve plans with; the rest is headroom for tracking a moving target. */
+const BRAKE_SHARE = 0.5;
+
+/**
+ * Closing speed that stops exactly at the destination `dist` away: cruise, then
+ * brake at a constant deceleration (speed ∝ √distance, so it arrives in finite
+ * time rather than creeping in exponentially), then a short linear settle.
+ */
+export function closingSpeed(dist: number, p: ArriveParams): number {
+  return Math.min(p.maxSpeed, Math.sqrt(2 * BRAKE_SHARE * p.accel * dist), dist * p.gain);
 }
 
 /**
@@ -33,7 +48,7 @@ export function arriveImpulse<T extends Vec3Like>(
   const dy = target.y - pos.y;
   const dz = target.z - pos.z;
   const dist = Math.hypot(dx, dy, dz);
-  const closing = dist > 1e-6 ? Math.min(p.maxSpeed, (remaining ?? dist) * p.gain) / dist : 0;
+  const closing = dist > 1e-6 ? closingSpeed(remaining ?? dist, p) / dist : 0;
 
   // Rapier damps velocity by 1 / (1 + damping * dt) each step; pre-scale to cancel it.
   const hold = 1 + p.damping * dt;

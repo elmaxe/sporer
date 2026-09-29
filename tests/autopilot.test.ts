@@ -3,7 +3,7 @@ import { arriveImpulse, detourWaypoint, standoffPoint, type ArriveParams } from 
 import type { Vec3Like } from '../src/gen/orbit';
 
 const DT = 1 / 60;
-const params: ArriveParams = { maxSpeed: 150, accel: 250, gain: 1.2, damping: 1.2 };
+const params: ArriveParams = { maxSpeed: 150, accel: 250, gain: 8, damping: 1.2 };
 const v3 = (x = 0, y = 0, z = 0): Vec3Like => ({ x, y, z });
 const dist = (a: Vec3Like, b: Vec3Like) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
 
@@ -35,6 +35,14 @@ describe('arriveImpulse', () => {
     expect(dist(pos, goal)).toBeLessThan(0.5);
     expect(Math.hypot(vel.x, vel.y, vel.z)).toBeLessThan(0.5);
     expect(overshoot).toBeLessThan(0.5);
+  });
+
+  it('brakes firmly and settles quickly instead of creeping in', () => {
+    // 300 units: ~2 s at cruise, ~0.6 s to brake from 150 at accel / 2, plus a short settle.
+    const goal = v3(300, 0, 0);
+    const { pos, vel } = simulate(() => goal, v3(), 3.2);
+    expect(dist(pos, goal)).toBeLessThan(0.5);
+    expect(Math.hypot(vel.x, vel.y, vel.z)).toBeLessThan(1);
   });
 
   it('never exceeds the acceleration limit', () => {
