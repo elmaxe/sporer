@@ -27,7 +27,7 @@ const ARRIVE_SPEED = 0.5;
  * off whooshes, longer for longer trips.
  */
 export class GalaxyShip implements Entity {
-  /** Interpolated render transform; the galaxy camera orbits this. */
+  /** Interpolated render transform (in the galaxy root); the galaxy camera orbits this. */
   readonly object = new THREE.Group();
   private readonly ring: THREE.Object3D;
   private _current: StarRef;
@@ -41,7 +41,8 @@ export class GalaxyShip implements Entity {
   private readonly zero = new THREE.Vector3();
 
   constructor(
-    private readonly scene: THREE.Scene,
+    /** The galaxy's rotating root: the ship moves in galaxy coordinates. */
+    private readonly parent: THREE.Object3D,
     start: StarRef,
     debug: Debug,
     private readonly sfx: SoundEffects,
@@ -50,7 +51,7 @@ export class GalaxyShip implements Entity {
     group.scale.setScalar(UFO_SCALE);
     this.object.add(group);
     this.ring = ring;
-    scene.add(this.object);
+    parent.add(this.object);
     this._current = start;
     this.dockAt(start);
 
@@ -116,7 +117,7 @@ export class GalaxyShip implements Entity {
   }
 
   dispose(): void {
-    this.scene.remove(this.object);
+    this.parent.remove(this.object);
     this.object.traverse((o) => {
       if (o instanceof THREE.Mesh) {
         o.geometry.dispose();

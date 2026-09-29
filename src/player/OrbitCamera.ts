@@ -169,7 +169,8 @@ export class OrbitCamera implements Entity {
       this.frameUp.copy(up);
       this.offset.applyQuaternion(this.frame);
     }
-    this.center.copy(this.target.position);
+    // World position: the target may sit in a moving group (the galaxy's rotating root).
+    this.target.getWorldPosition(this.center);
     if (this.focus) this.center.lerp(this.focus, this.focusBlend);
     // The camera is shared between levels, so always set its up.
     this.camera.up.copy(up ?? WORLD_UP);
