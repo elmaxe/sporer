@@ -9,9 +9,6 @@ import type { PlanetStyle, RingData } from '../gen/system';
  * subdivision: 20·(detail+1)² triangles.
  */
 
-/** Atmosphere shell radius relative to the planet, in the system view. */
-export const ATMOSPHERE_SCALE = 1.2;
-const ATMOSPHERE_INTENSITY = 0.9;
 
 export type TerrainNoise = (x: number, y: number, z: number, seed: number) => number;
 
@@ -162,64 +159,3 @@ export function createRings(rings: RingData, seed: number, scale = 1): THREE.Mes
   );
 }
 
-/**
- * A slightly larger back-face shell that glows brightest at the planet's limb.
- * `scale` is the shell radius relative to the planet, `relief` the terrain's
- * (so the glow peaks where the mountains end). If given, `sun` (a live unit
- * vector in world space, used as the uniform's value) dims the night side.
- */
-export function createAtmosphere(
-  radius: number,
-  relief: number,
-  color: string,
-  scale = ATMOSPHERE_SCALE,
-  segments = 48,
-  sun: THREE.Vector3 | null = null,
-): THREE.Mesh {
-  // How far the limb of the planet sits inside the shell, as -dot(normal, view) at the limb.
-  const surface = 1 + relief * 0.5;
-  const limb = Math.sqrt(1 - (surface / scale) ** 2);
-  return new THREE.Mesh(
-    new THREE.SphereGeometry(radius * scale, segments, segments / 2),
-    new THREE.ShaderMaterial({
-      uniforms: {
-        color: { value: new THREE.Color(color) },
-        limb: { value: limb },
-        intensity: { value: ATMOSPHERE_INTENSITY },
-        sun: { value: sun ?? new THREE.Vector3() },
-      },
-      vertexShader: /* glsl */ `
-        varying vec3 vNormal;
-        varying vec3 vView;
-        varying vec3 vWorldNormal;
-        void main() {
-          vec4 mv = modelViewMatrix * vec4(position, 1.0);
-          vNormal = normalize(normalMatrix * normal);
-          vWorldNormal = normalize(mat3(modelMatrix) * normal);
-          vView = normalize(-mv.xyz);
-          gl_Position = projectionMatrix * mv;
-        }`,
-      fragmentShader: /* glsl */ `
-        uniform vec3 color;
-        uniform float limb;
-        uniform float intensity;
-        uniform vec3 sun;
-        varying vec3 vNormal;
-        varying vec3 vView;
-        varying vec3 vWorldNormal;
-        void main() {
-          // Back faces: 0 at the shell's silhouette, 'limb' where the planet's edge is.
-          float f = clamp(-dot(normalize(vNormal), normalize(vView)) / limb, 0.0, 1.0);
-          // With a sun (zero vector = none): full glow by day, a faint rim by night.
-          float day = dot(sun, sun) > 0.5 ? mix(0.12, 1.0, smoothstep(-0.35, 0.25, dot(normalize(vWorldNormal), sun))) : 1.0;
-          gl_FragColor = vec4(color * pow(f, 3.0) * intensity * day, 1.0);
-          #include <tonemapping_fragment>
-          #include <colorspace_fragment>
-        }`,
-      side: THREE.BackSide,
-      blending: THREE.AdditiveBlending,
-      transparent: true,
-      depthWrite: false,
-    }),
-  );
-}

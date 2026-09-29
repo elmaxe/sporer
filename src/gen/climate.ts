@@ -276,12 +276,15 @@ export function tidalHeatFlow(
 
 // --- Evaluation: state + setting → derived ---
 
+/** A Venus-like cloud deck or Titan-like haze hides the surface. */
+export function cloudCovered(state: Pick<ClimateState, 'composition' | 'pressure'>): boolean {
+  if (state.composition !== 'carbonDioxide' && state.composition !== 'nitrogen') return false;
+  return state.pressure >= CLOUD_ALBEDO[state.composition].minPressure;
+}
+
 /** Bond albedo of the planet: the surface's, unless a thick atmosphere hides it under cloud or haze. */
 export function planetAlbedo(state: Pick<ClimateState, 'composition' | 'pressure' | 'surfaceAlbedo'>): number {
-  if (state.composition === 'carbonDioxide' || state.composition === 'nitrogen') {
-    const cloud = CLOUD_ALBEDO[state.composition];
-    if (state.pressure >= cloud.minPressure) return cloud.albedo;
-  }
+  if (cloudCovered(state)) return CLOUD_ALBEDO[state.composition as keyof typeof CLOUD_ALBEDO].albedo;
   return state.surfaceAlbedo;
 }
 

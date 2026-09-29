@@ -5,7 +5,9 @@ import { orbitPosition, type Orbit } from '../gen/orbit';
 import { describeClimate, type ClimateData } from '../gen/climate';
 import type { PlanetStyle, PlanetType, RingData } from '../gen/system';
 import type { CelestialBody } from './CelestialBody';
-import { createAtmosphere, createGasGeometry, createRings, createTerrainGeometry } from './planetGeometry';
+import { atmosphereLook } from '../gen/atmosphere';
+import { createAtmosphere, type AtmosphereSun } from './atmosphereShell';
+import { createGasGeometry, createRings, createTerrainGeometry } from './planetGeometry';
 
 /** What the renderer needs; generated PlanetData and MoonData both satisfy it. */
 export interface PlanetConfig {
@@ -64,6 +66,8 @@ export class Planet implements Entity, CelestialBody {
     readonly config: PlanetConfig,
     readonly description: string,
     readonly standoff: number,
+    /** Lights the atmosphere (the main star). */
+    sun: AtmosphereSun,
     /** The planet a moon orbits; null for planets. */
     readonly parent: Planet | null = null,
   ) {
@@ -83,7 +87,8 @@ export class Planet implements Entity, CelestialBody {
     tilted.add(this.surface);
     if (config.rings) tilted.add(createRings(config.rings, seed));
     this.object.add(tilted);
-    if (config.atmosphere) this.object.add(createAtmosphere(radius, style.relief, config.atmosphere));
+    const look = config.atmosphere && config.climate ? atmosphereLook(config.climate, radius) : null;
+    if (look) this.object.add(createAtmosphere(radius, config.atmosphere!, look, sun));
 
     this.object.name = config.name;
     this.positionAt(0, this.position);

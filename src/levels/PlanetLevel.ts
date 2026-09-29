@@ -77,6 +77,7 @@ export class PlanetLevel extends Level {
         this.scene,
         this.frame,
         system.world.moons.filter((m) => m.parent === body),
+        globe.sun,
       ),
     );
     this.hidden = [body, ...this.moons.moons];

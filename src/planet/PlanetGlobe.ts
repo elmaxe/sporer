@@ -2,8 +2,9 @@ import * as THREE from 'three';
 import type { Entity } from '../core/Entity';
 import { detailedTerrain } from '../gen/noise';
 import { isGas, type PlanetConfig } from '../world/Planet';
+import { atmosphereLook } from '../gen/atmosphere';
+import { createAtmosphere } from '../world/atmosphereShell';
 import {
-  createAtmosphere,
   createGasGeometry,
   createRings,
   createTerrainGeometry,
@@ -15,8 +16,6 @@ import { PLANET_SCALE, globeDetail, globeRadius } from './frame';
 const GAS_DETAIL = 64;
 /** Mountains are exaggerated a little up close, where the system view's relief reads as flat. */
 export const RELIEF_SCALE = 1.6;
-/** Atmosphere shell radius: low, so the camera (above the ship) always sees it from outside. */
-const ATMOSPHERE_SCALE = 1.08;
 
 /**
  * The visited planet or moon, at its true size (see globeRadius) and detailed: the
@@ -31,7 +30,7 @@ export class PlanetGlobe implements Entity {
   readonly radius: number;
   /** Radius of the highest terrain (or cloud tops): the ship hovers above this. */
   readonly top: number;
-  /** Unit direction to the (main) star; the atmosphere reads it to dim its night side. */
+  /** Unit direction to the (main) star; the atmospheres read it for their day and night sides. */
   readonly sun = new THREE.Vector3(0, 1, 0);
 
   constructor(
@@ -60,11 +59,9 @@ export class PlanetGlobe implements Entity {
     this.object.add(surface);
     if (seaFloor) this.object.add(createSea(config.type, style.sea!, R));
     if (config.rings) this.object.add(createRings(config.rings, seed, PLANET_SCALE));
-    if (config.atmosphere) {
-      this.object.add(
-        createAtmosphere(R, style.relief * RELIEF_SCALE, config.atmosphere, ATMOSPHERE_SCALE, 128, this.sun),
-      );
-    }
+    // The same look as in the system view (in planet radii), so the two match across the zoom.
+    const look = config.atmosphere && config.climate ? atmosphereLook(config.climate, config.radius) : null;
+    if (look) this.object.add(createAtmosphere(R, config.atmosphere!, look, { vector: this.sun, point: false }, 128));
     scene.add(this.object);
   }
 

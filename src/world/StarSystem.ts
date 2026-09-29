@@ -11,6 +11,7 @@ import type { CelestialBody } from './CelestialBody';
 import { Comet, cometParams } from './Comet';
 import { Planet } from './Planet';
 import { Star } from './Star';
+import { addAtmosphereDebug, type AtmosphereSun } from './atmosphereShell';
 import { stormParams } from './StarStorms';
 import { createGlowTexture } from './glowTexture';
 import { starParams } from './starMaterials';
@@ -57,10 +58,12 @@ export class StarSystem implements Entity {
           this.glowTexture,
         ),
     );
+    // Atmospheres are lit from the main star, wherever it is drawn.
+    const sun: AtmosphereSun = { vector: this.stars[0]!.object.position, point: true };
     this.planets = data.planets.map((p) => {
-      const planet = new Planet(scene, physics, p, describe(p), p.extent + PLANET_STANDOFF_MARGIN);
+      const planet = new Planet(scene, physics, p, describe(p), p.extent + PLANET_STANDOFF_MARGIN, sun);
       for (const m of p.moons) {
-        const moon = new Planet(scene, physics, m, `${describePlanet(m.type)} · moon`, m.radius + MOON_STANDOFF_MARGIN, planet);
+        const moon = new Planet(scene, physics, m, `${describePlanet(m.type)} · moon`, m.radius + MOON_STANDOFF_MARGIN, sun, planet);
         this.moons.push(moon);
       }
       return planet;
@@ -72,6 +75,7 @@ export class StarSystem implements Entity {
     this.animate(this._time);
     this.setExposure(1);
 
+    if (debug) addAtmosphereDebug(debug);
     const stars = debug?.folder('Stars');
     stars?.add(starParams, 'pace', 0, 5);
     stars?.add(starParams, 'granulation', 0.2, 3);

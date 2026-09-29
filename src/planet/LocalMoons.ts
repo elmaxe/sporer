@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import type { Entity } from '../core/Entity';
+import { atmosphereLook } from '../gen/atmosphere';
 import { orbitPosition } from '../gen/orbit';
+import { createAtmosphere } from '../world/atmosphereShell';
 import { TERRAIN_DETAIL, type Planet } from '../world/Planet';
 import { createTerrainGeometry } from '../world/planetGeometry';
 import type { PlanetFrame } from './PlanetFrame';
@@ -12,7 +14,7 @@ const Y = new THREE.Vector3(0, 1, 0);
  * The visited planet's own moons, as real meshes at planet-level scale on
  * their true orbits. Unlike the rest of the sky they can come closer than the
  * globe's far side, so they must be depth-sorted with it in the same scene.
- * Same low-poly look as in the system view, lit by the level's sunlight.
+ * Same low-poly look as in the system view (atmosphere included), lit by the level's sunlight.
  */
 export class LocalMoons implements Entity {
   private readonly meshes: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>[];
@@ -22,6 +24,8 @@ export class LocalMoons implements Entity {
     private readonly scene: THREE.Scene,
     private readonly frame: PlanetFrame,
     readonly moons: readonly Planet[],
+    /** Unit direction to the (main) star, for the atmospheres. */
+    sun: THREE.Vector3,
   ) {
     this.meshes = moons.map((moon) => {
       const { radius, seed, style } = moon.config;
@@ -30,6 +34,9 @@ export class LocalMoons implements Entity {
         new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9 }),
       );
       mesh.name = moon.name;
+      const { atmosphere, climate } = moon.config;
+      const look = atmosphere && climate ? atmosphereLook(climate, radius) : null;
+      if (look) mesh.add(createAtmosphere(radius * frame.scale, atmosphere!, look, { vector: sun, point: false }));
       scene.add(mesh);
       return mesh;
     });
@@ -52,8 +59,12 @@ export class LocalMoons implements Entity {
   dispose(): void {
     for (const mesh of this.meshes) {
       this.scene.remove(mesh);
-      mesh.geometry.dispose();
-      mesh.material.dispose();
+      mesh.traverse((o) => {
+        if (o instanceof THREE.Mesh) {
+          o.geometry.dispose();
+          (o.material as THREE.Material).dispose();
+        }
+      });
     }
   }
 }
