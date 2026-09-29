@@ -1,26 +1,56 @@
 import * as THREE from 'three';
+import { EARTH_GAME_RADIUS } from '../gen/planets';
 
 /*
  * Maths linking the planet level to the system it sits in. Pure (THREE maths
  * types only, no scene), unit-tested in tests/planet.test.ts.
  *
  * The planet level works in the body's own frame: the planet sits at the
- * origin with radius PLANET_RADIUS whatever its system radius, tilted and
- * spinning with it, so the ground stays put while the sky turns overhead.
+ * origin, tilted and spinning with it, so the ground stays put while the sky
+ * turns overhead. It is the system view magnified by one factor for every
+ * body (PLANET_SCALE), while the ship, its altitude and the camera keep the
+ * same size: so a dwarf is a small ball under the ship and a gas giant a
+ * nearly flat horizon.
  */
 
-/** A planet or moon's radius in planet-level units. */
-export const PLANET_RADIUS = 100;
+/** An Earth-sized body's radius in planet-level units (system radius EARTH_GAME_RADIUS). */
+export const EARTH_GLOBE_RADIUS = 100;
+
+/** Planet-level units per system unit, the same for every body. */
+export const PLANET_SCALE = EARTH_GLOBE_RADIUS / EARTH_GAME_RADIUS;
+
+/** A planet or moon's radius in planet-level units: 10 for the smallest moons, 100 for Earth, 425 for the biggest giants. */
+export function globeRadius(systemRadius: number): number {
+  return systemRadius * PLANET_SCALE;
+}
+
+/**
+ * Icosphere subdivisions for a globe: 60 at Earth size, growing with the
+ * square root of the radius (so bigger globes get finer, but a super-Earth's
+ * build doesn't stall the zoom), within [min, max].
+ */
+export function globeDetail(radius: number, min = 32, max = 84): number {
+  return Math.round(Math.min(max, Math.max(min, 60 * Math.sqrt(radius / EARTH_GLOBE_RADIUS))));
+}
+
+/**
+ * Autopilot speed factor over a globe: √(radius / Earth's), within
+ * [0.5, 2.1]. A giant's surface still takes longer to cross than a dwarf's,
+ * just not 17× longer.
+ */
+export function travelScale(radius: number): number {
+  return Math.min(2.1, Math.max(0.5, Math.sqrt(radius / EARTH_GLOBE_RADIUS)));
+}
+
+/** The low-orbit camera's max distance from the ship: `max` for Earth-sized and up, less for small globes (never below `min`). */
+export function maxViewDistance(radius: number, max: number, min = 100): number {
+  return Math.min(max, Math.max(min, (max * radius) / EARTH_GLOBE_RADIUS));
+}
 
 const Y = new THREE.Vector3(0, 1, 0);
 const Z = new THREE.Vector3(0, 0, 1);
 const tilted = new THREE.Quaternion();
 const spun = new THREE.Quaternion();
-
-/** Planet-level units per system unit for a body of the given system radius. */
-export function planetScale(systemRadius: number): number {
-  return PLANET_RADIUS / systemRadius;
-}
 
 /**
  * The body frame's orientation in system space: the axial tilt about Z, then

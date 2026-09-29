@@ -6,7 +6,7 @@ import type { ArriveParams } from '../player/autopilot';
 import { buildUfoMesh } from '../player/Ship';
 import { sphereStep, surfaceArriveImpulse } from './surfaceMotion';
 
-/** Tunables, exposed in the debug panel. Planet-level units (the globe's radius is 100). */
+/** Tunables, exposed in the debug panel. Planet-level units (an Earth-sized globe's radius is 100). */
 export const planetShipParams = {
   /** Manual (WASD) velocity change per second. */
   thrust: 60,
@@ -17,6 +17,7 @@ export const planetShipParams = {
   turnRate: 5,
 };
 
+/** The autopilot over an Earth-sized globe; its speed and acceleration scale with `travelScale`. */
 export const planetAutopilotParams: ArriveParams = {
   maxSpeed: 60,
   accel: 120,
@@ -77,6 +78,8 @@ export class PlanetShip implements Entity {
     readonly radius: number,
     /** Starting direction from the centre. */
     start: THREE.Vector3,
+    /** Autopilot speed factor for this globe's size (see planet/frame.ts travelScale). */
+    private readonly travelScale = 1,
   ) {
     const { group, ring } = buildUfoMesh();
     this.object.add(group);
@@ -164,7 +167,8 @@ export class PlanetShip implements Entity {
         .multiplyScalar(planetShipParams.thrust * boost * dt);
       vel.add(this.impulse);
     } else if (this.hasTarget) {
-      Object.assign(this.arrive, planetAutopilotParams).maxSpeed *= boost;
+      Object.assign(this.arrive, planetAutopilotParams).maxSpeed *= boost * this.travelScale;
+      this.arrive.accel *= this.travelScale;
       const arc = surfaceArriveImpulse(u, vel, this.target, this.radius, this.arrive, dt, this.impulse);
       vel.add(this.impulse);
       if (arc < ARRIVE_DISTANCE && vel.length() < ARRIVE_SPEED) this.stop();

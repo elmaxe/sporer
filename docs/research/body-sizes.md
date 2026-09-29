@@ -95,9 +95,9 @@ On average a system has 0.59 ice giants and 0.80 gas giants. About 24% of gas gi
 - Class and type weights by zone are gameplay choices, not occurrence rates. Kepler's intrinsic rates (Borucki: 6% Earth-size, 7% super-Earth, 17% Neptune-size, 4% Jupiter-size, for close-in orbits) would make most planets Neptunes, which is dull to fly around. What's kept is the real trend: small bodies can't hold air or oceans, so they are barren, icy or volcanic, and super-Earths are mostly wet.
 - Moons use the same mapping: 0.8 (0.01 R⊕, ~64 km) to 6 (0.56 R⊕, bigger than Mercury). Regular moons stay below 3.5 (Pluto-sized, about Triton at 3.68). Big moons are 4–6: Europa just under the edge, then the Moon, Io, Callisto, Titan and Ganymede. A moon is at most half its planet's radius: the Earth–Moon pair is 0.27 real, 0.52 in game units, the largest among the planets.
 - Moon orbit gaps scale with √(planet radius / 8), so giants spread their moons wider.
+- The planet level magnifies every body by the same factor, 12.5 (`PLANET_SCALE` in `planet/frame.ts`), so the linear size ratios above carry over to low orbit. The ship, its altitude and the camera stay the same size.
 
 ## Open questions
 
 - **Charon is capped.** Charon/Pluto is 0.51 real, 0.71 in game units, above the 0.5 cap, so a Pluto-Charon double dwarf can't happen. This is deliberate for now; a double-planet feature could lift it.
 - **Big-moon chances are tuned, not measured.** Jupiter has three moons above 4 game units (Io, Callisto, Ganymede; Europa is 3.96), Saturn one (Titan), Uranus and Neptune none. That's too few systems to get a rate, so the chances are chosen for "the odd one".
-- **The planet level ignores size.** Every body is rescaled to R = 100 there, so a dwarf and a super-Earth look alike from low orbit. The roadmap lists showing this there (horizon curvature, terrain detail) as optional; not done.

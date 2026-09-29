@@ -2,14 +2,19 @@ import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { DETAIL_AMPLITUDE, detailedTerrain, terrainNoise } from '../src/gen/noise';
 import {
-  PLANET_RADIUS,
+  EARTH_GLOBE_RADIUS,
+  PLANET_SCALE,
   angularRadius,
   bodyFrame,
+  globeDetail,
+  globeRadius,
   lightDirection,
   localToSystem,
-  planetScale,
+  maxViewDistance,
   skyScale,
+  travelScale,
 } from '../src/planet/frame';
+import { SIZE_CLASS_RADIUS } from '../src/gen/planets';
 import { greatCircleDirection, sphereStep, surfaceArriveImpulse } from '../src/planet/surfaceMotion';
 import type { ArriveParams } from '../src/player/autopilot';
 
@@ -154,15 +159,16 @@ describe('great-circle motion', () => {
 describe('planet frame and sky mapping', () => {
   const center = v(250, 3, -120);
   const radius = 8;
-  const scale = planetScale(radius);
+  const scale = PLANET_SCALE;
+  const R = globeRadius(radius);
   const frame = bodyFrame(0.3, 1.1, new THREE.Quaternion());
   const inverse = frame.clone().invert();
 
   it('maps the planet-level globe onto the system body', () => {
-    expect(scale * radius).toBe(PLANET_RADIUS);
+    expect(R).toBe(EARTH_GLOBE_RADIUS);
     const out = new THREE.Vector3();
     expect(localToSystem(v(0, 0, 0), center, frame, scale, out).distanceTo(center)).toBeLessThan(1e-9);
-    const onSurface = localToSystem(v(0, 0, PLANET_RADIUS), center, frame, scale, out);
+    const onSurface = localToSystem(v(0, 0, R), center, frame, scale, out);
     expect(onSurface.distanceTo(center)).toBeCloseTo(radius);
   });
 
@@ -193,7 +199,7 @@ describe('planet frame and sky mapping', () => {
     expect(skyDirection.distanceTo(star.clone().sub(center).normalize())).toBeLessThan(1e-9);
     // And the lit point of the globe is the side of the system body facing the star.
     const litPoint = localToSystem(
-      light.clone().multiplyScalar(PLANET_RADIUS),
+      light.clone().multiplyScalar(R),
       center,
       frame,
       scale,
@@ -212,5 +218,47 @@ describe('planet frame and sky mapping', () => {
     const s = skyScale(5, 3000, minAngle);
     expect(s).toBeGreaterThan(1);
     expect(angularRadius(5 * s, 3000)).toBeCloseTo(minAngle, 9);
+  });
+});
+
+describe('globe sizes', () => {
+  it('keeps every body at its true size relative to the ship: one scale for all', () => {
+    expect(globeRadius(8)).toBe(100);
+    expect(globeRadius(SIZE_CLASS_RADIUS.dwarf[0])).toBeCloseTo(25, 6);
+    expect(globeRadius(SIZE_CLASS_RADIUS.gasGiant[1]) / globeRadius(SIZE_CLASS_RADIUS.dwarf[0])).toBeCloseTo(
+      SIZE_CLASS_RADIUS.gasGiant[1] / SIZE_CLASS_RADIUS.dwarf[0],
+      9,
+    );
+  });
+
+  it('gives bigger globes a flatter horizon from the same altitude', () => {
+    // The horizon's dip below level, seen from `altitude` above a sphere of radius r.
+    const dip = (r: number, altitude: number) => Math.acos(r / (r + altitude));
+    const radii = [2, 5, 8, 12, 20, 34].map(globeRadius);
+    for (let i = 1; i < radii.length; i++) expect(dip(radii[i]!, 12)).toBeLessThan(dip(radii[i - 1]!, 12));
+  });
+
+  it('adds terrain detail with size, within a budget', () => {
+    expect(globeDetail(EARTH_GLOBE_RADIUS)).toBe(60);
+    expect(globeDetail(10)).toBe(32);
+    expect(globeDetail(globeRadius(SIZE_CLASS_RADIUS.superEarth[1]))).toBeLessThanOrEqual(84);
+    expect(globeDetail(150)).toBeGreaterThan(60);
+    expect(globeDetail(50)).toBeLessThan(60);
+  });
+
+  it('speeds up the autopilot on big globes, but not enough to hide the size', () => {
+    expect(travelScale(EARTH_GLOBE_RADIUS)).toBe(1);
+    expect(travelScale(10)).toBe(0.5);
+    // Half way round takes longer the bigger the globe.
+    const crossing = (r: number) => (Math.PI * r) / travelScale(r);
+    const radii = [2, 3.5, 6, 8, 12, 20, 34].map(globeRadius);
+    for (let i = 1; i < radii.length; i++) expect(crossing(radii[i]!)).toBeGreaterThan(crossing(radii[i - 1]!));
+  });
+
+  it('pulls the max camera distance in for small globes', () => {
+    expect(maxViewDistance(EARTH_GLOBE_RADIUS, 260)).toBe(260);
+    expect(maxViewDistance(400, 260)).toBe(260);
+    expect(maxViewDistance(50, 260)).toBe(130);
+    expect(maxViewDistance(10, 260)).toBe(100);
   });
 });
