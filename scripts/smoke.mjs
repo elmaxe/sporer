@@ -11,6 +11,8 @@
 // surface clock advances and storms have particles under way (and keep animating in the planet level's sky); comets
 // move, show their name on hover and ignore clicks. Looking at the star close up lowers the exposure (eye adaptation).
 // Living lava: in low orbit over the lava world, the eruptions have vents, events and blobs in the air.
+// Geysers: every body in the planet loop has the geyser kind its climate says (or none), with vents, eruptions and
+// particles in the air while one erupts; the loop also visits a body with each kind (steam, cryo planet and moon, sulphur).
 // Seamless zooms: through the galaxy and planet loops, every frame of every level transition records the crossfade
 // weight and canvas brightness; each transition must crossfade and never go black (screenshots mid-handover).
 // Touch: on an emulated phone, hold/tap/drag/pinch and the on-screen stick and Boost work, down to a planet and out.
@@ -122,6 +124,13 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
   r.lava = await evaluate(
     `planet.eruptions && { vents: planet.eruptions.activity.vents.length, events: planet.eruptions.events.length, blobs: planet.eruptions.liveBlobs }`,
   );
+  // The body's geysers (if its climate gives it any): vents, eruptions under way and particles in the air.
+  r.geysers = await evaluate(
+    `planet.geysers && { kind: planet.geysers.activity.kind, vents: planet.geysers.activity.vents.length, events: planet.geysers.events.length,
+      erupting: planet.geysers.events.filter((e) => e.start <= planet.frame.renderTime && planet.frame.renderTime < e.start + e.duration).length,
+      particles: planet.geysers.liveParticles, capacity: planet.geysers.capacity }`,
+  );
+  r.expectedGeysers = await evaluate(`geyserKind(__body.config.type, __body.config.climate)`);
   const shot = await send('Page.captureScreenshot', { format: 'png' });
   r.screenshot = join(outDir, `${shotName}.png`);
   writeFileSync(r.screenshot, Buffer.from(shot.result.data, 'base64'));
@@ -144,6 +153,8 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
     Math.abs(r.skyStarTime - r.skyClock) < 0.25 &&
     r.altitudeOk &&
     (r.type !== 'lava' || (r.lava && r.lava.vents > 0 && r.lava.events > 0 && r.lava.blobs > 0)) &&
+    (r.expectedGeysers ?? null) === (r.geysers?.kind ?? null) &&
+    (!r.geysers || (r.geysers.vents > 0 && r.geysers.events > 0 && (r.geysers.erupting === 0 || r.geysers.particles > 0))) &&
     r.modeAfter === 'system' &&
     r.parkedAt === r.name &&
     Math.abs(r.standoffs - 1) < 0.2;
@@ -456,8 +467,18 @@ if (started && !quick) {
         if (want.includes(p.type) && !(p.type in found)) found[p.type] = { star: ref.id, expr: 'world.planets[' + i + ']' };
         if (p.rings && p.type !== 'gas' && !('ringed' in found)) found.ringed = { star: ref.id, expr: 'world.planets[' + i + ']' };
         if (p.moons.length && !('moon' in found)) found.moon = { star: ref.id, expr: 'world.moons.find((m) => m.parent === world.planets[' + i + '])' };
+        // One body with each kind of geyser (moons included: cryo moons have tiger stripes).
+        const kind = geyserKind(p.type, p.climate);
+        if (kind && !(('geysers-' + kind) in found)) found['geysers-' + kind] = { star: ref.id, expr: 'world.planets[' + i + ']' };
+        for (const m of p.moons) {
+          const k = geyserKind(m.type, m.climate);
+          if (k === 'cryo' && !('geysers-cryo-moon' in found))
+            found['geysers-cryo-moon'] = { star: ref.id, expr: 'world.moons.find((m) => m.name === ' + JSON.stringify(m.name) + ')' };
+          if (k === 'sulphur' && !('geysers-sulphur' in found))
+            found['geysers-sulphur'] = { star: ref.id, expr: 'world.moons.find((m) => m.name === ' + JSON.stringify(m.name) + ')' };
+        }
       });
-      if (Object.keys(found).length === want.length + 2) break;
+      if (Object.keys(found).length === want.length + 6) break;
     }
     return found;
   })()`);

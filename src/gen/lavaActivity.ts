@@ -321,7 +321,8 @@ function smoothstep(a: number, b: number, x: number): number {
   return t * t * (3 - 2 * t);
 }
 
-function randomDirection(rng: Rng): Vec3Tuple {
+/** A uniformly random unit vector. */
+export function randomDirection(rng: Rng): Vec3Tuple {
   const y = rng.range(-1, 1);
   const lon = rng.range(0, Math.PI * 2);
   const r = Math.sqrt(1 - y * y);
@@ -329,7 +330,7 @@ function randomDirection(rng: Rng): Vec3Tuple {
 }
 
 /** A unit tangent to the unit sphere at `u`, at angle `angle` around it. */
-function tangent(u: Vec3Tuple, angle: number): Vec3Tuple {
+export function tangent(u: Vec3Tuple, angle: number): Vec3Tuple {
   const ref: Vec3Tuple = Math.abs(u[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
   const d = ref[0] * u[0] + ref[1] * u[1] + ref[2] * u[2];
   let a: Vec3Tuple = [ref[0] - d * u[0], ref[1] - d * u[1], ref[2] - d * u[2]];
