@@ -2,6 +2,7 @@ import { Game } from './core/Game';
 import { Debug } from './core/Debug';
 import { Physics } from './physics/Physics';
 import { generateGalaxy } from './gen/galaxy';
+import { geyserKind } from './gen/geysers';
 import { parseSeed } from './gen/rng';
 import { findHomeSystem, generateSystem } from './gen/system';
 import { SceneManager } from './levels/SceneManager';
@@ -32,7 +33,7 @@ async function main(): Promise<void> {
   // Handles for poking at the game from the browser console / automation.
   // ship / world / system follow the current system level, planet the planet level (or null).
   if (import.meta.env.DEV) {
-    Object.assign(window, { game, galaxy, levels, audio, generateSystem });
+    Object.assign(window, { game, galaxy, levels, audio, generateSystem, geyserKind });
     Object.defineProperties(window, {
       ship: { get: () => levels.systemLevel.ship, configurable: true },
       world: { get: () => levels.systemLevel.world, configurable: true },

@@ -1,5 +1,6 @@
 import { randomRotation, type Quat } from './galactic';
 import { generateComets, type CometData } from './comets';
+import { atmosphereTint, generateClimate, type ClimateData } from './climate';
 import type { GalaxyData, StarRef } from './galaxy';
 import { hexToRgb, hslToHex, rgbToHex } from './color';
 import { romanNumeral } from './names';
@@ -43,6 +44,9 @@ export interface MoonData {
   /** Relative to its planet. */
   orbit: Orbit;
   style: PlanetStyle;
+  /** Glow colour from the climate's atmosphere, or null when there's too little air to see. */
+  atmosphere: string | null;
+  climate: ClimateData;
 }
 
 export interface RingData {
@@ -64,7 +68,10 @@ export interface PlanetData {
   style: PlanetStyle;
   /** Gas giant band colours, darkest first; null for solid worlds. */
   bands: string[] | null;
+  /** Glow colour, or null for airless worlds (and gas giants, whose bands carry the look). */
   atmosphere: string | null;
+  /** Temperature, atmosphere and internal heat; null for gas giants (see gen/climate.ts). */
+  climate: ClimateData | null;
   rings: RingData | null;
   moons: MoonData[];
   /** Radius of the planet's "neighbourhood": rings and moon orbits included. */
@@ -140,11 +147,11 @@ export function generateSystem(ref: StarRef): SystemData {
           : null
         : // Own stream, so the draws of gas giants and everything else stay as they were.
           generateSolidRings(prng.fork('rings'), type, radius);
-    const moons = generateMoons(prng.fork('moons'), name, size, radius, rings);
+    const moonOrbits = generateMoons(prng.fork('moons'), name, size, radius, rings);
     const extent = Math.max(
       radius,
       rings?.outer ?? 0,
-      ...moons.map((m) => m.orbit.radius + m.radius),
+      ...moonOrbits.map((m) => m.orbit.radius + m.radius),
     );
     const orbitRadius = edge + gap + extent;
     let bands: string[] | null = null;
@@ -156,6 +163,23 @@ export function generateSystem(ref: StarRef): SystemData {
       style = planetStyle(prng, type);
       if (rings) rings.color = solidRingColor(prng.fork('rings', 'color'), type, style);
     }
+
+    // Own streams, so adding climate changed no other draw. Starlight falls
+    // off as 1 / zone², the same zone the types are chosen from.
+    const insolation = (habitableRadius / orbitRadius) ** 2;
+    const climate =
+      type === 'gas' ? null : generateClimate(prng.fork('climate'), { type, kind: size, radius, insolation });
+    const moons = moonOrbits.map((moon, j): MoonData => {
+      const crng = prng.fork('climate', 'moon', j);
+      const moonClimate = generateClimate(crng, {
+        type: moon.type,
+        kind: 'moon',
+        radius: moon.radius,
+        insolation,
+        host: { radius, size, orbitRadius: moon.orbit.radius },
+      });
+      return { ...moon, atmosphere: atmosphereTint(crng, moonClimate), climate: moonClimate };
+    });
 
     planets.push({
       name,
@@ -172,7 +196,8 @@ export function generateSystem(ref: StarRef): SystemData {
       },
       style,
       bands,
-      atmosphere: atmosphereColor(prng, type),
+      atmosphere: climateAtmosphere(prng, type, climate),
+      climate,
       rings,
       moons,
       extent,
@@ -203,6 +228,15 @@ export function generateSystem(ref: StarRef): SystemData {
     galacticTilt: randomRotation(rng.fork('galactic')),
     comets,
   };
+}
+
+/**
+ * The atmosphere's colour, from the climate. The old colour draw is kept in
+ * its place so the draws after it (the tilt) stay put.
+ */
+function climateAtmosphere(prng: Rng, type: PlanetType, climate: ClimateData | null): string | null {
+  atmosphereColor(prng, type);
+  return climate ? atmosphereTint(prng.fork('climate', 'tint'), climate) : null;
 }
 
 /** Where to put the player when arriving: in the first gap between planets, clear of moons. */
@@ -300,11 +334,11 @@ function generateMoons(
   size: SizeClass,
   radius: number,
   rings: RingData | null,
-): MoonData[] {
+): Omit<MoonData, 'atmosphere' | 'climate'>[] {
   const count = rng.weighted<number>(MOON_COUNT_WEIGHTS[size]);
   const gapScale = Math.sqrt(radius / EARTH_GAME_RADIUS);
 
-  const moons: MoonData[] = [];
+  const moons: Omit<MoonData, 'atmosphere' | 'climate'>[] = [];
   let edge = Math.max(radius * 1.5, rings ? rings.outer + 2 : 0);
   for (let i = 0; i < count; i++) {
     const moonType = rng.weighted<MoonType>([
@@ -380,4 +414,5 @@ export function describePlanet(type: PlanetType): string {
 }
 
 // Re-exported so callers can import all generation types from one place.
+export type { ClimateData } from './climate';
 export type { CometData, PlanetStyle, PlanetType, MoonType, SizeClass };

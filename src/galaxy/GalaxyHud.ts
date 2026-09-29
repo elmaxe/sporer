@@ -78,7 +78,7 @@ export class GalaxyHud implements Entity {
     if (hovered) {
       const here = hovered === ship.current && !ship.travelling ? ' · you are here' : '';
       const { clientX, clientY } = this.input.pointer;
-      this.tooltip.show(hovered, hovered.name, describeStars(hovered.stars) + here, clientX, clientY, this.input.touchMode);
+      this.tooltip.show(hovered, hovered.name, describeStars(hovered.stars) + here, clientX, clientY, undefined, this.input.touchMode);
     } else {
       this.tooltip.hide();
     }

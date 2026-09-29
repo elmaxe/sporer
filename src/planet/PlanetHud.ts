@@ -13,6 +13,7 @@ const TOUCH_HELP =
 /** The planet level's DOM overlay (the shared #hud in index.html). Text is throttled. */
 export class PlanetHud implements Entity {
   private readonly locationEl = document.getElementById('hud-location')!;
+  private readonly climateEl = document.getElementById('hud-climate')!;
   private readonly speedEl = document.getElementById('hud-speed')!;
   private readonly targetEl = document.getElementById('hud-target')!;
   private readonly help: HelpText;
@@ -24,6 +25,8 @@ export class PlanetHud implements Entity {
     /** e.g. "Haikrai III · Terran world · 1 moon". */
     private readonly location: string,
     input: Input,
+    /** e.g. "15 °C · N₂–O₂ 1.0 bar · 1.0 g · geothermal low · T3"; null for gas giants. */
+    private readonly climate: string | null = null,
   ) {
     this.help = new HelpText(input, HELP, TOUCH_HELP);
   }
@@ -31,12 +34,16 @@ export class PlanetHud implements Entity {
   activate(): void {
     this.active = true;
     this.locationEl.textContent = `${this.location} · low orbit`;
+    // Only this HUD uses the climate line, so it shows it while active and hides it on leaving.
+    this.climateEl.textContent = this.climate ?? '';
+    this.climateEl.hidden = !this.climate;
     this.help.refresh(true);
     this.sinceRefresh = REFRESH_SECONDS;
   }
 
   deactivate(): void {
     this.active = false;
+    this.climateEl.hidden = true;
   }
 
   update(frameDt: number): void {
@@ -50,5 +57,8 @@ export class PlanetHud implements Entity {
     this.targetEl.textContent = this.ship.enRoute ? 'Autopilot → surface point' : '';
   }
 
-  dispose(): void {}
+  dispose(): void {
+    // A stale level may be disposed after another took over the DOM.
+    if (this.active) this.climateEl.hidden = true;
+  }
 }

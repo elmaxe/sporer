@@ -23,10 +23,15 @@ export class PlanetLights implements Entity {
     private readonly stars: readonly Star[],
     /** Written with the direction to the first star each frame. */
     private readonly sun: THREE.Vector3,
+    /** Written with the first star's light (colour × intensity) and the ambient light, for unlit shaders that shade by hand. */
+    sunLight?: THREE.Color,
+    ambientLight?: THREE.Color,
   ) {
     // Same intensity as the star's point light in the system view.
     this.lights = stars.map((s) => new THREE.DirectionalLight(s.data.color, starLightIntensity(s.data)));
     scene.add(this.ambient, ...this.lights);
+    sunLight?.copy(this.lights[0]!.color).multiplyScalar(this.lights[0]!.intensity);
+    ambientLight?.copy(this.ambient.color).multiplyScalar(this.ambient.intensity);
     this.update();
   }
 

@@ -11,8 +11,10 @@ import type { CelestialBody } from './CelestialBody';
 import { Comet, cometParams } from './Comet';
 import { Planet } from './Planet';
 import { Star } from './Star';
+import { addAtmosphereDebug, type AtmosphereSun } from './atmosphereShell';
 import { stormParams } from './StarStorms';
 import { createGlowTexture } from './glowTexture';
+import { addLavaDebug } from './lavaMaterial';
 import { starParams } from './starMaterials';
 
 /** Gap between a body's neighbourhood (rings, moon orbits) and where the autopilot parks. */
@@ -57,10 +59,12 @@ export class StarSystem implements Entity {
           this.glowTexture,
         ),
     );
+    // Atmospheres are lit from the main star, wherever it is drawn.
+    const sun: AtmosphereSun = { vector: this.stars[0]!.object.position, point: true };
     this.planets = data.planets.map((p) => {
-      const planet = new Planet(scene, physics, p, describe(p), p.extent + PLANET_STANDOFF_MARGIN);
+      const planet = new Planet(scene, physics, p, describe(p), p.extent + PLANET_STANDOFF_MARGIN, sun);
       for (const m of p.moons) {
-        const moon = new Planet(scene, physics, m, `${describePlanet(m.type)} · moon`, m.radius + MOON_STANDOFF_MARGIN, planet);
+        const moon = new Planet(scene, physics, m, `${describePlanet(m.type)} · moon`, m.radius + MOON_STANDOFF_MARGIN, sun, planet);
         this.moons.push(moon);
       }
       return planet;
@@ -72,6 +76,10 @@ export class StarSystem implements Entity {
     this.animate(this._time);
     this.setExposure(1);
 
+    if (debug) {
+      addAtmosphereDebug(debug);
+      addLavaDebug(debug);
+    }
     const stars = debug?.folder('Stars');
     stars?.add(starParams, 'pace', 0, 5);
     stars?.add(starParams, 'granulation', 0.2, 3);
@@ -147,9 +155,11 @@ export class StarSystem implements Entity {
     this.animate(time);
   }
 
-  /** Living stars and comets: pure functions of the (render) time. */
+  /** Living stars, lava and comets: pure functions of the (render) time. */
   private animate(time: number): void {
     for (const s of this.stars) s.animate(time);
+    for (const p of this.planets) p.animate(time);
+    for (const m of this.moons) m.animate(time);
     for (const c of this.comets) c.poseAt(time);
   }
 

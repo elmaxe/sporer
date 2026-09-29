@@ -112,7 +112,11 @@ export async function launch({ width = 1280, height = 720 } = {}) {
     const exited = new Promise((r) => proc.once('exit', r));
     proc.kill();
     await Promise.race([exited, sleep(3000)]);
-    rmSync(profile, { recursive: true, force: true, maxRetries: 3 });
+    try {
+      rmSync(profile, { recursive: true, force: true, maxRetries: 3 });
+    } catch {
+      // A helper process may still be writing to the profile; it's a temp dir, so leave it.
+    }
   };
 
   await send('Runtime.enable');

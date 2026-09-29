@@ -59,7 +59,7 @@ export class Hud implements Entity {
     const body = this.picker.hovered;
     if (body) {
       const { clientX, clientY } = this.input.pointer;
-      this.tooltip.show(body, body.name, body.description, clientX, clientY, this.input.touchMode);
+      this.tooltip.show(body, body.name, body.description, clientX, clientY, body.details, this.input.touchMode);
     } else {
       this.tooltip.hide();
     }

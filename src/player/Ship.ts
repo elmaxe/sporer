@@ -6,6 +6,7 @@ import type { Vec3Like } from '../gen/orbit';
 import { RAPIER, type Physics } from '../physics/Physics';
 import type { CelestialBody } from '../world/CelestialBody';
 import { arriveImpulse, detourWaypoint, standoffPoint, type ArriveParams, type Obstacle } from './autopilot';
+import { AFTER_ATMOSPHERE_RENDER_ORDER } from '../world/atmosphereShell';
 
 /** Tunables, exposed in the debug panel. */
 export const shipParams = {
@@ -308,6 +309,8 @@ export function buildUfoMesh(): { group: THREE.Group; ring: THREE.Group } {
     ring.add(light);
   }
   group.add(ring);
+  // A group's renderOrder sorts everything under it (up to a nested group, hence the ring too).
+  group.renderOrder = ring.renderOrder = AFTER_ATMOSPHERE_RENDER_ORDER;
 
   return { group, ring };
 }

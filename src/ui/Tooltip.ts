@@ -10,21 +10,32 @@ export class Tooltip {
   private readonly el = document.getElementById('tooltip')!;
   private readonly nameEl = document.getElementById('tooltip-name')!;
   private readonly infoEl = document.getElementById('tooltip-info')!;
+  private readonly detailsEl = document.getElementById('tooltip-details')!;
   /** What is shown now; text is only rewritten (and measured) when this changes. */
   private subject: unknown = null;
   private width = 0;
   private height = 0;
 
   /**
-   * Shows `name`/`info` for `subject` next to the pointer: below right of a
-   * mouse, centred above a finger (`above`) so the hand doesn't cover it.
-   * Kept inside the window.
+   * Shows `name`/`info` (and an optional `details` line) for `subject` next to
+   * the pointer: below right of a mouse, centred above a finger (`above`) so
+   * the hand doesn't cover it. Kept inside the window.
    */
-  show(subject: unknown, name: string, info: string, clientX: number, clientY: number, above = false): void {
+  show(
+    subject: unknown,
+    name: string,
+    info: string,
+    clientX: number,
+    clientY: number,
+    details?: string,
+    above = false,
+  ): void {
     if (subject !== this.subject) {
       this.subject = subject;
       this.nameEl.textContent = name;
       this.infoEl.textContent = info;
+      this.detailsEl.textContent = details ?? '';
+      this.detailsEl.hidden = !details;
       this.el.hidden = false;
       this.width = this.el.offsetWidth;
       this.height = this.el.offsetHeight;
