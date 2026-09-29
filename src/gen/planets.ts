@@ -17,52 +17,182 @@ export interface PlanetStyle {
 }
 
 /**
- * Chooses a planet type from its distance to the star, measured in habitable
- * zone radii: <0.5 hot, 0.5–1.6 temperate, 1.6–3.5 cold, beyond that frozen.
+ * Size classes, smallest first. A planet draws its class from its zone, then
+ * its type given the class, so big worlds keep their air and small ones don't.
  */
-export function choosePlanetType(rng: Rng, zone: number): PlanetType {
-  if (zone < 0.5) {
-    return rng.weighted<PlanetType>([
-      ['lava', 55],
-      ['desert', 25],
-      ['barren', 20],
-    ]);
-  }
-  if (zone < 1.6) {
-    return rng.weighted<PlanetType>([
-      ['terran', 40],
-      ['ocean', 15],
-      ['desert', 20],
-      ['barren', 15],
-      ['gas', 10],
-    ]);
-  }
-  if (zone < 3.5) {
-    return rng.weighted<PlanetType>([
-      ['gas', 45],
-      ['ice', 35],
-      ['barren', 20],
-    ]);
-  }
-  return rng.weighted<PlanetType>([
-    ['gas', 55],
-    ['ice', 45],
-  ]);
+export type SizeClass = 'dwarf' | 'small' | 'earth' | 'superEarth' | 'iceGiant' | 'gasGiant';
+export const SIZE_CLASSES: readonly SizeClass[] = ['dwarf', 'small', 'earth', 'superEarth', 'iceGiant', 'gasGiant'];
+
+/** Game units per Earth radius at Earth size (see gameRadius). */
+export const EARTH_GAME_RADIUS = 8;
+
+/**
+ * Real radius (Earth radii) → game radius. Square-root compression: Earth is
+ * 8, Mercury 4.9, Neptune 15.7, Jupiter 26.8, so a Jupiter is ~3× an Earth
+ * instead of 11× and a Ceres still reads as a world. Deliberately stylised;
+ * the order and the real class boundaries are kept.
+ * See docs/research/body-sizes.md.
+ */
+export function gameRadius(earthRadii: number): number {
+  return EARTH_GAME_RADIUS * Math.sqrt(earthRadii);
 }
 
-const RADIUS: Record<PlanetType, readonly [number, number]> = {
-  lava: [4, 8],
-  barren: [3, 8],
-  desert: [5, 10],
-  terran: [7, 11],
-  ocean: [7, 12],
-  ice: [4, 9],
-  gas: [14, 24],
+/**
+ * Class boundaries in Earth radii (docs/research/body-sizes.md): dwarfs
+ * Ceres..Pluto, small Moon..Mars, Earth-sized up to the 1.5 R⊕ rocky limit
+ * (Fulton et al. 2017), super-Earths (with the sub-Neptunes) to 3 R⊕, ice
+ * giants to Borucki et al.'s 6 R⊕ Neptune/Jupiter divide, gas giants to
+ * 1.6 R_J (inflated hot Jupiters).
+ */
+export const SIZE_CLASS_EARTH_RADII: Record<SizeClass, readonly [number, number]> = {
+  dwarf: [0.0625, 0.19],
+  small: [0.19, 0.5625],
+  earth: [0.5625, 1.5],
+  superEarth: [1.5, 3],
+  iceGiant: [3, 6],
+  gasGiant: [6, 17.9],
 };
 
-export function planetRadius(rng: Rng, type: PlanetType): number {
-  const [min, max] = RADIUS[type];
-  return rng.range(min, max);
+/** The same boundaries in game units: dwarf 2–3.5, small 3.5–6, Earth 6–9.8, super 9.8–13.9, ice giant 13.9–19.6, gas giant 19.6–33.8. */
+export const SIZE_CLASS_RADIUS = Object.fromEntries(
+  SIZE_CLASSES.map((c) => [c, SIZE_CLASS_EARTH_RADII[c].map(gameRadius) as [number, number]]),
+) as unknown as Record<SizeClass, readonly [number, number]>;
+
+export function isGiant(size: SizeClass): size is 'iceGiant' | 'gasGiant' {
+  return size === 'iceGiant' || size === 'gasGiant';
+}
+
+/**
+ * Size class weights by zone (see chooseSizeClass). Giants keep the share gas
+ * giants had before (none hot, 10% temperate, 45% cold, 55% frozen), ice
+ * giants mostly far out. Gameplay weights, not occurrence rates.
+ */
+const SIZE_WEIGHTS: readonly (readonly [maxZone: number, weights: Record<SizeClass, number>])[] = [
+  [0.5, { dwarf: 15, small: 35, earth: 35, superEarth: 15, iceGiant: 0, gasGiant: 0 }],
+  [1.6, { dwarf: 6, small: 18, earth: 42, superEarth: 24, iceGiant: 3, gasGiant: 7 }],
+  [3.5, { dwarf: 12, small: 20, earth: 13, superEarth: 10, iceGiant: 18, gasGiant: 27 }],
+  [Infinity, { dwarf: 20, small: 15, earth: 6, superEarth: 4, iceGiant: 27, gasGiant: 28 }],
+];
+
+/**
+ * Chooses a size class from the distance to the star, measured in habitable
+ * zone radii: <0.5 hot, 0.5–1.6 temperate, 1.6–3.5 cold, beyond that frozen.
+ */
+export function chooseSizeClass(rng: Rng, zone: number): SizeClass {
+  const weights = SIZE_WEIGHTS.find(([max]) => zone < max)![1];
+  return rng.weighted(SIZE_CLASSES.map((c) => [c, weights[c]] as const));
+}
+
+type SolidType = Exclude<PlanetType, 'gas'>;
+
+/** Solid types by zone, before the size factor. */
+const TYPE_WEIGHTS: readonly (readonly [maxZone: number, weights: Partial<Record<SolidType, number>>])[] = [
+  [0.5, { lava: 55, desert: 25, barren: 20 }],
+  [1.6, { terran: 40, ocean: 15, desert: 20, barren: 15 }],
+  [3.5, { ice: 35, barren: 20 }],
+  [Infinity, { ice: 45 }],
+];
+
+/**
+ * How much more (or less) likely each solid type is in a size class: small
+ * bodies can't hold on to air or oceans, so they are mostly barren, icy or
+ * volcanic; super-Earths are mostly ocean or terran.
+ */
+const SIZE_AFFINITY: Record<Exclude<SizeClass, 'iceGiant' | 'gasGiant'>, Record<SolidType, number>> = {
+  dwarf: { lava: 1, barren: 3, desert: 0.2, terran: 0, ocean: 0, ice: 1.5 },
+  small: { lava: 1.2, barren: 2, desert: 0.8, terran: 0.3, ocean: 0.1, ice: 1.3 },
+  earth: { lava: 0.8, barren: 0.6, desert: 1, terran: 1.3, ocean: 1, ice: 1 },
+  superEarth: { lava: 0.6, barren: 0.2, desert: 0.6, terran: 1.5, ocean: 3, ice: 1 },
+};
+
+/**
+ * Chooses a planet type given its zone (as in chooseSizeClass) and size
+ * class: giants are gas, solid worlds weigh the zone's types by the size
+ * factor. Always exactly one draw from `rng`.
+ */
+export function choosePlanetType(rng: Rng, zone: number, size: SizeClass): PlanetType {
+  if (isGiant(size)) return rng.weighted<PlanetType>([['gas', 1]]);
+  const weights = TYPE_WEIGHTS.find(([max]) => zone < max)![1];
+  const affinity = SIZE_AFFINITY[size];
+  const entries = (Object.entries(weights) as [SolidType, number][]).map(([t, w]) => [t, w * affinity[t]] as const);
+  return rng.weighted<PlanetType>(entries);
+}
+
+/** Log-uniform in [min, max), so the small end isn't crowded out. One draw. */
+export function logRange(rng: Rng, min: number, max: number): number {
+  return min * Math.pow(max / min, rng.next());
+}
+
+/** A radius inside the class, log-uniform. One draw. */
+export function planetRadius(rng: Rng, size: SizeClass): number {
+  const [min, max] = SIZE_CLASS_RADIUS[size];
+  return logRange(rng, min, max);
+}
+
+/** Moons: pebbles (~64 km) to the odd one bigger than Mercury (see generateMoons). */
+export const MOON_RADIUS = { min: gameRadius(0.01), regularMax: 3.5, bigMin: 4, max: 6 } as const;
+
+/**
+ * A moon is at most this fraction of its planet's radius: the Earth–Moon pair
+ * in game units (0.27 real → 0.52), the largest among the planets.
+ */
+export const MOON_MAX_FRACTION = 0.5;
+
+/**
+ * Chance per moon of a big one (Moon, Io, Callisto, Titan, Ganymede size).
+ * Only big hosts have room (MOON_MAX_FRACTION). Kept rare so they stand out:
+ * about one gas giant in four has one (Jupiter and Saturn both do).
+ */
+export const BIG_MOON_CHANCE: Record<SizeClass, number> = {
+  dwarf: 0,
+  small: 0,
+  earth: 0.06,
+  superEarth: 0.1,
+  iceGiant: 0.08,
+  gasGiant: 0.12,
+};
+
+/** How many moons a planet of a size class has, by weight. */
+export const MOON_COUNT_WEIGHTS: Record<SizeClass, readonly (readonly [number, number])[]> = {
+  dwarf: [
+    [0, 8],
+    [1, 2],
+  ],
+  small: [
+    [0, 6],
+    [1, 3],
+    [2, 1],
+  ],
+  earth: [
+    [0, 5],
+    [1, 4],
+    [2, 1],
+  ],
+  superEarth: [
+    [0, 3],
+    [1, 4],
+    [2, 3],
+  ],
+  iceGiant: [
+    [0, 1],
+    [1, 3],
+    [2, 3],
+    [3, 2],
+  ],
+  gasGiant: [
+    [0, 1],
+    [1, 2],
+    [2, 3],
+    [3, 3],
+    [4, 2],
+  ],
+};
+
+/** A moon's radius around a planet of `planetRadius` and class `size`. */
+export function moonRadius(rng: Rng, planetRadius: number, size: SizeClass): number {
+  const cap = Math.min(MOON_RADIUS.max, planetRadius * MOON_MAX_FRACTION);
+  if (rng.chance(BIG_MOON_CHANCE[size]) && cap > MOON_RADIUS.bigMin) return logRange(rng, MOON_RADIUS.bigMin, cap);
+  return logRange(rng, MOON_RADIUS.min, Math.max(MOON_RADIUS.min, Math.min(MOON_RADIUS.regularMax, cap)));
 }
 
 /** Gas giants get their style from their bands (see gasBands). */
@@ -129,11 +259,15 @@ export function planetStyle(rng: Rng, type: Exclude<PlanetType, 'gas'> | MoonTyp
   }
 }
 
-/** 4–6 related band colours, darkest first. Mostly Jupiter-like browns, sometimes blue or exotic. */
-export function gasBands(rng: Rng): string[] {
+/**
+ * 4–6 related band colours, darkest first. Mostly Jupiter-like browns,
+ * sometimes blue or exotic; ice giants mostly blue, like Uranus and Neptune.
+ * The same draws either way.
+ */
+export function gasBands(rng: Rng, iceGiant = false): string[] {
   const hue = rng.weighted<number>([
-    [rng.range(20, 45), 60],
-    [rng.range(190, 230), 25],
+    [rng.range(20, 45), iceGiant ? 15 : 60],
+    [rng.range(190, 230), iceGiant ? 70 : 25],
     [rng.range(0, 360), 15],
   ]);
   const count = rng.int(4, 6);

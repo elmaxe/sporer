@@ -9,10 +9,9 @@ import {
   createTerrainGeometry,
   peakRadius,
 } from '../world/planetGeometry';
-import { PLANET_RADIUS, planetScale } from './frame';
+import { PLANET_SCALE, globeDetail, globeRadius } from './frame';
 
-/** Icosphere subdivisions of the close-up globe: 20·61² ≈ 74k triangles. */
-const TERRAIN_DETAIL = 60;
+/** Gas giants are smooth-shaded, so their bands need less detail than terrain as they grow. */
 const GAS_DETAIL = 64;
 /** Mountains are exaggerated a little up close, where the system view's relief reads as flat. */
 export const RELIEF_SCALE = 1.6;
@@ -20,7 +19,7 @@ export const RELIEF_SCALE = 1.6;
 const ATMOSPHERE_SCALE = 1.08;
 
 /**
- * The visited planet or moon, big (radius PLANET_RADIUS) and detailed: the
+ * The visited planet or moon, at its true size (see globeRadius) and detailed: the
  * terrain from the same noise as the system view plus finer octaves, a sea
  * surface for worlds with liquid, rings and the atmosphere glow. Gas giants
  * are the same banded sphere as in the system view, only finer. Static in the
@@ -28,6 +27,8 @@ const ATMOSPHERE_SCALE = 1.08;
  */
 export class PlanetGlobe implements Entity {
   readonly object = new THREE.Group();
+  /** Sea-level (or cloud-top) radius. */
+  readonly radius: number;
   /** Radius of the highest terrain (or cloud tops): the ship hovers above this. */
   readonly top: number;
   /** Unit direction to the (main) star; the atmosphere reads it to dim its night side. */
@@ -38,7 +39,7 @@ export class PlanetGlobe implements Entity {
     config: PlanetConfig,
   ) {
     const { seed, style } = config;
-    const R = PLANET_RADIUS;
+    const R = (this.radius = globeRadius(config.radius));
     const gas = isGas(config);
     this.top = gas ? R : peakRadius(R, style, RELIEF_SCALE);
     const seaFloor = !gas && style.sea !== null;
@@ -47,7 +48,8 @@ export class PlanetGlobe implements Entity {
       gas
         ? createGasGeometry(R, seed, config.bands, GAS_DETAIL, true)
         : createTerrainGeometry(R, seed, style, {
-            detail: TERRAIN_DETAIL,
+            // Earth-sized: 20·61² ≈ 74k triangles.
+            detail: globeDetail(R),
             noise: detailedTerrain,
             reliefScale: RELIEF_SCALE,
             seaFloor,
@@ -56,8 +58,8 @@ export class PlanetGlobe implements Entity {
     );
     surface.name = 'Surface';
     this.object.add(surface);
-    if (seaFloor) this.object.add(createSea(config.type, style.sea!));
-    if (config.rings) this.object.add(createRings(config.rings, seed, planetScale(config.radius)));
+    if (seaFloor) this.object.add(createSea(config.type, style.sea!, R));
+    if (config.rings) this.object.add(createRings(config.rings, seed, PLANET_SCALE));
     if (config.atmosphere) {
       this.object.add(
         createAtmosphere(R, style.relief * RELIEF_SCALE, config.atmosphere, ATMOSPHERE_SCALE, 128, this.sun),
@@ -81,8 +83,8 @@ export class PlanetGlobe implements Entity {
  * A smooth sphere at sea level: glossy water, glowing lava, matte ice. Opaque:
  * the sky is drawn first, so see-through water would show stars through the planet.
  */
-function createSea(type: PlanetConfig['type'], color: string): THREE.Mesh {
-  const geometry = new THREE.SphereGeometry(PLANET_RADIUS, 160, 80);
+function createSea(type: PlanetConfig['type'], color: string, radius: number): THREE.Mesh {
+  const geometry = new THREE.SphereGeometry(radius, 160, 80);
   let material: THREE.MeshStandardMaterial;
   if (type === 'lava') {
     material = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.35, roughness: 0.7 });

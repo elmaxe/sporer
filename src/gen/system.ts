@@ -5,15 +5,20 @@ import { hexToRgb, hslToHex, rgbToHex } from './color';
 import { romanNumeral } from './names';
 import type { Orbit } from './orbit';
 import {
+  EARTH_GAME_RADIUS,
+  MOON_COUNT_WEIGHTS,
   atmosphereColor,
+  chooseSizeClass,
   choosePlanetType,
   gasBands,
   gasStyle,
+  moonRadius,
   planetRadius,
   planetStyle,
   type MoonType,
   type PlanetStyle,
   type PlanetType,
+  type SizeClass,
 } from './planets';
 import { Rng } from './rng';
 import type { StarData } from './stars';
@@ -50,6 +55,8 @@ export interface RingData {
 export interface PlanetData {
   name: string;
   type: PlanetType;
+  /** Size class: dwarf to gas giant (see gen/planets.ts). */
+  size: SizeClass;
   radius: number;
   seed: number;
   spin: number;
@@ -119,9 +126,13 @@ export function generateSystem(ref: StarRef): SystemData {
     const gap = prng.range(20, 50) * (1 + i * 0.4);
 
     // The type depends on distance, but the final distance depends on the
-    // planet's extent, so classify at the nearest possible orbit.
-    const type = choosePlanetType(prng, (edge + gap) / habitableRadius);
-    const radius = planetRadius(prng, type);
+    // planet's extent, so classify at the nearest possible orbit. The size
+    // class has its own stream; the type and radius take one draw each from
+    // prng, as they always did, so the planet's other draws stay put.
+    const zone = (edge + gap) / habitableRadius;
+    const size = chooseSizeClass(prng.fork('size'), zone);
+    const type = choosePlanetType(prng, zone, size);
+    const radius = planetRadius(prng, size);
     const rings =
       type === 'gas'
         ? prng.chance(0.45)
@@ -129,7 +140,7 @@ export function generateSystem(ref: StarRef): SystemData {
           : null
         : // Own stream, so the draws of gas giants and everything else stay as they were.
           generateSolidRings(prng.fork('rings'), type, radius);
-    const moons = generateMoons(prng.fork('moons'), name, type, radius, rings);
+    const moons = generateMoons(prng.fork('moons'), name, size, radius, rings);
     const extent = Math.max(
       radius,
       rings?.outer ?? 0,
@@ -139,7 +150,7 @@ export function generateSystem(ref: StarRef): SystemData {
     let bands: string[] | null = null;
     let style: PlanetStyle;
     if (type === 'gas') {
-      bands = gasBands(prng);
+      bands = gasBands(prng, size === 'iceGiant');
       style = gasStyle(bands);
     } else {
       style = planetStyle(prng, type);
@@ -149,6 +160,7 @@ export function generateSystem(ref: StarRef): SystemData {
     planets.push({
       name,
       type,
+      size,
       radius,
       seed: prng.int(0, 1_000_000),
       spin: prng.range(0.05, 0.35) * prng.sign(),
@@ -279,27 +291,18 @@ function solidRingColor(rng: Rng, type: Exclude<PlanetType, 'gas'>, style: Plane
   return rgbToHex((r + grey) / 2 + lift, (g + grey) / 2 + lift, (b + grey) / 2 + lift);
 }
 
+/** Gaps between moon orbits for an Earth-sized planet; they scale with √(radius / 8), so bigger planets spread their moons wider. */
+const MOON_GAP: readonly [number, number] = [3, 8];
+
 function generateMoons(
   rng: Rng,
   planetName: string,
-  type: PlanetType,
+  size: SizeClass,
   radius: number,
   rings: RingData | null,
 ): MoonData[] {
-  const count =
-    type === 'gas'
-      ? rng.weighted<number>([
-          [0, 1],
-          [1, 3],
-          [2, 3],
-          [3, 2],
-          [4, 1],
-        ])
-      : rng.weighted<number>([
-          [0, 6],
-          [1, 3],
-          [2, 1],
-        ]);
+  const count = rng.weighted<number>(MOON_COUNT_WEIGHTS[size]);
+  const gapScale = Math.sqrt(radius / EARTH_GAME_RADIUS);
 
   const moons: MoonData[] = [];
   let edge = Math.max(radius * 1.5, rings ? rings.outer + 2 : 0);
@@ -309,12 +312,12 @@ function generateMoons(
       ['ice', 3],
       ['lava', 1],
     ]);
-    const moonRadius = rng.range(1.2, Math.max(1.5, Math.min(3.5, radius * 0.35)));
-    const orbitRadius = edge + moonRadius + rng.range(3, 8);
+    const r = moonRadius(rng, radius, size);
+    const orbitRadius = edge + r + rng.range(MOON_GAP[0], MOON_GAP[1]) * gapScale;
     moons.push({
       name: `${planetName}-${String.fromCharCode(97 + i)}`,
       type: moonType,
-      radius: moonRadius,
+      radius: r,
       seed: rng.int(0, 1_000_000),
       spin: rng.range(0.1, 0.5),
       orbit: {
@@ -325,7 +328,7 @@ function generateMoons(
       },
       style: planetStyle(rng, moonType),
     });
-    edge = orbitRadius + moonRadius;
+    edge = orbitRadius + r;
   }
   return moons;
 }
@@ -336,6 +339,24 @@ function keplerPeriod(orbitRadius: number, mass: number): number {
 
 function clamp(v: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, v));
+}
+
+/** Short label for UI, e.g. "Ice giant", "Ocean world · super-Earth". */
+export function describeSized(type: PlanetType, size: SizeClass): string {
+  switch (size) {
+    case 'gasGiant':
+      return 'Gas giant';
+    case 'iceGiant':
+      return 'Ice giant';
+    case 'dwarf':
+      return `${describePlanet(type)} · dwarf`;
+    case 'small':
+      return `${describePlanet(type)} · small`;
+    case 'earth':
+      return `${describePlanet(type)} · Earth-sized`;
+    case 'superEarth':
+      return `${describePlanet(type)} · super-Earth`;
+  }
 }
 
 /** Short label for UI, e.g. "Gas giant", "Terran world". */
@@ -359,4 +380,4 @@ export function describePlanet(type: PlanetType): string {
 }
 
 // Re-exported so callers can import all generation types from one place.
-export type { CometData, PlanetStyle, PlanetType, MoonType };
+export type { CometData, PlanetStyle, PlanetType, MoonType, SizeClass };

@@ -8,12 +8,13 @@ import { PlanetHud } from '../planet/PlanetHud';
 import { PlanetLights } from '../planet/PlanetLights';
 import { PlanetPicker } from '../planet/PlanetPicker';
 import { PlanetShip } from '../planet/PlanetShip';
+import { maxViewDistance, travelScale } from '../planet/frame';
 import { OrbitCamera, type OrbitParams } from '../player/OrbitCamera';
 import type { Planet } from '../world/Planet';
 import { Level } from './Level';
 import type { SystemLevel } from './SystemLevel';
 
-/** Low-orbit camera, in planet-level units (the globe's radius is 100). */
+/** Low-orbit camera, in planet-level units (an Earth-sized globe's radius is 100); maxDistance is for Earth-sized and bigger globes. */
 export const planetCameraParams: OrbitParams = {
   minDistance: 8,
   maxDistance: 260,
@@ -47,6 +48,8 @@ export class PlanetLevel extends Level {
   readonly frame: PlanetFrame;
   readonly ship: PlanetShip;
   readonly orbit: OrbitCamera;
+  /** The globe's sea-level radius in planet-level units: the body's true size (see planet/frame.ts). */
+  readonly radius: number;
   private readonly moons: LocalMoons;
   private readonly hud: PlanetHud;
   /** Bodies drawn by this level, left out of the sky: the planet and its moons. */
@@ -79,13 +82,16 @@ export class PlanetLevel extends Level {
     this.add(new PlanetLights(this.scene, this.frame, system.world.stars, globe.sun));
 
     this.frame.toLocalDirection(side, this.start);
-    this.ship = this.add(new PlanetShip(this.scene, input, camera, debug, globe.top + ALTITUDE, this.start));
+    this.radius = globe.radius;
+    this.ship = this.add(
+      new PlanetShip(this.scene, input, camera, debug, globe.top + ALTITUDE, this.start, travelScale(globe.radius)),
+    );
     this.orbit = this.add(
       new OrbitCamera(
         camera,
         this.ship.object,
         input,
-        planetCameraParams,
+        { ...planetCameraParams, maxDistance: maxViewDistance(globe.radius, planetCameraParams.maxDistance) },
         {
           distance: PLANET_VIEW_DISTANCE,
           up: this.ship.up,
@@ -98,7 +104,7 @@ export class PlanetLevel extends Level {
         'Planet camera',
       ),
     );
-    this.add(new PlanetPicker(this.scene, camera, input, this.ship));
+    this.add(new PlanetPicker(this.scene, camera, input, this.ship, globe.radius));
     this.hud = this.add(new PlanetHud(this.ship, `${body.name} · ${body.description}`));
   }
 

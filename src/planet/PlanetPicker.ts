@@ -2,7 +2,6 @@ import * as THREE from 'three';
 import type { Entity } from '../core/Entity';
 import type { Input } from '../core/Input';
 import { MarkerRing } from '../player/MarkerRing';
-import { PLANET_RADIUS } from './frame';
 import type { PlanetShip } from './PlanetShip';
 
 /** Target ring size, in planet-level units. */
@@ -17,7 +16,7 @@ const MARKER_SIZE = 3;
 export class PlanetPicker implements Entity {
   private readonly raycaster = new THREE.Raycaster();
   private readonly ndc = new THREE.Vector2();
-  private readonly sphere = new THREE.Sphere(new THREE.Vector3(), PLANET_RADIUS);
+  private readonly sphere: THREE.Sphere;
   private readonly point = new THREE.Vector3();
   private readonly normal = new THREE.Vector3();
   private readonly ring: MarkerRing;
@@ -27,7 +26,10 @@ export class PlanetPicker implements Entity {
     private readonly camera: THREE.Camera,
     private readonly input: Input,
     private readonly ship: PlanetShip,
+    /** The globe's sea-level radius. */
+    radius: number,
   ) {
+    this.sphere = new THREE.Sphere(new THREE.Vector3(), radius);
     this.ring = new MarkerRing(scene, '#66ffcc');
   }
 

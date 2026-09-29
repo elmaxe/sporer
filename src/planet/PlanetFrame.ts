@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
 import type { Planet } from '../world/Planet';
-import { bodyFrame, localToSystem, planetScale } from './frame';
+import { PLANET_SCALE, bodyFrame, localToSystem } from './frame';
 
 /** Tunables, exposed in the debug panel. */
 export const planetParams = {
@@ -22,7 +22,7 @@ export const planetParams = {
  */
 export class PlanetFrame implements Entity {
   /** Planet-level units per system unit. */
-  readonly scale: number;
+  readonly scale = PLANET_SCALE;
   /** Body frame → system space rotation, and its inverse. */
   readonly quaternion = new THREE.Quaternion();
   readonly inverse = new THREE.Quaternion();
@@ -40,7 +40,6 @@ export class PlanetFrame implements Entity {
     time: number,
     debug: Debug,
   ) {
-    this.scale = planetScale(body.radius);
     this._time = this.prevTime = this._renderTime = this.startTime = time;
     this.startSpin = body.spinAngle;
     this.restart(time);
