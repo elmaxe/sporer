@@ -2,7 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>Spore 2 — Space Stage</title>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
@@ -19,6 +22,14 @@
       <div id="tooltip-name"></div>
       <div id="tooltip-info"></div>
       <div id="tooltip-details" hidden></div>
+    </div>
+    <div id="touch-controls">
+      <div id="touch-stick" aria-label="Move"><div id="touch-knob"></div></div>
+      <div id="touch-buttons">
+        <button id="touch-up" type="button" data-key="KeyE" aria-label="Up">▲</button>
+        <button id="touch-down" type="button" data-key="KeyQ" aria-label="Down">▼</button>
+        <button id="touch-boost" type="button" data-key="ShiftLeft">Boost</button>
+      </div>
     </div>
     <div id="audio">
       <div id="audio-panel" hidden>

@@ -13,6 +13,7 @@
 // Living lava: in low orbit over the lava world, the eruptions have vents, events and blobs in the air.
 // Seamless zooms: through the galaxy and planet loops, every frame of every level transition records the crossfade
 // weight and canvas brightness; each transition must crossfade and never go black (screenshots mid-handover).
+// Touch: on an emulated phone, hold/tap/drag/pinch and the on-screen stick and Boost work, down to a planet and out.
 // Prints JSON with FPS, console errors and screenshot paths. Exit 1 on failure.
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -473,6 +474,133 @@ const screenshot = join(outDir, 'screenshot.png');
 const shot = await send('Page.captureScreenshot', { format: 'png' });
 writeFileSync(screenshot, Buffer.from(shot.result.data, 'base64'));
 
+/**
+ * Touch play on an emulated phone (390x844, real CDP touch events): hold a finger on the star (tooltip), lift
+ * (autopilot to it), drag (rotates, no tap), pinch (zoom), the on-screen stick with a second finger on Boost, then
+ * pinch in at a planet to descend, tap the globe, and pinch out to the system and on to the galaxy, checking which
+ * on-screen controls each level shows.
+ */
+async function runTouch() {
+  const W = 390;
+  const H = 844;
+  await send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 1, mobile: true });
+  await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+  const home = new URL(url);
+  home.searchParams.delete('star');
+  await send('Page.navigate', { url: home.href });
+  await sleep(4000);
+  await page.waitFor(`typeof window.levels !== 'undefined' && !levels.transitioning`, 30000);
+  const touch = (type, points) => send('Input.dispatchTouchEvent', { type, touchPoints: points.map(([x, y], id) => ({ x, y, id })) });
+  const frames = () => evaluate(`new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))`);
+  const swipe = async (from, to, steps = 10) => {
+    await touch('touchStart', from);
+    for (let i = 1; i <= steps; i++) {
+      await touch('touchMove', from.map(([x, y], k) => [x + ((to[k][0] - x) * i) / steps, y + ((to[k][1] - y) * i) / steps]));
+      await sleep(16);
+    }
+    await touch('touchEnd', []);
+    await frames();
+  };
+  const pinchUntil = async (mode, spread) => {
+    for (let k = 0; k < 10 && (await evaluate(`levels.mode`)) !== mode; k++) {
+      await swipe(spread ? [[195, 400], [195, 440]] : [[195, 200], [195, 640]], spread ? [[195, 200], [195, 640]] : [[195, 400], [195, 440]]);
+      await sleep(500);
+      for (let i = 0; i < 40 && (await evaluate(`levels.transitioning`)); i++) await sleep(250);
+    }
+    return evaluate(`levels.mode`);
+  };
+  const controls = `({ ship: document.documentElement.dataset.ship,
+    shown: getComputedStyle(document.getElementById('touch-controls')).display !== 'none',
+    upDown: getComputedStyle(document.getElementById('touch-up')).display !== 'none' })`;
+  const center = (id) =>
+    evaluate(`(() => { const b = document.getElementById('${id}').getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; })()`);
+  const r = {};
+
+  r.system = await evaluate(`({ touchMode: game.input.touchMode, help: document.getElementById('hud-help').textContent.startsWith('Tap'), ...${controls} })`);
+  const star = await evaluate(`(() => { const p = world.stars[0].renderPosition.clone().project(game.camera); return [(p.x + 1) / 2 * innerWidth, (1 - p.y) / 2 * innerHeight]; })()`);
+  await touch('touchStart', [star]);
+  await sleep(300);
+  r.holdTooltip = await evaluate(`document.getElementById('tooltip').hidden ? null : document.getElementById('tooltip-name').textContent`);
+  await touch('touchEnd', []);
+  await frames();
+  r.tap = await evaluate(`({ star: world.stars[0].name, target: ship.targetBody?.name ?? null, tooltipHidden: document.getElementById('tooltip').hidden })`);
+  await evaluate(`ship.stop()`);
+
+  const yaw = await evaluate(`levels.systemLevel.orbit.targetYaw`);
+  await swipe([[150, 500]], [[250, 500]]);
+  r.drag = { yaw: +((await evaluate(`levels.systemLevel.orbit.targetYaw`)) - yaw).toFixed(2), tapped: await evaluate(`ship.autopilotActive`) };
+
+  const distance = await evaluate(`levels.systemLevel.orbit.targetDistance`);
+  await swipe([[195, 380], [195, 460]], [[195, 340], [195, 500]]); // spread to twice as far apart: half the distance
+  r.pinch = +((await evaluate(`levels.systemLevel.orbit.targetDistance`)) / distance).toFixed(2);
+
+  const stick = await center('touch-stick');
+  const boost = await center('touch-boost');
+  const from = await evaluate(`ship.object.position.toArray()`);
+  await touch('touchStart', [stick]);
+  await touch('touchMove', [[stick[0], stick[1] - 60]]);
+  await sleep(800);
+  await touch('touchStart', [[stick[0], stick[1] - 60], boost]);
+  await sleep(200);
+  r.stick = await evaluate(`({ forward: game.input.axis('KeyS', 'KeyW'), boost: game.input.isDown('ShiftLeft'), speed: +ship.speed.toFixed(1) })`);
+  await touch('touchEnd', []);
+  await frames();
+  r.stick.released = await evaluate(`game.input.axis('KeyS', 'KeyW') === 0 && !game.input.isDown('ShiftLeft')`);
+  const to = await evaluate(`ship.object.position.toArray()`);
+  r.stick.moved = +Math.hypot(to[0] - from[0], to[2] - from[2]).toFixed(1);
+
+  // Down to a planet and back.
+  await evaluate(`(() => { const body = world.planets[0]; const side = world.stars[0].position.clone().sub(body.position).normalize(); side.y += 0.5; ship.parkAt(body, side); })()`);
+  await sleep(300);
+  r.planet = { mode: await pinchUntil('planet', true) };
+  if (r.planet.mode === 'planet') {
+    Object.assign(r.planet, await evaluate(controls));
+    const at = await evaluate(`(() => {
+      const V = game.camera.position.constructor;
+      const u = planet.ship.direction.clone();
+      const up = new V(0, 1, 0).applyQuaternion(game.camera.quaternion);
+      const t = up.sub(u.clone().multiplyScalar(up.dot(u))).normalize();
+      const p = u.multiplyScalar(Math.cos(0.35)).add(t.multiplyScalar(Math.sin(0.35))).multiplyScalar(planet.radius).project(game.camera);
+      return [(p.x + 1) / 2 * innerWidth, (1 - p.y) / 2 * innerHeight];
+    })()`);
+    await touch('touchStart', [at]);
+    await touch('touchEnd', []);
+    await frames();
+    r.planet.tapEnRoute = await evaluate(`planet.ship.enRoute`);
+    r.planet.screenshot = join(outDir, 'touch-planet.png');
+    writeFileSync(r.planet.screenshot, await page.screenshot());
+    r.planet.back = await pinchUntil('system', false);
+  }
+  r.galaxy = { mode: await pinchUntil('galaxy', false), ...(await evaluate(controls)) };
+  r.ok =
+    r.system.touchMode &&
+    r.system.help &&
+    r.system.ship === 'space' &&
+    r.system.shown &&
+    r.system.upDown &&
+    r.holdTooltip === r.tap.star &&
+    r.tap.target === r.tap.star &&
+    r.tap.tooltipHidden &&
+    Math.abs(r.drag.yaw) > 0.3 &&
+    !r.drag.tapped &&
+    Math.abs(r.pinch - 0.5) < 0.05 &&
+    r.stick.forward > 0.9 &&
+    r.stick.boost &&
+    r.stick.released &&
+    r.stick.moved > 5 &&
+    r.planet.mode === 'planet' &&
+    r.planet.ship === 'surface' &&
+    r.planet.shown &&
+    !r.planet.upDown &&
+    r.planet.tapEnRoute &&
+    r.planet.back === 'system' &&
+    r.galaxy.mode === 'galaxy' &&
+    r.galaxy.ship === 'none' &&
+    !r.galaxy.shown;
+  return r;
+}
+const touch = started ? await runTouch() : null;
+
 const moved = started && after.pos[2] < before.pos[2] - 10 && after.speed > 5;
 const autopiloted = started && autopilot.endDist < Math.max(3, autopilot.startDist * 0.1);
 const picked = started && pick.target === pick.star && pick.tooltip === pick.star;
@@ -525,10 +653,11 @@ const planets =
   seamless.ok &&
   planetTypes.every((r) => r.ok) &&
   (quick || planetTypes.length === 9);
-const ok = started && moved && autopiloted && picked && skyOk && alive && looped && sounded && planets && errors.length === 0;
+const touched = started && touch.ok;
+const ok = started && moved && autopiloted && picked && skyOk && alive && looped && sounded && planets && touched && errors.length === 0;
 console.log(
   JSON.stringify(
-    { ok, started, moved, autopiloted, picked, skyOk, alive, looped, sounded, planets, before, after, autopilot, pick, sky, living, comet, eye, galaxyLoop, seamless, audio, planetLoop, heldZoom, planetTypes, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
+    { ok, started, moved, autopiloted, picked, skyOk, alive, looped, sounded, planets, touched, before, after, autopilot, pick, sky, living, comet, eye, galaxyLoop, seamless, audio, planetLoop, heldZoom, planetTypes, touch, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
     null,
     2,
   ),

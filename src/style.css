@@ -6,6 +6,12 @@ body {
   background: #000;
   color: #cfe3ff;
   font-family: system-ui, sans-serif;
+  /* No page scrolling, rubber-banding, text selection or long-press callouts on phones. */
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 #app,
@@ -13,12 +19,15 @@ body {
   display: block;
   width: 100%;
   height: 100%;
+  /* Touch gestures are the game's (Input), not the browser's pan and zoom. */
+  touch-action: none;
 }
 
 #hud {
   position: fixed;
-  left: 16px;
-  bottom: 16px;
+  left: max(16px, env(safe-area-inset-left));
+  bottom: max(16px, env(safe-area-inset-bottom));
+  max-width: calc(100vw - 32px);
   pointer-events: none;
   text-shadow: 0 0 4px #000;
 }
@@ -96,8 +105,8 @@ body {
 
 #audio {
   position: fixed;
-  right: 16px;
-  bottom: 16px;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: max(16px, env(safe-area-inset-bottom));
   /* Above the lil-gui debug panel (1001), which the open volume panel overlaps. */
   z-index: 1002;
   display: flex;
@@ -185,4 +194,102 @@ body {
 
 #audio-mute:hover {
   border-color: rgba(102, 255, 204, 0.8);
+}
+
+/* Touch play (html.touch, set by TouchControls): on-screen ship controls, HUD moved to the top. */
+#touch-controls {
+  display: none;
+}
+
+html.touch #hud {
+  top: max(12px, env(safe-area-inset-top));
+  bottom: auto;
+}
+
+/* The debug FPS meter (dev / ?debug) would sit on the HUD: under the debug panel's title bar instead. */
+html.touch #stats {
+  left: auto !important;
+  right: 0;
+  top: 40px !important;
+}
+
+html.touch #hud-help {
+  max-width: 34em;
+  font-size: 11px;
+}
+
+html.touch:not([data-ship='none']) #touch-controls {
+  display: block;
+}
+
+#touch-stick,
+#touch-buttons button {
+  position: fixed;
+  z-index: 1000;
+  touch-action: none;
+  border: 1px solid rgba(102, 255, 204, 0.35);
+  background: rgba(8, 14, 28, 0.55);
+  color: #cfe3ff;
+}
+
+#touch-stick {
+  left: max(24px, env(safe-area-inset-left));
+  bottom: max(24px, env(safe-area-inset-bottom));
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+}
+
+#touch-knob {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: rgba(102, 255, 204, 0.35);
+  border: 1px solid rgba(102, 255, 204, 0.8);
+  pointer-events: none;
+}
+
+#touch-buttons button {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 50%;
+  font: 600 13px system-ui, sans-serif;
+  right: max(16px, env(safe-area-inset-right));
+}
+
+#touch-buttons button.active {
+  border-color: rgba(102, 255, 204, 0.9);
+  background: rgba(102, 255, 204, 0.3);
+  color: #fff;
+}
+
+/* A column above the sound button (40px at the bottom right). */
+#touch-boost {
+  width: 72px;
+  height: 72px;
+  bottom: calc(max(16px, env(safe-area-inset-bottom)) + 56px);
+}
+
+#touch-down,
+#touch-up {
+  width: 52px;
+  height: 52px;
+  margin-right: 10px;
+  font-size: 16px;
+}
+
+#touch-down {
+  bottom: calc(max(16px, env(safe-area-inset-bottom)) + 140px);
+}
+
+#touch-up {
+  bottom: calc(max(16px, env(safe-area-inset-bottom)) + 204px);
+}
+
+html:not([data-ship='space']) #touch-up,
+html:not([data-ship='space']) #touch-down {
+  display: none;
 }

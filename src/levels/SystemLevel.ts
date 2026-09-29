@@ -35,6 +35,7 @@ const TOUCH_MARGIN = 3;
  * (`renderSky`).
  */
 export class SystemLevel extends Level {
+  override readonly touchControls = 'space';
   readonly data: SystemData;
   readonly world: StarSystem;
   readonly ship: Ship;

@@ -196,7 +196,8 @@ export class Ship implements Entity {
       if (this.forward.lengthSq() < 1e-6) this.forward.set(0, 0, -1);
       this.forward.normalize();
       this.right.crossVectors(this.forward, UP);
-      this.move.normalize();
+      // Diagonal keys aren't faster; a half-pushed touch stick is slower.
+      if (this.move.lengthSq() > 1) this.move.normalize();
       this.impulse
         .copy(this.right)
         .multiplyScalar(this.move.x)

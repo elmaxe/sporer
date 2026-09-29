@@ -2,6 +2,9 @@ import * as THREE from 'three';
 import type { Entity } from '../core/Entity';
 import type { Physics } from '../physics/Physics';
 
+/** 'space': stick, up/down and boost; 'surface': stick and boost; 'none': just gestures. */
+export type TouchShipControls = 'none' | 'surface' | 'space';
+
 /**
  * One scale of the game (galaxy, system, later planet): its own scene,
  * entities and optional physics world, at units that suit that scale.
@@ -9,6 +12,8 @@ import type { Physics } from '../physics/Physics';
  */
 export class Level {
   readonly scene = new THREE.Scene();
+  /** Which on-screen ship controls a touch player gets here (see TouchControls). */
+  readonly touchControls: TouchShipControls = 'none';
   private readonly entities: Entity[] = [];
 
   constructor(readonly physics: Physics | null = null) {}

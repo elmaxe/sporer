@@ -47,6 +47,7 @@ const SKY_FAR = 20000;
  * true angular size and lit with correct phases.
  */
 export class PlanetLevel extends Level {
+  override readonly touchControls = 'surface';
   readonly frame: PlanetFrame;
   readonly ship: PlanetShip;
   readonly orbit: OrbitCamera;
@@ -115,7 +116,7 @@ export class PlanetLevel extends Level {
     this.add(new PlanetPicker(this.scene, camera, input, this.ship, globe.radius));
     const { climate } = body.config;
     this.hud = this.add(
-      new PlanetHud(this.ship, `${body.name} · ${body.description}`, climate ? describeClimateDetail(climate) : null),
+      new PlanetHud(this.ship, `${body.name} · ${body.description}`, input, climate ? describeClimateDetail(climate) : null),
     );
   }
 

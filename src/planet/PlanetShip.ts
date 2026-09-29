@@ -159,7 +159,8 @@ export class PlanetShip implements Entity {
       if (this.forward.lengthSq() < 1e-4) this.forward.copy(this.camera.up).addScaledVector(u, -this.camera.up.dot(u));
       this.forward.normalize();
       this.right.crossVectors(this.forward, u);
-      this.move.normalize();
+      // Diagonal keys aren't faster; a half-pushed touch stick is slower.
+      if (this.move.lengthSq() > 1) this.move.normalize();
       this.impulse
         .copy(this.right)
         .multiplyScalar(this.move.x)

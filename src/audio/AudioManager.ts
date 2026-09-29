@@ -33,8 +33,8 @@ export interface PlayedSfx {
  * effects (`play`), through a Web Audio mixer (one gain per channel).
  *
  * Browsers only allow audio after a user gesture, so the AudioContext is
- * created on the first pointer or key press (creating it earlier logs a
- * warning); the files are fetched up front. The music streams from a media
+ * created on the first pointer or key press (a touch counts as it lifts;
+ * creating it earlier logs a warning); the files are fetched up front. The music streams from a media
  * element (it's long and fades in/out on its own). The ambience is short
  * and loud at both ends, so it's decoded and crossfaded into a seamless
  * buffer loop. Audio pauses while the tab is hidden.
@@ -58,6 +58,7 @@ export class AudioManager implements SoundEffects {
     this.ambienceData.catch((err: unknown) => console.error('Ambience failed to load', err));
 
     window.addEventListener('pointerdown', this.onGesture, true);
+    window.addEventListener('pointerup', this.onGesture, true);
     window.addEventListener('keydown', this.onGesture, true);
     document.addEventListener('visibilitychange', this.onVisibility);
 
@@ -130,8 +131,18 @@ export class AudioManager implements SoundEffects {
 
   private onGesture = (e: Event) => {
     // Script-dispatched events can't unlock audio (play() would be refused).
-    if (this.mixer || !e.isTrusted) return;
-    this.removeGestureListeners();
+    if (!e.isTrusted) return;
+    // Browsers count a mouse press as a user gesture, but a touch only when it lifts.
+    if (e instanceof PointerEvent && (e.type === 'pointerdown') !== (e.pointerType === 'mouse')) return;
+    if (this.mixer) {
+      // Made on a gesture the browser didn't accept (e.g. the end of a touch drag): try again on this one.
+      if (this.mixer.ctx.state === 'running') this.removeGestureListeners();
+      else if (!document.hidden) {
+        void this.mixer.ctx.resume();
+        this.playMusic();
+      }
+      return;
+    }
 
     const ctx = new AudioContext();
     const master = ctx.createGain();
@@ -152,6 +163,7 @@ export class AudioManager implements SoundEffects {
     this.startAmbience(ctx, gains.ambience).catch((err: unknown) => console.error('Ambience failed to start', err));
     if (document.hidden) void ctx.suspend();
     else this.playMusic();
+    if (ctx.state === 'running') this.removeGestureListeners();
   };
 
   private async startAmbience(ctx: AudioContext, out: AudioNode): Promise<void> {
@@ -191,6 +203,7 @@ export class AudioManager implements SoundEffects {
 
   private removeGestureListeners(): void {
     window.removeEventListener('pointerdown', this.onGesture, true);
+    window.removeEventListener('pointerup', this.onGesture, true);
     window.removeEventListener('keydown', this.onGesture, true);
   }
 }

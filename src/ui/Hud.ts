@@ -4,6 +4,7 @@ import { describeStars } from '../gen/stars';
 import type { SystemData } from '../gen/system';
 import type { Picker } from '../player/Picker';
 import type { Ship } from '../player/Ship';
+import { HelpText } from './HelpText';
 import type { Tooltip } from './Tooltip';
 
 const REFRESH_SECONDS = 0.1;
@@ -11,6 +12,9 @@ const HELP =
   'Click: fly to a planet, star or point · Scroll: zoom (in at a planet to descend, out past the system for the galaxy) · ' +
   'Drag: rotate view · ' +
   'WASD: nudge · E/Q: up/down · Shift: boost · M: mute';
+const TOUCH_HELP =
+  'Tap: fly to a planet, star or point · Pinch: zoom (in at a planet to descend, out past the system for the galaxy) · ' +
+  'Drag: rotate view · Hold: identify · Stick: nudge · ▲/▼: up/down · Boost';
 
 /**
  * The system level's DOM overlay (see #hud in index.html). The DOM is shared
@@ -21,7 +25,7 @@ export class Hud implements Entity {
   private readonly locationEl = document.getElementById('hud-location')!;
   private readonly speedEl = document.getElementById('hud-speed')!;
   private readonly targetEl = document.getElementById('hud-target')!;
-  private readonly helpEl = document.getElementById('hud-help')!;
+  private readonly help: HelpText;
   private sinceRefresh = REFRESH_SECONDS;
   private active = false;
 
@@ -31,14 +35,16 @@ export class Hud implements Entity {
     private readonly input: Input,
     private readonly system: SystemData,
     private readonly tooltip: Tooltip,
-  ) {}
+  ) {
+    this.help = new HelpText(input, HELP, TOUCH_HELP);
+  }
 
   activate(): void {
     this.active = true;
     const { system } = this;
     const planets = system.planets.length === 1 ? '1 planet' : `${system.planets.length} planets`;
     this.locationEl.textContent = `${system.name} · ${describeStars(system.stars)} · ${planets}`;
-    this.helpEl.textContent = HELP;
+    this.help.refresh(true);
     this.sinceRefresh = REFRESH_SECONDS;
   }
 
@@ -53,7 +59,7 @@ export class Hud implements Entity {
     const body = this.picker.hovered;
     if (body) {
       const { clientX, clientY } = this.input.pointer;
-      this.tooltip.show(body, body.name, body.description, clientX, clientY, body.details);
+      this.tooltip.show(body, body.name, body.description, clientX, clientY, body.details, this.input.touchMode);
     } else {
       this.tooltip.hide();
     }
@@ -61,6 +67,7 @@ export class Hud implements Entity {
     this.sinceRefresh += frameDt;
     if (this.sinceRefresh < REFRESH_SECONDS) return;
     this.sinceRefresh = 0;
+    this.help.refresh();
     this.speedEl.textContent = `${this.ship.speed.toFixed(0)} u/s`;
     const target = this.ship.targetBody;
     this.targetEl.textContent = !this.ship.autopilotActive
