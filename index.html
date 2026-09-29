@@ -6,6 +6,10 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="theme-color" content="#000000" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" href="icons/icon-192.png" />
     <title>Spore 2 — Space Stage</title>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
@@ -23,6 +27,17 @@
       <div id="tooltip-info"></div>
       <div id="tooltip-details" hidden></div>
     </div>
+    <div id="planet-map" hidden>
+      <div id="planet-map-head">
+        <span id="planet-map-title"></span>
+        <button id="planet-map-toggle" type="button" aria-expanded="true">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+        </button>
+      </div>
+      <div id="planet-map-body">
+        <canvas id="planet-map-marks"></canvas>
+      </div>
+    </div>
     <div id="touch-controls">
       <div id="touch-stick" aria-label="Move"><div id="touch-knob"></div></div>
       <div id="touch-buttons">
@@ -31,6 +46,13 @@
         <button id="touch-boost" type="button" data-key="ShiftLeft">Boost</button>
       </div>
     </div>
+    <button id="fullscreen-toggle" type="button" aria-label="Full screen" hidden>
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path class="expand" d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" />
+        <path class="collapse" d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5" />
+      </svg>
+    </button>
+    <div id="fullscreen-hint" hidden>To play full screen: tap <b>Share</b>, then <b>Add to Home Screen</b>, and start the game from there.</div>
     <div id="audio">
       <div id="audio-panel" hidden>
         <label>Master <input type="range" data-key="master" min="0" max="1" step="0.01" /><output data-key="master"></output></label>

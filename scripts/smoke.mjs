@@ -5,7 +5,8 @@
 // star, travel, scroll in to its system; the galaxy shows distant galaxies, twinkles, spins and draws binaries
 // as two dots, and picking works while it's turned), a real click on the speaker button starts audio; then the
 // transitions and galaxy travel play their whooshes, and M mutes. Then the planet loop (park at a planet,
-// scroll in to low orbit, click the globe and fly, scroll back out beside it), and again for every planet
+// scroll in to low orbit, click the globe and fly, the Equal Earth map is shown and a click on it sets the
+// autopilot there, scroll back out beside it), and again for every planet
 // type, a ringed rocky/icy/lava world and a moon in other systems (skip those with --quick). The system sky has
 // the galaxy band (screenshot looking at the galactic centre) and a smoke trail per planet and moon. Living stars: the
 // surface clock advances and storms have particles under way (and keep animating in the planet level's sky); comets
@@ -15,7 +16,8 @@
 // particles in the air while one erupts; the loop also visits a body with each kind (steam, cryo planet and moon, sulphur).
 // Seamless zooms: through the galaxy and planet loops, every frame of every level transition records the crossfade
 // weight and canvas brightness; each transition must crossfade and never go black (screenshots mid-handover).
-// Touch: on an emulated phone, hold/tap/drag/pinch and the on-screen stick and Boost work, down to a planet and out.
+// Touch: on an emulated phone, hold/tap/drag/pinch and the on-screen stick and Boost work, down to a planet and out;
+// the full-screen button shows and the planet map doesn't.
 // Prints JSON with FPS, console errors and screenshot paths. Exit 1 on failure.
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -131,6 +133,23 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
       particles: planet.geysers.liveParticles, capacity: planet.geysers.capacity }`,
   );
   r.expectedGeysers = await evaluate(`geyserKind(__body.config.type, __body.config.climate)`);
+  // The Equal Earth map: shown and baked; clicking it sends the autopilot to that point of the globe.
+  for (let i = 0; i < 40 && !(await evaluate(`planet.map.baked`)); i++) await sleep(250);
+  r.map = await evaluate(`new Promise((resolve) => {
+    const canvas = document.getElementById('planet-map-marks');
+    const rect = canvas.getBoundingClientRect();
+    const V = game.camera.position.constructor;
+    const want = planet.ship.direction.clone().applyAxisAngle(new V(0, 1, 0), 1).applyAxisAngle(new V(1, 0, 0), 0.2);
+    const p = planet.map.mapPosition(want);
+    const at = { clientX: rect.left + p.x, clientY: rect.top + p.y, button: 0, bubbles: true };
+    canvas.dispatchEvent(new PointerEvent('pointerdown', at));
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve({
+      visible: planet.map.visible && !document.getElementById('planet-map').hidden && rect.width > 100,
+      baked: planet.map.baked,
+      enRoute: planet.ship.enRoute,
+      targetDegrees: +(planet.ship.destination.angleTo(want) * 180 / Math.PI).toFixed(2),
+    })));
+  })`);
   const shot = await send('Page.captureScreenshot', { format: 'png' });
   r.screenshot = join(outDir, `${shotName}.png`);
   writeFileSync(r.screenshot, Buffer.from(shot.result.data, 'base64'));
@@ -152,6 +171,10 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
     r.skyClock > 0.3 &&
     Math.abs(r.skyStarTime - r.skyClock) < 0.25 &&
     r.altitudeOk &&
+    r.map.visible &&
+    r.map.baked &&
+    r.map.enRoute &&
+    r.map.targetDegrees < 1.5 &&
     (r.type !== 'lava' || (r.lava && r.lava.vents > 0 && r.lava.events > 0 && r.lava.blobs > 0)) &&
     (r.expectedGeysers ?? null) === (r.geysers?.kind ?? null) &&
     (!r.geysers || (r.geysers.vents > 0 && r.geysers.events > 0 && (r.geysers.erupting === 0 || r.geysers.particles > 0))) &&
@@ -537,7 +560,8 @@ async function runTouch() {
     evaluate(`(() => { const b = document.getElementById('${id}').getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; })()`);
   const r = {};
 
-  r.system = await evaluate(`({ touchMode: game.input.touchMode, help: document.getElementById('hud-help').textContent.startsWith('Tap'), ...${controls} })`);
+  r.system = await evaluate(`({ touchMode: game.input.touchMode, help: document.getElementById('hud-help').textContent.startsWith('Tap'),
+    fullscreenButton: getComputedStyle(document.getElementById('fullscreen-toggle')).display !== 'none', ...${controls} })`);
   const star = await evaluate(`(() => { const p = world.stars[0].renderPosition.clone().project(game.camera); return [(p.x + 1) / 2 * innerWidth, (1 - p.y) / 2 * innerHeight]; })()`);
   await touch('touchStart', [star]);
   await sleep(300);
@@ -576,6 +600,8 @@ async function runTouch() {
   r.planet = { mode: await pinchUntil('planet', true) };
   if (r.planet.mode === 'planet') {
     Object.assign(r.planet, await evaluate(controls));
+    // The map is for mouse players only.
+    r.planet.mapHidden = await evaluate(`getComputedStyle(document.getElementById('planet-map')).display === 'none' && !planet.map.visible`);
     const at = await evaluate(`(() => {
       const V = game.camera.position.constructor;
       const u = planet.ship.direction.clone();
@@ -596,6 +622,7 @@ async function runTouch() {
   r.ok =
     r.system.touchMode &&
     r.system.help &&
+    r.system.fullscreenButton &&
     r.system.ship === 'space' &&
     r.system.shown &&
     r.system.upDown &&
@@ -612,6 +639,7 @@ async function runTouch() {
     r.planet.mode === 'planet' &&
     r.planet.ship === 'surface' &&
     r.planet.shown &&
+    r.planet.mapHidden &&
     !r.planet.upDown &&
     r.planet.tapEnRoute &&
     r.planet.back === 'system' &&

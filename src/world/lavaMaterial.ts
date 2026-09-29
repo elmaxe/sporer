@@ -79,31 +79,23 @@ const LAVA_GLSL = /* glsl */ `
   }
 `;
 
-const seaVertex = /* glsl */ `
-  ${LAVA_GLSL}
-  varying vec3 vDir;
-  varying float vFlow;
-  void main() {
-    vDir = normalize(position);
-    vFlow = lavaFlow(vDir);
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-  }
-`;
-
-const seaFragment = /* glsl */ `
+/**
+ * The lava sea's colour at unit direction `p` (body frame) given its broad
+ * `flow` (lavaFlow(p)): crust plates cracked open where the flow runs hot,
+ * molten where it's hottest, the cool crust lit by the sun. Before tone
+ * mapping. Needs LAVA_GLSL and the sea uniforms (`LavaLook.seaUniforms`).
+ * Shared by the sea sphere and the planet level's map.
+ */
+export const LAVA_SEA_GLSL = /* glsl */ `
   ${LAVA_GLSL}
   uniform vec3 uSun;          // unit direction to the sun, body frame
   uniform vec3 uSunLight;     // its colour × intensity
   uniform vec3 uAmbient;
   uniform vec3 uCrust;
   uniform float uCrustScale;
-  varying vec3 vDir;
-  varying float vFlow;
 
-  void main() {
-    vec3 p = normalize(vDir);
+  vec3 lavaSea(vec3 p, float flow) {
     float t = uLavaTime;
-    float flow = vFlow;
     // Crust plates: the cells between a drifting noise's zero crossings, bent by
     // the currents. Their seams crack open wider where the flow runs hot.
     vec3 q = p * uCrustScale + uLavaOffset * 1.7 + vec3(flow - 0.5) * 0.9;
@@ -118,8 +110,28 @@ const seaFragment = /* glsl */ `
     // Crust where it's cool: dark rock, lit like the terrain (Lambert), faintly red from below.
     vec3 light = uAmbient + uSunLight * max(dot(p, uSun), 0.0);
     vec3 rock = uCrust * light * (0.75 + 0.6 * smoothstep(0.0, 0.3, b));
-    vec3 col = mix(rock + lavaRamp(heat) * 0.12, lavaRamp(heat), lavaMolten(heat));
-    gl_FragColor = vec4(col, 1.0);
+    return mix(rock + lavaRamp(heat) * 0.12, lavaRamp(heat), lavaMolten(heat));
+  }
+`;
+
+const seaVertex = /* glsl */ `
+  ${LAVA_GLSL}
+  varying vec3 vDir;
+  varying float vFlow;
+  void main() {
+    vDir = normalize(position);
+    vFlow = lavaFlow(vDir);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const seaFragment = /* glsl */ `
+  ${LAVA_SEA_GLSL}
+  varying vec3 vDir;
+  varying float vFlow;
+
+  void main() {
+    gl_FragColor = vec4(lavaSea(normalize(vDir), vFlow), 1.0);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
   }
@@ -196,15 +208,20 @@ export class LavaLook {
     return new THREE.ShaderMaterial({
       vertexShader: seaVertex,
       fragmentShader: seaFragment,
-      uniforms: {
-        ...this.uniforms,
-        uSun: { value: sun },
-        uSunLight: { value: sunLight },
-        uAmbient: { value: ambient },
-        uCrust: { value: this.crust },
-        uCrustScale: { value: 14 },
-      },
+      uniforms: this.seaUniforms(sun, sunLight, ambient),
     });
+  }
+
+  /** The uniforms LAVA_SEA_GLSL reads (the shared lava ones plus the light), for a material of its own. */
+  seaUniforms(sun: THREE.Vector3, sunLight: THREE.Color, ambient: THREE.Color): Record<string, THREE.IUniform> {
+    return {
+      ...this.uniforms,
+      uSun: { value: sun },
+      uSunLight: { value: sunLight },
+      uAmbient: { value: ambient },
+      uCrust: { value: this.crust },
+      uCrustScale: { value: 14 },
+    };
   }
 
   /**
