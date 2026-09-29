@@ -25,8 +25,9 @@ export const planetMapParams = {
   hillshade: 0.5,
 };
 
-/** The map's width in CSS pixels at most (the stylesheet sets the same). */
+/** The map's width in CSS pixels at most (the stylesheet sets the same): the desktop panel, the touch overlay. */
 const CSS_WIDTH = 320;
+const TOUCH_CSS_WIDTH = 640;
 /** Margin around the projection's outline, as a fraction of its size. */
 const MARGIN = 0.03;
 /** Milliseconds of map baking per frame, so building it never stalls the game. */
@@ -34,6 +35,8 @@ const BAKE_BUDGET_MS = 4;
 /** While baking, the texture is re-uploaded at most this often. */
 const UPLOAD_SECONDS = 0.1;
 const MARKS_SECONDS = 1 / 30;
+/** The markers' canvas resolution, device pixels per CSS pixel at most (like the game's canvas). */
+const MAX_PIXEL_RATIO = 2;
 /** Rounding of the map's bottom corners, CSS px (the panel's border radius, less its border). */
 const CORNER_RADIUS = 7;
 /** Graticule spacing, radians. */
@@ -124,13 +127,16 @@ const fragmentShader = /* glsl */ `
 
 /**
  * A map of the visited planet or moon in the Equal Earth projection (see
- * equalEarth.ts), for mouse players (the stylesheet hides it in touch mode):
+ * equalEarth.ts): a panel in the corner for mouse players, and for touch
+ * players an overlay opened from the Map button (#touch-map) and closed by
+ * its title bar's ×:
  * the same terrain and seas as the globe, coloured by the globe's own
  * painters from the same noise, with relief shading and the live night
  * side; lava seas are drawn by the globe's lava shader, so they flow and
  * glow in step with it. On top: the sun, the ship and its heading, and the
- * autopilot's destination and great-circle path. Click it to fly there; N
- * (or its button) folds it away, remembered in localStorage.
+ * autopilot's destination and great-circle path. Click or tap it to fly
+ * there; N (or its button) folds the desktop panel away, remembered in
+ * localStorage.
  *
  * The terrain is baked on the CPU a few rows per frame into a texture; the
  * level draws the map into the game's canvas under the panel (`render`),
@@ -143,6 +149,7 @@ export class PlanetMap implements Entity {
   private readonly title = document.getElementById('planet-map-title')!;
   private readonly toggle = document.getElementById('planet-map-toggle') as HTMLButtonElement;
   private readonly marksCanvas = document.getElementById('planet-map-marks') as HTMLCanvasElement;
+  private readonly mapButton = document.getElementById('touch-map') as HTMLButtonElement;
   private readonly width: number;
   private readonly height: number;
   /** Canvas pixels per projection unit. */
@@ -162,6 +169,10 @@ export class PlanetMap implements Entity {
   private active = false;
   private shown = false;
   private folded: boolean;
+  /** Touch mode: whether the overlay is open (it starts closed). */
+  private open = false;
+  /** The input mode the panel was last laid out for. */
+  private touchLayout: boolean | null = null;
   private keyWasDown = false;
   private sinceMarks = MARKS_SECONDS;
   /** Where the map is drawn, CSS px from the canvas's top left (re-read when the layout may have changed). */
@@ -191,16 +202,18 @@ export class PlanetMap implements Entity {
     private readonly input: Input,
     debug: Debug,
   ) {
-    const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
-    this.width = Math.round(CSS_WIDTH * pixelRatio);
+    // Baked for the size it will mostly be shown at (the touch overlay is bigger).
+    const pixelRatio = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
+    this.width = Math.round((input.touchMode ? TOUCH_CSS_WIDTH : CSS_WIDTH) * pixelRatio);
     this.scale = this.width / (EQUAL_EARTH_WIDTH * (1 + MARGIN));
     this.height = Math.round(EQUAL_EARTH_HEIGHT * (1 + MARGIN) * this.scale);
     this.data = new Uint8Array(this.width * this.height * 4);
     this.heights = new Float32Array(this.width * this.height);
     this.texture = new THREE.DataTexture(this.data, this.width, this.height, THREE.RGBAFormat);
     this.texture.colorSpace = THREE.SRGBColorSpace;
-    // The texture matches the drawn pixels; nearest keeps the lava flag (alpha) crisp.
-    this.texture.magFilter = this.texture.minFilter = THREE.NearestFilter;
+    // Scaled to the panel's size (the shader reads alpha < 0.5 as lava, so coasts stay crisp).
+    this.texture.magFilter = this.texture.minFilter = THREE.LinearFilter;
+    this.texture.generateMipmaps = false;
 
     const gas = isGas(config);
     this.gas = gas ? gasPainter(config.seed, config.bands, true) : null;
@@ -242,24 +255,34 @@ export class PlanetMap implements Entity {
 
   /** True while the map is on screen. */
   get visible(): boolean {
-    return this.shown;
+    return this.shown && !this.hidesBody;
+  }
+
+  /** The desktop panel folded down to its title bar. */
+  private get hidesBody(): boolean {
+    return this.folded && !this.input.touchMode;
   }
 
   /** Where `direction` (body frame) is on the map, in CSS pixels from its top left (for tests and automation). */
   mapPosition(direction: THREE.Vector3): { x: number; y: number } {
     this.project(direction, this.point);
-    const k = this.marksCanvas.clientWidth / this.width;
+    const k = this.marksCanvas.getBoundingClientRect().width / this.width;
     return { x: this.point.x * k, y: this.point.y * k };
   }
 
   activate(): void {
     this.active = true;
     this.title.textContent = this.name;
+    this.open = false;
+    this.touchLayout = null;
+    // The texture's aspect until measured, so the panel lays out at the right height.
     this.marksCanvas.width = this.width;
     this.marksCanvas.height = this.height;
     this.showFolded();
+    this.showOpen();
     this.toggle.addEventListener('click', this.onToggle);
-    this.marksCanvas.addEventListener('pointerdown', this.onPointerDown);
+    this.mapButton.addEventListener('click', this.onMapButton);
+    this.marksCanvas.addEventListener('click', this.onClick);
     window.addEventListener('resize', this.onResize);
     this.sinceMarks = Infinity;
     this.rectDirty = true;
@@ -270,7 +293,8 @@ export class PlanetMap implements Entity {
     this.active = false;
     this.setShown(false);
     this.toggle.removeEventListener('click', this.onToggle);
-    this.marksCanvas.removeEventListener('pointerdown', this.onPointerDown);
+    this.mapButton.removeEventListener('click', this.onMapButton);
+    this.marksCanvas.removeEventListener('click', this.onClick);
     window.removeEventListener('resize', this.onResize);
   }
 
@@ -280,9 +304,16 @@ export class PlanetMap implements Entity {
     const key = this.input.isDown(TOGGLE_KEY);
     if (key && !this.keyWasDown) this.setFolded(!this.folded);
     this.keyWasDown = key;
-    // Not in touch mode, and not while zooming in or out (input is blocked then).
-    this.setShown(!this.input.touchMode && !this.input.blocked);
-    if (!this.shown || this.folded) return;
+    const touch = this.input.touchMode;
+    if (touch !== this.touchLayout) {
+      // The stylesheet moves and resizes the panel between the modes.
+      this.touchLayout = touch;
+      this.rectDirty = true;
+      this.showFolded();
+    }
+    // Touch players open it from the Map button; never while zooming in or out (input is blocked then).
+    this.setShown((!this.input.touchMode || this.open) && !this.input.blocked);
+    if (!this.visible) return;
 
     if (!this.baked) {
       this.bake();
@@ -301,7 +332,7 @@ export class PlanetMap implements Entity {
 
   /** Draws the map into the game's canvas, under the panel. Called by the level after its scene. */
   render(renderer: THREE.WebGLRenderer): void {
-    if (!this.shown || this.folded) return;
+    if (!this.visible) return;
     if (this.rectDirty) this.measure(renderer.domElement);
     const { x, y, w, h } = this.rect;
     if (w <= 0 || h <= 0) return;
@@ -329,7 +360,15 @@ export class PlanetMap implements Entity {
     this.rect.x = r.left - c.left;
     this.rect.y = r.top - c.top;
     this.rect.w = r.width;
-    this.rect.h = r.height;
+    // From the texture's aspect: the canvas's own height follows it once resized below.
+    this.rect.h = (r.width * this.height) / this.width;
+    // The markers are drawn at the size they're shown.
+    const width = Math.round(r.width * Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO));
+    if (width > 0 && width !== this.marksCanvas.width) {
+      this.marksCanvas.width = width;
+      this.marksCanvas.height = Math.round((width * this.height) / this.width);
+      this.sinceMarks = Infinity;
+    }
   }
 
   /** Canvas pixel (column, row) ← projection point. */
@@ -394,7 +433,11 @@ export class PlanetMap implements Entity {
   private drawMarks(): void {
     const ctx = this.marksCanvas.getContext('2d')!;
     const { width, height, point } = this;
-    const px = width / CSS_WIDTH;
+    if (this.rect.w <= 0) return;
+    // Drawn in texture pixels, scaled to the canvas; `px` is one CSS pixel, so markers keep their size.
+    const k = this.marksCanvas.width / width;
+    ctx.setTransform(k, 0, 0, k, 0, 0);
+    const px = width / this.rect.w;
     ctx.clearRect(0, 0, width, height);
     ctx.lineJoin = ctx.lineCap = 'round';
 
@@ -516,6 +559,16 @@ export class PlanetMap implements Entity {
     this.sinceMarks = Infinity;
   }
 
+  private setOpen(open: boolean): void {
+    this.open = open;
+    this.showOpen();
+  }
+
+  private showOpen(): void {
+    this.mapButton.classList.toggle('active', this.open);
+    this.mapButton.setAttribute('aria-expanded', String(this.open));
+  }
+
   private setFolded(folded: boolean): void {
     this.folded = folded;
     saveFolded(folded);
@@ -526,26 +579,33 @@ export class PlanetMap implements Entity {
 
   private showFolded(): void {
     this.root.classList.toggle('folded', this.folded);
-    const label = this.folded ? 'Show map (N)' : 'Hide map (N)';
-    this.toggle.setAttribute('aria-expanded', String(!this.folded));
+    const label = this.input.touchMode ? 'Close map' : this.folded ? 'Show map (N)' : 'Hide map (N)';
+    this.toggle.setAttribute('aria-expanded', String(!this.hidesBody));
     this.toggle.setAttribute('aria-label', label);
     this.toggle.title = label;
   }
 
+  /** The title bar's button: folds the desktop panel, closes the touch overlay. */
   private onToggle = () => {
-    this.setFolded(!this.folded);
+    if (this.input.touchMode) this.setOpen(false);
+    else this.setFolded(!this.folded);
+  };
+
+  private onMapButton = () => {
+    if (!this.input.blocked) this.setOpen(!this.open);
   };
 
   private onResize = () => {
     this.rectDirty = true;
   };
 
-  /** Click the map: fly to that point. */
-  private onPointerDown = (e: PointerEvent) => {
-    if (e.button !== 0 || this.input.blocked) return;
+  /** Click or tap the map: fly to that point. */
+  private onClick = (e: MouseEvent) => {
+    if (this.input.blocked) return;
     const rect = this.marksCanvas.getBoundingClientRect();
+    // One scale for both axes, as the map is drawn (the canvas's own height is rounded).
     const x = ((e.clientX - rect.left) / rect.width) * this.width;
-    const y = ((e.clientY - rect.top) / rect.height) * this.height;
+    const y = ((e.clientY - rect.top) / rect.width) * this.width;
     if (!equalEarthInverse((x - this.width / 2) / this.scale, (this.height / 2 - y) / this.scale, this.lonLat)) return;
     fromLonLat(this.lonLat.lon, this.lonLat.lat, this.dir3);
     this.ship.moveTo(this.click.fromArray(this.dir3));

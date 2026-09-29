@@ -185,9 +185,30 @@ body {
   overflow: hidden;
 }
 
-#planet-map[hidden],
-html.touch #planet-map {
+#planet-map[hidden] {
   display: none;
+}
+
+/* On touch, the map opens over the middle of the screen from the Map button (#touch-map), as large as fits. */
+html.touch #planet-map {
+  z-index: 1004;
+  left: 50%;
+  right: auto;
+  top: 50%;
+  bottom: auto;
+  transform: translate(-50%, -50%);
+  width: min(calc(100vw - 32px), calc((100vh - 150px) * 2), 640px);
+  width: min(calc(100vw - 32px), calc((100dvh - 150px) * 2), 640px);
+}
+
+html.touch #planet-map-head {
+  padding: 6px 6px 6px 12px;
+  font-size: 14px;
+}
+
+html.touch #planet-map-toggle {
+  width: 32px;
+  height: 32px;
 }
 
 #planet-map-head {
@@ -224,11 +245,20 @@ html.touch #planet-map {
   color: #66ffcc;
 }
 
-#planet-map.folded #planet-map-toggle svg {
+#planet-map-toggle .close,
+html.touch #planet-map-toggle .fold {
+  display: none;
+}
+
+html.touch #planet-map-toggle .close {
+  display: block;
+}
+
+#planet-map.folded #planet-map-toggle .fold {
   transform: rotate(180deg);
 }
 
-#planet-map.folded #planet-map-body {
+html:not(.touch) #planet-map.folded #planet-map-body {
   display: none;
 }
 
@@ -395,5 +425,17 @@ html.touch:not([data-ship='none']) #touch-controls {
 
 html:not([data-ship='space']) #touch-up,
 html:not([data-ship='space']) #touch-down {
+  display: none;
+}
+
+/* Low orbit only, where ▲ / ▼ would be in space. */
+#touch-map {
+  width: 52px;
+  height: 52px;
+  margin-right: 10px;
+  bottom: calc(max(16px, env(safe-area-inset-bottom)) + 140px);
+}
+
+html:not([data-ship='surface']) #touch-map {
   display: none;
 }
