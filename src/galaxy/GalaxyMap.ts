@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
 import type { GalaxyData, StarRef } from '../gen/galaxy';
-import { binaryLayout, galaxyMemberSize } from './appearance';
+import { BULGE_GLOW_COLOR, DISC_GLOW_COLOR, binaryLayout, galaxyMemberSize } from './appearance';
 import { createGlowVolume } from './glowVolume';
 
 /** Dots never get smaller or bigger than this on screen, in CSS pixels. */
@@ -172,8 +172,8 @@ export class GalaxyMap implements Entity {
     // (matching the star distributions in gen/galaxy.ts). Both are symmetric about
     // +Y, so the root's spin doesn't change how their shader sees them.
     const r = galaxy.radius;
-    this.addGlow(new THREE.Vector3(r * 1.3, r * 0.06, r * 1.3), '#6f86c8', 0.16, 0.28);
-    this.addGlow(new THREE.Vector3(r * 0.45, r * 0.2, r * 0.45), '#ffd9a0', 0.45, 0.8);
+    this.addGlow(new THREE.Vector3(r * 1.3, r * 0.06, r * 1.3), DISC_GLOW_COLOR, 0.16, 0.28);
+    this.addGlow(new THREE.Vector3(r * 0.45, r * 0.2, r * 0.45), BULGE_GLOW_COLOR, 0.45, 0.8);
   }
 
   /** Dots drawn: one per star, two per binary. */

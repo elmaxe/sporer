@@ -14,6 +14,8 @@ import { TargetMarker } from '../player/TargetMarker';
 import { Hud } from '../ui/Hud';
 import type { Tooltip } from '../ui/Tooltip';
 import type { CelestialBody } from '../world/CelestialBody';
+import { GalaxyBand } from '../world/GalaxyBand';
+import { OrbitTrails } from '../world/OrbitTrails';
 import type { Planet } from '../world/Planet';
 import { Starfield } from '../world/Starfield';
 import { StarSystem } from '../world/StarSystem';
@@ -37,10 +39,12 @@ export class SystemLevel extends Level {
   readonly world: StarSystem;
   readonly ship: Ship;
   readonly orbit: OrbitCamera;
+  readonly band: GalaxyBand;
   readonly eye: EyeAdaptation;
   private readonly hud: Hud;
   private readonly starfield: Starfield;
   private readonly marker: TargetMarker;
+  readonly trails: OrbitTrails;
 
   constructor(
     readonly ref: StarRef,
@@ -57,6 +61,7 @@ export class SystemLevel extends Level {
     super(physics);
     this.data = generateSystem(ref);
 
+    this.band = this.add(new GalaxyBand(this.scene, ref, this.data, debug));
     this.starfield = this.add(new Starfield(this.scene, camera));
     this.world = this.add(new StarSystem(this.scene, physics, this.data, debug));
     const spawn = new THREE.Vector3(0, 15, spawnDistance(this.data));
@@ -80,6 +85,16 @@ export class SystemLevel extends Level {
     );
     this.eye = this.add(new EyeAdaptation(camera, this.world.stars, debug));
     const picker = this.add(new Picker(camera, input, this.ship, this.world.bodies, this.world.comets));
+    this.trails = this.add(
+      new OrbitTrails(
+        this.scene,
+        camera,
+        this.world.planets,
+        this.world.moons,
+        (body) => body === picker.hovered || body === this.ship.targetBody,
+        debug,
+      ),
+    );
     this.marker = this.add(new TargetMarker(this.scene, camera, this.ship));
     this.hud = this.add(new Hud(this.ship, picker, input, this.data, tooltip));
   }
@@ -117,7 +132,8 @@ export class SystemLevel extends Level {
    * Draws the system as seen from `camera` (in system units) at system time
    * `time`: the sky of the planet level. The player's ship and marker and the
    * `hidden` bodies (the planet being visited, drawn by that level) are left
-   * out, and bodies smaller than `minAngle` are enlarged to it.
+   * out, as are the orbit trails, and bodies smaller than `minAngle` are
+   * enlarged to it.
    */
   renderSky(
     renderer: THREE.WebGLRenderer,
@@ -130,9 +146,12 @@ export class SystemLevel extends Level {
     this.starfield.centerOn(camera.position);
     this.ship.object.visible = false;
     this.marker.hide();
+    const trails = this.trails.visible;
+    this.trails.visible = false;
     for (const body of hidden) body.object.visible = false;
     renderer.render(this.scene, camera);
     for (const body of hidden) body.object.visible = true;
+    this.trails.visible = trails;
     this.ship.object.visible = true;
   }
 

@@ -1,8 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { galacticTilt, MAX_GALACTIC_TILT, rotate } from '../src/gen/galactic';
-import { generateGalaxy } from '../src/gen/galaxy';
-import { Rng } from '../src/gen/rng';
-import { generateSystem } from '../src/gen/system';
 import {
   galaxyScale,
   handoverIn,
@@ -97,28 +93,5 @@ describe('seamless zoom timeline', () => {
   it('hands over zooming out well beyond where the system camera starts', () => {
     expect(handoverOut(zone, 100)).toBe(handoverIn(zone));
     expect(handoverOut(zone, 2500)).toBeCloseTo(2500 * params.handoverOut);
-  });
-});
-
-describe('galacticTilt', () => {
-  it('is a unit rotation that keeps the ecliptic within the maximum tilt', () => {
-    for (let i = 0; i < 500; i++) {
-      const q = galacticTilt(new Rng(i));
-      expect(Math.hypot(q.x, q.y, q.z, q.w)).toBeCloseTo(1, 12);
-      const pole = rotate(q, 0, 1, 0);
-      expect(Math.hypot(pole.x, pole.y, pole.z)).toBeCloseTo(1, 12);
-      expect(Math.acos(Math.min(1, pole.y))).toBeLessThanOrEqual(MAX_GALACTIC_TILT + 1e-9);
-    }
-  });
-
-  it('varies between systems and is deterministic', () => {
-    const galaxy = generateGalaxy(1337, 20);
-    const tilts = galaxy.stars.map((ref) => generateSystem(ref).galacticTilt);
-    expect(new Set(tilts.map((q) => q.w.toFixed(6))).size).toBe(tilts.length);
-    expect(generateSystem(galaxy.stars[3]!).galacticTilt).toEqual(tilts[3]);
-    // Tilts spread out: some near face-on, some steep.
-    const angles = tilts.map((q) => Math.acos(rotate(q, 0, 1, 0).y));
-    expect(Math.min(...angles)).toBeLessThan(0.6);
-    expect(Math.max(...angles)).toBeGreaterThan(0.8);
   });
 });

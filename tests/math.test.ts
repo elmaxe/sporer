@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { orbitPosition, type Orbit } from '../src/gen/orbit';
+import { orbitAngle, orbitAngleOf, orbitPosition, type Orbit } from '../src/gen/orbit';
 import { terrainNoise } from '../src/gen/noise';
 
 describe('orbitPosition', () => {
@@ -45,6 +45,18 @@ describe('terrainNoise', () => {
       const n = terrainNoise(Math.sin(i), Math.cos(i * 1.3), Math.sin(i * 0.7), i % 13);
       expect(n).toBeGreaterThanOrEqual(-1);
       expect(n).toBeLessThanOrEqual(1);
+    }
+  });
+});
+
+describe('orbitAngleOf', () => {
+  it('recovers the angle orbitPosition put a body at', () => {
+    const orbit: Orbit = { radius: 120, period: 40, phase: 1, inclination: 0.2 };
+    for (const time of [0, 3, 17.5, 39, 123]) {
+      const p = orbitPosition(orbit, time, { x: 0, y: 0, z: 0 });
+      const a = orbitAngleOf(orbit, p);
+      expect(Math.cos(a)).toBeCloseTo(Math.cos(orbitAngle(orbit, time)), 10);
+      expect(Math.sin(a)).toBeCloseTo(Math.sin(orbitAngle(orbit, time)), 10);
     }
   });
 });

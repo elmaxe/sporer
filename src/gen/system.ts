@@ -1,6 +1,7 @@
+import { randomRotation, type Quat } from './galactic';
 import { generateComets, type CometData } from './comets';
-import { galacticTilt, type QuatLike } from './galactic';
 import type { GalaxyData, StarRef } from './galaxy';
+import { hexToRgb, hslToHex, rgbToHex } from './color';
 import { romanNumeral } from './names';
 import type { Orbit } from './orbit';
 import {
@@ -75,10 +76,13 @@ export interface SystemData {
   starZone: number;
   /** Distance with Earth-like temperatures. Drives planet types. */
   habitableRadius: number;
+  /**
+   * Rotation from system space into galaxy space: how the system's ecliptic
+   * is tilted against the galactic plane (see gen/galactic.ts).
+   */
+  galacticTilt: Quat;
   /** On long elliptical orbits; scenery only (not visitable). */
   comets: CometData[];
-  /** Rotation from system space into galaxy space (the ecliptic is tilted against the galactic plane). */
-  galacticTilt: QuatLike;
 }
 
 /** G-class period at the reference distance; other orbits follow Kepler's third law. */
@@ -118,7 +122,13 @@ export function generateSystem(ref: StarRef): SystemData {
     // planet's extent, so classify at the nearest possible orbit.
     const type = choosePlanetType(prng, (edge + gap) / habitableRadius);
     const radius = planetRadius(prng, type);
-    const rings = type === 'gas' && prng.chance(0.45) ? generateRings(prng, radius) : null;
+    const rings =
+      type === 'gas'
+        ? prng.chance(0.45)
+          ? generateRings(prng, radius)
+          : null
+        : // Own stream, so the draws of gas giants and everything else stay as they were.
+          generateSolidRings(prng.fork('rings'), type, radius);
     const moons = generateMoons(prng.fork('moons'), name, type, radius, rings);
     const extent = Math.max(
       radius,
@@ -133,6 +143,7 @@ export function generateSystem(ref: StarRef): SystemData {
       style = gasStyle(bands);
     } else {
       style = planetStyle(prng, type);
+      if (rings) rings.color = solidRingColor(prng.fork('rings', 'color'), type, style);
     }
 
     planets.push({
@@ -177,9 +188,8 @@ export function generateSystem(ref: StarRef): SystemData {
     planets,
     starZone,
     habitableRadius,
+    galacticTilt: randomRotation(rng.fork('galactic')),
     comets,
-    // Own stream too: nothing above changed.
-    galacticTilt: galacticTilt(rng.fork('galactic')),
   };
 }
 
@@ -232,6 +242,41 @@ function generateRings(rng: Rng, radius: number): RingData {
     color: gasBands(rng)[1]!,
     opacity: rng.range(0.4, 0.8),
   };
+}
+
+/** Chance of rings around a solid planet, by type: icy worlds hold on to them, hot ones rarely. */
+export const SOLID_RING_CHANCE: Record<Exclude<PlanetType, 'gas'>, number> = {
+  ice: 0.22,
+  barren: 0.14,
+  desert: 0.1,
+  terran: 0.08,
+  ocean: 0.08,
+  lava: 0.05,
+};
+
+/** Narrow rings (outer edge ≤ 2 R) for a solid planet, or null. The colour is set from its style later. */
+function generateSolidRings(rng: Rng, type: Exclude<PlanetType, 'gas'>, radius: number): RingData | null {
+  if (!rng.chance(SOLID_RING_CHANCE[type])) return null;
+  const inner = radius * rng.range(1.3, 1.5);
+  return {
+    inner,
+    outer: Math.min(radius * 2, inner + radius * rng.range(0.2, 0.5)),
+    color: '',
+    opacity: rng.range(0.35, 0.65),
+  };
+}
+
+/** Icy white for ice worlds, otherwise dusty: a paler, greyer blend of the planet's own ground colours. */
+function solidRingColor(rng: Rng, type: Exclude<PlanetType, 'gas'>, style: PlanetStyle): string {
+  if (type === 'ice') return hslToHex(rng.range(190, 215), rng.range(0.15, 0.35), rng.range(0.8, 0.9));
+  const low = hexToRgb(style.low);
+  const high = hexToRgb(style.high);
+  const t = rng.range(0.4, 0.7);
+  const [r, g, b] = low.map((c, i) => c + (high[i]! - c) * t) as [number, number, number];
+  const grey = (r + g + b) / 3;
+  // Halfway to grey, and never too dark to see against space.
+  const lift = Math.max(0, 0.45 - grey);
+  return rgbToHex((r + grey) / 2 + lift, (g + grey) / 2 + lift, (b + grey) / 2 + lift);
 }
 
 function generateMoons(

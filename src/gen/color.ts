@@ -23,6 +23,17 @@ export function jitterHsl(rng: Rng, [h, s, l]: Hsl, hue = 8, sat = 0.08, light =
   return hslToHex(h + rng.range(-hue, hue), s + rng.range(-sat, sat), l + rng.range(-light, light));
 }
 
+/** Hex colour to RGB channels in [0, 1]. */
+export function hexToRgb(hex: string): [r: number, g: number, b: number] {
+  const n = parseInt(hex.slice(1), 16);
+  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+}
+
+/** RGB channels in [0, 1] (clamped) to hex. */
+export function rgbToHex(r: number, g: number, b: number): string {
+  return `#${[r, g, b].map((c) => Math.round(clamp01(c) * 255).toString(16).padStart(2, '0')).join('')}`;
+}
+
 function clamp01(v: number): number {
   return Math.min(1, Math.max(0, v));
 }
