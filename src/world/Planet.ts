@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Entity } from '../core/Entity';
 import { RAPIER, type Physics } from '../physics/Physics';
 import { orbitPosition, type Orbit } from '../gen/orbit';
+import { describeClimate, type ClimateData } from '../gen/climate';
 import type { PlanetStyle, PlanetType, RingData } from '../gen/system';
 import type { CelestialBody } from './CelestialBody';
 import { createAtmosphere, createGasGeometry, createRings, createTerrainGeometry } from './planetGeometry';
@@ -21,6 +22,8 @@ export interface PlanetConfig {
   atmosphere?: string | null;
   rings?: RingData | null;
   tilt?: number;
+  /** Solid bodies only (see gen/climate.ts). */
+  climate?: ClimateData | null;
 }
 
 /** Icosphere subdivision of the system view's planets (gas giants need more for smooth bands). */
@@ -42,6 +45,8 @@ export class Planet implements Entity, CelestialBody {
   readonly object = new THREE.Group();
   readonly position = new THREE.Vector3();
   readonly velocity = new THREE.Vector3();
+  /** The climate line of the tooltip, e.g. "−140 °C · thin N₂ atmosphere". */
+  readonly details: string | undefined;
   /**
    * When set, the surface's spin is this function of the system (render)
    * time instead of turning at the body's own rate, e.g. to follow the planet
@@ -63,6 +68,7 @@ export class Planet implements Entity, CelestialBody {
     readonly parent: Planet | null = null,
   ) {
     const { radius, seed, style } = config;
+    this.details = config.climate ? describeClimate(config.climate) : undefined;
     const gas = isGas(config);
     this.surface = new THREE.Mesh(
       gas

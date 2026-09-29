@@ -28,6 +28,11 @@ body {
   opacity: 0.85;
 }
 
+#hud-climate {
+  font-size: 13px;
+  color: #9fd8ff;
+}
+
 #hud-speed {
   font-size: 20px;
   font-variant-numeric: tabular-nums;
@@ -69,6 +74,16 @@ body {
 #tooltip-info {
   font-size: 12px;
   opacity: 0.75;
+}
+
+#tooltip-details {
+  font-size: 12px;
+  color: #9fd8ff;
+}
+
+#tooltip-details[hidden],
+#hud-climate[hidden] {
+  display: none;
 }
 
 #loading {

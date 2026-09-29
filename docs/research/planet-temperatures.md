@@ -45,12 +45,12 @@ The last column is the warming a greenhouse model must reproduce. It is about ze
 
 ## Game mapping
 
-Not implemented yet (step 12). The plan, to be verified:
-- T_eq scales as L^¼ / √d. In game units, calibrate with one explicit factor so that an Earth-like planet at `habitableRadius` gets T_eq ≈ 255 K, then about 288 K after its greenhouse warming.
-- The greenhouse warming grows with pressure and depends on composition. It has to hit the three reference points above within tolerance; its model needs its own sources.
+Implemented in step 12 (`gen/climate.ts`; see `climate.md` for the greenhouse, escape and heat models):
+- Insolation = (habitableRadius / d)², which is the L / d² scaling because the habitable radius ∝ √L. An Earth-like planet at `habitableRadius` gets T_eq = 255.1 K from the formula above, then exactly 288.15 K after its greenhouse warming.
+- The greenhouse warming is T_s = T_eq (1 + ¾τ)^¼ with τ = τ₀ Pⁿ per composition, calibrated on Earth, Venus and Titan, and checked on Mars (210 K against 208–214 K measured).
 
 ## Open questions
 
 - **Earth's 1.1 K gap.** NASA gives 254.0 K for Earth, but the formula with NASA's own S and A gives 255.1 K, while Venus and Mars match to 0.1 K. It could be a different albedo or irradiance in their computation, or rounding. It doesn't matter at game precision, but it isn't explained yet.
 - **Mars's −2 K.** Mars is slightly *below* its T_eq. This may be the diurnal and seasonal averaging of a thin atmosphere (the mean of T isn't the T of the mean flux). Unverified.
-- **Moons and outer planets.** Their temperatures, and tidal or geothermal heating, still need sources: Io, Europa, Enceladus, Titan.
+- **Moons and outer planets.** Titan, Io and Enceladus are covered in `climate.md`; Europa's heat flow is still unchecked.
