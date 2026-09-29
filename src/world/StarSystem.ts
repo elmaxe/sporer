@@ -4,6 +4,7 @@ import type { Entity } from '../core/Entity';
 import { FIXED_DT } from '../core/Game';
 import { hashSeed } from '../gen/rng';
 import { exposureParams } from '../player/exposure';
+import { moonShell } from '../player/zoomCurve';
 import { describePlanet, type PlanetData, type SystemData } from '../gen/system';
 import { skyScale } from '../planet/frame';
 import type { Physics } from '../physics/Physics';
@@ -62,6 +63,7 @@ export class StarSystem implements Entity {
       for (const m of p.moons) {
         const moon = new Planet(scene, physics, m, `${describePlanet(m.type)} · moon`, m.radius + MOON_STANDOFF_MARGIN, planet);
         this.moons.push(moon);
+        planet.keepOut.push(moonShell(m.orbit.radius, m.radius));
       }
       return planet;
     });

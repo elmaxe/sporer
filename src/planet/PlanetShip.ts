@@ -4,7 +4,7 @@ import type { Entity } from '../core/Entity';
 import type { Input } from '../core/Input';
 import type { ArriveParams } from '../player/autopilot';
 import { buildUfoMesh } from '../player/Ship';
-import { sphereStep, surfaceArriveImpulse } from './surfaceMotion';
+import { climbToward, sphereStep, surfaceArriveImpulse } from './surfaceMotion';
 
 /** Tunables, exposed in the debug panel. Planet-level units (the globe's radius is 100). */
 export const planetShipParams = {
@@ -15,6 +15,8 @@ export const planetShipParams = {
   damping: 1.2,
   /** How quickly the ship turns to face where it's going (1/s). */
   turnRate: 5,
+  /** Seconds to close ~63% of the gap to a new altitude, so it glides there rather than jumps. */
+  climbTime: 0.25,
 };
 
 export const planetAutopilotParams: ArriveParams = {
@@ -27,13 +29,19 @@ export const planetAutopilotParams: ArriveParams = {
 /** The autopilot counts as arrived within this arc length and speed. */
 const ARRIVE_DISTANCE = 0.5;
 const ARRIVE_SPEED = 1;
+/**
+ * The altitude the speeds above are tuned for. Higher up they scale with the
+ * flying radius, so the ground crosses the view at the same angular rate.
+ */
+const REFERENCE_ALTITUDE = 12;
 
 /**
  * The UFO in low orbit. Scripted, no physics: its state is a unit direction
- * from the planet's centre plus a velocity tangent to the sphere, at a fixed
- * flying radius above the highest terrain. The autopilot (`moveTo`) flies the
- * great circle to a point with the same arrive steering as in the system;
- * WASD pushes it in the tangent plane relative to the camera. It stays level
+ * from the planet's centre plus a velocity tangent to the sphere, at a flying
+ * radius above the highest terrain: the zoom sets the altitude (`setAltitude`)
+ * and the radius glides there. The autopilot (`moveTo`) flies the great
+ * circle to a point with the same arrive steering as in the system; WASD
+ * pushes it in the tangent plane relative to the camera. It stays level
  * with the ground (up = the radial direction) and turns to face its course.
  */
 export class PlanetShip implements Entity {
@@ -49,6 +57,8 @@ export class PlanetShip implements Entity {
 
   // Simulation state: direction from the centre, tangent velocity, facing (tangent).
   private readonly u = new THREE.Vector3();
+  private _radius: number;
+  private targetRadius: number;
   private readonly vel = new THREE.Vector3();
   private readonly heading = new THREE.Vector3();
   private readonly target = new THREE.Vector3();
@@ -73,11 +83,14 @@ export class PlanetShip implements Entity {
     /** WASD moves relative to where this camera looks. */
     private readonly camera: THREE.Camera,
     debug: Debug,
-    /** Distance from the planet's centre it flies at. */
-    readonly radius: number,
+    /** Radius of the highest terrain: altitudes are measured from it. */
+    readonly top: number,
+    /** Starting height above `top`. */
+    altitude: number,
     /** Starting direction from the centre. */
     start: THREE.Vector3,
   ) {
+    this._radius = this.targetRadius = top + altitude;
     const { group, ring } = buildUfoMesh();
     this.object.add(group);
     this.hull = group;
@@ -90,6 +103,7 @@ export class PlanetShip implements Entity {
     f?.add(planetShipParams, 'boostMultiplier', 1, 6);
     f?.add(planetShipParams, 'damping', 0, 5).onChange((v: number) => (planetAutopilotParams.damping = v));
     f?.add(planetShipParams, 'turnRate', 0.5, 20);
+    f?.add(planetShipParams, 'climbTime', 0, 2);
     const a = debug.folder('Planet autopilot');
     a?.add(planetAutopilotParams, 'maxSpeed', 10, 300);
     a?.add(planetAutopilotParams, 'accel', 10, 600);
@@ -106,13 +120,32 @@ export class PlanetShip implements Entity {
     return this.hasTarget;
   }
 
+  /** Distance from the planet's centre it flies at (simulation). */
+  get radius(): number {
+    return this._radius;
+  }
+
+  /** Height above the highest terrain (simulation). */
+  get altitude(): number {
+    return this._radius - this.top;
+  }
+
+  /** Flies at `altitude` above the highest terrain, gliding there over `climbTime`. */
+  setAltitude(altitude: number): void {
+    this.targetRadius = this.top + Math.max(altitude, 0);
+  }
+
   /** The (simulation) direction from the planet's centre. */
   get direction(): THREE.Vector3 {
     return this.u;
   }
 
-  /** Puts the ship above `start` (a direction from the centre), at rest and with no autopilot target. */
+  /**
+   * Puts the ship above `start` (a direction from the centre), at rest, at
+   * the altitude it's heading for and with no autopilot target.
+   */
   placeAt(start: THREE.Vector3): void {
+    this._radius = this.targetRadius;
     this.u.copy(start).normalize();
     this.vel.set(0, 0, 0);
     this.hasTarget = false;
@@ -121,7 +154,7 @@ export class PlanetShip implements Entity {
     if (this.heading.lengthSq() < 1e-6) this.heading.set(1, 0, 0);
     this.heading.normalize();
     this.orient(this.currRot);
-    this.currPos.copy(this.u).multiplyScalar(this.radius);
+    this.currPos.copy(this.u).multiplyScalar(this._radius);
     this.prevPos.copy(this.currPos);
     this.prevRot.copy(this.currRot);
     this.update(0, 0);
@@ -136,7 +169,7 @@ export class PlanetShip implements Entity {
   /** Autopilot to the point of the flying sphere above `point` (any point off the centre). */
   moveTo(point: THREE.Vector3): void {
     this.target.copy(point).normalize();
-    this.destination.copy(this.target).multiplyScalar(this.radius);
+    this.destination.copy(this.target).multiplyScalar(this._radius);
     this.hasTarget = true;
   }
 
@@ -147,6 +180,8 @@ export class PlanetShip implements Entity {
   fixedUpdate(dt: number): void {
     const { input, u, vel } = this;
     const boost = input.isDown('ShiftLeft') || input.isDown('ShiftRight') ? planetShipParams.boostMultiplier : 1;
+    this._radius = climbToward(this._radius, this.targetRadius, dt, planetShipParams.climbTime);
+    const reach = this._radius / (this.top + REFERENCE_ALTITUDE);
 
     this.move.set(input.axis('KeyA', 'KeyD'), 0, input.axis('KeyS', 'KeyW'));
     if (this.move.lengthSq() > 0) {
@@ -161,11 +196,14 @@ export class PlanetShip implements Entity {
         .copy(this.right)
         .multiplyScalar(this.move.x)
         .addScaledVector(this.forward, this.move.z)
-        .multiplyScalar(planetShipParams.thrust * boost * dt);
+        .multiplyScalar(planetShipParams.thrust * boost * reach * dt);
       vel.add(this.impulse);
     } else if (this.hasTarget) {
-      Object.assign(this.arrive, planetAutopilotParams).maxSpeed *= boost;
-      const arc = surfaceArriveImpulse(u, vel, this.target, this.radius, this.arrive, dt, this.impulse);
+      Object.assign(this.arrive, planetAutopilotParams);
+      this.arrive.maxSpeed *= boost * reach;
+      this.arrive.accel *= reach;
+      this.destination.copy(this.target).multiplyScalar(this._radius);
+      const arc = surfaceArriveImpulse(u, vel, this.target, this._radius, this.arrive, dt, this.impulse);
       vel.add(this.impulse);
       if (arc < ARRIVE_DISTANCE && vel.length() < ARRIVE_SPEED) this.stop();
     }
@@ -173,7 +211,7 @@ export class PlanetShip implements Entity {
     vel.divideScalar(1 + planetShipParams.damping * dt);
 
     // Slide over the sphere, carrying the velocity and heading along.
-    sphereStep(u, vel, this.radius, dt, this.step);
+    sphereStep(u, vel, this._radius, dt, this.step);
     u.applyQuaternion(this.step).normalize();
     vel.applyQuaternion(this.step).addScaledVector(u, -vel.dot(u));
     this.heading.applyQuaternion(this.step).addScaledVector(u, -this.heading.dot(u)).normalize();
@@ -187,7 +225,7 @@ export class PlanetShip implements Entity {
 
     this.prevPos.copy(this.currPos);
     this.prevRot.copy(this.currRot);
-    this.currPos.copy(u).multiplyScalar(this.radius);
+    this.currPos.copy(u).multiplyScalar(this._radius);
     this.orient(this.currRot);
   }
 

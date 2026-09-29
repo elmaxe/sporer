@@ -1,4 +1,5 @@
 import type * as THREE from 'three';
+import type { Shell } from '../player/zoomCurve';
 
 /** Something the player can hover to see its name (e.g. a comet), but not necessarily fly to. */
 export interface Sight {
@@ -15,6 +16,8 @@ export interface Sight {
 export interface CelestialBody extends Sight {
   /** How far from the centre the autopilot parks, clear of rings and moons. */
   readonly standoff: number;
+  /** Shells around it (from its centre) the autopilot never parks in: its moons' orbits. */
+  readonly keepOut?: readonly Shell[];
   /** Position after the latest fixed step (simulation state). */
   readonly position: THREE.Vector3;
   /** Velocity over the latest fixed step, units per second. */

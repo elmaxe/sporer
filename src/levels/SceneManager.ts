@@ -4,6 +4,7 @@ import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
 import type { Game } from '../core/Game';
 import type { GalaxyData, StarRef } from '../gen/galaxy';
+import { parkingScale } from '../player/zoomCurve';
 import { Tooltip } from '../ui/Tooltip';
 import type { Planet } from '../world/Planet';
 import { GALAXY_VIEW_DISTANCE, GalaxyLevel } from './GalaxyLevel';
@@ -131,7 +132,7 @@ export class SceneManager implements Entity {
     const galaxy = this.galaxyLevel;
     const from = system.orbit;
     const to = galaxy.orbit;
-    const handover = handoverOut(system.data.starZone, from.zoom);
+    const handover = handoverOut(system.data.starZone, from.distance);
     const scale = galaxyScale(handover);
     // As the system's eye sees it (it may still be adapted to a star close up).
     galaxy.showCloseUp(system.data, scale, () => system.world.time, () => system.eye.exposure);
@@ -139,7 +140,7 @@ export class SceneManager implements Entity {
     const matchView = () => from.orientation(this.view).premultiply(galaxy.systemRotation(system.data, this.rotation));
     this.sfx.play('transitionOut');
     this.beginSeamless({
-      zoom: this.seamlessZoom(from.zoom, handover, GALAXY_VIEW_DISTANCE / scale),
+      zoom: this.seamlessZoom(from.distance, handover, GALAXY_VIEW_DISTANCE / scale),
       outgoing: system,
       incoming: galaxy,
       apply: (s) => {
@@ -197,7 +198,7 @@ export class SceneManager implements Entity {
       from.orientation(this.view).premultiply(galaxy.systemRotation(system.data, this.rotation).invert());
     this.sfx.play('transitionIn');
     this.beginSeamless({
-      zoom: this.seamlessZoom(from.zoom / scale, handover, ARRIVAL_DISTANCE),
+      zoom: this.seamlessZoom(from.distance / scale, handover, ARRIVAL_DISTANCE),
       outgoing: galaxy,
       incoming: system,
       apply: (s) => {
@@ -254,7 +255,7 @@ export class SceneManager implements Entity {
     const matchView = () => from.orientation(this.view).premultiply(frame.inverse);
     this.sfx.play('transitionIn');
     this.beginSeamless({
-      zoom: this.planetZoom(from.zoom, handover, PLANET_VIEW_DISTANCE / scale),
+      zoom: this.planetZoom(from.distance, handover, PLANET_VIEW_DISTANCE / scale),
       outgoing: system,
       incoming: level,
       apply: (s) => {
@@ -306,13 +307,14 @@ export class SceneManager implements Entity {
     const from = planet.orbit;
     const to = system.orbit;
     const scale = frame.scale;
-    const handover = planetHandoverOut(body.radius, from.zoom / scale);
+    // Beyond where the camera already is from the globe's centre (it can be high above the ship), not from the ship.
+    const handover = planetHandoverOut(body.radius, this.game.camera.position.length() / scale);
     const end = Math.max(ARRIVAL_DISTANCE / 2, body.radius * 3);
     // System space from the body frame.
     const matchView = () => from.orientation(this.view).premultiply(frame.quaternion);
     this.sfx.play('transitionOut');
     this.beginSeamless({
-      zoom: this.planetZoom(from.zoom / scale, handover, end),
+      zoom: this.planetZoom(from.distance / scale, handover, end),
       outgoing: planet,
       incoming: system,
       apply: (s) => {
@@ -333,6 +335,8 @@ export class SceneManager implements Entity {
         system.world.setTime(planet.time);
         body.spinAngle = frame.spinAngle;
         planet.exitSide(this.side);
+        // Parked as far out as the zoom it ends on asks for.
+        system.ship.parkingScale = parkingScale(end);
         system.ship.parkAt(body, this.side);
         this.game.setLevel(system);
         system.eye.settleNext();

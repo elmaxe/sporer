@@ -34,7 +34,7 @@ export const planetZoomParams = {
   minRadii: 1.3,
   /** Going down, the handover is at most this fraction of the camera's starting distance from the body. */
   inFraction: 0.7,
-  /** Going up, the handover is at least this many times the planet camera's starting distance. */
+  /** Going up, the handover is at least this many times the planet camera's starting distance from the centre. */
   outFactor: 1.3,
 };
 
@@ -96,7 +96,10 @@ export function planetHandoverIn(radius: number, cameraDistance: number, params 
   return Math.max(params.minRadii * radius, Math.min(framed, params.inFraction * cameraDistance));
 }
 
-/** Going back up, from a planet camera starting `start` from its ship (system units): the same framing or farther. */
+/**
+ * Going back up, with the planet camera starting `start` from the body's centre (system units; it may be high
+ * above the ship): the same framing as going down, or farther out than the camera already is.
+ */
 export function planetHandoverOut(radius: number, start: number, params = planetZoomParams): number {
   return Math.max(radius / Math.sin(params.handoverAngle), params.outFactor * start, params.minRadii * radius);
 }

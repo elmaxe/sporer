@@ -9,6 +9,7 @@ import { EyeAdaptation } from '../player/EyeAdaptation';
 import { sceneExposure } from '../player/exposure';
 import { OrbitCamera, cameraParams } from '../player/OrbitCamera';
 import { Picker } from '../player/Picker';
+import { parkingScale } from '../player/zoomCurve';
 import { Ship } from '../player/Ship';
 import { TargetMarker } from '../player/TargetMarker';
 import { Hud } from '../ui/Hud';
@@ -83,6 +84,14 @@ export class SystemLevel extends Level {
         'System camera',
       ),
     );
+    // Near a body the zoom also sets how close the ship parks, so it dives in as you scroll in. Scripted
+    // camera moves (level transitions, with input blocked) leave it be.
+    this.add({
+      update: () => {
+        if (!input.blocked) this.ship.parkingScale = parkingScale(this.orbit.distance);
+      },
+      dispose: () => {},
+    });
     this.eye = this.add(new EyeAdaptation(camera, this.world.stars, debug));
     const picker = this.add(new Picker(camera, input, this.ship, this.world.bodies, this.world.comets));
     this.trails = this.add(
@@ -121,10 +130,17 @@ export class SystemLevel extends Level {
     return best;
   }
 
-  /** A planet or moon the ship is flying into (all but touching its surface), if any. */
+  /**
+   * A planet or moon the ship is flying into (all but touching its surface),
+   * if any. While parked, only the body it's parked at counts: the ship then
+   * only moves to follow the zoom, and a moon it brushes past on the way in or
+   * out isn't somewhere the player asked to go.
+   */
   bodyInReach(): Planet | null {
-    for (const body of this.world.planets) if (this.touching(body)) return body;
-    for (const body of this.world.moons) if (this.touching(body)) return body;
+    const parked = this.ship.enRoute ? null : this.ship.targetBody;
+    for (const bodies of [this.world.planets, this.world.moons]) {
+      for (const body of bodies) if ((!parked || body === parked) && this.touching(body)) return body;
+    }
     return null;
   }
 
