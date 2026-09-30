@@ -17,7 +17,7 @@
 // Seamless zooms: through the galaxy and planet loops, every frame of every level transition records the crossfade
 // weight and canvas brightness; each transition must crossfade and never go black (screenshots mid-handover).
 // Touch: on an emulated phone, hold/tap/drag/pinch and the on-screen stick and Boost work, down to a planet and out;
-// the full-screen button shows and the planet map doesn't.
+// the full-screen button shows, and in low orbit the Map button opens the map, a tap on it flies there, × closes it.
 // Prints JSON with FPS, console errors and screenshot paths. Exit 1 on failure.
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -142,12 +142,14 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
     const want = planet.ship.direction.clone().applyAxisAngle(new V(0, 1, 0), 1).applyAxisAngle(new V(1, 0, 0), 0.2);
     const p = planet.map.mapPosition(want);
     const at = { clientX: rect.left + p.x, clientY: rect.top + p.y, button: 0, bubbles: true };
-    canvas.dispatchEvent(new PointerEvent('pointerdown', at));
+    canvas.dispatchEvent(new MouseEvent('click', at));
     requestAnimationFrame(() => requestAnimationFrame(() => resolve({
       visible: planet.map.visible && !document.getElementById('planet-map').hidden && rect.width > 100,
       baked: planet.map.baked,
       enRoute: planet.ship.enRoute,
       targetDegrees: +(planet.ship.destination.angleTo(want) * 180 / Math.PI).toFixed(2),
+      // Click coordinates are whole pixels, so the target is within a pixel or so of the point.
+      pixelDegrees: +(360 / rect.width).toFixed(2),
     })));
   })`);
   const shot = await send('Page.captureScreenshot', { format: 'png' });
@@ -174,7 +176,7 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
     r.map.visible &&
     r.map.baked &&
     r.map.enRoute &&
-    r.map.targetDegrees < 1.5 &&
+    r.map.targetDegrees < 1.5 * r.map.pixelDegrees &&
     (r.type !== 'lava' || (r.lava && r.lava.vents > 0 && r.lava.events > 0 && r.lava.blobs > 0)) &&
     (r.expectedGeysers ?? null) === (r.geysers?.kind ?? null) &&
     (!r.geysers || (r.geysers.vents > 0 && r.geysers.events > 0 && (r.geysers.erupting === 0 || r.geysers.particles > 0))) &&
@@ -600,8 +602,34 @@ async function runTouch() {
   r.planet = { mode: await pinchUntil('planet', true) };
   if (r.planet.mode === 'planet') {
     Object.assign(r.planet, await evaluate(controls));
-    // The map is for mouse players only.
-    r.planet.mapHidden = await evaluate(`getComputedStyle(document.getElementById('planet-map')).display === 'none' && !planet.map.visible`);
+    // The map starts closed on touch; the Map button opens it over the screen, a tap on it sets the autopilot
+    // there, and its × closes it.
+    const mapShown = `getComputedStyle(document.getElementById('planet-map')).display !== 'none' && planet.map.visible`;
+    r.planet.map = { closed: !(await evaluate(mapShown)), button: await evaluate(`getComputedStyle(document.getElementById('touch-map')).display !== 'none'`) };
+    const mapButton = await center('touch-map');
+    await touch('touchStart', [mapButton]);
+    await touch('touchEnd', []);
+    await frames();
+    r.planet.map.opened = await evaluate(mapShown);
+    for (let i = 0; i < 40 && !(await evaluate(`planet.map.baked`)); i++) await sleep(250);
+    const mapTap = await evaluate(`(() => {
+      const V = game.camera.position.constructor;
+      window.__mapWant = planet.ship.direction.clone().applyAxisAngle(new V(0, 1, 0), -1);
+      const p = planet.map.mapPosition(__mapWant);
+      const rect = document.getElementById('planet-map-marks').getBoundingClientRect();
+      return [rect.left + p.x, rect.top + p.y];
+    })()`);
+    await touch('touchStart', [mapTap]);
+    await touch('touchEnd', []);
+    await frames();
+    r.planet.map.tapDegrees = await evaluate(`planet.ship.enRoute ? +(planet.ship.destination.angleTo(__mapWant) * 180 / Math.PI).toFixed(2) : null`);
+    r.planet.map.screenshot = join(outDir, 'touch-map.png');
+    writeFileSync(r.planet.map.screenshot, await page.screenshot());
+    const close = await center('planet-map-toggle');
+    await touch('touchStart', [close]);
+    await touch('touchEnd', []);
+    await frames();
+    r.planet.map.closedAgain = !(await evaluate(mapShown));
     const at = await evaluate(`(() => {
       const V = game.camera.position.constructor;
       const u = planet.ship.direction.clone();
@@ -639,7 +667,12 @@ async function runTouch() {
     r.planet.mode === 'planet' &&
     r.planet.ship === 'surface' &&
     r.planet.shown &&
-    r.planet.mapHidden &&
+    r.planet.map.closed &&
+    r.planet.map.button &&
+    r.planet.map.opened &&
+    r.planet.map.tapDegrees !== null &&
+    r.planet.map.tapDegrees < 1.5 &&
+    r.planet.map.closedAgain &&
     !r.planet.upDown &&
     r.planet.tapEnRoute &&
     r.planet.back === 'system' &&
