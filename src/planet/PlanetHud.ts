@@ -5,10 +5,10 @@ import type { PlanetShip } from './PlanetShip';
 
 const REFRESH_SECONDS = 0.1;
 const HELP =
-  'Click the surface: fly there · Scroll: zoom (out past orbit for the system) · Drag: rotate view · ' +
+  'Click the surface: fly there · Scroll: altitude (out past high orbit for the system) · Drag: rotate view · ' +
   'WASD: nudge · Shift: boost · N: map · M: mute · Esc: menu';
 const TOUCH_HELP =
-  'Tap the surface: fly there · Pinch: zoom (out past orbit for the system) · Drag: rotate view · Stick: nudge · Boost · Map';
+  'Tap the surface: fly there · Pinch: altitude (out past high orbit for the system) · Drag: rotate view · Stick: nudge · Boost · Map';
 
 /** The planet level's DOM overlay (the shared #hud in index.html). Text is throttled. */
 export class PlanetHud implements Entity {

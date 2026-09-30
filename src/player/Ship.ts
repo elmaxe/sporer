@@ -6,6 +6,7 @@ import type { Vec3Like } from '../gen/orbit';
 import { RAPIER, type Physics } from '../physics/Physics';
 import type { CelestialBody } from '../world/CelestialBody';
 import { arriveImpulse, detourWaypoint, standoffPoint, type ArriveParams, type Obstacle } from './autopilot';
+import { parkGap, referenceGap, zoomCurveParams } from './zoomCurve';
 import { AFTER_ATMOSPHERE_RENDER_ORDER } from '../world/atmosphereShell';
 
 /** Tunables, exposed in the debug panel. */
@@ -38,18 +39,30 @@ const UP = new THREE.Vector3(0, 1, 0);
  * level and turns to face its velocity. It moves by impulses, from the
  * autopilot (`moveTo`, which detours around bodies in the way) or from WASD
  * relative to the camera, so it still collides and bounces off planets.
+ * Parked at (or flying to) a body, how far from it the ship parks follows
+ * the camera's zoom (`viewDistance`, see zoomCurve.ts).
  */
 export class Ship implements Entity {
   /** Interpolated render transform; read this for cameras and UI. */
   readonly object = new THREE.Group();
   /** Where the autopilot is heading (simulation state); only meaningful while `autopilotActive`. */
   readonly destination = new THREE.Vector3();
+  /**
+   * The camera's distance from the ship, set by the level each frame: the
+   * parking gap follows it (zoom in to bring the ship down to a body, out to
+   * pull it back).
+   */
+  viewDistance = zoomCurveParams.referenceView;
   private readonly body: RAPIER.RigidBody;
   private readonly ring: THREE.Object3D;
 
   private hasTarget = false;
   private _targetBody: CelestialBody | null = null;
   private arrived = false;
+  /** The parking's gap from the body's surface at the reference view (see zoomCurve.ts). */
+  private gapAtReference = 0;
+  /** Arrive steering for a fly-in (`flyIn`) until it parks; null for the usual autopilot. */
+  private approach: ArriveParams | null = null;
 
   private yaw = 0;
   private readonly prevPos = new THREE.Vector3();
@@ -141,31 +154,59 @@ export class Ship implements Entity {
   moveTo(target: CelestialBody | Vec3Like): void {
     this.hasTarget = true;
     this.arrived = false;
+    this.approach = null;
     if ('standoff' in target) {
       this._targetBody = target;
-      standoffPoint(this.currPos, target.position, target.standoff, this.destination);
+      this.gapAtReference = target.standoff - target.radius;
+      standoffPoint(this.currPos, target.position, this.parkDistance(target), this.destination);
     } else {
       this._targetBody = null;
       this.destination.set(target.x, target.y, target.z);
     }
   }
 
+  /** How far from `body`'s centre the ship parks at the current zoom. */
+  parkDistance(body: CelestialBody): number {
+    return body.radius + parkGap(this.gapAtReference, this.viewDistance);
+  }
+
   /**
-   * Teleports the ship to `body`'s standoff distance in direction `side` from
-   * it, moving with the body and parked there (e.g. coming back from the
-   * planet level, after the system clock jumped).
+   * Teleports the ship to `body`'s standoff distance (at the current zoom) in
+   * direction `side` from it, moving with the body and parked there (e.g.
+   * coming back from the planet level, after the system clock jumped).
    */
   parkAt(body: CelestialBody, side: THREE.Vector3): void {
-    this.pos.copy(side).normalize().multiplyScalar(body.standoff).add(body.position);
-    this.body.setTranslation(this.pos, true);
-    this.body.setLinvel(body.velocity, true);
-    this.currPos.copy(this.pos);
-    this.prevPos.copy(this.pos);
-    this.object.position.copy(this.pos);
+    this.gapAtReference = body.standoff - body.radius;
+    this.pos.copy(side).normalize().multiplyScalar(this.parkDistance(body)).add(body.position);
+    this.teleport(this.pos, body.velocity);
     this.destination.copy(this.pos);
     this._targetBody = body;
     this.hasTarget = true;
     this.arrived = true;
+    this.approach = null;
+  }
+
+  /**
+   * Arriving in the system: the ship appears at `start` flying at `speed`
+   * towards `body` and brakes evenly all the way in, to park `gap` from its
+   * surface at camera distance `view` (it follows the zoom from then on).
+   */
+  flyIn(body: CelestialBody, start: THREE.Vector3, speed: number, gap: number, view: number): void {
+    this._targetBody = body;
+    this.hasTarget = true;
+    this.arrived = false;
+    this.gapAtReference = referenceGap(gap, view);
+    this.viewDistance = view;
+    standoffPoint(start, body.position, this.parkDistance(body), this.destination);
+    const dist = start.distanceTo(this.destination);
+    this.vel.subVectors(this.destination, start).setLength(speed).add(body.velocity);
+    this.teleport(start, this.vel);
+    this.yaw = Math.atan2(-this.vel.x, -this.vel.z);
+    this.body.setRotation(this.rot.setFromAxisAngle(UP, this.yaw), true);
+    this.currRot.copy(this.rot);
+    this.prevRot.copy(this.rot);
+    // Constant braking from `speed` to rest over `dist`: closing speed √(accel · dist) (see closingSpeed).
+    this.approach = { ...autopilotParams, maxSpeed: speed, accel: (speed * speed) / Math.max(dist, 1) };
   }
 
   /** Draws the UFO at `scale` × its size (visual only; e.g. growing out of the star on arrival). */
@@ -178,6 +219,7 @@ export class Ship implements Entity {
     this.hasTarget = false;
     this._targetBody = null;
     this.arrived = false;
+    this.approach = null;
   }
 
   fixedUpdate(dt: number): void {
@@ -244,12 +286,20 @@ export class Ship implements Entity {
     this.physics.world.removeRigidBody(this.body);
   }
 
+  private teleport(position: Vec3Like, velocity: Vec3Like): void {
+    this.body.setTranslation(position, true);
+    this.body.setLinvel(velocity, true);
+    this.currPos.set(position.x, position.y, position.z);
+    this.prevPos.copy(this.currPos);
+    this.object.position.copy(this.currPos);
+  }
+
   private steer(dt: number, boost: number): void {
     const body = this._targetBody;
     const targetVel = body ? body.velocity : this.zero;
-    if (body) standoffPoint(this.pos, body.position, body.standoff, this.destination);
+    if (body) standoffPoint(this.pos, body.position, this.parkDistance(body), this.destination);
 
-    Object.assign(this.arrive, autopilotParams).maxSpeed *= boost;
+    Object.assign(this.arrive, this.approach ?? autopilotParams).maxSpeed *= this.approach ? 1 : boost;
     if (detourWaypoint(this.pos, this.destination, this.obstacles, CLEARANCE, this.waypoint)) {
       const remaining = this.pos.distanceTo(this.waypoint) + this.waypoint.distanceTo(this.destination);
       arriveImpulse(this.pos, this.vel, this.waypoint, targetVel, this.arrive, dt, this.impulse, remaining);
@@ -266,6 +316,7 @@ export class Ship implements Entity {
       // Parked next to a body: keep station. At a point: done.
       if (body) this.arrived = true;
       else this.stop();
+      this.approach = null;
     }
   }
 }

@@ -14,6 +14,12 @@ export class Level {
   readonly scene = new THREE.Scene();
   /** Which on-screen ship controls a touch player gets here (see TouchControls). */
   readonly touchControls: TouchShipControls = 'none';
+  /**
+   * True while a level transition drives the camera: its distance then
+   * doesn't move the ship (normally the zoom sets how far the ship is from
+   * what it's at, see player/zoomCurve.ts).
+   */
+  zoomLocked = false;
   private readonly entities: Entity[] = [];
 
   constructor(readonly physics: Physics | null = null) {}

@@ -4,8 +4,11 @@ import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
 import type { Game } from '../core/Game';
 import type { GalaxyData, StarRef } from '../gen/galaxy';
+import { arrivalDistance } from '../gen/system';
+import { zoomCurveParams } from '../player/zoomCurve';
 import { Tooltip } from '../ui/Tooltip';
 import type { Planet } from '../world/Planet';
+import { arrivalParams, clampElevation } from './arrival';
 import { GALAXY_VIEW_DISTANCE, GalaxyLevel } from './GalaxyLevel';
 import { PLANET_VIEW_DISTANCE, PlanetLevel } from './PlanetLevel';
 import type { Level } from './Level';
@@ -80,6 +83,7 @@ export class SceneManager implements Entity {
   private readonly view = new THREE.Quaternion();
   private readonly rotation = new THREE.Quaternion();
   private readonly direction = new THREE.Vector3();
+  private readonly settle = new THREE.Vector3();
   /** The visited body's spin, from the planet level's frame (see Planet.spinAt). */
   private readonly planetSpin = (time: number) => this._planetLevel?.frame.spinAt(time) ?? 0;
 
@@ -96,6 +100,17 @@ export class SceneManager implements Entity {
     );
     this._systemLevel = this.createSystem(start);
     game.setLevel(this._systemLevel);
+    const f = debug.folder('Arrival');
+    f?.add(arrivalParams, 'start', 0.2, 0.8);
+    f?.add(arrivalParams, 'minStart', 1, 4);
+    f?.add(arrivalParams, 'flightTime', 1, 8);
+    const z = debug.folder('Zoom moves the ship');
+    z?.add(zoomCurveParams, 'referenceView', 12, 200);
+    z?.add(zoomCurveParams, 'gapExponent', 0, 1.5);
+    z?.add(zoomCurveParams, 'minGap', 3.5, 20);
+    z?.add(zoomCurveParams, 'lowAltitude', 1, 20);
+    z?.add(zoomCurveParams, 'highRadii', 0.5, 4);
+    z?.add(zoomCurveParams, 'altitudeCurve', 0.5, 3);
   }
 
   get systemLevel(): SystemLevel {
@@ -131,7 +146,8 @@ export class SceneManager implements Entity {
     const galaxy = this.galaxyLevel;
     const from = system.orbit;
     const to = galaxy.orbit;
-    const handover = handoverOut(system.data.starZone, from.zoom);
+    // Beyond the camera's distance from the ship and from the star(s) (the ship may be far out from them).
+    const handover = handoverOut(system.data.starZone, Math.max(from.zoom, this.game.camera.position.length()));
     const scale = galaxyScale(handover);
     // As the system's eye sees it (it may still be adapted to a star close up).
     galaxy.showCloseUp(system.data, scale, () => system.world.time, () => system.eye.exposure);
@@ -175,7 +191,8 @@ export class SceneManager implements Entity {
    * Galaxy → the system of the star the ship is docked at. Ignored while
    * travelling. The camera dives at the star as the UFO shrinks into it and
    * the star swells into a sun, then the system takes over and zooms on in,
-   * over to the UFO growing back at its place.
+   * over to the UFO, which grows back as it flies in from far out, braking
+   * towards the star, to park a few star diameters from it.
    */
   toSystem(): void {
     const galaxy = this.galaxyLevel;
@@ -216,8 +233,12 @@ export class SceneManager implements Entity {
       swap: () => {
         this.game.setLevel(system);
         system.eye.settleNext();
-        // Settle on the orbit closest to the matched view.
-        to.lookFrom(this.direction.copy(BACK).applyQuaternion(matchView()));
+        // Whichever side of the ecliptic the view came in from, the ship arrives along it, just above, and
+        // the camera settles over the ship on the orbit closest to the matched view that looks down on it.
+        const dir = this.direction.copy(BACK).applyQuaternion(matchView());
+        const [low, high] = arrivalParams.cameraElevation;
+        to.lookFrom(clampElevation(dir, low, high, this.settle));
+        this.flyIn(system, clampElevation(dir, ...arrivalParams.shipElevation, dir), handover);
       },
       finish: () => {
         galaxy.hideCloseUp();
@@ -306,7 +327,8 @@ export class SceneManager implements Entity {
     const from = planet.orbit;
     const to = system.orbit;
     const scale = frame.scale;
-    const handover = planetHandoverOut(body.radius, from.zoom / scale);
+    // Beyond the camera's distance from the ship and from the globe's centre (the ship may be high above it).
+    const handover = planetHandoverOut(body.radius, Math.max(from.zoom, this.game.camera.position.length()) / scale);
     const end = Math.max(ARRIVAL_DISTANCE / 2, body.radius * 3);
     // System space from the body frame.
     const matchView = () => from.orientation(this.view).premultiply(frame.quaternion);
@@ -333,6 +355,8 @@ export class SceneManager implements Entity {
         system.world.setTime(planet.time);
         body.spinAngle = frame.spinAngle;
         planet.exitSide(this.side);
+        // Parked as far out as the zoom it ends at puts it.
+        system.ship.viewDistance = end;
         system.ship.parkAt(body, this.side);
         this.game.setLevel(system);
         system.eye.settleNext();
@@ -377,6 +401,8 @@ export class SceneManager implements Entity {
   private beginSeamless(t: Omit<SeamlessTransition, 'elapsed' | 'swapped' | 'started'>): void {
     this.seamless = { ...t, elapsed: 0, swapped: false, started: false };
     this.game.input.blocked = true;
+    // The timeline drives both cameras: their distances mustn't move the ships.
+    t.outgoing.zoomLocked = t.incoming.zoomLocked = true;
     t.apply(sampleSeamlessZoom(t.zoom, 0));
     // Compile the incoming level's shaders now, not on its first frame mid-crossfade (a visible stall).
     this.game.renderer.compile(t.incoming.scene, this.game.camera);
@@ -397,8 +423,24 @@ export class SceneManager implements Entity {
     this.game.setCrossfade(s.blend > 0 && s.blend < 1 ? t.outgoing : null, s.blend);
     if (!s.done) return;
     t.finish();
+    t.outgoing.zoomLocked = t.incoming.zoomLocked = false;
     this.seamless = null;
     this.game.input.blocked = false;
+  }
+
+  /**
+   * Starts the system ship's arrival: it appears `dir` from the barycentre
+   * (the camera's side of the star, just above the ecliptic), `handover` out
+   * being about where the camera is, already flying at the star, and brakes
+   * evenly to park a few star diameters out, clear of the planets' orbits,
+   * as the camera settles.
+   */
+  private flyIn(system: SystemLevel, dir: THREE.Vector3, handover: number): void {
+    const star = system.world.stars[0]!;
+    const park = arrivalDistance(system.data, dir);
+    const start = Math.min(0.8 * handover, Math.max(arrivalParams.start * handover, arrivalParams.minStart * park));
+    const speed = (2 * (start - park)) / arrivalParams.flightTime;
+    system.ship.flyIn(star, this.side.copy(dir).multiplyScalar(start), speed, park - star.radius, ARRIVAL_DISTANCE);
   }
 
   private createPlanet(body: Planet, side: THREE.Vector3): PlanetLevel {

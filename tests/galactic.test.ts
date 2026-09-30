@@ -4,7 +4,9 @@ import {
   bandAt,
   bandStarDirections,
   conjugate,
+  flatTilt,
   galacticSky,
+  MAX_GALACTIC_TILT,
   randomRotation,
   rotate,
   type Quat,
@@ -43,6 +45,43 @@ describe('randomRotation / rotate', () => {
     const r = rotate({ x: 0, y: s, z: 0, w: s }, { x: 1, y: 0, z: 0 }, { x: 0, y: 0, z: 0 });
     expect(r.x).toBeCloseTo(0, 12);
     expect(r.z).toBeCloseTo(-1, 12);
+  });
+});
+
+describe('flatTilt', () => {
+  /** Angle between the system's ecliptic north, turned into galaxy space, and galactic north. */
+  const tiltOf = (q: Quat) => Math.acos(Math.min(1, rotate(q, { x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 0 }).y));
+
+  it('gives deterministic unit quaternions', () => {
+    const a = flatTilt(new Rng(7));
+    expect(flatTilt(new Rng(7))).toEqual(a);
+    expect(Math.hypot(a.x, a.y, a.z, a.w)).toBeCloseTo(1, 12);
+  });
+
+  it('keeps every ecliptic within the maximum tilt, spread over the whole cap and every heading', () => {
+    const rng = new Rng(42);
+    const tilts: number[] = [];
+    const headings = new Set<number>();
+    for (let i = 0; i < 2000; i++) {
+      const q = flatTilt(rng);
+      tilts.push(tiltOf(q));
+      const n = rotate(q, { x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 0 });
+      headings.add(Math.floor(((Math.atan2(n.z, n.x) + Math.PI) / (2 * Math.PI)) * 8));
+    }
+    tilts.sort((a, b) => a - b);
+    expect(tilts[tilts.length - 1]!).toBeLessThanOrEqual(MAX_GALACTIC_TILT + 1e-9);
+    // Even over the cap (cos θ uniform): the median is acos((1 + cos max) / 2), ~21° for a 30° cap.
+    const median = tilts[tilts.length >> 1]!;
+    expect(median).toBeCloseTo(Math.acos((1 + Math.cos(MAX_GALACTIC_TILT)) / 2), 1);
+    expect(tilts[Math.floor(tilts.length * 0.9)]!).toBeGreaterThan(0.8 * MAX_GALACTIC_TILT);
+    expect(headings.size).toBe(8);
+  });
+
+  it('is what generated systems get', () => {
+    const galaxy = generateGalaxy(1337);
+    for (const ref of galaxy.stars.slice(0, 200)) {
+      expect(tiltOf(generateSystem(ref).galacticTilt)).toBeLessThanOrEqual(MAX_GALACTIC_TILT + 1e-9);
+    }
   });
 });
 
