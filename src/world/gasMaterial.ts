@@ -73,6 +73,14 @@ ${SIMPLEX_GLSL}
   }
 `;
 
+/** The colour of a gas giant's haze: the bands' average, lightened (the air scatters more than the clouds reflect). */
+export function gasHazeColor(bands: readonly string[]): string {
+  const mean = new THREE.Color(0, 0, 0);
+  for (const b of bands) mean.add(new THREE.Color(b));
+  mean.multiplyScalar(1 / Math.max(1, bands.length));
+  return '#' + mean.lerp(new THREE.Color(1, 1, 1), 0.1).getHexString();
+}
+
 const TAU = Math.PI * 2;
 
 /** `seed * factors` (one per axis), wrapped to [0, 2π) so the GPU's sine keeps its precision. */

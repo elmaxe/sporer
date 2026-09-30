@@ -5,10 +5,10 @@ import { orbitPosition, type Orbit } from '../gen/orbit';
 import { describeClimate, type ClimateData } from '../gen/climate';
 import type { PlanetStyle, PlanetType, RingData } from '../gen/system';
 import type { CelestialBody } from './CelestialBody';
-import { atmosphereLook } from '../gen/atmosphere';
+import { atmosphereLook, gasHazeLook } from '../gen/atmosphere';
 import { createAtmosphere, type AtmosphereSun } from './atmosphereShell';
 import { createLavaLook, type LavaLook } from './lavaMaterial';
-import { createGasMaterial } from './gasMaterial';
+import { createGasMaterial, gasHazeColor } from './gasMaterial';
 import { createGasGeometry, createRings, createTerrainGeometry } from './planetGeometry';
 import { createWeatherLook, type WeatherLook } from './weatherLook';
 import { globeRadius } from '../planet/frame';
@@ -110,8 +110,8 @@ export class Planet implements Entity, CelestialBody {
     tilted.add(this.surface);
     if (config.rings) tilted.add(createRings(config.rings, seed));
     this.object.add(tilted);
-    const look = config.atmosphere && config.climate ? atmosphereLook(config.climate, radius) : null;
-    if (look) this.object.add(createAtmosphere(radius, config.atmosphere!, look, sun));
+    const look = gas ? gasHazeLook : config.atmosphere && config.climate ? atmosphereLook(config.climate, radius) : null;
+    if (look) this.object.add(createAtmosphere(radius, gas ? gasHazeColor(config.bands) : config.atmosphere!, look, sun));
 
     this.object.name = config.name;
     this.positionAt(0, this.position);

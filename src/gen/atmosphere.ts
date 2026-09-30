@@ -62,6 +62,14 @@ export interface AtmosphereLook {
   depth: number;
 }
 
+/**
+ * A gas giant's haze: there is no ground to stand on, so its cloud tops sit
+ * under a deep, soft blanket of gas that thickens towards the limb and lets
+ * the bands show through dimmed. Stylised like the rest of the looks above
+ * (no real scale height: a giant's is ~25 km on a 60 000 km radius), tuned by eye.
+ */
+export const gasHazeLook: AtmosphereLook = { scaleHeight: 0.025, top: 1.15, depth: 0.15 };
+
 /** The look of a body's atmosphere, or null when it has none. `gameRadius` is the body's radius in system units. */
 export function atmosphereLook(
   c: Pick<ClimateData, 'temperature' | 'gravity' | 'composition' | 'pressure'>,

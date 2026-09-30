@@ -2,10 +2,10 @@ import * as THREE from 'three';
 import type { Entity } from '../core/Entity';
 import { detailedTerrain } from '../gen/noise';
 import { isGas, type PlanetConfig } from '../world/Planet';
-import { atmosphereLook } from '../gen/atmosphere';
+import { atmosphereLook, gasHazeLook } from '../gen/atmosphere';
 import { createAtmosphere } from '../world/atmosphereShell';
 import { SEA_RENDER_ORDER, createLavaLook, type LavaLook } from '../world/lavaMaterial';
-import { createGasMaterial } from '../world/gasMaterial';
+import { createGasMaterial, gasHazeColor } from '../world/gasMaterial';
 import { createRings, floorRadius, gasSampler, peakRadius, terrainSampler } from '../world/planetGeometry';
 import { createCubeSphere } from '../world/cubeSphere';
 import { GROUND_LAYER, GroundDepth } from '../world/groundDepth';
@@ -88,9 +88,13 @@ export class PlanetGlobe implements Entity {
     if (seaFloor) this.object.add(createSea(config.type, style.sea!, R, this.lava ? this.lava.createSeaMaterial(this.sun, this.sunLight, this.ambientLight) : null));
     if (config.rings) this.object.add(createRings(config.rings, seed, PLANET_SCALE));
     // The same look as in the system view (in planet radii), so the two match across the zoom.
-    const look = config.atmosphere && config.climate ? atmosphereLook(config.climate, config.radius) : null;
-    this.ground = look ? new GroundDepth() : null;
-    if (look) this.object.add(createAtmosphere(R, config.atmosphere!, look, { vector: this.sun, point: false }, ATMOSPHERE_SEGMENTS, this.ground));
+    const look = gas ? gasHazeLook : config.atmosphere && config.climate ? atmosphereLook(config.climate, config.radius) : null;
+    // A gas giant's surface is a smooth sphere, so its haze stops at that sphere: no ground depth to read.
+    this.ground = look && !gas ? new GroundDepth() : null;
+    if (look) {
+      const color = gas ? gasHazeColor(config.bands) : config.atmosphere!;
+      this.object.add(createAtmosphere(R, color, look, { vector: this.sun, point: false }, ATMOSPHERE_SEGMENTS, this.ground));
+    }
     this.weather = gas ? null : createWeatherLook(config, this.lava?.activity ?? null);
     if (this.weather) this.object.add(this.weather.createCloudLayer(1, CLOUD_SEGMENTS, { vector: this.sun, point: false }));
     scene.add(this.object);
