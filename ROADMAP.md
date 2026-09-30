@@ -260,9 +260,47 @@ Status: ⬜ todo · 🟨 in progress · ✅ done
 ### 20. ✅ FPS counter
 - Result: `ui/FpsCounter.ts` (a global entity, in the game and the lab) with pure `ui/fps.ts` (`FpsWindow`: frames per second over half-second windows and the longest frame in each, starting over after a gap of a second or more, such as a hidden tab; `tests/fps.test.ts`). Off by default; the menu's new Display section has a Show FPS button, and the lab's panel an "FPS counter" checkbox, both the same setting in localStorage (`spore2.fps`). It reads e.g. "58 FPS · longest 34 ms", top centre on desktop and bottom centre on touch (between the stick and the buttons, clear of the HUD). The debug stats.js meter is unchanged.
 
+### 21. 🟨 Bigger planets
+- In low orbit every planet is bigger next to the UFO, so the surface has room for plants and, later, animals at Spore's sizes (a tree about the UFO's size, bushes smaller).
+- The planet level's scale is one constant, `EARTH_GLOBE_RADIUS` (an Earth-sized globe's radius in planet units, 100 today); the UFO, its altitude and the camera keep their sizes. Try 2×, 3× and 4×, screenshot them and let the user pick.
+- What has to follow the scale: the LOD's deepest level (one more per doubling, so the facets under the UFO stay as fine), `detailedTerrain`'s finest octaves (its smallest hills are ~5 units apart today; they should stay about that size in units, not grow with the planet), possibly the relief (mountains grow with the planet: ~11 → ~45 units at 4× next to a 4-unit UFO), and anything sized in planet units that should look the same next to the planet (geyser plumes, lava fountains, the camera's zoom range and the transitions' start and end distances). Things sized next to the UFO (the marker ring) stay.
+- Done when the chosen scale plays well for every planet type (smoke test), with triangles and FPS measured before and after in the lab.
+
+### 22. ⬜ The ship follows the ground
+- Zoomed in low, the UFO keeps a fixed clearance over the ground beneath it (terrain, or the sea surface over water) instead of flying above the highest peak; zooming out blends back to today's altitude above the peaks. It looks ahead along its velocity so it rises before a slope instead of into it, and climbs and sinks smoothly.
+- Clicking the globe hits the terrain as drawn, not the sea-level sphere (ray against the terrain sampler), so a click on a hillside flies to that hillside. The same ray is what later picks things on the ground.
+
+### 23. ⬜ Surface entities, with simple plants
+**Priority: a working system first.** The point of this step is the entity system (placement, level of detail, picking, remembering changes), not how the plants look. Plants are placeholders built from a few primitives (a cone or ball on a cylinder for a tree, an icosahedron or two for a bush). Don't spend time on tree generation here; that's the plant designer's job later.
+
+- Plants on habitable planets (T1–T3): trees, large bushes and small bushes, appearing with levels of detail as the UFO gets close. More species and denser cover the higher the tier.
+- Desktop first. A menu setting (Display section, saved in localStorage like Show FPS) turns plants off; off by default in touch mode.
+- No beaming or weapons yet, but the API they'll need is in: picking a plant with a ray, removing one, and turning one into a live object of its own.
+
+**Implementation notes (proposed design; confirm with the user before building):**
+
+*Data (pure, in `src/gen/`, unit-tested):*
+- Species per planet from its seed and habitability tier: a small parameter set per species (kind: tree / large bush / small bush, height, trunk share, crown shape, colours). The plant designer will edit these same parameters later. How many species per tier and how dense: gameplay numbers, but looked up (Spore's per-tier ecosystems; real plant densities by climate as a sanity check) with the `research` skill, not guessed.
+- Placement in cells: a fixed grid on the cube sphere (the same faces as `cubeSphereMath`), cells some tens of units across. Each cell's plants come only from `hashSeed(planet seed, face, i, j)`, so a cell is the same every visit and independent of its neighbours. Jittered points, rejected under the sea, on steep slopes and where the climate band is wrong (height, latitude); the rest pick a species by weight.
+- Every plant has a stable id (cell + index) so what the player does to it can be recorded.
+- Changes: a per-planet change list (removed ids now; moved or damaged later) kept outside the level, so a removed plant stays gone after leaving and coming back. It's also all that save/load will need.
+
+*Runtime (`src/surface/`, a new feature area):*
+- `SurfaceEntities`, a planet-level entity: generates the cells near the camera a few per frame (a time budget, like the LOD's), drops far ones, and keeps a spatial index for queries.
+- Level of detail: near, the full placeholder mesh; mid-distance, a much cheaper one (a few triangles); far, nothing. Distances scale with plant size, so trees show further out than small bushes. One `InstancedMesh` per species per level (a handful of draw calls), rebuilt per cell only when something enters, leaves or changes level. Levels crossfade with a dithered (screen-door) fade so nothing pops and nothing needs sorting.
+- Sitting on the ground: the LOD surface is coarser far away and blends between levels, so a plant at the exact terrain height can float or sink where the drawn ground is coarser. Measure how far off it is at each distance; if it shows, place plants on the drawn surface (a `LodSurface` height query) rather than on the ideal terrain.
+- Interaction API for later steps: `pick(ray)` (nearest plant along a ray; step 22's ground ray narrows it to nearby cells), `remove(id)` (records it in the change list) and `promote(id)` (takes a plant out of the instanced batch as its own live object, for the beam to lift or a weapon to hit). This step shows the plant under the pointer in the tooltip to prove `pick` works.
+- The planet lab draws the plants too (a toggle and a count in the readout), since it builds the game's own planet level.
+
+*Checks:* unit tests for determinism, independent cells, stable ids, nothing under the sea, no plants on T0 and more on higher tiers, and the change list. Smoke test: plants near the ship on a T3 planet, none on a T0 one, and the setting turns them off. Triangles, draw calls and FPS measured in the lab with plants on and off.
+
 ## Later / ideas
 
-- Abduction beam, spice economy, colonising planets
+- **Beam (abduction):** lift a plant (later an animal) into the UFO with a ray beam, using the surface entities' `pick` and `promote`. For now a beamed plant just disappears (recorded in the change list). Aborting the beam drops it, and it falls back to the ground (this may need a Rapier world on the planet level, or a scripted fall).
+- **Plant lab / designer:** a page like the planet lab for making and checking plants, and the procedural generator behind them (real trees and bushes instead of step 23's placeholders), editing the same species parameters.
+- **Weapons:** hit things on the surface (knock over, burn, destroy) through the same entity API.
+- **Animals and citizens:** moving surface entities built on the same system (placement, LOD, picking, change list), plus movement and behaviour.
+- Spice economy, colonising planets
 - Other empires and diplomacy
 - Save/load (only the seed + player state are needed)
 - LOD for the sea (revisit): the low-orbit water, lava sea and atmosphere are still fixed cube spheres (25k, 16k and 16k triangles), so zoomed out the water alone is ~6× the terrain's triangles. Options (see `docs/research/planet-lod.md`, Open questions): put the water on its own `LodSurface` (flat sampler, same horizon culling and blending; adds a draw call per chunk), or swap between a few prebuilt resolutions by camera distance. Lava needs its per-vertex flow moved per pixel first, or its glow pattern changes as chunks split. Measure triangles and FPS before and after.
