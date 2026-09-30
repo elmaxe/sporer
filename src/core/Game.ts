@@ -45,8 +45,11 @@ export class Game {
     container: HTMLElement,
     readonly debug: Debug,
   ) {
-    this.renderer = new THREE.WebGLRenderer({ antialias: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // ?quality=low: half resolution, no antialiasing. About 5× the frame rate under software WebGL
+    // (headless Chrome's SwiftShader, which the smoke test runs on).
+    const low = new URLSearchParams(location.search).get('quality') === 'low';
+    this.renderer = new THREE.WebGLRenderer({ antialias: !low });
+    this.renderer.setPixelRatio(low ? 0.5 : Math.min(window.devicePixelRatio, 2));
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     container.appendChild(this.renderer.domElement);
 
