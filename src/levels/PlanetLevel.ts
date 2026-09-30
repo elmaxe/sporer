@@ -85,7 +85,7 @@ export class PlanetLevel extends Level {
   ) {
     super();
     this.frame = this.add(new PlanetFrame(body, system.world.time, debug));
-    const globe = this.add(new PlanetGlobe(this.scene, body.config, this.frame));
+    const globe = this.add(new PlanetGlobe(this.scene, body.config, this.frame, camera, debug));
     this.eruptions = globe.lava
       ? this.add(new LavaEruptions(this.scene, this.frame, globe.lava.activity, body.config.seed, body.config.style.sea!, debug))
       : null;

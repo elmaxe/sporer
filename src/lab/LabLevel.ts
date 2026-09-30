@@ -267,7 +267,7 @@ export class LabLevel extends Level {
     let target: THREE.Object3D = this.pivot;
     let up: THREE.Vector3 | undefined;
     if (globeView) {
-      const globe = (this.globe = this.add(new PlanetGlobe(this.scene, config, clock)));
+      const globe = (this.globe = this.add(new PlanetGlobe(this.scene, config, clock, camera, debug)));
       this.sun.link(globe);
       const R = (this.radius = globe.radius);
       this.eruptions = globe.lava
@@ -360,11 +360,11 @@ export class LabLevel extends Level {
     if (zoom !== undefined) this.orbit.setDistance(zoom * this.radius);
   }
 
-  /** Triangles drawn for the planet (surface, sea, rings, atmosphere). */
+  /** Triangles drawn for the planet (surface, sea, rings, atmosphere; the surface chunks shown now, before frustum culling). */
   get triangles(): number {
     let n = 0;
     const root = this.globe?.object ?? this.bodies?.planet.object;
-    root?.traverse((o) => {
+    root?.traverseVisible((o) => {
       if (!(o instanceof THREE.Mesh)) return;
       const g = o.geometry as THREE.BufferGeometry;
       n += (g.index ? g.index.count : g.getAttribute('position').count) / 3;

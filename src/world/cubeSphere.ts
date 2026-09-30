@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { CUBE_FACES, spherify } from './cubeSphereMath';
 
 /*
  * Cube sphere: a cube whose six faces are `segments` × `segments` grids,
@@ -21,20 +22,6 @@ export function cubeSphereTriangles(segments: number): number {
 }
 
 /**
- * The cube's faces: outward axis, and the grid's u and v axes with
- * u × v = outward, so the triangles wind counter-clockwise seen from outside.
- * Each axis is [index (0 = x, 1 = y, 2 = z), sign].
- */
-const FACES: readonly (readonly [readonly [number, number], readonly [number, number], readonly [number, number]])[] = [
-  [[0, 1], [1, 1], [2, 1]], // +X: y × z
-  [[0, -1], [2, 1], [1, 1]], // -X: z × y
-  [[1, 1], [2, 1], [0, 1]], // +Y: z × x
-  [[1, -1], [0, 1], [2, 1]], // -Y: x × z
-  [[2, 1], [0, 1], [1, 1]], // +Z: x × y
-  [[2, -1], [1, 1], [0, 1]], // -Z: y × x
-];
-
-/**
  * A unit-direction cube sphere of `radius` with `segments` grid cells along
  * each cube edge: indexed positions and normals (the outward direction), no UVs.
  */
@@ -52,7 +39,9 @@ export function createCubeSphere(radius: number, segments: number): THREE.Buffer
   let vertices = 0;
   let triangles = 0;
 
-  for (const [out, u, v] of FACES) {
+  const dir = { x: 0, y: 0, z: 0 };
+
+  for (const [out, u, v] of CUBE_FACES) {
     for (let j = 0; j <= n; j++) {
       for (let i = 0; i <= n; i++) {
         lattice[out[0]] = out[1] > 0 ? n : 0;
@@ -64,23 +53,13 @@ export function createCubeSphere(radius: number, segments: number): THREE.Buffer
           index = vertices++;
           welded.set(key, index);
           // Cube coordinates in [-1, 1], computed from the lattice so shared points match exactly.
-          const x = (2 * lattice[0]! - n) / n;
-          const y = (2 * lattice[1]! - n) / n;
-          const z = (2 * lattice[2]! - n) / n;
-          const x2 = x * x;
-          const y2 = y * y;
-          const z2 = z * z;
-          const px = x * Math.sqrt(1 - y2 / 2 - z2 / 2 + (y2 * z2) / 3);
-          const py = y * Math.sqrt(1 - x2 / 2 - z2 / 2 + (x2 * z2) / 3);
-          const pz = z * Math.sqrt(1 - x2 / 2 - y2 / 2 + (x2 * y2) / 3);
-          // The mapping lands on the sphere; normalising removes rounding.
-          const inv = 1 / Math.hypot(px, py, pz);
-          normals[index * 3] = px * inv;
-          normals[index * 3 + 1] = py * inv;
-          normals[index * 3 + 2] = pz * inv;
-          positions[index * 3] = px * inv * radius;
-          positions[index * 3 + 1] = py * inv * radius;
-          positions[index * 3 + 2] = pz * inv * radius;
+          spherify((2 * lattice[0]! - n) / n, (2 * lattice[1]! - n) / n, (2 * lattice[2]! - n) / n, dir);
+          normals[index * 3] = dir.x;
+          normals[index * 3 + 1] = dir.y;
+          normals[index * 3 + 2] = dir.z;
+          positions[index * 3] = dir.x * radius;
+          positions[index * 3 + 1] = dir.y * radius;
+          positions[index * 3 + 2] = dir.z * radius;
         }
         faceGrid[j * side + i] = index;
       }
