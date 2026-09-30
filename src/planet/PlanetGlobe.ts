@@ -5,17 +5,18 @@ import { isGas, type PlanetConfig } from '../world/Planet';
 import { atmosphereLook } from '../gen/atmosphere';
 import { createAtmosphere } from '../world/atmosphereShell';
 import { SEA_RENDER_ORDER, createLavaLook, type LavaLook } from '../world/lavaMaterial';
-import {
-  createGasGeometry,
-  createRings,
-  createTerrainGeometry,
-  peakRadius,
-} from '../world/planetGeometry';
-import { PLANET_SCALE, globeDetail, globeRadius } from './frame';
+import { createRings, floorRadius, gasSampler, peakRadius, terrainSampler } from '../world/planetGeometry';
+import { createCubeSphere } from '../world/cubeSphere';
+import type { Debug } from '../core/Debug';
+import { PLANET_SCALE, globeRadius } from './frame';
+import { LodSurface, addLodDebug } from './LodSurface';
 import type { RenderClock } from './PlanetFrame';
 
-/** Gas giants are smooth-shaded, so their bands need less detail than terrain as they grow. */
-const GAS_DETAIL = 64;
+/** Cube sphere segments of the sea surface, and of the lava sea, whose shader works out its flow per vertex. */
+const SEA_SEGMENTS = 46;
+const LAVA_SEA_SEGMENTS = 37;
+/** Cube sphere segments of the atmosphere shell. */
+const ATMOSPHERE_SEGMENTS = 37;
 /** Mountains are exaggerated a little up close, where the system view's relief reads as flat. */
 export const RELIEF_SCALE = 1.6;
 /** A vent's glow on the lava sea, radians. */
@@ -25,8 +26,9 @@ const VENT_RADIUS = 0.05;
  * The visited planet or moon, at its true size (see globeRadius) and detailed: the
  * terrain from the same noise as the system view plus finer octaves, a sea
  * surface for worlds with liquid, rings and the atmosphere glow. Gas giants
- * are the same banded sphere as in the system view, only finer. Static in the
- * planet level's body frame.
+ * are the same banded sphere as in the system view, only finer. The surface
+ * refines where the camera looks (LodSurface). Static in the planet level's
+ * body frame.
  */
 export class PlanetGlobe implements Entity {
   readonly object = new THREE.Group();
@@ -42,10 +44,16 @@ export class PlanetGlobe implements Entity {
   /** Lava worlds and moons: the animated sea and its eruptions' schedule. */
   readonly lava: LavaLook | null;
 
+  private readonly surface: LodSurface;
+  private readonly cameraPosition = new THREE.Vector3();
+
   constructor(
     private readonly scene: THREE.Scene,
     config: PlanetConfig,
     private readonly frame: RenderClock,
+    /** The surface refines where this camera is. */
+    private readonly camera: THREE.Camera,
+    debug: Debug,
   ) {
     const { seed, style } = config;
     const R = (this.radius = globeRadius(config.radius));
@@ -54,34 +62,43 @@ export class PlanetGlobe implements Entity {
     const seaFloor = !gas && style.sea !== null;
     this.lava = gas ? null : createLavaLook(config, VENT_RADIUS);
 
-    const surface = new THREE.Mesh(
+    this.surface = new LodSurface(
+      R,
+      gas ? R : floorRadius(R, style, RELIEF_SCALE, seaFloor),
+      this.top,
       gas
-        ? createGasGeometry(R, seed, config.bands, GAS_DETAIL, true)
-        : createTerrainGeometry(R, seed, style, {
-            // Earth-sized: 20·61² ≈ 74k triangles.
-            detail: globeDetail(R),
-            noise: detailedTerrain,
-            reliefScale: RELIEF_SCALE,
-            seaFloor,
-          }),
+        ? gasSampler(R, seed, config.bands, true)
+        : terrainSampler(R, seed, style, { noise: detailedTerrain, reliefScale: RELIEF_SCALE, seaFloor }),
       new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: !gas, roughness: 0.9 }),
     );
-    surface.name = 'Surface';
-    this.object.add(surface);
+    this.object.add(this.surface.object);
+    addLodDebug(debug);
     if (seaFloor) this.object.add(createSea(config.type, style.sea!, R, this.lava ? this.lava.createSeaMaterial(this.sun, this.sunLight, this.ambientLight) : null));
     if (config.rings) this.object.add(createRings(config.rings, seed, PLANET_SCALE));
     // The same look as in the system view (in planet radii), so the two match across the zoom.
     const look = config.atmosphere && config.climate ? atmosphereLook(config.climate, config.radius) : null;
-    if (look) this.object.add(createAtmosphere(R, config.atmosphere!, look, { vector: this.sun, point: false }, 128));
+    if (look) this.object.add(createAtmosphere(R, config.atmosphere!, look, { vector: this.sun, point: false }, ATMOSPHERE_SEGMENTS));
     scene.add(this.object);
-    this.update();
+    this.update(0);
   }
 
-  update(): void {
+  /** True when the surface has every chunk the camera wants (for automation). */
+  get settled(): boolean {
+    return this.surface.settled;
+  }
+
+  /** The surface's chunks drawn now and their depths (the lab's readout). */
+  lodStats(): { chunks: number; minDepth: number; maxDepth: number } {
+    return this.surface.stats();
+  }
+
+  update(frameDt: number): void {
     this.lava?.animate(this.frame.renderTime);
+    this.surface.update(this.object.worldToLocal(this.camera.getWorldPosition(this.cameraPosition)), frameDt);
   }
 
   dispose(): void {
+    this.surface.dispose();
     this.scene.remove(this.object);
     this.object.traverse((o) => {
       if (o instanceof THREE.Mesh) {
@@ -99,7 +116,7 @@ export class PlanetGlobe implements Entity {
  */
 function createSea(type: PlanetConfig['type'], color: string, radius: number, lava: THREE.Material | null): THREE.Mesh {
   // The lava shader works out its flow per vertex, so it gets fewer (still smooth at the horizon).
-  const geometry = lava ? new THREE.SphereGeometry(radius, 128, 64) : new THREE.SphereGeometry(radius, 160, 80);
+  const geometry = createCubeSphere(radius, lava ? LAVA_SEA_SEGMENTS : SEA_SEGMENTS);
   let material: THREE.Material;
   if (lava) {
     material = lava;

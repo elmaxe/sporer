@@ -3,6 +3,7 @@ import { Game } from '../core/Game';
 import { addLavaDebug } from '../world/lavaMaterial';
 import { addAtmosphereDebug } from '../world/atmosphereShell';
 import { Physics } from '../physics/Physics';
+import { FpsCounter } from '../ui/FpsCounter';
 import { TouchControls } from '../ui/TouchControls';
 import { LabInfo } from './LabInfo';
 import { LabPanel } from './LabPanel';
@@ -17,7 +18,8 @@ async function main(): Promise<void> {
   const [debug] = await Promise.all([Debug.create({ force: true, title: 'Planet lab' }), Physics.init()]);
   const game = new Game(document.getElementById('app')!, debug);
   const lab = new PlanetLab(game, debug, PlanetLab.stateFromUrl(new URL(location.href)));
-  new LabPanel(debug.panel!, lab);
+  const fps = game.add(new FpsCounter());
+  new LabPanel(debug.panel!, lab, fps);
   // The game's own tunables for what the lab shows, below the lab's controls.
   debug.nestFolders('Game tunables');
   addLavaDebug(debug);

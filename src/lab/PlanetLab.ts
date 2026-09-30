@@ -126,9 +126,14 @@ export class PlanetLab {
     return labClimateData(this.planet);
   }
 
-  /** True once the latest edit is built and drawn (for automation). */
+  /** True once the latest edit is built and drawn, the surface refined for the view (for automation). */
   get ready(): boolean {
-    return this.timer === null && this._level !== null && this.framesSinceBuild >= READY_FRAMES;
+    return this.timer === null && this._level !== null && this.framesSinceBuild >= READY_FRAMES && this.settled;
+  }
+
+  /** The globe's surface has every chunk the camera wants (always, in the system view). */
+  private get settled(): boolean {
+    return this._level?.globe?.settled ?? true;
   }
 
   /** Resolves once `ready`. */
@@ -305,8 +310,10 @@ export class PlanetLab {
   }
 
   private afterFrame(): void {
-    if (this.timer !== null || this.framesSinceBuild >= READY_FRAMES) return;
-    if (++this.framesSinceBuild < READY_FRAMES) return;
+    // Frames count once the surface has refined for the current view.
+    if (this.timer !== null || !this.settled) return;
+    if (this.framesSinceBuild < READY_FRAMES) this.framesSinceBuild++;
+    if (!this.ready || this.waiters.length === 0) return;
     const waiters = this.waiters;
     this.waiters = [];
     for (const w of waiters) w();

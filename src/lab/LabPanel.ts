@@ -16,6 +16,7 @@ import {
   type LabKind,
   type LabPlanet,
 } from './labPlanet';
+import type { FpsCounter } from '../ui/FpsCounter';
 import type { PlanetLab } from './PlanetLab';
 
 const COMPOSITIONS: Record<string, Composition> = {
@@ -63,6 +64,8 @@ export class LabPanel {
   constructor(
     private readonly gui: GUI,
     private readonly lab: PlanetLab,
+    /** The FPS counter, switched from the Lab folder (the same setting as the game menu's Show FPS). */
+    private readonly fps: FpsCounter,
   ) {
     this.buildLab();
     this.buildLight();
@@ -98,6 +101,7 @@ export class LabPanel {
     f.add(view, 'wireframe').onChange(() => lab.applyLive());
     f.add(view, 'axes').name('axes (Y = spin axis)').onChange(() => lab.applyLive());
     f.add(view, 'starfield').onChange(() => lab.rebuild());
+    f.add(this.fps, 'shown').name('FPS counter');
     const actions = {
       random: () => void lab.generate(),
       sameKind: () => void lab.generate(lab.nextSeed(), { type: this.p.type, kind: this.p.kind }),

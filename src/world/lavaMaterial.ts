@@ -3,6 +3,7 @@ import type { Debug } from '../core/Debug';
 import { EruptionSchedule, eruptionGlow, lavaActivity, type LavaActivity } from '../gen/lavaActivity';
 import { globeRadius } from '../planet/frame';
 import type { PlanetConfig } from './Planet';
+import { createCubeSphere } from './cubeSphere';
 import { SIMPLEX_GLSL } from './noiseGlsl';
 
 /** Global multipliers over every lava sea (debug tuning). */
@@ -226,11 +227,11 @@ export class LavaLook {
 
   /**
    * A cheaper lava sea for small, distant views (the system view and a
-   * visited planet's moons): a lit icosphere at sea level (`detail`
-   * subdivisions: 20·(detail+1)² triangles, evenly spaced), whose glow is worked out per vertex from the broad flow and the vents
+   * visited planet's moons): a lit cube sphere at sea level (`segments`
+   * per cube face: 12·segments² triangles, evenly spaced), whose glow is worked out per vertex from the broad flow and the vents
    * (like the stars' spots). The crust plates and their seams are averaged out.
    */
-  createSeaSphere(radius: number, detail = 7): THREE.Mesh {
+  createSeaSphere(radius: number, segments = 10): THREE.Mesh {
     const material = new THREE.MeshStandardMaterial({ color: this.crust, roughness: 0.9 });
     material.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, this.uniforms);
@@ -251,7 +252,7 @@ export class LavaLook {
         .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vLavaGlow;');
     };
     material.customProgramCacheKey = () => 'lava-sea';
-    const mesh = new THREE.Mesh(new THREE.IcosahedronGeometry(radius, detail), material);
+    const mesh = new THREE.Mesh(createCubeSphere(radius, segments), material);
     mesh.name = 'Lava';
     mesh.renderOrder = SEA_RENDER_ORDER;
     return mesh;

@@ -25,15 +25,6 @@ export function globeRadius(systemRadius: number): number {
 }
 
 /**
- * Icosphere subdivisions for a globe: 60 at Earth size, growing with the
- * square root of the radius (so bigger globes get finer, but a super-Earth's
- * build doesn't stall the zoom), within [min, max].
- */
-export function globeDetail(radius: number, min = 32, max = 84): number {
-  return Math.round(Math.min(max, Math.max(min, 60 * Math.sqrt(radius / EARTH_GLOBE_RADIUS))));
-}
-
-/**
  * Autopilot speed factor over a globe: √(radius / Earth's), within
  * [0.5, 2.1]. A giant's surface still takes longer to cross than a dwarf's,
  * just not 17× longer.

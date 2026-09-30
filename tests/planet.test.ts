@@ -6,7 +6,6 @@ import {
   PLANET_SCALE,
   angularRadius,
   bodyFrame,
-  globeDetail,
   globeRadius,
   lightDirection,
   localToSystem,
@@ -236,14 +235,6 @@ describe('globe sizes', () => {
     const dip = (r: number, altitude: number) => Math.acos(r / (r + altitude));
     const radii = [2, 5, 8, 12, 20, 34].map(globeRadius);
     for (let i = 1; i < radii.length; i++) expect(dip(radii[i]!, 12)).toBeLessThan(dip(radii[i - 1]!, 12));
-  });
-
-  it('adds terrain detail with size, within a budget', () => {
-    expect(globeDetail(EARTH_GLOBE_RADIUS)).toBe(60);
-    expect(globeDetail(10)).toBe(32);
-    expect(globeDetail(globeRadius(SIZE_CLASS_RADIUS.superEarth[1]))).toBeLessThanOrEqual(84);
-    expect(globeDetail(150)).toBeGreaterThan(60);
-    expect(globeDetail(50)).toBeLessThan(60);
   });
 
   it('speeds up the autopilot on big globes, but not enough to hide the size', () => {

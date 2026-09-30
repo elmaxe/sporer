@@ -2,19 +2,22 @@ import * as THREE from 'three';
 import { terrainNoise } from '../gen/noise';
 import { hashSeed, Rng } from '../gen/rng';
 import type { PlanetStyle, RingData } from '../gen/system';
+import { createCubeSphere } from './cubeSphere';
+import type { Vec3Like } from './cubeSphereMath';
 
 /*
  * Planet mesh builders shared by the system view (small, coarse bodies) and
- * the planet level (one big, fine globe). `detail` is the icosphere
- * subdivision: 20·(detail+1)² triangles.
+ * the planet level (one big, fine globe). `segments` is the cube sphere's
+ * grid size per cube face (see cubeSphere.ts): 12·segments² triangles, evenly
+ * spread, with no poles.
  */
 
 
 export type TerrainNoise = (x: number, y: number, z: number, seed: number) => number;
 
 export interface TerrainOptions {
-  /** Icosphere subdivision. */
-  detail: number;
+  /** Cube sphere segments per cube face edge. */
+  segments: number;
   noise?: TerrainNoise;
   /** Multiplies the style's relief (the close-up globe exaggerates it a little). */
   reliefScale?: number;
@@ -54,34 +57,66 @@ export function terrainPainter(style: PlanetStyle, seaFloor = false): TerrainPai
   };
 }
 
-/** Icosphere displaced by noise, with per-vertex colours and a flat sea. */
+/**
+ * A planet's surface as a function of direction: for the unit direction
+ * `dir`, writes the colour into `color` and returns the radius there. The
+ * whole-globe meshes and the planet level's LOD chunks are built from these.
+ */
+export type SurfaceSampler = (dir: Vec3Like, color: THREE.Color) => number;
+
+/** Terrain displaced by noise and coloured by height (see TerrainOptions; `segments` is unused). */
+export function terrainSampler(
+  radius: number,
+  seed: number,
+  style: PlanetStyle,
+  { noise = terrainNoise, reliefScale = 1, seaFloor = false }: Omit<TerrainOptions, 'segments'>,
+): SurfaceSampler {
+  const paint = terrainPainter(style, seaFloor);
+  const relief = style.relief * reliefScale;
+  return (dir, color) => {
+    const height = paint(noise(dir.x, dir.y, dir.z, seed), color);
+    return radius * (1 + relief * (height < 0 ? SEA_FLOOR_DEPTH : 1) * height);
+  };
+}
+
+/** How deep a `seaFloor` sinks, relative to the relief above sea level. */
+const SEA_FLOOR_DEPTH = 0.6;
+
+/** Radius of the lowest point of a terrain planet built with these options (the sea floor's deepest, else sea level). */
+export function floorRadius(radius: number, style: PlanetStyle, reliefScale = 1, seaFloor = false): number {
+  return seaFloor ? radius * (1 - style.relief * reliefScale * SEA_FLOOR_DEPTH) : radius;
+}
+
+/** Cube sphere displaced by noise, with per-vertex colours and a flat sea. */
 export function createTerrainGeometry(
   radius: number,
   seed: number,
   style: PlanetStyle,
-  { detail, noise = terrainNoise, reliefScale = 1, seaFloor = false }: TerrainOptions,
+  options: TerrainOptions,
 ): THREE.BufferGeometry {
-  const geometry = new THREE.IcosahedronGeometry(radius, detail);
+  return sampledSphere(createCubeSphere(1, options.segments), terrainSampler(radius, seed, style, options), true);
+}
+
+/**
+ * Moves each vertex of the unit cube sphere `geometry` out to the sampled
+ * radius and colours it. Indexed: each point is sampled once and shared by
+ * its triangles, so the surface stays watertight. `displaced` recomputes the
+ * normals (else they stay pointing straight out: a smooth sphere).
+ */
+function sampledSphere(geometry: THREE.BufferGeometry, sample: SurfaceSampler, displaced: boolean): THREE.BufferGeometry {
   const position = geometry.getAttribute('position') as THREE.BufferAttribute;
   const colors = new Float32Array(position.count * 3);
   const dir = new THREE.Vector3();
   const color = new THREE.Color();
-  const paint = terrainPainter(style, seaFloor);
-  const relief = style.relief * reliefScale;
-
   for (let i = 0; i < position.count; i++) {
-    dir.fromBufferAttribute(position, i).normalize();
-    const height = paint(noise(dir.x, dir.y, dir.z, seed), color);
-
-    // The geometry is non-indexed, but shared corners have identical positions
-    // and therefore identical noise, so the surface stays watertight.
-    dir.multiplyScalar(radius * (1 + relief * (height < 0 ? 0.6 : 1) * height));
+    dir.fromBufferAttribute(position, i);
+    dir.multiplyScalar(sample(dir, color));
     position.setXYZ(i, dir.x, dir.y, dir.z);
     color.toArray(colors, i * 3);
   }
-
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  geometry.computeVertexNormals();
+  if (displaced) geometry.computeVertexNormals();
+  geometry.computeBoundingSphere();
   return geometry;
 }
 
@@ -111,6 +146,15 @@ export function gasPainter(seed: number, bands: readonly string[], streaks = fal
   };
 }
 
+/** A gas giant's cloud tops: a sphere of `radius` striped by `gasPainter`. */
+export function gasSampler(radius: number, seed: number, bands: readonly string[], streaks = false): SurfaceSampler {
+  const paint = gasPainter(seed, bands, streaks);
+  return (dir, color) => {
+    paint(dir.x, dir.y, dir.z, color);
+    return radius;
+  };
+}
+
 /**
  * Smooth sphere striped by latitude, the stripe edges wobbled by noise.
  * `streaks` adds thin, wavy cloud streaks for close-up views.
@@ -119,28 +163,12 @@ export function createGasGeometry(
   radius: number,
   seed: number,
   bands: readonly string[],
-  detail: number,
+  segments: number,
   streaks = false,
 ): THREE.BufferGeometry {
   // Stripe edges follow triangle edges, so this wants a finer sphere than terrain.
-  const geometry = new THREE.IcosahedronGeometry(radius, detail);
-  const position = geometry.getAttribute('position') as THREE.BufferAttribute;
-  const normals = new Float32Array(position.count * 3);
-  const colors = new Float32Array(position.count * 3);
-  const paint = gasPainter(seed, bands, streaks);
-
-  const dir = new THREE.Vector3();
-  const color = new THREE.Color();
-  for (let i = 0; i < position.count; i++) {
-    dir.fromBufferAttribute(position, i).normalize();
-    dir.toArray(normals, i * 3);
-    paint(dir.x, dir.y, dir.z, color);
-    color.toArray(colors, i * 3);
-  }
-
-  geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
-  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  return geometry;
+  // The cube sphere's normals already point straight out: smooth shading.
+  return sampledSphere(createCubeSphere(1, segments), gasSampler(radius, seed, bands, streaks), false);
 }
 
 /**
