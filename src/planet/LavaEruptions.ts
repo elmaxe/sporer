@@ -11,19 +11,20 @@ import {
   type EruptionEvent,
   type LavaActivity,
 } from '../gen/lavaActivity';
+import { GLOBE_SIZE_FACTOR } from '../gen/planets';
 import { Rng } from '../gen/rng';
 import { AFTER_ATMOSPHERE_RENDER_ORDER } from '../world/atmosphereShell';
 import { createGlowTexture } from '../world/glowTexture';
 import type { RenderClock } from './PlanetFrame';
 
 export const eruptionParams = {
-  /** Blob size, planet-level units. */
-  blobSize: 0.6,
+  /** Blob size, planet-level units (grows with the globes, like the arcs). */
+  blobSize: 0.6 * GLOBE_SIZE_FACTOR,
   brightness: 1,
   /** Brightness of the hanging glow over big eruptions. */
   glow: 1,
-  /** Peak intensity of the light an eruption throws on the terrain around it. */
-  light: 400,
+  /** Peak intensity of the light an eruption throws on the terrain around it (it falls off as distance², which grows with the globes). */
+  light: 400 * GLOBE_SIZE_FACTOR ** 2,
 };
 
 /** Glow sprites (the brightest vents get one). */
@@ -271,7 +272,7 @@ export class LavaEruptions implements Entity {
     if (top) {
       const [x, y, z] = top.origin;
       const peak = peakHeight(top.speed, gravity);
-      this.light.position.set(x, y, z).multiplyScalar(radius + Math.max(1.5, peak * 0.4));
+      this.light.position.set(x, y, z).multiplyScalar(radius + Math.max(1.5 * GLOBE_SIZE_FACTOR, peak * 0.4));
       // Flicker: a few incommensurate wobbles.
       const flicker = 0.8 + 0.12 * Math.sin(time * 13.1) + 0.08 * Math.sin(time * 29.7 + 1.3);
       this.light.intensity = eruptionParams.light * eruptionGlow(top, time) * flicker;

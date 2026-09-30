@@ -17,7 +17,7 @@ import {
 } from '../src/gen/lavaActivity';
 import { detailedTerrain } from '../src/gen/noise';
 import { generateSystem, type MoonData, type PlanetData } from '../src/gen/system';
-import { globeRadius } from '../src/planet/frame';
+import { EARTH_GLOBE_RADIUS, globeRadius } from '../src/planet/frame';
 
 const KINDS: EruptionKind[] = ['fountain', 'eruption'];
 
@@ -137,8 +137,8 @@ describe('lavaActivity', () => {
 
   it('scales the activity with internal heat', () => {
     const b = bodies[0]!;
-    const cool = lavaActivity(b.seed, b.style, { ...b.climate!, geothermal: 0.5 }, 100);
-    const hot = lavaActivity(b.seed, b.style, { ...b.climate!, geothermal: 1 }, 100);
+    const cool = lavaActivity(b.seed, b.style, { ...b.climate!, geothermal: 0.5 }, EARTH_GLOBE_RADIUS);
+    const hot = lavaActivity(b.seed, b.style, { ...b.climate!, geothermal: 1 }, EARTH_GLOBE_RADIUS);
     expect(hot.fountain.chance).toBeGreaterThan(cool.fountain.chance);
     expect(hot.eruption.chance).toBeGreaterThan(cool.eruption.chance);
     expect(hot.fountain.speed[1]).toBeGreaterThan(cool.fountain.speed[1]);

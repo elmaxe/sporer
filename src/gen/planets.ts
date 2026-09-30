@@ -33,7 +33,7 @@ export const EARTH_GAME_RADIUS = 8;
  * (`detailedTerrain`'s octaves) and the LOD's deepest level follow it, so hills
  * and facets keep their size next to the UFO.
  */
-export const EARTH_GLOBE_RADIUS = 100;
+export const EARTH_GLOBE_RADIUS = 400;
 
 /** How many times bigger globes are than the original low-orbit scale (Earth radius 100). */
 export const GLOBE_SIZE_FACTOR = EARTH_GLOBE_RADIUS / 100;

@@ -13,7 +13,7 @@ import {
   skyScale,
   travelScale,
 } from '../src/planet/frame';
-import { SIZE_CLASS_RADIUS } from '../src/gen/planets';
+import { GLOBE_SIZE_FACTOR, SIZE_CLASS_RADIUS } from '../src/gen/planets';
 import { greatCircleDirection, sphereStep, surfaceArriveImpulse } from '../src/planet/surfaceMotion';
 import type { ArriveParams } from '../src/player/autopilot';
 
@@ -238,8 +238,8 @@ describe('globe sizes', () => {
   });
 
   it('speeds up the autopilot on big globes, but not enough to hide the size', () => {
-    expect(travelScale(EARTH_GLOBE_RADIUS)).toBe(1);
-    expect(travelScale(10)).toBe(0.5);
+    expect(travelScale(EARTH_GLOBE_RADIUS)).toBe(Math.sqrt(GLOBE_SIZE_FACTOR));
+    expect(travelScale(EARTH_GLOBE_RADIUS / 10)).toBe(0.5 * Math.sqrt(GLOBE_SIZE_FACTOR));
     // Half way round takes longer the bigger the globe.
     const crossing = (r: number) => (Math.PI * r) / travelScale(r);
     const radii = [2, 3.5, 6, 8, 12, 20, 34].map(globeRadius);
@@ -247,9 +247,10 @@ describe('globe sizes', () => {
   });
 
   it('pulls the max camera distance in for small globes', () => {
-    expect(maxViewDistance(EARTH_GLOBE_RADIUS, 260)).toBe(260);
-    expect(maxViewDistance(EARTH_GLOBE_RADIUS * 4, 260)).toBe(260);
-    expect(maxViewDistance(EARTH_GLOBE_RADIUS / 2, 260)).toBe(130);
-    expect(maxViewDistance(EARTH_GLOBE_RADIUS / 10, 260)).toBe(100);
+    const max = 260 * GLOBE_SIZE_FACTOR;
+    expect(maxViewDistance(EARTH_GLOBE_RADIUS, max)).toBe(max);
+    expect(maxViewDistance(EARTH_GLOBE_RADIUS * 4, max)).toBe(max);
+    expect(maxViewDistance(EARTH_GLOBE_RADIUS / 2, max)).toBe(max / 2);
+    expect(maxViewDistance(EARTH_GLOBE_RADIUS / 10, max)).toBe(100 * GLOBE_SIZE_FACTOR);
   });
 });

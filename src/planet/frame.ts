@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { EARTH_GAME_RADIUS, EARTH_GLOBE_RADIUS } from '../gen/planets';
+import { EARTH_GAME_RADIUS, EARTH_GLOBE_RADIUS, GLOBE_SIZE_FACTOR } from '../gen/planets';
 
 /*
  * Maths linking the planet level to the system it sits in. Pure (THREE maths
@@ -26,14 +26,16 @@ export function globeRadius(systemRadius: number): number {
 /**
  * Autopilot speed factor over a globe: √(radius / Earth's), within
  * [0.5, 2.1]. A giant's surface still takes longer to cross than a dwarf's,
- * just not 17× longer.
+ * just not 17× longer. Times √GLOBE_SIZE_FACTOR: on bigger globes the UFO
+ * is faster, though not by the whole factor, so a crossing takes a little
+ * longer and the ground doesn't race by under the (relatively smaller) ship.
  */
 export function travelScale(radius: number): number {
-  return Math.min(2.1, Math.max(0.5, Math.sqrt(radius / EARTH_GLOBE_RADIUS)));
+  return Math.sqrt(GLOBE_SIZE_FACTOR) * Math.min(2.1, Math.max(0.5, Math.sqrt(radius / EARTH_GLOBE_RADIUS)));
 }
 
 /** The low-orbit camera's max distance from the ship: `max` for Earth-sized and up, less for small globes (never below `min`). */
-export function maxViewDistance(radius: number, max: number, min = 100): number {
+export function maxViewDistance(radius: number, max: number, min = 100 * GLOBE_SIZE_FACTOR): number {
   return Math.min(max, Math.max(min, (max * radius) / EARTH_GLOBE_RADIUS));
 }
 
