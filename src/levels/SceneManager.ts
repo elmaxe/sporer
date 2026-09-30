@@ -8,6 +8,7 @@ import { arrivalDistance } from '../gen/system';
 import { zoomCurveParams } from '../player/zoomCurve';
 import { Tooltip } from '../ui/Tooltip';
 import type { Planet } from '../world/Planet';
+import { arrivalParams, clampElevation } from './arrival';
 import { GALAXY_VIEW_DISTANCE, GalaxyLevel } from './GalaxyLevel';
 import { PLANET_VIEW_DISTANCE, PlanetLevel } from './PlanetLevel';
 import type { Level } from './Level';
@@ -32,16 +33,6 @@ import { ARRIVAL_DISTANCE, SystemLevel } from './SystemLevel';
 const ORIGIN = new THREE.Vector3();
 /** A camera looks along its local -Z, so +Z points from what it looks at back to it. */
 const BACK = new THREE.Vector3(0, 0, 1);
-
-/** Arriving in a system from the galaxy, the ship flies in from far out and brakes to park near the star. */
-export const arrivalParams = {
-  /** Where it appears, as a share of the camera's distance from the star at the handover (so it's ahead of the camera). */
-  start: 0.55,
-  /** ...but at least this many times its parking distance. */
-  minStart: 1.8,
-  /** Seconds from appearing to parked, braking evenly all the way. */
-  flightTime: 3.5,
-};
 
 export type LevelMode = 'system' | 'galaxy' | 'planet';
 
@@ -92,6 +83,7 @@ export class SceneManager implements Entity {
   private readonly view = new THREE.Quaternion();
   private readonly rotation = new THREE.Quaternion();
   private readonly direction = new THREE.Vector3();
+  private readonly settle = new THREE.Vector3();
   /** The visited body's spin, from the planet level's frame (see Planet.spinAt). */
   private readonly planetSpin = (time: number) => this._planetLevel?.frame.spinAt(time) ?? 0;
 
@@ -241,10 +233,12 @@ export class SceneManager implements Entity {
       swap: () => {
         this.game.setLevel(system);
         system.eye.settleNext();
-        // Settle on the orbit closest to the matched view.
+        // Whichever side of the ecliptic the view came in from, the ship arrives along it, just above, and
+        // the camera settles over the ship on the orbit closest to the matched view that looks down on it.
         const dir = this.direction.copy(BACK).applyQuaternion(matchView());
-        to.lookFrom(dir);
-        this.flyIn(system, dir, handover);
+        const [low, high] = arrivalParams.cameraElevation;
+        to.lookFrom(clampElevation(dir, low, high, this.settle));
+        this.flyIn(system, clampElevation(dir, ...arrivalParams.shipElevation, dir), handover);
       },
       finish: () => {
         galaxy.hideCloseUp();
@@ -435,10 +429,11 @@ export class SceneManager implements Entity {
   }
 
   /**
-   * Starts the system ship's arrival: it appears on the camera's side of the
-   * star, `dir` from the barycentre and ahead of the camera (`handover` out),
-   * already flying at the star, and brakes evenly to park a few star
-   * diameters out, clear of the planets' orbits, as the camera settles.
+   * Starts the system ship's arrival: it appears `dir` from the barycentre
+   * (the camera's side of the star, just above the ecliptic), `handover` out
+   * being about where the camera is, already flying at the star, and brakes
+   * evenly to park a few star diameters out, clear of the planets' orbits,
+   * as the camera settles.
    */
   private flyIn(system: SystemLevel, dir: THREE.Vector3, handover: number): void {
     const star = system.world.stars[0]!;

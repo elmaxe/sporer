@@ -2,7 +2,7 @@
 
 ## Question
 
-Every system has a `galacticTilt` (step 7, `gen/system.ts` → `randomRotation(rng.fork('galactic'))`): a uniformly random rotation from system space into galaxy space. It tilts the galaxy band in the system sky, and in the seamless galaxy ↔ system zoom (step 9) it sets how far the view rolls as the camera settles onto the ecliptic. Playtesting: "most systems are very heavily tilted compared with the galaxy's plane. Is that realistic?"
+Every system has a `galacticTilt` (step 7, `gen/system.ts`, drawn from `rng.fork('galactic')`): a rotation from system space into galaxy space. It was uniformly random (`randomRotation`) when this note was first written, and is now `flatTilt` (see Game mapping). It tilts the galaxy band in the system sky, and in the seamless galaxy ↔ system zoom (step 9) it sets how far the view rolls as the camera settles onto the ecliptic. Playtesting: "most systems are very heavily tilted compared with the galaxy's plane. Is that realistic?"
 
 What's needed: the real distribution of the angle between a planetary system's orbital plane and the galactic plane, the Solar System's own value as a reference case, and whether the game's distribution matches.
 
@@ -16,7 +16,7 @@ What's needed: the real distribution of the angle between a planetary system's o
 
 ## Measurements
 
-The Solar System's tilt, from the two poles (spherical law of cosines), and the isotropic distribution: for random orientations the pole is uniform on the sphere, so an unsigned tilt θ has P(tilt ≤ θ) = 1 − cos θ. The game's tilt comes from 1,500 generated systems (seed 1337), as the angle between the system's +Y, turned by `galacticTilt`, and the galaxy's +Y (unsigned).
+The Solar System's tilt, from the two poles (spherical law of cosines), and the isotropic distribution: for random orientations the pole is uniform on the sphere, so an unsigned tilt θ has P(tilt ≤ θ) = 1 − cos θ. The game's tilt (as it was then, `randomRotation`) comes from 1,500 generated systems (seed 1337), as the angle between the system's +Y, turned by `galacticTilt`, and the galaxy's +Y (unsigned).
 
 Script (`npx vite-node tilt.ts`):
 
@@ -52,8 +52,9 @@ Game median 60.7° (10th percentile 24.3°, 90th 83.8°); the isotropic median i
 
 ## Game mapping
 
-- `galacticTilt` is uniformly random, so the tilts are isotropic. That matches the observations (random orientations overall), and the Solar System's 60.19° is almost exactly the median. **"Most systems are heavily tilted" is realistic**: with random orientations, 71% of systems are tilted more than 45° and only 6% are within 20° of the galactic plane, because far more directions on the sphere lie near the equator than near the poles.
-- No change was made to the generation. If the zoom's roll looks wrong, that's a presentation question (how the camera settles onto the ecliptic after the handover), not a realism one. A gameplay bias towards flatter systems would be a deliberate stylised departure and should be written down here if it's ever made.
+- With uniformly random tilts (`randomRotation`) the game matched the observations (random orientations overall), and the Solar System's 60.19° is almost exactly the median. **"Most systems are heavily tilted" is realistic**: with random orientations, 71% of systems are tilted more than 45° and only 6% are within 20° of the galactic plane, because far more directions on the sphere lie near the equator than near the poles.
+- **Deliberate departure (asked for after playtesting): systems are flatter than real ones.** `flatTilt` (`gen/galactic.ts`) turns the system by any angle about the pole, then tilts its ecliptic by at most `MAX_GALACTIC_TILT` = 30° about a random axis in the plane, spread evenly over that cap of directions (cos θ uniform in [cos 30°, 1]): median ≈ 21°, pinned in `tests/galactic.test.ts`. Real ones have a median of 60° and nearly half are more than 60° off. The reason is presentation: zooming from the galaxy into a system maps the view through the tilt, so a steep tilt meant a big roll as the camera settled onto the ecliptic, and a system upside down against the galaxy (e.g. star 2049 at seed 1337, tilted 109.7°) had you arrive from under its ecliptic. The band still crosses each sky at its own angle, just nearer the ecliptic. Every system's band and tilt changed with this (nothing else did: the tilt has its own `rng.fork`).
+- Independently of the tilt, the arrival from the galaxy always comes in just above the ecliptic (1–4°) with the camera settling 12–35° above it (`levels/arrival.ts`), since the galaxy camera can look from below the galactic plane too.
 
 ## Open questions
 

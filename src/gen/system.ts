@@ -1,4 +1,4 @@
-import { randomRotation, type Quat } from './galactic';
+import { flatTilt, type Quat } from './galactic';
 import { generateComets, type CometData } from './comets';
 import { atmosphereTint, generateClimate, type ClimateData } from './climate';
 import type { GalaxyData, StarRef } from './galaxy';
@@ -225,7 +225,7 @@ export function generateSystem(ref: StarRef): SystemData {
     planets,
     starZone,
     habitableRadius,
-    galacticTilt: randomRotation(rng.fork('galactic')),
+    galacticTilt: flatTilt(rng.fork('galactic')),
     comets,
   };
 }

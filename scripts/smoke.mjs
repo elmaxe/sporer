@@ -2,12 +2,13 @@
 // Usage: npm run smoke [-- http://localhost:5173/]   (dev server must be running)
 // Checks: W moves the ship along -Z, the autopilot flies back to a point, hovering + clicking
 // the star targets it, and the galaxy loop works (scroll out to the galaxy, click the nearest
-// star, travel, scroll in to its system, where the ship flies in and parks a few star diameters out; the galaxy
-// shows distant galaxies, twinkles, spins and draws binaries as two dots, and picking works while it's turned), a
-// real click on the speaker button starts audio; then the transitions and galaxy travel play their whooshes, and M
-// mutes. Then the planet loop (park at a planet, scroll in to low orbit, click the globe and fly, the Equal Earth
-// map is shown and a click on it sets the autopilot there, scroll all the way in and out and check the ship's
-// altitude follows, scroll back out beside it, parked as far out as the zoom says), and again for every planet
+// star, travel, scroll in to its system, where the ship flies in and parks a few star diameters out, just above the
+// ecliptic with the camera over it; the galaxy shows distant galaxies, twinkles, spins and draws binaries as two dots,
+// and picking works while it's turned), a real click on the speaker button starts audio; then the transitions and
+// galaxy travel play their whooshes, and M mutes. Then the planet loop (park at a planet, scroll in to low orbit,
+// click the globe and fly, the Equal Earth map is shown and a click on it sets the autopilot there, scroll all the
+// way in and out and check the ship's altitude follows, scroll back out beside it, parked as far out as the zoom
+// says), and again for every planet
 // type, a ringed rocky/icy/lava world and a moon in other systems (skip those with --quick). The system sky has
 // the galaxy band (screenshot looking at the galactic centre) and a smoke trail per planet and moon. Living stars: the
 // surface clock advances and storms have particles under way (and keep animating in the planet level's sky); comets
@@ -404,7 +405,9 @@ if (started) {
   // Arriving, the ship flies in from far out and brakes to park a few star diameters from the star.
   const arrival = `({ target: ship.targetBody?.name ?? null, star: world.stars[0].name, enRoute: ship.enRoute,
     distance: +ship.object.position.distanceTo(world.stars[0].position).toFixed(0),
-    park: +ship.parkDistance(world.stars[0]).toFixed(0), zone: +system.starZone.toFixed(0) })`;
+    park: +ship.parkDistance(world.stars[0]).toFixed(0), zone: +system.starZone.toFixed(0),
+    aboveEcliptic: +(ship.object.position.y - world.stars[0].position.y).toFixed(1),
+    cameraAboveShip: +(game.camera.position.y - ship.object.position.y).toFixed(1) })`;
   galaxyLoop.arrival = { flying: await evaluate(arrival) };
   for (let i = 0; i < 60 && (await evaluate(`ship.enRoute`)); i++) await sleep(250);
   galaxyLoop.arrival.parked = await evaluate(arrival);
@@ -741,6 +744,9 @@ const looped =
   !galaxyLoop.arrival.parked.enRoute &&
   Math.abs(galaxyLoop.arrival.parked.distance - galaxyLoop.arrival.parked.park) < 3 &&
   galaxyLoop.arrival.parked.distance > 2 * galaxyLoop.arrival.parked.zone &&
+  // Always arrives just above the ecliptic, with the camera over the ship.
+  galaxyLoop.arrival.parked.aboveEcliptic > 0 &&
+  galaxyLoop.arrival.parked.cameraAboveShip > 0 &&
   typeof galaxyLoop.shipSpeed === 'number';
 const sounded =
   started &&
