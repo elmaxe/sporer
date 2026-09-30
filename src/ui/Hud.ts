@@ -5,16 +5,17 @@ import type { SystemData } from '../gen/system';
 import type { Picker } from '../player/Picker';
 import type { Ship } from '../player/Ship';
 import { HelpText } from './HelpText';
+import type { SystemMap } from './SystemMap';
 import type { Tooltip } from './Tooltip';
 
 const REFRESH_SECONDS = 0.1;
 const HELP =
   'Click: fly to a planet, star or point · Scroll: move in or out (in at a planet to descend, out past the system for the galaxy) · ' +
   'Drag: rotate view · ' +
-  'WASD: nudge · E/Q: up/down · Shift: boost · M: mute';
+  'WASD: nudge · E/Q: up/down · Shift: boost · N: map · M: mute';
 const TOUCH_HELP =
   'Tap: fly to a planet, star or point · Pinch: move in or out (in at a planet to descend, out past the system for the galaxy) · ' +
-  'Drag: rotate view · Hold: identify · Stick: nudge · ▲/▼: up/down · Boost';
+  'Drag: rotate view · Hold: identify · Stick: nudge · ▲/▼: up/down · Boost · Map';
 
 /**
  * The system level's DOM overlay (see #hud in index.html). The DOM is shared
@@ -32,6 +33,8 @@ export class Hud implements Entity {
   constructor(
     private readonly ship: Ship,
     private readonly picker: Picker,
+    /** Its hovered body takes over the tooltip, and nothing behind the panel shows one. */
+    private readonly map: SystemMap,
     private readonly input: Input,
     private readonly system: SystemData,
     private readonly tooltip: Tooltip,
@@ -56,9 +59,10 @@ export class Hud implements Entity {
   update(frameDt: number): void {
     // Still updated while crossfading out, but the DOM belongs to the level taking over.
     if (!this.active) return;
-    const body = this.picker.hovered;
+    const { map } = this;
+    const body = map.pointerOver ? map.hovered : this.picker.hovered;
     if (body) {
-      const { clientX, clientY } = this.input.pointer;
+      const { clientX, clientY } = map.pointerOver ? map.pointer : this.input.pointer;
       this.tooltip.show(body, body.name, body.description, clientX, clientY, body.details, this.input.touchMode);
     } else {
       this.tooltip.hide();

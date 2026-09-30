@@ -27,16 +27,28 @@
       <div id="tooltip-info"></div>
       <div id="tooltip-details" hidden></div>
     </div>
-    <div id="planet-map" hidden>
-      <div id="planet-map-head">
-        <span id="planet-map-title"></span>
-        <button id="planet-map-toggle" type="button" aria-expanded="true">
+    <div id="planet-map" class="map-panel" hidden>
+      <div class="map-head">
+        <span id="planet-map-title" class="map-title"></span>
+        <button id="planet-map-toggle" class="map-toggle" type="button" aria-expanded="true">
           <svg class="fold" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6" /></svg>
           <svg class="close" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18" /></svg>
         </button>
       </div>
-      <div id="planet-map-body">
-        <canvas id="planet-map-marks"></canvas>
+      <div class="map-body">
+        <canvas id="planet-map-marks" class="map-canvas"></canvas>
+      </div>
+    </div>
+    <div id="system-map" class="map-panel" hidden>
+      <div class="map-head">
+        <span id="system-map-title" class="map-title"></span>
+        <button id="system-map-toggle" class="map-toggle" type="button" aria-expanded="true">
+          <svg class="fold" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+          <svg class="close" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18" /></svg>
+        </button>
+      </div>
+      <div class="map-body">
+        <canvas id="system-map-canvas" class="map-canvas"></canvas>
       </div>
     </div>
     <div id="touch-controls">

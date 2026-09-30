@@ -1,14 +1,14 @@
 // Headless browser smoke test over the Chrome DevTools Protocol.
 // Usage: npm run smoke [-- http://localhost:5173/]   (dev server must be running)
 // Checks: W moves the ship along -Z, the autopilot flies back to a point, hovering + clicking
-// the star targets it, and the galaxy loop works (scroll out to the galaxy, click the nearest
-// star, travel, scroll in to its system, where the ship flies in and parks a few star diameters out, just above the
-// ecliptic with the camera over it; the galaxy shows distant galaxies, twinkles, spins and draws binaries as two dots,
-// and picking works while it's turned), a real click on the speaker button starts audio; then the transitions and
-// galaxy travel play their whooshes, and M mutes. Then the planet loop (park at a planet, scroll in to low orbit,
-// click the globe and fly, the Equal Earth map is shown and a click on it sets the autopilot there, scroll all the
-// way in and out and check the ship's altitude follows, scroll back out beside it, parked as far out as the zoom
-// says), and again for every planet
+// the star targets it, the system map shows every planet and moon (hover, click to fly, N folds it), and the galaxy
+// loop works (scroll out to the galaxy, click the nearest star, travel, scroll in to its system, where the ship flies
+// in and parks a few star diameters out, just above the ecliptic with the camera over it; the galaxy shows distant
+// galaxies, twinkles, spins and draws binaries as two dots, and picking works while it's turned), a real click on the
+// speaker button starts audio; then the transitions and galaxy travel play their whooshes, and M mutes. Then the
+// planet loop (park at a planet, scroll in to low orbit, click the globe and fly, the Equal Earth map is shown and a
+// click on it sets the autopilot there, scroll all the way in and out and check the ship's altitude follows, scroll
+// back out beside it, parked as far out as the zoom says), and again for every planet
 // type, a ringed rocky/icy/lava world and a moon in other systems (skip those with --quick). The system sky has
 // the galaxy band (screenshot looking at the galactic centre) and a smoke trail per planet and moon. Living stars: the
 // surface clock advances and storms have particles under way (and keep animating in the planet level's sky); comets
@@ -19,7 +19,8 @@
 // Seamless zooms: through the galaxy and planet loops, every frame of every level transition records the crossfade
 // weight and canvas brightness; each transition must crossfade and never go black (screenshots mid-handover).
 // Touch: on an emulated phone, hold/tap/drag/pinch and the on-screen stick and Boost work, down to a planet and out;
-// the full-screen button shows, and in low orbit the Map button opens the map, a tap on it flies there, × closes it.
+// the full-screen button shows, and the Map button opens the system map (in space) and the planet map (in low
+// orbit), a tap on either flies there, × closes it.
 // Prints JSON with FPS, console errors and screenshot paths. Exit 1 on failure.
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -46,7 +47,7 @@ await evaluate(`new Promise((r) => { let n = 0; (function f() { if (++n > 20) r(
 
 const state = `({ speed: +ship.speed.toFixed(1), pos: ship.object.position.toArray().map((n) => +n.toFixed(1)) })`;
 const started = await evaluate(`typeof window.ship !== 'undefined'`);
-let before, after, autopilot, pick, sky, living, comet, eye, galaxyLoop, fps, audio, planetLoop, heldZoom, seamless;
+let before, after, autopilot, pick, systemMap, sky, living, comet, eye, galaxyLoop, fps, audio, planetLoop, heldZoom, seamless;
 const planetTypes = [];
 const wheel = (deltaY) =>
   evaluate(`game.renderer.domElement.dispatchEvent(new WheelEvent('wheel', { deltaY: ${deltaY}, bubbles: true, cancelable: true }))`);
@@ -238,6 +239,57 @@ if (started) {
     })));
   })`);
   await evaluate(`ship.stop()`);
+
+  // The system map: shown with every planet and moon, and the count in its title; hovering a planet's disc
+  // shows its tooltip, clicking it sends the autopilot there, and N folds the panel away and back.
+  for (let i = 0; i < 40 && !(await evaluate(`levels.systemLevel.map.baked`)); i++) await sleep(250);
+  systemMap = await evaluate(`new Promise((resolve) => {
+    const map = levels.systemLevel.map;
+    const canvas = document.getElementById('system-map-canvas');
+    const rect = canvas.getBoundingClientRect();
+    const body = world.planets[world.planets.length - 1];
+    const p = map.mapPosition(body);
+    const at = { clientX: rect.left + p.x, clientY: rect.top + p.y, button: 0, pointerType: 'mouse', bubbles: true };
+    canvas.dispatchEvent(new PointerEvent('pointermove', at));
+    canvas.dispatchEvent(new MouseEvent('click', at));
+    const layout = map.currentLayout;
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve({
+      visible: map.visible && !document.getElementById('system-map').hidden && rect.width > 100,
+      baked: map.baked,
+      title: document.getElementById('system-map-title').textContent,
+      planets: layout.planets.length,
+      moons: layout.planets.reduce((n, q) => n + q.moons.length, 0),
+      expected: { planets: world.planets.length, moons: world.moons.length },
+      body: body.name,
+      tooltip: document.getElementById('tooltip').hidden ? null : document.getElementById('tooltip-name').textContent,
+      target: ship.targetBody?.name ?? null,
+    })));
+  })`);
+  await evaluate(`document.getElementById('system-map-canvas').dispatchEvent(new PointerEvent('pointerleave')), ship.stop()`);
+  const key = (type) => evaluate(`window.dispatchEvent(new KeyboardEvent('${type}', { code: 'KeyN' }))`);
+  const mapOpen = `levels.systemLevel.map.visible && getComputedStyle(document.querySelector('#system-map .map-body')).display !== 'none'`;
+  // Held for a few frames, so the map's per-frame poll sees the press (headless frame rates are low).
+  const frames = `new Promise((r) => { let n = 0; (function f() { if (++n > 3) r(); else requestAnimationFrame(f); })(); })`;
+  const pressN = async () => {
+    await key('keydown');
+    await evaluate(frames);
+    await key('keyup');
+    await evaluate(frames);
+  };
+  await pressN();
+  systemMap.folded = !(await evaluate(mapOpen));
+  await pressN();
+  systemMap.unfolded = await evaluate(mapOpen);
+  systemMap.ok =
+    systemMap.visible &&
+    systemMap.baked &&
+    systemMap.title.includes(systemMap.expected.planets === 1 ? '1 planet' : `${systemMap.expected.planets} planets`) &&
+    systemMap.planets === systemMap.expected.planets &&
+    systemMap.moons === systemMap.expected.moons &&
+    systemMap.tooltip === systemMap.body &&
+    systemMap.target === systemMap.body &&
+    systemMap.folded &&
+    systemMap.unfolded;
 
   // Living stars and comets: sample twice, a couple of seconds apart.
   const sample = `({
@@ -625,6 +677,32 @@ async function runTouch() {
   const to = await evaluate(`ship.object.position.toArray()`);
   r.stick.moved = +Math.hypot(to[0] - from[0], to[2] - from[2]).toFixed(1);
 
+  // The system map: the Map button (above ▲ / ▼ in space) opens it over the screen, a tap on a planet flies
+  // there, and its × closes it.
+  const systemMapShown = `getComputedStyle(document.getElementById('system-map')).display !== 'none' && levels.systemLevel.map.visible`;
+  r.systemMap = { closed: !(await evaluate(systemMapShown)), button: await evaluate(`getComputedStyle(document.getElementById('touch-map')).display !== 'none'`) };
+  await touch('touchStart', [await center('touch-map')]);
+  await touch('touchEnd', []);
+  await frames();
+  await frames();
+  r.systemMap.opened = await evaluate(systemMapShown);
+  const planetTap = await evaluate(`(() => {
+    const p = levels.systemLevel.map.mapPosition(world.planets[0]);
+    const rect = document.getElementById('system-map-canvas').getBoundingClientRect();
+    return [rect.left + p.x, rect.top + p.y];
+  })()`);
+  await touch('touchStart', [planetTap]);
+  await touch('touchEnd', []);
+  await frames();
+  r.systemMap.target = await evaluate(`ship.targetBody === world.planets[0]`);
+  r.systemMap.screenshot = join(outDir, 'touch-system-map.png');
+  writeFileSync(r.systemMap.screenshot, await page.screenshot());
+  await touch('touchStart', [await center('system-map-toggle')]);
+  await touch('touchEnd', []);
+  await frames();
+  r.systemMap.closedAgain = !(await evaluate(systemMapShown));
+  await evaluate(`ship.stop()`);
+
   // Down to a planet and back.
   await evaluate(`(() => { const body = world.planets[0]; const side = world.stars[0].position.clone().sub(body.position).normalize(); side.y += 0.5; ship.parkAt(body, side); })()`);
   await sleep(300);
@@ -693,6 +771,11 @@ async function runTouch() {
     r.stick.boost &&
     r.stick.released &&
     r.stick.moved > 5 &&
+    r.systemMap.closed &&
+    r.systemMap.button &&
+    r.systemMap.opened &&
+    r.systemMap.target &&
+    r.systemMap.closedAgain &&
     r.planet.mode === 'planet' &&
     r.planet.ship === 'surface' &&
     r.planet.shown &&
@@ -714,7 +797,7 @@ const touch = started ? await runTouch() : null;
 
 const moved = started && after.pos[2] < before.pos[2] - 10 && after.speed > 5;
 const autopiloted = started && autopilot.endDist < Math.max(3, autopilot.startDist * 0.1);
-const picked = started && pick.target === pick.star && pick.tooltip === pick.star;
+const picked = started && pick.target === pick.star && pick.tooltip === pick.star && systemMap.ok;
 const skyOk = started && sky.band && sky.trails === sky.expectedTrails && sky.visibleTrails >= 1;
 const alive =
   started &&
@@ -776,7 +859,7 @@ const touched = started && touch.ok;
 const ok = started && moved && autopiloted && picked && skyOk && alive && looped && sounded && planets && touched && errors.length === 0;
 console.log(
   JSON.stringify(
-    { ok, started, moved, autopiloted, picked, skyOk, alive, looped, sounded, planets, touched, before, after, autopilot, pick, sky, living, comet, eye, galaxyLoop, seamless, audio, planetLoop, heldZoom, planetTypes, touch, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
+    { ok, started, moved, autopiloted, picked, skyOk, alive, looped, sounded, planets, touched, before, after, autopilot, pick, systemMap, sky, living, comet, eye, galaxyLoop, seamless, audio, planetLoop, heldZoom, planetTypes, touch, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
     null,
     2,
   ),

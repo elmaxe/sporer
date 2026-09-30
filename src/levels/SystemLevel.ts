@@ -12,6 +12,7 @@ import { Picker } from '../player/Picker';
 import { Ship } from '../player/Ship';
 import { TargetMarker } from '../player/TargetMarker';
 import { Hud } from '../ui/Hud';
+import { SystemMap } from '../ui/SystemMap';
 import type { Tooltip } from '../ui/Tooltip';
 import type { CelestialBody } from '../world/CelestialBody';
 import { GalaxyBand } from '../world/GalaxyBand';
@@ -43,6 +44,8 @@ export class SystemLevel extends Level {
   readonly band: GalaxyBand;
   readonly eye: EyeAdaptation;
   private readonly hud: Hud;
+  /** The star, planets and moons in a row, in the corner (mouse players) or from the Map button (touch). */
+  readonly map: SystemMap;
   private readonly starfield: Starfield;
   private readonly marker: TargetMarker;
   readonly trails: OrbitTrails;
@@ -97,7 +100,10 @@ export class SystemLevel extends Level {
       ),
     );
     this.marker = this.add(new TargetMarker(this.scene, camera, this.ship));
-    this.hud = this.add(new Hud(this.ship, picker, input, this.data, tooltip));
+    this.map = this.add(
+      new SystemMap(this.data, this.world.stars, this.world.planets, this.world.moons, this.ship, picker, input),
+    );
+    this.hud = this.add(new Hud(this.ship, picker, this.map, input, this.data, tooltip));
   }
 
   /**
@@ -196,9 +202,11 @@ export class SystemLevel extends Level {
 
   override enter(): void {
     this.hud.activate();
+    this.map.activate();
   }
 
   override exit(): void {
     this.hud.deactivate();
+    this.map.deactivate();
   }
 }
