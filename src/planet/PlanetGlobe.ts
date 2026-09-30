@@ -7,6 +7,7 @@ import { createAtmosphere } from '../world/atmosphereShell';
 import { SEA_RENDER_ORDER, createLavaLook, type LavaLook } from '../world/lavaMaterial';
 import { createRings, floorRadius, gasSampler, peakRadius, terrainSampler } from '../world/planetGeometry';
 import { createCubeSphere } from '../world/cubeSphere';
+import { GROUND_LAYER, GroundDepth } from '../world/groundDepth';
 import { createWeatherLook, type WeatherLook } from '../world/weatherLook';
 import type { Debug } from '../core/Debug';
 import { PLANET_SCALE, RELIEF_SCALE, globeRadius } from './frame';
@@ -51,6 +52,8 @@ export class PlanetGlobe implements Entity {
   readonly weather: WeatherLook | null;
 
   private readonly surface: LodSurface;
+  /** Bodies with an atmosphere: where the ground is, so the haze stops there (see renderDepth). */
+  private readonly ground: GroundDepth | null;
   private readonly cameraPosition = new THREE.Vector3();
 
   constructor(
@@ -83,7 +86,8 @@ export class PlanetGlobe implements Entity {
     if (config.rings) this.object.add(createRings(config.rings, seed, PLANET_SCALE));
     // The same look as in the system view (in planet radii), so the two match across the zoom.
     const look = config.atmosphere && config.climate ? atmosphereLook(config.climate, config.radius) : null;
-    if (look) this.object.add(createAtmosphere(R, config.atmosphere!, look, { vector: this.sun, point: false }, ATMOSPHERE_SEGMENTS));
+    this.ground = look ? new GroundDepth() : null;
+    if (look) this.object.add(createAtmosphere(R, config.atmosphere!, look, { vector: this.sun, point: false }, ATMOSPHERE_SEGMENTS, this.ground));
     this.weather = gas ? null : createWeatherLook(config, this.lava?.activity ?? null);
     if (this.weather) this.object.add(this.weather.createCloudLayer(1, CLOUD_SEGMENTS, { vector: this.sun, point: false }));
     scene.add(this.object);
@@ -100,6 +104,11 @@ export class PlanetGlobe implements Entity {
     return this.surface.stats();
   }
 
+  /** Draws the ground's depth for the atmosphere: call before drawing the scene with `camera`. */
+  renderDepth(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera): void {
+    this.ground?.render(renderer, this.scene, camera);
+  }
+
   update(frameDt: number): void {
     this.lava?.animate(this.frame.renderTime);
     this.weather?.animate(this.frame.renderTime);
@@ -108,6 +117,7 @@ export class PlanetGlobe implements Entity {
 
   dispose(): void {
     this.surface.dispose();
+    this.ground?.dispose();
     this.scene.remove(this.object);
     this.object.traverse((o) => {
       if (o instanceof THREE.Mesh) {
@@ -138,5 +148,6 @@ function createSea(type: PlanetConfig['type'], color: string, radius: number, la
   sea.name = 'Sea';
   // Drawn first, so the sea floor under it is rejected by the depth test rather than shaded.
   sea.renderOrder = SEA_RENDER_ORDER;
+  sea.layers.enable(GROUND_LAYER);
   return sea;
 }

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
 import { GLOBE_SIZE_FACTOR } from '../gen/planets';
 import { faceGridPoint, type FacePoint } from '../world/cubeSphereMath';
+import { GROUND_LAYER } from '../world/groundDepth';
 import type { SurfaceSampler } from '../world/planetGeometry';
 import {
   CHUNK_CELLS,
@@ -372,6 +373,7 @@ export class LodSurface {
     const mesh = new THREE.Mesh(geometry, this.material);
     mesh.visible = false;
     mesh.matrixAutoUpdate = false;
+    mesh.layers.enable(GROUND_LAYER);
     node.mesh = mesh;
     this.object.add(mesh);
   }

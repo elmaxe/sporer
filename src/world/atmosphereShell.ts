@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
 import { groundDensity, PATH_SAMPLES, type AtmosphereLook } from '../gen/atmosphere';
 import { createCubeSphere } from './cubeSphere';
+import type { GroundDepth } from './groundDepth';
 
 /**
  * Tunables of the atmosphere shader (the look's shape comes from
@@ -59,6 +60,10 @@ const MESH_MARGIN = 1.02;
  * `radius` is the planet's sea-level radius in the mesh's local units. The
  * mesh must be added straight to a (possibly moving, scaled) parent centred
  * on the planet; everything else is read from its world matrix.
+ *
+ * The rays stop at the sea-level sphere, or, given `ground`, at the ground
+ * drawn into its depth pass (the low-orbit globe, whose exaggerated relief
+ * rises far above that sphere; see groundDepth.ts).
  */
 export function createAtmosphere(
   radius: number,
@@ -67,6 +72,7 @@ export function createAtmosphere(
   sun: AtmosphereSun,
   /** Cube sphere segments (see cubeSphere.ts). */
   segments = 18,
+  ground: GroundDepth | null = null,
 ): THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial> {
   // The polygons sit inside the sphere they approximate; push them out so the shell's true top is covered.
   const meshRadius = radius * look.top * MESH_MARGIN;
@@ -84,7 +90,9 @@ export function createAtmosphere(
       sun: { value: sun.vector },
       sunIsPoint: { value: sun.point ? 1 : 0 },
       ...atmosphereUniforms,
+      ...ground?.uniforms,
     },
+    defines: ground ? { GROUND_DEPTH: '' } : {},
     vertexShader: /* glsl */ `
       varying vec3 vWorld;
       varying vec3 vCenter;
@@ -112,6 +120,13 @@ export function createAtmosphere(
       uniform float night;
       uniform float dusk;
       uniform float forward;
+      #ifdef GROUND_DEPTH
+      #include <packing>
+      uniform sampler2D groundDepth;
+      uniform vec2 groundSize;
+      uniform float groundNear;
+      uniform float groundFar;
+      #endif
       varying vec3 vWorld;
       varying vec3 vCenter;
       varying float vScale;
@@ -136,11 +151,21 @@ export function createAtmosphere(
         float t0 = max(-b - sqrt(shell), 0.0);
         float t1 = -b + sqrt(shell);
         if (t1 <= 0.0) discard;
+        #ifdef GROUND_DEPTH
+        float z = texture2D(groundDepth, gl_FragCoord.xy / groundSize).x;
+        if (z < 1.0) {
+          // View depth → distance along the ray (the camera looks down its -z), in the shell's units.
+          vec3 ahead = -vec3(viewMatrix[0][2], viewMatrix[1][2], viewMatrix[2][2]);
+          t1 = min(t1, -perspectiveDepthToViewZ(z, groundNear, groundFar) / dot(d, ahead) / vScale);
+        }
+        if (t1 <= t0) discard;
+        #else
         float ground = b * b - (oo - radius * radius);
         if (ground > 0.0) {
           float tg = -b - sqrt(ground);
           if (tg > 0.0) t1 = min(t1, tg);
         }
+        #endif
         // Split where the ray comes closest (densest), sample each half with t ∝ u² (gen/atmosphere.ts pathOpticalDepth).
         float tc = clamp(-b, t0, t1);
         vec3 L = sunIsPoint > 0.5 ? normalize(sun - center) : sun;
