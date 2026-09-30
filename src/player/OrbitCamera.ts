@@ -39,8 +39,9 @@ export interface OrbitOptions {
   zoomLimitsHold?: () => boolean;
   /**
    * Moves a camera position out of anything it must not be inside (e.g. a
-   * planet the view dips into from below), in place. Run on the orbit's own
-   * position, not while a view override (`setView`) sets it.
+   * planet the view dips into from below, or a zoom that shrinks faster than
+   * the centre moves), in place. Runs on the camera's final position, also
+   * while a view override (`setView`) sets it.
    */
   keepOut?: (position: THREE.Vector3) => void;
   /**
@@ -248,6 +249,7 @@ export class OrbitCamera implements Entity {
       const q = this.orientation(this.orient).slerp(this.view, this.viewBlend);
       this.camera.quaternion.copy(q);
       this.camera.position.copy(this.center).addScaledVector(this.back.copy(BACK).applyQuaternion(q), this.distance);
+      this.options.keepOut?.(this.camera.position);
       return;
     }
     this.camera.position.copy(this.center).addScaledVector(this.offset, this.distance);

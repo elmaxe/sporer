@@ -552,7 +552,12 @@ if (started && (runs('galaxy') || runs('audio') || runs('planet'))) {
         const i = 4 * (y * w + x); sum += s.px[i] + s.px[i + 1] + s.px[i + 2]; n++;
       }
       const weight = levels.crossfade;
-      s.current.frames.push({ weight, brightness: sum / (3 * n) });
+      // Planet zooms: how far the camera is from the body's centre, in radii (over the highest terrain in the planet level).
+      const pl = levels.planetLevel;
+      const clearance = !pl ? null : levels.mode === 'planet'
+        ? game.camera.position.length() / pl.top
+        : game.camera.position.distanceTo(pl.body.renderPosition) / pl.body.radius;
+      s.current.frames.push({ weight, brightness: sum / (3 * n), clearance });
       if (s.freezeWhen && weight !== null && weight > 0.35 && levels.mode === s.freezeWhen) {
         s.freezeWhen = null; s.frozen = true; game.stop();
       }
@@ -795,6 +800,7 @@ await section('planet', async () => {
         frames: seg.frames.length,
         crossfadeFrames: blended.length,
         minBrightness: +Math.min(...seg.frames.map((x) => x.brightness)).toFixed(2),
+        minClearance: +Math.min(...seg.frames.map((x) => x.clearance ?? Infinity)).toFixed(3),
       };
     });
     const kinds = [...new Set(segments.map((x) => x.zoom))];
@@ -804,7 +810,7 @@ await section('planet', async () => {
   // Each zoom this run went through (the galaxy loop's only if that section ran).
   const kinds = [...(sections.galaxy ? ['system → galaxy', 'galaxy → system'] : []), 'system → planet', 'planet → system'];
   seamless.ok =
-    kinds.every((k) => seamless.kinds.includes(k)) && seamless.segments.every((x) => x.crossfadeFrames > 0 && x.minBrightness > 0.5);
+    kinds.every((k) => seamless.kinds.includes(k)) && seamless.segments.every((x) => x.crossfadeFrames > 0 && x.minBrightness > 0.5 && (x.minClearance ?? Infinity) >= 1);
   // Audio is only unlocked by the audio section's real click, so only then can the loop hear its whooshes.
   const heard = !sections.audio || (planetLoop.soundIn === 'transitionIn' && planetLoop.soundOut === 'transitionOut');
   return planetLoop.ok && heard && heldZoom.ok && planetLoop.handoverShot !== null && seamless.ok;
