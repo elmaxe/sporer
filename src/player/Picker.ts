@@ -9,14 +9,12 @@ import type { Ship } from './Ship';
  * (~1.1°), so small moons stay clickable when zoomed out.
  */
 const MIN_PICK_ANGLE = 0.02;
-/** Clicks on empty space farther than this from the ship are pulled in. */
-const MAX_POINT_DISTANCE = 3000;
 
 /**
  * Turns the pointer into targets: hovering finds the body (or sight, e.g. a
- * comet) under the cursor, a click sends the ship to that body, or to the
- * point on the ship's horizontal plane under the cursor when it misses.
- * Clicking a sight does nothing: they can be looked at, not flown to.
+ * comet) under the cursor, and a click sends the ship to that body. Clicking
+ * empty space or a sight does nothing: the ship only ever goes to bodies, and
+ * sights can be looked at, not flown to.
  * Everything is tested as spheres, which is cheaper than raycasting meshes.
  */
 export class Picker implements Entity {
@@ -25,7 +23,6 @@ export class Picker implements Entity {
 
   private readonly raycaster = new THREE.Raycaster();
   private readonly ndc = new THREE.Vector2();
-  private readonly plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
   private readonly point = new THREE.Vector3();
   /** Nearest hit so far during `pick`. */
   private best: Sight | null = null;
@@ -48,17 +45,7 @@ export class Picker implements Entity {
     const click = this.input.consumeClick();
     if (!click) return;
     const hit = this.pick(click.ndcX, click.ndcY);
-    if (hit) {
-      if (this.isBody(hit)) this.ship.moveTo(hit);
-      return;
-    }
-    const ship = this.ship.object.position;
-    this.plane.constant = -ship.y;
-    if (!this.raycaster.ray.intersectPlane(this.plane, this.point)) return;
-    if (this.point.distanceTo(ship) > MAX_POINT_DISTANCE) {
-      this.point.sub(ship).setLength(MAX_POINT_DISTANCE).add(ship);
-    }
-    this.ship.moveTo(this.point);
+    if (hit && this.isBody(hit)) this.ship.moveTo(hit);
   }
 
   /** The nearest body or sight whose (padded) sphere the ray through `ndc` hits. Leaves the ray set. */

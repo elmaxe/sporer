@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { arriveImpulse, detourWaypoint, standoffPoint, type ArriveParams } from '../src/player/autopilot';
+import { arriveImpulse, detourWaypoint, hoverPoint, type ArriveParams } from '../src/player/autopilot';
 import type { Vec3Like } from '../src/gen/orbit';
 
 const DT = 1 / 60;
@@ -59,15 +59,9 @@ describe('arriveImpulse', () => {
   });
 });
 
-describe('standoffPoint', () => {
-  it('parks on the side the ship approaches from', () => {
-    const p = standoffPoint(v3(100, 0, 0), v3(10, 0, 0), 20, v3());
-    expect(p).toEqual({ x: 30, y: 0, z: 0 });
-  });
-
-  it('handles a ship exactly at the body centre', () => {
-    const p = standoffPoint(v3(5, 5, 5), v3(5, 5, 5), 10, v3());
-    expect(dist(p, v3(5, 5, 5))).toBeCloseTo(10);
+describe('hoverPoint', () => {
+  it('hovers straight above the body, whichever side the ship is on', () => {
+    expect(hoverPoint(v3(10, -4, 3), 20, v3())).toEqual({ x: 10, y: 16, z: 3 });
   });
 });
 

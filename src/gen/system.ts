@@ -239,14 +239,6 @@ function climateAtmosphere(prng: Rng, type: PlanetType, climate: ClimateData | n
   return climate ? atmosphereTint(prng.fork('climate', 'tint'), climate) : null;
 }
 
-/** Where to put the player when arriving: in the first gap between planets, clear of moons. */
-export function spawnDistance(system: SystemData): number {
-  const [a, b] = system.planets;
-  if (a && b) return (a.orbit.radius + a.extent + b.orbit.radius - b.extent) / 2;
-  if (a) return a.orbit.radius + a.extent + 40;
-  return system.starZone * 2 + 40;
-}
-
 /** Arriving from the galaxy, the ship parks about this many star-zone diameters from the barycentre. */
 export const ARRIVAL_DIAMETERS = 3;
 

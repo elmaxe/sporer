@@ -185,11 +185,6 @@ export class PlanetLevel extends Level {
     return this.frame.time;
   }
 
-  /** System-space direction from the body to the ship: the side to come back out on. */
-  exitSide(out: THREE.Vector3): THREE.Vector3 {
-    return this.frame.toSystemDirection(this.ship.direction, out);
-  }
-
   /** What the sky shows, for tests: stars, bodies drawn in it, and moons drawn as meshes here. */
   get skyStats(): { stars: number; bodies: number; localMoons: number } {
     const world = this.system.world;

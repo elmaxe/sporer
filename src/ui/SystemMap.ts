@@ -394,17 +394,11 @@ export class SystemMap implements Entity {
     }
 
     const ship = this.ship;
-    const target = ship.autopilotActive ? ship.targetBody : null;
-    const parked = target && !ship.enRoute ? this.markAt(target) : null;
+    const target = ship.targetBody;
+    const parked = !ship.enRoute ? this.markAt(target) : null;
     if (ship.enRoute) {
-      // The destination: a dashed ring round a body, or a small one at a point's distance from the star.
-      const at = target
-        ? this.markAt(target)
-        : {
-            x: distanceToMapX(layout, this.data.starZone, this.orbits, ship.destination.length()),
-            y: layout.axisY,
-            r: 2,
-          };
+      // The destination: a dashed ring round the body.
+      const at = this.markAt(target);
       if (at) {
         ctx.beginPath();
         ctx.arc(at.x, at.y, at.r + 4, 0, Math.PI * 2);

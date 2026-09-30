@@ -68,23 +68,23 @@ Load the tools in one ToolSearch call:
 ({ speed: ship.speed, pos: ship.object.position.toArray(), objects: game.scene.children.length })
 ```
 
+In the system view there's no manual flying: the ship always hovers above a body (it starts above the star) or is on the autopilot to the next one. Simulated keys still work in low orbit (WASD nudges the planet ship):
+
 ```js
 // simulate held keys without focus issues
 window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
 setTimeout(() => window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' })), 1500);
 ```
 
-After ~2 s, `ship.speed` should be > 0 and the position should have moved along the camera's forward direction (−Z at spawn, toward the sun).
-
 ```js
-// autopilot: fly to a body (or pass any {x, y, z}); poll until parked
+// autopilot: fly to a body; poll until it hovers there
 ship.moveTo(world.planets[0]);
-({ enRoute: ship.enRoute, target: ship.targetBody?.name, speed: ship.speed })
+({ enRoute: ship.enRoute, target: ship.targetBody.name, speed: ship.speed })
 ```
 
 ```js
-// planet level: park at a planet, descend, fly over the globe, come back up
-ship.parkAt(world.planets[0], world.stars[0].position.clone().sub(world.planets[0].position)); // day side
+// planet level: hover at a planet (teleport), descend, fly over the globe, come back up
+ship.parkAt(world.planets[0]);
 levels.toPlanet();                                   // then, after ~1.3 s: levels.mode === 'planet'
 planet.ship.moveTo(planet.ship.direction.clone().add({ x: 0.3, y: 0, z: 0 }));
 ({ sky: planet.skyStats, enRoute: planet.ship.enRoute, speed: planet.ship.speed });

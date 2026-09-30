@@ -552,37 +552,17 @@ html.touch:not([data-ship='none']) #touch-controls {
   bottom: calc(max(16px, env(safe-area-inset-bottom)) + 56px);
 }
 
-#touch-down,
-#touch-up {
-  width: 52px;
-  height: 52px;
-  margin-right: 10px;
-  font-size: 16px;
-}
-
-#touch-down {
-  bottom: calc(max(16px, env(safe-area-inset-bottom)) + 140px);
-}
-
-#touch-up {
-  bottom: calc(max(16px, env(safe-area-inset-bottom)) + 204px);
-}
-
-html:not([data-ship='space']) #touch-up,
-html:not([data-ship='space']) #touch-down {
+/* No stick in space: the ship only goes where you tap. */
+html[data-ship='space'] #touch-stick {
   display: none;
 }
 
-/* In low orbit where ▲ / ▼ would be in space; in space above them. */
+/* Above Boost. */
 #touch-map {
   width: 52px;
   height: 52px;
   margin-right: 10px;
   bottom: calc(max(16px, env(safe-area-inset-bottom)) + 140px);
-}
-
-html[data-ship='space'] #touch-map {
-  bottom: calc(max(16px, env(safe-area-inset-bottom)) + 268px);
 }
 
 html:not([data-ship='surface']):not([data-ship='space']) #touch-map {
