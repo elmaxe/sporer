@@ -25,6 +25,12 @@ export class Game {
   afterFrame: (() => void) | null = null;
   /** Shows only one side of a running crossfade (for inspecting a handover, e.g. while stopped). */
   crossfadeSolo: 'outgoing' | 'incoming' | null = null;
+  /**
+   * While true, time stands still (no fixed steps, zero frame time) but
+   * frames are still drawn, so the paused view survives resizes (e.g. under
+   * the menu).
+   */
+  paused = false;
 
   private _level: Level | null = null;
   /** The outgoing level while crossfading to the active one, and the active one's weight. */
@@ -124,7 +130,7 @@ export class Game {
     this.debug.beginFrame();
 
     const now = time / 1000;
-    const frameDt = this.lastTime < 0 ? 0 : Math.min(now - this.lastTime, MAX_FRAME_DT);
+    const frameDt = this.lastTime < 0 || this.paused ? 0 : Math.min(now - this.lastTime, MAX_FRAME_DT);
     this.lastTime = now;
 
     const steps = this.fixedStep.advance(frameDt);

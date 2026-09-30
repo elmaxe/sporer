@@ -105,20 +105,7 @@ body {
   font-size: 18px;
 }
 
-#audio {
-  position: fixed;
-  right: max(16px, env(safe-area-inset-right));
-  bottom: max(16px, env(safe-area-inset-bottom));
-  /* Above the lil-gui debug panel (1001), which the open volume panel overlaps. */
-  z-index: 1002;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 8px;
-  font-size: 13px;
-}
-
-#audio-toggle,
+#menu-toggle,
 #fullscreen-toggle {
   display: grid;
   place-items: center;
@@ -132,14 +119,38 @@ body {
   cursor: pointer;
 }
 
-#audio-toggle:hover,
-#audio-toggle[aria-expanded='true'],
+#menu-toggle:hover,
+#menu-toggle[aria-expanded='true'],
 #fullscreen-toggle:hover {
   border-color: rgba(102, 255, 204, 0.8);
   color: #66ffcc;
 }
 
-/* Left of the sound button. */
+/* The menu button, bottom right. Above the lil-gui debug panel (1001). */
+#menu-toggle {
+  position: fixed;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: max(16px, env(safe-area-inset-bottom));
+  z-index: 1002;
+}
+
+/* A small crossed speaker on the menu button while muted (M). */
+#menu-toggle .muted-badge {
+  display: none;
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  padding: 2px;
+  border-radius: 50%;
+  background: #08101c;
+  color: #ff8a7a;
+}
+
+#menu-toggle.muted .muted-badge {
+  display: block;
+}
+
+/* Left of the menu button. */
 #fullscreen-toggle {
   position: fixed;
   right: calc(max(16px, env(safe-area-inset-right)) + 48px);
@@ -175,7 +186,7 @@ body {
   line-height: 1.4;
 }
 
-/* The maps (the planet level's #planet-map, the system level's #system-map): a panel above the sound button
+/* The maps (the planet level's #planet-map, the system level's #system-map): a panel above the menu button
    for mouse players. The planet map is drawn into the game's canvas under #planet-map-marks
    (PlanetMap.render), which carries the markers; the system map is all on its own canvas (SystemMap). */
 .map-panel {
@@ -286,65 +297,145 @@ html:not(.touch) .map-panel.folded .map-body {
   cursor: default;
 }
 
-#audio .cross,
-#audio.muted .waves {
+/* The menu (Esc or the menu button): pauses the game over a dimmed view. Above everything, maps included. */
+#menu {
+  position: fixed;
+  inset: 0;
+  z-index: 1010;
+  display: grid;
+  place-items: center;
+  padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom))
+    max(16px, env(safe-area-inset-left));
+  background: rgba(0, 4, 12, 0.55);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+
+#menu[hidden] {
   display: none;
 }
 
-#audio.muted .cross {
-  display: inline;
-}
-
-#audio-panel {
+#menu-panel {
+  width: min(340px, 100%);
+  max-height: 100%;
+  overflow: auto;
+  box-sizing: border-box;
   display: grid;
-  gap: 6px;
-  padding: 10px 12px;
-  border-radius: 8px;
+  gap: 12px;
+  padding: 14px 16px 12px;
+  border-radius: 10px;
   background: rgba(8, 14, 28, 0.96);
   border: 1px solid rgba(102, 255, 204, 0.35);
+  font-size: 13px;
 }
 
-#audio-panel[hidden] {
-  display: none;
+.menu-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
-#audio-panel label {
+#menu h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+#menu h3 {
+  margin: 0 0 2px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #66ffcc;
+}
+
+#menu section {
   display: grid;
-  grid-template-columns: 5.5em 120px 3em;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(102, 255, 204, 0.15);
+}
+
+#menu p {
+  margin: 0;
+  line-height: 1.4;
+  opacity: 0.8;
+}
+
+#menu-close {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: #cfe3ff;
+  cursor: pointer;
+}
+
+#menu-close:hover {
+  color: #66ffcc;
+}
+
+.menu-button {
+  display: block;
+  padding: 9px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(102, 255, 204, 0.35);
+  background: rgba(102, 255, 204, 0.06);
+  color: #cfe3ff;
+  font: inherit;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.menu-button:hover,
+.menu-button:focus-visible {
+  border-color: rgba(102, 255, 204, 0.8);
+  color: #fff;
+}
+
+.menu-button.primary {
+  background: rgba(102, 255, 204, 0.18);
+  font-weight: 600;
+}
+
+#audio label {
+  display: grid;
+  grid-template-columns: 5.5em 1fr 3em;
   align-items: center;
   gap: 8px;
 }
 
-#audio-panel input[type='range'] {
+#audio input[type='range'] {
   width: 100%;
   margin: 0;
   accent-color: #66ffcc;
 }
 
-#audio-panel output {
+#audio output {
   text-align: right;
   font-variant-numeric: tabular-nums;
   opacity: 0.75;
 }
 
-#audio.muted #audio-panel input[type='range'],
-#audio.muted #audio-panel output {
+#audio.muted input[type='range'],
+#audio.muted output {
   opacity: 0.4;
 }
 
-#audio-mute {
-  margin-top: 2px;
-  padding: 4px 8px;
-  border-radius: 4px;
-  border: 1px solid rgba(102, 255, 204, 0.35);
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
+#menu .menu-keys {
+  font-size: 11px;
+  opacity: 0.55;
+  text-align: center;
 }
 
-#audio-mute:hover {
-  border-color: rgba(102, 255, 204, 0.8);
+html.touch #menu .menu-keys {
+  display: none;
 }
 
 /* Touch play (html.touch, set by TouchControls): on-screen ship controls, HUD moved to the top. */
@@ -417,7 +508,7 @@ html.touch:not([data-ship='none']) #touch-controls {
   color: #fff;
 }
 
-/* A column above the sound button (40px at the bottom right). */
+/* A column above the menu button (40px at the bottom right). */
 #touch-boost {
   width: 72px;
   height: 72px;

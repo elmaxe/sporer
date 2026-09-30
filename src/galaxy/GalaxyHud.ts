@@ -12,7 +12,7 @@ import type { GalaxyPicker } from './GalaxyPicker';
 import type { GalaxyShip } from './GalaxyShip';
 
 const REFRESH_SECONDS = 0.1;
-const HELP = 'Click a star: travel there · Scroll in at a star: enter its system · Scroll: zoom · Drag: rotate view · M: mute';
+const HELP = 'Click a star: travel there · Scroll in at a star: enter its system · Scroll: zoom · Drag: rotate view · M: mute · Esc: menu';
 const TOUCH_HELP = 'Tap a star: travel there · Pinch in at a star: enter its system · Pinch: zoom · Drag: rotate view · Hold: identify';
 
 /**

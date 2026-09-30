@@ -6,7 +6,7 @@ import type { PlanetShip } from './PlanetShip';
 const REFRESH_SECONDS = 0.1;
 const HELP =
   'Click the surface: fly there · Scroll: altitude (out past high orbit for the system) · Drag: rotate view · ' +
-  'WASD: nudge · Shift: boost · N: map · M: mute';
+  'WASD: nudge · Shift: boost · N: map · M: mute · Esc: menu';
 const TOUCH_HELP =
   'Tap the surface: fly there · Pinch: altitude (out past high orbit for the system) · Drag: rotate view · Stick: nudge · Boost · Map';
 

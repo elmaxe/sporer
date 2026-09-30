@@ -1,0 +1,499 @@
+import {
+  atmosphereTint,
+  climateSetting,
+  climateState,
+  earthRadii,
+  evaluateClimate,
+  generateClimate,
+  type BodyKind,
+  type ClimateBody,
+  type ClimateData,
+  type ClimateSetting,
+  type ClimateState,
+} from '../gen/climate';
+import { hexToRgb, rgbToHex } from '../gen/color';
+import type { Orbit } from '../gen/orbit';
+import {
+  MOON_RADIUS,
+  SIZE_CLASSES,
+  SIZE_CLASS_RADIUS,
+  chooseSizeClass,
+  choosePlanetType,
+  gasBands,
+  gasStyle,
+  isGiant,
+  logRange,
+  planetRadius,
+  planetStyle,
+  type MoonType,
+  type PlanetStyle,
+  type PlanetType,
+  type SizeClass,
+} from '../gen/planets';
+import { Rng, hashSeed } from '../gen/rng';
+import type { StarKind, SpectralClass } from '../gen/stars';
+import {
+  describePlanet,
+  describeSized,
+  generateMoons,
+  generateRings,
+  generateSolidRings,
+  solidRingColor,
+  type MoonData,
+  type RingData,
+  type SystemData,
+} from '../gen/system';
+import type { PlanetConfig } from '../world/Planet';
+
+/*
+ * The planet lab's model (see lab/PlanetLab.ts): one planet or moon with
+ * everything the renderer and the climate take, editable field by field, and
+ * made from the game's own generators so a lab planet is a game planet. Pure
+ * data, no THREE, unit-tested in tests/lab.test.ts.
+ */
+
+export type LabKind = BodyKind;
+export const LAB_KINDS: readonly LabKind[] = [...SIZE_CLASSES, 'moon'];
+export const LAB_TYPES: readonly PlanetType[] = ['lava', 'barren', 'desert', 'terran', 'ocean', 'ice', 'gas'];
+export const SOLID_KINDS: readonly SizeClass[] = ['dwarf', 'small', 'earth', 'superEarth'];
+
+/** A solid body's climate as its two editable halves; everything else is derived (evaluateClimate). */
+export interface LabClimate {
+  setting: ClimateSetting;
+  state: ClimateState;
+}
+
+export interface LabPlanet {
+  name: string;
+  type: PlanetType;
+  /** Size class, or 'moon' (moons can have geysers from tidal heat, and no moons of their own). */
+  kind: LabKind;
+  /** System units (Earth 8). */
+  radius: number;
+  seed: number;
+  /** Radians per second. */
+  spin: number;
+  /** Axial tilt, radians. */
+  tilt: number;
+  style: PlanetStyle;
+  /** Gas giant bands, darkest first; null for solid bodies. */
+  bands: string[] | null;
+  /** Atmosphere glow colour, or null for none. */
+  atmosphere: string | null;
+  rings: RingData | null;
+  /** Null for gas giants. */
+  climate: LabClimate | null;
+  /** Shown in the lab's system view. */
+  moons: MoonData[];
+}
+
+/** Stars the lab can light a planet with. */
+export type LabStar = SpectralClass | Exclude<StarKind, 'mainSequence'>;
+export const LAB_STARS: readonly LabStar[] = ['O', 'B', 'A', 'F', 'G', 'K', 'redDwarf', 'whiteDwarf', 'redGiant', 'blueGiant'];
+
+/** The lab's view options (not part of the planet). */
+export interface LabView {
+  /** 'globe': low orbit (the planet level's globe); 'system': the system view's body with its moons. */
+  view: 'globe' | 'system';
+  /** 'orbit': the camera circles the planet's centre; 'fly': it follows the UFO, like in the game. */
+  camera: 'orbit' | 'fly';
+  /** The Equal Earth map (globe view). */
+  map: boolean;
+  star: LabStar;
+  /** Where the sun is, degrees: around the axis, and above the equator (the subsolar latitude). */
+  sunAzimuth: number;
+  sunElevation: number;
+  /** Globe view: the sun goes round as the planet turns (at the planet level's slowed spin). */
+  dayCycle: boolean;
+  paused: boolean;
+  /** Clock rate: 1 = game time. */
+  speed: number;
+  wireframe: boolean;
+  axes: boolean;
+  starfield: boolean;
+  /** Editing the radius, type or size recomputes gravity, escape velocity and heat flow. */
+  autoSetting: boolean;
+}
+
+export const DEFAULT_VIEW: LabView = {
+  view: 'globe',
+  camera: 'orbit',
+  map: true,
+  star: 'G',
+  sunAzimuth: 35,
+  sunElevation: 15,
+  dayCycle: false,
+  paused: false,
+  speed: 1,
+  wireframe: false,
+  axes: false,
+  starfield: true,
+  autoSetting: true,
+};
+
+/** Where a planet loaded from the game came from: planet `planet` (or its moon `moon`) of star `star` in galaxy `seed`. */
+export interface LabSource {
+  seed: string;
+  star: number;
+  planet: number;
+  moon?: number;
+}
+
+/** Everything a lab link carries. */
+export interface LabState {
+  planet: LabPlanet;
+  view: LabView;
+  source?: LabSource;
+}
+
+/** A body at rest at the origin. */
+export const STILL_ORBIT: Orbit = { radius: 0, period: 1, phase: 0, inclination: 0 };
+
+/**
+ * Distance from the star, in habitable-zone radii, where each type is typical
+ * (the zones of gen/planets.ts's type weights). Starlight is 1 / zone².
+ */
+export const TYPICAL_ZONE: Record<PlanetType, number> = {
+  lava: 0.35,
+  desert: 0.9,
+  barren: 1.2,
+  terran: 1,
+  ocean: 1,
+  ice: 2.5,
+  gas: 2.5,
+};
+
+/** A lab moon's planet, for its tidal heating: a Jupiter-like giant with the moon close in. */
+export const LAB_MOON_HOST: NonNullable<ClimateBody['host']> = { radius: 25, size: 'gasGiant', orbitRadius: 45 };
+
+/** Radius range (system units) the lab offers for a kind. */
+export function kindRadiusRange(kind: LabKind): readonly [number, number] {
+  return kind === 'moon' ? [MOON_RADIUS.min, MOON_RADIUS.max] : SIZE_CLASS_RADIUS[kind];
+}
+
+/** Moon types the game generates (a lab moon may be any solid type). */
+const MOON_TYPES: readonly (readonly [MoonType, number])[] = [
+  ['barren', 6],
+  ['ice', 3],
+  ['lava', 1],
+];
+
+export interface GenerateOptions {
+  type?: PlanetType;
+  kind?: LabKind;
+  /** Starlight relative to Earth; default: 1 / TYPICAL_ZONE² for the type. */
+  insolation?: number;
+  /** Moons around a planet; default: drawn like the game does. */
+  moons?: number;
+}
+
+/**
+ * A new planet from `seed` with the game's generators: size class and type
+ * as the game would draw them (or as given), then radius, colours, rings,
+ * climate, atmosphere and moons, each from its own stream so fixing one
+ * choice doesn't change the others.
+ */
+export function generateLabPlanet(seed: number, options: GenerateOptions = {}): LabPlanet {
+  const rng = new Rng(seed >>> 0);
+  const [type, kind] = resolveTypeAndKind(rng, options.type, options.kind);
+  const radius = kind === 'moon' ? moonRadius(rng.fork('radius')) : planetRadius(rng.fork('radius'), kind);
+  const { style, bands } = labStyle(seed, type, kind);
+  const insolation = options.insolation ?? 1 / TYPICAL_ZONE[type] ** 2;
+  const spinRng = rng.fork('spin');
+  const planet: LabPlanet = {
+    name: `Lab ${seed}`,
+    type,
+    kind,
+    radius,
+    seed: seed >>> 0,
+    spin: spinRng.range(0.05, 0.35) * spinRng.sign(),
+    tilt: kind === 'moon' ? 0 : rng.fork('tilt').gaussian(0, 0.2),
+    style,
+    bands,
+    atmosphere: null,
+    rings: kind === 'moon' ? null : labRings(seed, type, radius, style),
+    climate: null,
+    moons: [],
+  };
+  const climated = withGeneratedClimate(planet, insolation);
+  return kind === 'moon' ? climated : withMoons(climated, options.moons);
+}
+
+function resolveTypeAndKind(rng: Rng, type: PlanetType | undefined, kind: LabKind | undefined): [PlanetType, LabKind] {
+  const zone = rng.fork('zone').range(0.3, 4);
+  if (type === 'gas') return ['gas', kind && kind !== 'moon' && isGiant(kind) ? kind : 'gasGiant'];
+  if (kind && kind !== 'moon' && isGiant(kind)) return ['gas', kind];
+  if (type) return [type, kind ?? rng.fork('size').pick(SOLID_KINDS)];
+  if (kind === 'moon') return [rng.fork('type').weighted(MOON_TYPES), 'moon'];
+  const size = kind ?? chooseSizeClass(rng.fork('size'), zone);
+  return [choosePlanetType(rng.fork('type'), zone, size), size];
+}
+
+function moonRadius(rng: Rng): number {
+  return logRange(rng, 1.5, MOON_RADIUS.max);
+}
+
+/** Colours and terrain for a type (the game's planetStyle / gasBands), from the seed. */
+export function labStyle(seed: number, type: PlanetType, kind: LabKind): { style: PlanetStyle; bands: string[] | null } {
+  const rng = new Rng(hashSeed(seed, 'style', type));
+  if (type === 'gas') {
+    const bands = gasBands(rng, kind === 'iceGiant');
+    return { style: gasStyle(bands), bands };
+  }
+  return { style: planetStyle(rng, type), bands: null };
+}
+
+/** Rings as the game would give this planet (or null). `force` always gives some. */
+export function labRings(seed: number, type: PlanetType, radius: number, style: PlanetStyle, force = false): RingData | null {
+  const rng = new Rng(hashSeed(seed, 'rings'));
+  if (type === 'gas') return force || rng.chance(0.45) ? generateRings(rng.fork('gas'), radius) : null;
+  const rings = generateSolidRings(rng.fork('solid'), type, radius) ?? (force ? defaultSolidRings(radius) : null);
+  if (rings) rings.color = solidRingColor(rng.fork('color'), type, style);
+  return rings;
+}
+
+function defaultSolidRings(radius: number): RingData {
+  return { inner: radius * 1.4, outer: radius * 1.85, color: '', opacity: 0.5 };
+}
+
+/** The setting the game would give this body (gravity, escape velocity, heat flow), at `insolation`. */
+export function labSetting(planet: Pick<LabPlanet, 'type' | 'kind' | 'radius' | 'seed'>, insolation: number): ClimateSetting {
+  if (planet.type === 'gas') return { insolation, gravity: 1, escapeVelocity: 11.2, heatFlow: 0 };
+  return climateSetting(climateBody(planet, insolation), new Rng(hashSeed(planet.seed, 'heat')));
+}
+
+function climateBody(planet: Pick<LabPlanet, 'type' | 'kind' | 'radius'>, insolation: number): ClimateBody {
+  return {
+    type: planet.type as ClimateBody['type'],
+    kind: planet.kind,
+    radius: planet.radius,
+    insolation,
+    host: planet.kind === 'moon' ? LAB_MOON_HOST : undefined,
+  };
+}
+
+/** A fresh climate and atmosphere tint for the planet's type and size, as generation would draw them. */
+export function withGeneratedClimate(planet: LabPlanet, insolation: number): LabPlanet {
+  if (planet.type === 'gas') return { ...planet, climate: null, atmosphere: null };
+  const rng = new Rng(hashSeed(planet.seed, 'climate', planet.type));
+  const climate = generateClimate(rng, climateBody(planet, insolation));
+  return {
+    ...planet,
+    climate: { setting: settingOf(climate), state: climateState(climate) },
+    atmosphere: atmosphereTint(rng.fork('tint'), climate),
+  };
+}
+
+/** Moons as the game would give this planet (`count` of them, or a drawn number); none for a moon. */
+export function withMoons(planet: LabPlanet, count?: number): LabPlanet {
+  const { kind } = planet;
+  if (kind === 'moon') return { ...planet, moons: [] };
+  const rng = new Rng(hashSeed(planet.seed, 'moons'));
+  const insolation = planet.climate?.setting.insolation ?? 1 / TYPICAL_ZONE[planet.type] ** 2;
+  const moons = generateMoons(rng, planet.name, kind, planet.radius, planet.rings, count).map((moon, j): MoonData => {
+    const crng = rng.fork('climate', j);
+    const climate = generateClimate(crng, {
+      type: moon.type,
+      kind: 'moon',
+      radius: moon.radius,
+      insolation,
+      host: { radius: planet.radius, size: kind, orbitRadius: moon.orbit.radius },
+    });
+    return { ...moon, atmosphere: atmosphereTint(crng, climate), climate };
+  });
+  return { ...planet, moons };
+}
+
+/**
+ * The planet as another type, keeping its seed, size (a giant becomes a
+ * super-Earth and a solid world a gas giant), starlight, spin and tilt: new
+ * colours, climate and atmosphere for the type, rings kept (recoloured).
+ */
+export function withType(planet: LabPlanet, type: PlanetType): LabPlanet {
+  const giant = planet.kind !== 'moon' && isGiant(planet.kind);
+  let kind = planet.kind;
+  if (type === 'gas' && !giant) kind = 'gasGiant';
+  if (type !== 'gas' && giant) kind = 'superEarth';
+  const radius = inRange(planet.radius, kind) ? planet.radius : classMiddle(kind);
+  const { style, bands } = labStyle(planet.seed, type, kind);
+  const rings = planet.rings && kind !== 'moon' ? recolourRings(planet, type, radius, style) : null;
+  const next = withGeneratedClimate({ ...planet, type, kind, radius, style, bands, rings }, insolationOf(planet));
+  return kind === 'moon' ? { ...next, moons: [] } : next;
+}
+
+/** The planet as another size class (or a moon), its radius moved into the class and its setting recomputed. */
+export function withKind(planet: LabPlanet, kind: LabKind): LabPlanet {
+  const giant = kind !== 'moon' && isGiant(kind);
+  if (giant !== (planet.type === 'gas')) return withType({ ...planet, kind }, giant ? 'gas' : 'terran');
+  const radius = inRange(planet.radius, kind) ? planet.radius : classMiddle(kind);
+  const next: LabPlanet = { ...planet, kind, radius, moons: kind === 'moon' ? [] : planet.moons };
+  if (kind === 'moon') next.rings = null;
+  if (planet.type === 'gas' && planet.bands) {
+    // Ice giants are mostly blue, gas giants mostly brown: new bands for the class.
+    const { style, bands } = labStyle(planet.seed, 'gas', kind);
+    next.style = style;
+    next.bands = bands;
+  }
+  return withAutoSetting(next);
+}
+
+/** The setting recomputed from the radius, type and kind (keeping the starlight). */
+export function withAutoSetting(planet: LabPlanet): LabPlanet {
+  if (!planet.climate) return planet;
+  return { ...planet, climate: { ...planet.climate, setting: labSetting(planet, planet.climate.setting.insolation) } };
+}
+
+/** The atmosphere glow the game would draw for the current climate (null when too thin to see). */
+export function climateTint(planet: LabPlanet): string | null {
+  const climate = labClimateData(planet);
+  return climate ? atmosphereTint(new Rng(hashSeed(planet.seed, 'climate', planet.type)).fork('tint'), climate) : null;
+}
+
+function recolourRings(planet: LabPlanet, type: PlanetType, radius: number, style: PlanetStyle): RingData {
+  const rings = planet.rings!;
+  const k = radius / planet.radius;
+  const color = labRings(planet.seed, type, radius, style, true)!.color;
+  return { ...rings, inner: rings.inner * k, outer: rings.outer * k, color };
+}
+
+function insolationOf(planet: LabPlanet): number {
+  return planet.climate?.setting.insolation ?? 1 / TYPICAL_ZONE[planet.type] ** 2;
+}
+
+function inRange(radius: number, kind: LabKind): boolean {
+  const [min, max] = kindRadiusRange(kind);
+  return radius >= min && radius <= max;
+}
+
+/** Geometric middle of a kind's radius range. */
+export function classMiddle(kind: LabKind): number {
+  const [min, max] = kindRadiusRange(kind);
+  return Math.sqrt(min * max);
+}
+
+function settingOf(c: ClimateSetting): ClimateSetting {
+  return { insolation: c.insolation, gravity: c.gravity, escapeVelocity: c.escapeVelocity, heatFlow: c.heatFlow };
+}
+
+// --- Views of the model ---
+
+/** The full climate (derived values included), or null for gas giants. */
+export function labClimateData(planet: LabPlanet): ClimateData | null {
+  if (planet.type === 'gas' || !planet.climate) return null;
+  return evaluateClimate(planet.climate.setting, planet.climate.state);
+}
+
+/** What the game's renderers take, at rest at the origin. */
+export function toPlanetConfig(planet: LabPlanet): PlanetConfig {
+  const gas = planet.type === 'gas';
+  return {
+    name: planet.name,
+    type: planet.type,
+    radius: planet.radius,
+    seed: planet.seed,
+    spin: planet.spin,
+    orbit: STILL_ORBIT,
+    style: planet.style,
+    bands: gas ? planet.bands : null,
+    atmosphere: gas ? null : planet.atmosphere,
+    rings: planet.rings,
+    tilt: planet.tilt,
+    climate: labClimateData(planet),
+  };
+}
+
+/** The game's label, e.g. "Ice world · Earth-sized" or "Barren rock · moon". */
+export function describeLab(planet: LabPlanet): string {
+  return planet.kind === 'moon' ? `${describePlanet(planet.type)} · moon` : describeSized(planet.type, planet.kind);
+}
+
+/** Radius in Earth radii (the inverse of the game's square-root size map). */
+export function labEarthRadii(planet: LabPlanet): number {
+  return earthRadii(planet.radius);
+}
+
+// --- From the game ---
+
+/** A planet or moon of the game as a lab planet: its data plus, for a planet, its moons. */
+export function labFromBody(config: PlanetConfig & { size?: SizeClass }, moon: boolean, moons: readonly MoonData[] = []): LabPlanet {
+  const climate = config.climate ?? null;
+  return {
+    name: config.name,
+    type: config.type,
+    kind: moon ? 'moon' : (config.size ?? 'earth'),
+    radius: config.radius,
+    seed: config.seed,
+    spin: config.spin,
+    tilt: config.tilt ?? 0,
+    style: { ...config.style },
+    bands: config.bands ? [...config.bands] : null,
+    atmosphere: config.atmosphere ?? null,
+    rings: config.rings ? { ...config.rings } : null,
+    climate: climate && config.type !== 'gas' ? { setting: settingOf(climate), state: climateState(climate) } : null,
+    moons: moon ? [] : moons.map((m) => ({ ...m })),
+  };
+}
+
+/** A link to the planet lab (lab.html next to `base`, the game's page) showing `planet`. */
+export function labLink(planet: LabPlanet, base: string, view: Partial<LabView> = {}): string {
+  return new URL(`lab.html#${encodeLab({ planet, view: { ...DEFAULT_VIEW, ...view } })}`, base).href;
+}
+
+/** Planet `planet` of a generated system (or its moon `moon`), or null if there is none. */
+export function labFromSystem(system: SystemData, planet: number, moon?: number): LabPlanet | null {
+  const p = system.planets[planet];
+  if (!p) return null;
+  if (moon === undefined) return labFromBody(p, false, p.moons);
+  const m = p.moons[moon];
+  return m ? labFromBody(m, true) : null;
+}
+
+// --- Links ---
+
+/** The lab state as URL-safe text (base64url JSON), for the link's #hash. */
+export function encodeLab(state: LabState): string {
+  const bytes = new TextEncoder().encode(JSON.stringify(state));
+  let binary = '';
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/**
+ * The lab state from `encodeLab`'s text, or null if it isn't one. Missing
+ * fields are filled from a generated planet of the same seed and type and
+ * from the default view, so older links keep working.
+ */
+export function decodeLab(text: string): LabState | null {
+  try {
+    const base64 = text.replace(/-/g, '+').replace(/_/g, '/');
+    const binary = atob(base64 + '='.repeat((4 - (base64.length % 4)) % 4));
+    const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+    const raw = JSON.parse(new TextDecoder().decode(bytes)) as Partial<{
+      planet: Partial<LabPlanet>;
+      view: Partial<LabView>;
+      source: LabSource;
+    }>;
+    const p = raw.planet;
+    if (!p || typeof p !== 'object') return null;
+    const type = LAB_TYPES.includes(p.type as PlanetType) ? p.type : undefined;
+    const kind = LAB_KINDS.includes(p.kind as LabKind) ? p.kind : undefined;
+    const seed = typeof p.seed === 'number' && Number.isFinite(p.seed) ? p.seed : 1;
+    const base = generateLabPlanet(seed, { type, kind });
+    const planet: LabPlanet = { ...base, ...p, type: base.type, kind: base.kind, seed: base.seed };
+    if (typeof planet.radius !== 'number' || !Number.isFinite(planet.radius) || planet.radius <= 0) planet.radius = base.radius;
+    planet.style = { ...base.style, ...p.style };
+    if (planet.type !== 'gas' && !planet.climate) planet.climate = base.climate;
+    const state: LabState = { planet, view: { ...DEFAULT_VIEW, ...raw.view } };
+    if (raw.source && typeof raw.source.star === 'number') state.source = raw.source;
+    return state;
+  } catch {
+    return null;
+  }
+}
+
+/** Mixes two hex colours (t = 0 → a). */
+export function mixHex(a: string, b: string, t: number): string {
+  const x = hexToRgb(a);
+  const y = hexToRgb(b);
+  return rgbToHex(x[0] + (y[0] - x[0]) * t, x[1] + (y[1] - x[1]) * t, x[2] + (y[2] - x[2]) * t);
+}

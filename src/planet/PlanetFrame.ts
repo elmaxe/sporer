@@ -13,6 +13,11 @@ export const planetParams = {
   spinScale: 0.1,
 };
 
+/** What views animated by the clock read: the system time of the frame being drawn. */
+export interface RenderClock {
+  readonly renderTime: number;
+}
+
 /**
  * The planet level's clock and its link to system space. Holds the system
  * time (it keeps running from where the system level left off, with pure
@@ -20,7 +25,7 @@ export const planetParams = {
  * body is in the system and how its frame is oriented. Must be the level's
  * first entity: everything else reads it.
  */
-export class PlanetFrame implements Entity {
+export class PlanetFrame implements Entity, RenderClock {
   /** Planet-level units per system unit. */
   readonly scale = PLANET_SCALE;
   /** Body frame → system space rotation, and its inverse. */

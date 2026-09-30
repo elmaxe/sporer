@@ -309,7 +309,7 @@ function placeStars(rng: Rng, stars: StarData[]): SystemStar[] {
   ];
 }
 
-function generateRings(rng: Rng, radius: number): RingData {
+export function generateRings(rng: Rng, radius: number): RingData {
   return {
     inner: radius * rng.range(1.3, 1.5),
     outer: radius * rng.range(1.9, 2.5),
@@ -329,7 +329,7 @@ export const SOLID_RING_CHANCE: Record<Exclude<PlanetType, 'gas'>, number> = {
 };
 
 /** Narrow rings (outer edge ≤ 2 R) for a solid planet, or null. The colour is set from its style later. */
-function generateSolidRings(rng: Rng, type: Exclude<PlanetType, 'gas'>, radius: number): RingData | null {
+export function generateSolidRings(rng: Rng, type: Exclude<PlanetType, 'gas'>, radius: number): RingData | null {
   if (!rng.chance(SOLID_RING_CHANCE[type])) return null;
   const inner = radius * rng.range(1.3, 1.5);
   return {
@@ -341,7 +341,7 @@ function generateSolidRings(rng: Rng, type: Exclude<PlanetType, 'gas'>, radius: 
 }
 
 /** Icy white for ice worlds, otherwise dusty: a paler, greyer blend of the planet's own ground colours. */
-function solidRingColor(rng: Rng, type: Exclude<PlanetType, 'gas'>, style: PlanetStyle): string {
+export function solidRingColor(rng: Rng, type: Exclude<PlanetType, 'gas'>, style: PlanetStyle): string {
   if (type === 'ice') return hslToHex(rng.range(190, 215), rng.range(0.15, 0.35), rng.range(0.8, 0.9));
   const low = hexToRgb(style.low);
   const high = hexToRgb(style.high);
@@ -356,14 +356,15 @@ function solidRingColor(rng: Rng, type: Exclude<PlanetType, 'gas'>, style: Plane
 /** Gaps between moon orbits for an Earth-sized planet; they scale with √(radius / 8), so bigger planets spread their moons wider. */
 const MOON_GAP: readonly [number, number] = [3, 8];
 
-function generateMoons(
+/** A planet's moons, without their climates. `count` overrides the drawn number (tools; it changes the draws). */
+export function generateMoons(
   rng: Rng,
   planetName: string,
   size: SizeClass,
   radius: number,
   rings: RingData | null,
+  count = rng.weighted<number>(MOON_COUNT_WEIGHTS[size]),
 ): Omit<MoonData, 'atmosphere' | 'climate'>[] {
-  const count = rng.weighted<number>(MOON_COUNT_WEIGHTS[size]);
   const gapScale = Math.sqrt(radius / EARTH_GAME_RADIUS);
 
   const moons: Omit<MoonData, 'atmosphere' | 'climate'>[] = [];

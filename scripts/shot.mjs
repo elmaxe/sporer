@@ -7,8 +7,11 @@
 //
 // Options:
 //   --url <url>        page to load (default http://localhost:5173/); --star <id> / --seed <s> add URL params
+//   --lab [<query>]    the planet lab (lab.html) instead of the game, e.g. --lab "gen=7&type=ice" or --lab
+//                      "seed=1337&star=5&planet=2" (a game planet); drive it with js:lab.set(...) and the like
 //   --out <dir>        where PNGs go (default: a new temp dir); created if missing
 //   --size <w>x<h>     page size in CSS pixels (default 1280x720)
+//   --phone            an emulated phone: 390x844 (unless --size), mobile, touch events (the game's touch mode)
 //   --clean            hide the debug panel and FPS meter
 //   --sheet            also write sheet.png: every screenshot in a labelled grid (one Read for a sequence)
 //   --steps <file>     read more steps from a file, one per line (# comments), handy for long JS
@@ -28,10 +31,13 @@
 //   solo:<outgoing|incoming>:<name>
 //                                while frozen mid-crossfade: redraw showing only that level, screenshot → <name>.png,
 //                                then redraw the blend (compare the two sides of a handover)
+//   tap:<element id>             tap (--phone) or click the middle of that element, then wait two frames
 //   fps                          measure frames per second over 120 frames
 //   goto:<url or ?params>        load another page (e.g. goto:?star=2) and wait for the game
 //
-// Page globals (dev build): game, levels, galaxy, ship, world, system, planet, audio, generateSystem.
+// Page globals (dev build): game, levels, galaxy, ship, world, system, planet, audio, menu, generateSystem.
+// In the lab: game and lab (src/lab/PlanetLab.ts: lab.set, setView, generate, load, look, setTime, ...);
+// settle there waits for lab.ready (the latest edit built and drawn).
 // Prints JSON: { ok, failure, out, shots, results, errors } (errors: console errors/warnings/exceptions).
 // A failing step stops the run, saves failure.png and exits 1.
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -53,6 +59,11 @@ for (let i = 0; i < args.length; i++) {
   else if (a === '--size') opts.size = value();
   else if (a === '--star') opts.params.star = value();
   else if (a === '--seed') opts.params.seed = value();
+  else if (a === '--lab') {
+    opts.lab = true;
+    // An optional query right after it (anything not starting with -- and not a step).
+    if (i + 1 < args.length && !args[i + 1].startsWith('--') && !/^[a-z]+(:|$)/.test(args[i + 1])) opts.labQuery = args[++i];
+  } else if (a === '--phone') opts.phone = true;
   else if (a === '--clean') opts.clean = true;
   else if (a === '--sheet') opts.sheet = true;
   else if (a === '--steps') {
@@ -65,9 +76,14 @@ for (let i = 0; i < args.length; i++) {
 }
 if (steps.length === 0) steps.push('shot:view');
 
+if (opts.phone && !args.includes('--size')) opts.size = '390x844';
 const [width, height] = opts.size.split('x').map(Number);
-const url = new URL(opts.url);
+const url = new URL(opts.lab ? `lab.html${opts.labQuery ? `?${opts.labQuery.replace(/^\?/, '')}` : ''}` : '', opts.url);
 for (const [k, v] of Object.entries(opts.params)) url.searchParams.set(k, v);
+/** True once the page's game (or the lab) is running. */
+const STARTED = `typeof window.lab !== 'undefined' || (typeof window.levels !== 'undefined' && typeof window.ship !== 'undefined')`;
+/** True when nothing is changing: no level transition in the game, the latest edit built and drawn in the lab. */
+const SETTLED = `typeof window.lab !== 'undefined' ? lab.ready : !levels.transitioning`;
 const out = resolve(opts.out ?? mkdtempSync(join(tmpdir(), 'spore2-shots-')));
 mkdirSync(out, { recursive: true });
 
@@ -77,6 +93,10 @@ if (!(await fetch(url).then((r) => r.ok, () => false))) {
 }
 
 const page = await launch({ width, height });
+if (opts.phone) {
+  await page.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: true });
+  await page.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+}
 const shots = [];
 const results = [];
 let last = null;
@@ -88,7 +108,7 @@ const HIDE_DEBUG = `(() => { const s = document.createElement('style');
 /** Loads `href` and waits until the game is running (a few frames drawn). */
 async function load(href) {
   await page.navigate(href);
-  if (!(await page.waitFor(`typeof window.levels !== 'undefined' && typeof window.ship !== 'undefined'`, 30000))) {
+  if (!(await page.waitFor(STARTED, 30000))) {
     throw new Error(`The game didn't start at ${href}`);
   }
   if (opts.clean) await page.evaluate(HIDE_DEBUG);
@@ -97,7 +117,7 @@ async function load(href) {
 
 /** Waits until no transition runs, then for a few frames (so shaders are compiled and the view is drawn). */
 async function settle() {
-  if (!(await page.waitFor(`!levels.transitioning`, 30000))) throw new Error('A level transition never finished');
+  if (!(await page.waitFor(SETTLED, 30000))) throw new Error('A level transition (or lab build) never finished');
   await page.evaluate(`new Promise((r) => { let n = 0; (function f() { if (++n > 3) r(); else requestAnimationFrame(f); })(); })`);
 }
 
@@ -205,6 +225,21 @@ async function run(step) {
     case 'resume':
       await page.evaluate(`game.afterFrame = null; game.start()`);
       return;
+    case 'tap': {
+      const at = await page.evaluate(`(() => { const e = document.getElementById(${JSON.stringify(rest)}); if (!e) return null;
+        const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+      if (!at) throw new Error(`no element #${rest}`);
+      if (opts.phone) {
+        await page.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...at, id: 0 }] });
+        await page.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      } else {
+        for (const type of ['mousePressed', 'mouseReleased']) {
+          await page.send('Input.dispatchMouseEvent', { type, ...at, button: 'left', clickCount: 1 });
+        }
+      }
+      await page.evaluate(`new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))`);
+      return;
+    }
     case 'fps':
       results.push({
         step,

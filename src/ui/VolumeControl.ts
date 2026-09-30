@@ -22,14 +22,14 @@ function saveAudioSettings(s: AudioSettings): void {
 }
 
 /**
- * The speaker button and volume panel (#audio in index.html): master, music,
- * ambience and effects sliders plus mute. M toggles mute anywhere. Changes apply
- * live and are saved to localStorage.
+ * The volume settings in the menu (#audio in index.html, see GameMenu):
+ * master, music, ambience and effects sliders plus mute. M toggles mute
+ * anywhere; the menu button shows a muted badge. Changes apply live and are
+ * saved to localStorage.
  */
 export class VolumeControl {
   private readonly root = document.getElementById('audio')!;
-  private readonly toggle = document.getElementById('audio-toggle') as HTMLButtonElement;
-  private readonly panel = document.getElementById('audio-panel')!;
+  private readonly menuButton = document.getElementById('menu-toggle');
   private readonly muteBtn = document.getElementById('audio-mute') as HTMLButtonElement;
   private readonly sliders = SLIDERS.map((key) => ({
     key,
@@ -45,19 +45,15 @@ export class VolumeControl {
       s.input.value = String(settings[s.key]);
       s.input.addEventListener('input', this.onSlider);
     }
-    this.toggle.addEventListener('click', this.onToggle);
     this.muteBtn.addEventListener('click', this.onMute);
     window.addEventListener('keydown', this.onKey);
-    window.addEventListener('pointerdown', this.onOutside);
     this.render();
   }
 
   dispose(): void {
     for (const s of this.sliders) s.input.removeEventListener('input', this.onSlider);
-    this.toggle.removeEventListener('click', this.onToggle);
     this.muteBtn.removeEventListener('click', this.onMute);
     window.removeEventListener('keydown', this.onKey);
-    window.removeEventListener('pointerdown', this.onOutside);
   }
 
   private update(patch: Partial<AudioSettings>): void {
@@ -71,8 +67,9 @@ export class VolumeControl {
     const { muted } = this.settings;
     for (const s of this.sliders) s.value.textContent = `${Math.round(this.settings[s.key] * 100)}%`;
     this.root.classList.toggle('muted', muted);
+    this.menuButton?.classList.toggle('muted', muted);
     this.muteBtn.textContent = muted ? 'Unmute (M)' : 'Mute (M)';
-    this.toggle.title = muted ? 'Sound (muted)' : 'Sound';
+    this.muteBtn.setAttribute('aria-pressed', String(muted));
   }
 
   private onSlider = (e: Event) => {
@@ -82,23 +79,11 @@ export class VolumeControl {
     this.update({ [key]: Number(input.value), muted: false });
   };
 
-  private onToggle = () => {
-    this.panel.hidden = !this.panel.hidden;
-    this.toggle.setAttribute('aria-expanded', String(!this.panel.hidden));
-  };
-
   private onMute = () => {
     this.update({ muted: !this.settings.muted });
   };
 
   private onKey = (e: KeyboardEvent) => {
     if (e.code === 'KeyM' && !e.repeat) this.onMute();
-  };
-
-  private onOutside = (e: PointerEvent) => {
-    if (!this.panel.hidden && !this.root.contains(e.target as Node)) {
-      this.panel.hidden = true;
-      this.toggle.setAttribute('aria-expanded', 'false');
-    }
   };
 }
