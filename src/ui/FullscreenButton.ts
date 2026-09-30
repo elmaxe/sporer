@@ -10,7 +10,7 @@ type WebkitElement = HTMLElement & { webkitRequestFullscreen?: () => Promise<voi
 
 /**
  * The full-screen button (#fullscreen-toggle in index.html), next to the
- * sound button. Where the browser lets a page go full screen (Android,
+ * menu button. Where the browser lets a page go full screen (Android,
  * iPad, desktop) it toggles that. iPhone Safari doesn't, so there it
  * explains the other way: Add to Home Screen, which launches the game full
  * screen (public/manifest.webmanifest and the apple-mobile-web-app metas).

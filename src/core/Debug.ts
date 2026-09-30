@@ -8,24 +8,35 @@ import type Stats from 'stats.js';
  *
  * Usage: `const f = debug.folder('Ship'); f?.add(params, 'thrust', 0, 200);`
  */
+export interface DebugOptions {
+  /** Enable even in production builds without `?debug` (tools like the planet lab). */
+  force?: boolean;
+  /** The panel's title (default "Debug"). */
+  title?: string;
+}
+
 export class Debug {
   private readonly folders = new Map<string, GUI>();
+  /** Where `folder` puts new folders: the panel itself, or a folder set by `nestFolders`. */
+  private parent: GUI | undefined;
 
   private constructor(
     private readonly gui?: GUI,
     private readonly stats?: Stats,
-  ) {}
+  ) {
+    this.parent = gui;
+  }
 
-  static async create(): Promise<Debug> {
-    const enabled = import.meta.env.DEV || new URLSearchParams(location.search).has('debug');
+  static async create({ force = false, title = 'Debug' }: DebugOptions = {}): Promise<Debug> {
+    const enabled = force || import.meta.env.DEV || new URLSearchParams(location.search).has('debug');
     if (!enabled) return new Debug();
 
     const [{ default: GUIClass }, { default: StatsClass }] = await Promise.all([
       import('lil-gui'),
       import('stats.js'),
     ]);
-    const gui = new GUIClass({ title: 'Debug' });
-    // Leave the bottom-right corner free for the sound button (#audio).
+    const gui = new GUIClass({ title });
+    // Leave the bottom-right corner free for the menu button (#menu-toggle).
     gui.domElement.style.maxHeight = 'calc(100% - 72px)';
     // On a phone the open panel would cover the whole screen (and swallow every touch).
     if (matchMedia('(max-width: 600px)').matches) gui.close();
@@ -40,6 +51,21 @@ export class Debug {
     return this.gui !== undefined;
   }
 
+  /** The whole panel (undefined when debug is off), for tools that lay out their own folders. */
+  get panel(): GUI | undefined {
+    return this.gui;
+  }
+
+  /**
+   * From now on, `folder` nests new folders inside a (closed) folder called
+   * `name` at the end of the panel, e.g. to keep the game's own tunables
+   * apart from a tool's controls.
+   */
+  nestFolders(name: string): void {
+    if (!this.gui) return;
+    this.parent = this.gui.addFolder(name).close();
+  }
+
   /**
    * A GUI folder, or undefined when debug is off. Asking for an existing name
    * replaces that folder, so an object that is rebuilt (e.g. the ship when a
@@ -48,7 +74,7 @@ export class Debug {
   folder(name: string): GUI | undefined {
     if (!this.gui) return undefined;
     this.folders.get(name)?.destroy();
-    const folder = this.gui.addFolder(name);
+    const folder = (this.parent ?? this.gui).addFolder(name);
     this.folders.set(name, folder);
     return folder;
   }

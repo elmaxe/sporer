@@ -12,7 +12,7 @@ const REFRESH_SECONDS = 0.1;
 const HELP =
   'Click: fly to a planet, star or point · Scroll: zoom (in at a planet to descend, out past the system for the galaxy) · ' +
   'Drag: rotate view · ' +
-  'WASD: nudge · E/Q: up/down · Shift: boost · N: map · M: mute';
+  'WASD: nudge · E/Q: up/down · Shift: boost · N: map · M: mute · Esc: menu';
 const TOUCH_HELP =
   'Tap: fly to a planet, star or point · Pinch: zoom (in at a planet to descend, out past the system for the galaxy) · ' +
   'Drag: rotate view · Hold: identify · Stick: nudge · ▲/▼: up/down · Boost · Map';

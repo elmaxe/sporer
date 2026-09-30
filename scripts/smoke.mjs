@@ -3,8 +3,9 @@
 // Checks: W moves the ship along -Z, the autopilot flies back to a point, hovering + clicking
 // the star targets it, the system map shows every planet and moon (hover, click to fly, N folds it), and the galaxy loop works (scroll out to the galaxy, click the nearest
 // star, travel, scroll in to its system; the galaxy shows distant galaxies, twinkles, spins and draws binaries
-// as two dots, and picking works while it's turned), a real click on the speaker button starts audio; then the
-// transitions and galaxy travel play their whooshes, and M mutes. Then the planet loop (park at a planet,
+// as two dots, and picking works while it's turned), a real click on the menu button starts audio and opens the
+// menu (the game pauses; volume sliders and a planet lab link; a real Esc closes it); then the transitions and
+// galaxy travel play their whooshes, and M mutes. Then the planet loop (park at a planet,
 // scroll in to low orbit, click the globe and fly, the Equal Earth map is shown and a click on it sets the
 // autopilot there, scroll back out beside it), and again for every planet
 // type, a ringed rocky/icy/lava world and a moon in other systems (skip those with --quick). The system sky has
@@ -18,7 +19,9 @@
 // weight and canvas brightness; each transition must crossfade and never go black (screenshots mid-handover).
 // Touch: on an emulated phone, hold/tap/drag/pinch and the on-screen stick and Boost work, down to a planet and out;
 // the full-screen button shows, and the Map button opens the system map (in space) and the planet map (in low
-// orbit), a tap on either flies there, × closes it.
+// orbit), a tap on either flies there, × closes it; the menu button opens the menu. The planet lab works on the
+// phone too (stick, Map button, drag, tap to fly).
+// Planet lab (lab.html): every type and a moon build and draw in both views, a game planet loads, the panel works.
 // Prints JSON with FPS, console errors and screenshot paths. Exit 1 on failure.
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -438,15 +441,26 @@ if (started) {
   galaxyLoop.shipSpeed = await evaluate(`ship.speed`);
   fps = await evaluate(measureFps);
 
-  // Audio: a real (trusted) click on the speaker button unlocks audio and opens the volume panel.
-  const button = await evaluate(`(() => { const r = document.getElementById('audio-toggle').getBoundingClientRect();
+  // Audio: a real (trusted) click on the menu button unlocks audio and opens the menu, which pauses the game and
+  // holds the volume sliders and a link to the planet lab (for the first planet here); a real Esc closes it.
+  const button = await evaluate(`(() => { const r = document.getElementById('menu-toggle').getBoundingClientRect();
     return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
   for (const type of ['mousePressed', 'mouseReleased']) {
     await send('Input.dispatchMouseEvent', { type, ...button, button: 'left', clickCount: 1 });
   }
   await sleep(1000);
-  audio = await evaluate(`({ state: audio.state, panelOpen: !document.getElementById('audio-panel').hidden,
-    effectsSlider: !!document.querySelector('#audio-panel input[data-key="sfx"]') })`);
+  const clock = `levels.systemLevel.world.time`;
+  const pausedAt = await evaluate(clock);
+  await sleep(500);
+  audio = await evaluate(`({ state: audio.state, panelOpen: menu.isOpen, paused: game.paused && ${clock} === ${pausedAt},
+    effectsSlider: !!document.querySelector('#menu #audio input[data-key="sfx"]'),
+    labLink: document.getElementById('menu-lab').href.includes('lab.html#'),
+    labText: document.getElementById('menu-lab').textContent })`);
+  audio.menuShot = join(outDir, 'menu.png');
+  writeFileSync(audio.menuShot, await page.screenshot());
+  for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, code: 'Escape', key: 'Escape', windowsVirtualKeyCode: 27 });
+  await sleep(300);
+  audio.closedByEsc = await evaluate(`!menu.isOpen && !game.paused && ${clock} > ${pausedAt}`);
 
   // Whooshes: zoom out (transition), travel to a neighbour, zoom back in.
   const played = `(audio.lastPlayed && { name: audio.lastPlayed.name, seconds: +audio.lastPlayed.seconds.toFixed(2), count: audio.lastPlayed.count })`;
@@ -474,7 +488,9 @@ if (started) {
   audio.sfx.modeAfter = await evaluate(`levels.mode`);
   await send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'KeyM', key: 'm' });
   await send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'KeyM', key: 'm' });
-  audio.mutedByKey = await evaluate(`document.getElementById('audio').classList.contains('muted')`);
+  audio.mutedByKey = await evaluate(
+    `document.getElementById('audio').classList.contains('muted') && document.getElementById('menu-toggle').classList.contains('muted')`,
+  );
 
   // Planet loop in the current system: the first terran or ocean world, else the first planet.
   planetLoop = await runPlanetLoop(
@@ -573,6 +589,72 @@ const shot = await send('Page.captureScreenshot', { format: 'png' });
 writeFileSync(screenshot, Buffer.from(shot.result.data, 'base64'));
 
 /**
+ * The planet lab (lab.html): every planet type and a moon build in the globe and system views and draw a lit
+ * planet (mean brightness of the middle of the canvas), lava worlds have eruptions, a game planet loads by
+ * star and index with its name, the panel's type control rebuilds the planet, and the page URL keeps a link.
+ */
+async function runLab() {
+  const r = { cases: [] };
+  await send('Page.navigate', { url: new URL('lab.html?gen=3', url).href });
+  if (!(await page.waitFor(`typeof window.lab !== 'undefined' && lab.ready`, 30000))) return { ok: false, started: false };
+  // Redraw and read the canvas in the same task (the drawing buffer is only valid until it's shown).
+  const brightness = `(() => {
+    game.redraw();
+    const gl = game.renderer.getContext(), w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
+    const px = new Uint8Array(w * h * 4);
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    let sum = 0, n = 0;
+    for (let y = Math.floor(h * 0.3); y < h * 0.7; y += 6) for (let x = Math.floor(w * 0.35); x < w * 0.65; x += 6) {
+      const i = 4 * (y * w + x); sum += px[i] + px[i + 1] + px[i + 2]; n++;
+    }
+    return +(sum / (3 * n)).toFixed(1);
+  })()`;
+  const cases = [...['lava', 'barren', 'desert', 'terran', 'ocean', 'ice', 'gas'].map((type) => ({ type })), { kind: 'moon' }];
+  for (const c of cases) {
+    const result = { case: c.type ?? c.kind };
+    for (const view of ['globe', 'system']) {
+      await evaluate(`lab.setView({ view: '${view}' }).then(() => lab.generate(17, ${JSON.stringify(c)}))`);
+      await page.waitFor(`lab.ready`, 30000);
+      result[view] = await evaluate(`({
+        type: lab.planet.type, kind: lab.planet.kind, triangles: lab.level.triangles,
+        eruptions: !!lab.level.eruptions, brightness: ${brightness} })`);
+    }
+    result.ok =
+      (!c.type || result.globe.type === c.type) &&
+      (!c.kind || result.globe.kind === c.kind) &&
+      result.globe.triangles > 5000 &&
+      result.system.triangles > 500 &&
+      result.globe.brightness > 8 &&
+      result.system.brightness > 8 &&
+      result.globe.eruptions === (result.globe.type === 'lava');
+    r.cases.push(result);
+  }
+  await evaluate(`lab.setView({ view: 'globe' })`);
+  r.loaded = await evaluate(`(async () => {
+    await lab.load('1337', 5, 1);
+    return { name: lab.planet.name, source: lab.source, hash: location.hash.length };
+  })()`);
+  r.panelType = await evaluate(`(async () => {
+    game.debug.panel.controllersRecursive().find((c) => c._name === 'type').setValue('ice');
+    await new Promise((ok) => setTimeout(ok, 50));
+    await lab.whenReady();
+    return lab.planet.type;
+  })()`);
+  r.screenshot = join(outDir, 'lab.png');
+  writeFileSync(r.screenshot, await page.screenshot());
+  r.ok =
+    r.cases.length === cases.length &&
+    r.cases.every((c) => c.ok) &&
+    // Planet index 1 is the system's second planet: "<star name> II".
+    / II$/.test(r.loaded?.name ?? '') &&
+    r.loaded.source?.star === 5 &&
+    r.loaded.hash > 100 &&
+    r.panelType === 'ice';
+  return r;
+}
+const lab = started ? await runLab() : null;
+
+/**
  * Touch play on an emulated phone (390x844, real CDP touch events): hold a finger on the star (tooltip), lift
  * (autopilot to it), drag (rotates, no tap), pinch (zoom), the on-screen stick with a second finger on Boost, then
  * pinch in at a planet to descend, tap the globe, and pinch out to the system and on to the galaxy, checking which
@@ -647,6 +729,18 @@ async function runTouch() {
   r.stick.released = await evaluate(`game.input.axis('KeyS', 'KeyW') === 0 && !game.input.isDown('ShiftLeft')`);
   const to = await evaluate(`ship.object.position.toArray()`);
   r.stick.moved = +Math.hypot(to[0] - from[0], to[2] - from[2]).toFixed(1);
+
+  // The menu: a tap on the menu button opens it (paused, with the planet lab link), a tap on Resume closes it.
+  await touch('touchStart', [await center('menu-toggle')]);
+  await touch('touchEnd', []);
+  await frames();
+  r.menu = await evaluate(`({ opened: menu.isOpen && game.paused, lab: document.getElementById('menu-lab').href.includes('lab.html') })`);
+  r.menu.shot = join(outDir, 'touch-menu.png');
+  writeFileSync(r.menu.shot, await page.screenshot());
+  await touch('touchStart', [await center('menu-resume')]);
+  await touch('touchEnd', []);
+  await frames();
+  r.menu.closed = await evaluate(`!menu.isOpen && !game.paused`);
 
   // The system map: the Map button (above ▲ / ▼ in space) opens it over the screen, a tap on a planet flies
   // there, and its × closes it.
@@ -742,6 +836,9 @@ async function runTouch() {
     r.stick.boost &&
     r.stick.released &&
     r.stick.moved > 5 &&
+    r.menu.opened &&
+    r.menu.lab &&
+    r.menu.closed &&
     r.systemMap.closed &&
     r.systemMap.button &&
     r.systemMap.opened &&
@@ -765,6 +862,57 @@ async function runTouch() {
   return r;
 }
 const touch = started ? await runTouch() : null;
+
+/**
+ * The planet lab on the same emulated phone: the controls panel starts folded, the on-screen stick and Map
+ * button show in low orbit, a drag turns the camera, a tap on the globe flies the UFO there, and the Map button
+ * opens the map over the screen.
+ */
+async function runTouchLab() {
+  await send('Page.navigate', { url: new URL('lab.html?gen=4&type=terran', url).href });
+  if (!(await page.waitFor(`typeof window.lab !== 'undefined' && lab.ready`, 30000))) return { ok: false, started: false };
+  const tap = async ([x, y]) => {
+    await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 0 }] });
+    await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await evaluate(`new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))`);
+  };
+  const center = (id) =>
+    evaluate(`(() => { const b = document.getElementById('${id}').getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; })()`);
+  const r = {};
+  r.layout = await evaluate(`({ touch: document.documentElement.classList.contains('touch'), ship: document.documentElement.dataset.ship,
+    stick: getComputedStyle(document.getElementById('touch-stick')).display !== 'none',
+    mapButton: getComputedStyle(document.getElementById('touch-map')).display !== 'none',
+    panelFolded: game.debug.panel._closed, panelWidth: game.debug.panel.domElement.getBoundingClientRect().width,
+    back: !!document.querySelector('#lab-info a.lab-back') })`);
+  const yaw = await evaluate(`lab.level.orbit.targetYaw`);
+  await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 120, y: 520, id: 0 }] });
+  for (let i = 1; i <= 10; i++) {
+    await send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: 120 + i * 12, y: 520, id: 0 }] });
+    await sleep(16);
+  }
+  await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  r.dragYaw = +((await evaluate(`lab.level.orbit.targetYaw`)) - yaw).toFixed(2);
+  // The middle of the globe, on screen.
+  await tap(await evaluate(`[innerWidth / 2, innerHeight / 2]`));
+  r.tapFlies = await evaluate(`lab.level.ship.enRoute`);
+  await tap(await center('touch-map'));
+  await sleep(300);
+  r.mapOpen = await evaluate(`lab.level.map.visible`);
+  r.screenshot = join(outDir, 'touch-lab.png');
+  writeFileSync(r.screenshot, await page.screenshot());
+  r.ok =
+    r.layout.touch &&
+    r.layout.ship === 'surface' &&
+    r.layout.stick &&
+    r.layout.mapButton &&
+    r.layout.panelFolded &&
+    r.layout.back &&
+    Math.abs(r.dragYaw) > 0.2 &&
+    r.tapFlies &&
+    r.mapOpen;
+  return r;
+}
+const touchLab = started ? await runTouchLab() : null;
 
 const moved = started && after.pos[2] < before.pos[2] - 10 && after.speed > 5;
 const autopiloted = started && autopilot.endDist < Math.max(3, autopilot.startDist * 0.1);
@@ -800,7 +948,10 @@ const sounded =
   started &&
   audio.state === 'running' &&
   audio.panelOpen &&
+  audio.paused &&
   audio.effectsSlider &&
+  audio.labLink &&
+  audio.closedByEsc &&
   audio.sfx.out?.name === 'transitionOut' &&
   audio.sfx.travel?.name === 'travel' &&
   audio.sfx.in?.name === 'transitionIn' &&
@@ -818,11 +969,13 @@ const planets =
   seamless.ok &&
   planetTypes.every((r) => r.ok) &&
   (quick || planetTypes.length === 13); // 7 types, ringed, moon and 4 geyser kinds
-const touched = started && touch.ok;
-const ok = started && moved && autopiloted && picked && skyOk && alive && looped && sounded && planets && touched && errors.length === 0;
+const touched = started && touch.ok && touchLab.ok;
+const labbed = started && lab.ok;
+const ok =
+  started && moved && autopiloted && picked && skyOk && alive && looped && sounded && planets && touched && labbed && errors.length === 0;
 console.log(
   JSON.stringify(
-    { ok, started, moved, autopiloted, picked, skyOk, alive, looped, sounded, planets, touched, before, after, autopilot, pick, systemMap, sky, living, comet, eye, galaxyLoop, seamless, audio, planetLoop, heldZoom, planetTypes, touch, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
+    { ok, started, moved, autopiloted, picked, skyOk, alive, looped, sounded, planets, touched, labbed, before, after, autopilot, pick, systemMap, sky, living, comet, eye, galaxyLoop, seamless, audio, planetLoop, heldZoom, planetTypes, touch, touchLab, lab, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
     null,
     2,
   ),

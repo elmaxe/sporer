@@ -14,7 +14,7 @@ import {
 import { Rng } from '../gen/rng';
 import { AFTER_ATMOSPHERE_RENDER_ORDER } from '../world/atmosphereShell';
 import { createGlowTexture } from '../world/glowTexture';
-import type { PlanetFrame } from './PlanetFrame';
+import type { RenderClock } from './PlanetFrame';
 
 export const eruptionParams = {
   /** Blob size, planet-level units. */
@@ -121,7 +121,7 @@ export class LavaEruptions implements Entity {
 
   constructor(
     private readonly scene: THREE.Scene,
-    private readonly frame: PlanetFrame,
+    private readonly frame: RenderClock,
     readonly activity: LavaActivity,
     seed: number,
     /** The sea's colour, tinting the blobs. */

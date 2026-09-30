@@ -25,6 +25,8 @@ npm run shot -- --out <dir> --clean [--sheet] [--star <id>] <steps...>
 - **`--sheet`** also writes `sheet.png`: every shot in one labelled grid. Use it for sequences, so a single Read shows them all. Read single shots for detail.
 - **`--star <id>` / `--seed <s>`**: which system/galaxy to start in (`--url` for anything else, e.g. a preview build on :4173). Default page size is 1280×720 (`--size`).
 - **`--steps <file>`**: steps from a file, one per line, `#` comments. Use it when the JS gets long or needs quotes; put the file in the scratchpad.
+- **`--phone`**: an emulated phone (390×844, mobile, real touch events), so the game (and the lab) run in touch mode with the on-screen controls; use `tap:<element id>` to press its buttons.
+- **`--lab [<query>]`**: shoot the planet lab (`lab.html`) instead of the game, e.g. `--lab "gen=7&type=ice&kind=moon"` or `--lab "seed=1337&star=5&planet=2"`. See *The planet lab* below.
 
 Steps run in order. With no steps, you get `shot:view`.
 
@@ -40,10 +42,11 @@ Steps run in order. With no steps, you get `shot:view`.
 | `freeze:<expression>` | stop the game loop on the first frame where the expression is true (checked after drawing), so the next `shot` is exactly that frame |
 | `resume` | restart the loop after a freeze |
 | `solo:<outgoing\|incoming>:<name>` | while frozen mid-crossfade: redraw with only that level showing and shoot it; compare the two sides of a handover (same place, same size?) |
+| `tap:<element id>` | tap (with `--phone`) or click the middle of that element, e.g. `tap:menu-toggle`, `tap:touch-map` |
 | `fps` | frames per second over 120 frames (headless SwiftShader: expect ~5–25) |
 | `goto:<url or ?params>` | load another page, e.g. `goto:?star=2`, and wait for the game |
 
-The page has the dev globals: `game`, `levels` (the `SceneManager`), `galaxy`, `ship`, `world` (the `StarSystem`), `system` (its data), `planet` (the planet level or null), `audio`, `generateSystem`. See `threejs-game-conventions` for what the classes offer.
+The page has the dev globals: `game`, `levels` (the `SceneManager`), `galaxy`, `ship`, `world` (the `StarSystem`), `system` (its data), `planet` (the planet level or null), `audio`, `menu` (the Esc menu: `menu.open()`, `menu.hide()`; open, the game is paused), `generateSystem`. See `threejs-game-conventions` for what the classes offer.
 
 ## 3. Look, and report
 
@@ -96,6 +99,35 @@ More hooks:
 - Galaxy spin: `levels.galaxyLevel.root.rotation.y`.
 - Travel: `levels.galaxyLevel.ship.travelTo(galaxy.stars[42])`, then `until:!levels.galaxyLevel.ship.travelling`.
 - Autopilot: `ship.moveTo(world.planets[1])`, then `until:!ship.enRoute`.
+
+## The planet lab
+
+For anything about how a planet or moon looks (terrain, seas, gas bands, atmospheres, rings, lava, geysers, the map, lighting), the lab is quicker than flying there: it builds exactly the body you ask for with the game's own code. The page has `game` and `lab` (`src/lab/PlanetLab.ts`); every `lab.*` edit returns a promise that resolves once it's built and drawn, and `settle` waits for `lab.ready`.
+
+| Call | Does |
+|---|---|
+| `lab.generate(seed, { type, kind, insolation, moons })` | a new body from the game's generators (type: lava, barren, desert, terran, ocean, ice, gas; kind: dwarf, small, earth, superEarth, iceGiant, gasGiant, moon) |
+| `lab.load(galaxySeed, star, planet, moon?)` | a planet (or moon) of the game |
+| `lab.set({ radius: 9, style: { seaLevel: 0.3 }, rings: {...}, climate: { setting: { heatFlow: 0.1 } } })` | edit anything (merged two levels deep); `lab.planet` is the model |
+| `lab.setType('ice')`, `lab.setKind('moon')`, `lab.terraform({ composition: 'oxygenNitrogen', pressure: 1 })` | the panel's type, size and climate edits |
+| `lab.setView({ view: 'system', camera: 'fly', star: 'redDwarf', sunAzimuth: 90, sunElevation: 10, paused: true, wireframe: true })` | view, camera (orbit the planet or follow the UFO), light, clock |
+| `lab.look(lon, lat, zoom)` | camera over longitude/latitude (degrees) at `zoom` planet radii |
+| `lab.lookAtVent()` | the next geyser or lava vent, from the side so plumes stand against the sky |
+| `lab.setTime(t)` | jump the clock (eruptions and geysers are pure functions of it) |
+| `lab.climate`, `lab.level.geysers`, `lab.level.eruptions`, `lab.level.globe`, `lab.level.triangles` | what got built |
+
+```bash
+# A cryo-geyser moon: airless, some heat, look at a plume
+npm run shot -- --out $OUT --clean --lab "gen=21&type=ice&kind=moon" \
+  "js:lab.terraform({ composition: 'none', pressure: 0 })" "js:lab.set({ climate: { setting: { heatFlow: 0.1 } } })" \
+  "js:lab.lookAtVent()" wait:2500 shot:cryo
+# The same planet across all types (a contact sheet)
+npm run shot -- --out $OUT --clean --sheet --lab "gen=5" "js:lab.setType('lava')" shot:lava "js:lab.setType('ocean')" shot:ocean "js:lab.setType('gas')" shot:gas
+```
+
+`--clean` hides the lab's control panel too; the readout (top right) stays, with the climate and what's active.
+
+On a phone: `npm run shot -- --out $OUT --phone --lab "gen=4&type=terran" tap:touch-map "until:lab.level.map.baked" shot:phone-map`.
 
 ## Tips
 

@@ -12,7 +12,7 @@ import {
   peakRadius,
 } from '../world/planetGeometry';
 import { PLANET_SCALE, globeDetail, globeRadius } from './frame';
-import type { PlanetFrame } from './PlanetFrame';
+import type { RenderClock } from './PlanetFrame';
 
 /** Gas giants are smooth-shaded, so their bands need less detail than terrain as they grow. */
 const GAS_DETAIL = 64;
@@ -45,7 +45,7 @@ export class PlanetGlobe implements Entity {
   constructor(
     private readonly scene: THREE.Scene,
     config: PlanetConfig,
-    private readonly frame: PlanetFrame,
+    private readonly frame: RenderClock,
   ) {
     const { seed, style } = config;
     const R = (this.radius = globeRadius(config.radius));

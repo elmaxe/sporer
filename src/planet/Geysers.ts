@@ -11,7 +11,7 @@ import {
 } from '../gen/geysers';
 import { Rng } from '../gen/rng';
 import { AFTER_ATMOSPHERE_RENDER_ORDER } from '../world/atmosphereShell';
-import type { PlanetFrame } from './PlanetFrame';
+import type { RenderClock } from './PlanetFrame';
 
 export const geyserParams = {
   /** Scales every particle's size. */
@@ -142,7 +142,7 @@ export class Geysers implements Entity {
 
   constructor(
     private readonly scene: THREE.Scene,
-    private readonly frame: PlanetFrame,
+    private readonly frame: RenderClock,
     readonly activity: GeyserActivity,
     seed: number,
     sun: THREE.Vector3,
