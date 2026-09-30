@@ -893,53 +893,69 @@ async function runTouch() {
 const touch = started ? await runTouch() : null;
 
 /**
- * The planet lab on the same emulated phone: the controls panel starts folded, the on-screen stick and Map
- * button show in low orbit, a drag turns the camera, a tap on the globe flies the UFO there, and the Map button
- * opens the map over the screen.
+ * The planet lab on an emulated phone: the controls panel starts folded, the on-screen stick and Map button show
+ * in low orbit, a drag turns the camera, a tap on the globe flies the UFO there, and the Map button opens the map
+ * over the screen. In a browser of its own: in the same tab, after runTouch's gestures headless Chrome stopped
+ * sending the lab page pointer events at all (no pointerdown in 20 probe touches, while a tap on a button still
+ * clicked it), so the drag and the globe tap never reached the game's input and this failed every run.
  */
 async function runTouchLab() {
-  await send('Page.navigate', { url: new URL('lab.html?gen=4&type=terran', url).href });
-  if (!(await page.waitFor(`typeof window.lab !== 'undefined' && lab.ready`, 30000))) return { ok: false, started: false };
-  const tap = async ([x, y]) => {
-    await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 0 }] });
+  const W = 390;
+  const H = 844;
+  const phone = await launch({ width: W, height: H });
+  try {
+    const send = phone.send;
+    const evaluate = phone.tryEvaluate;
+    await send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 1, mobile: true });
+    await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+    await send('Page.navigate', { url: new URL('lab.html?gen=4&type=terran', url).href });
+    if (!(await phone.waitFor(`typeof window.lab !== 'undefined' && lab.ready`, 30000))) return { ok: false, started: false };
+    const tap = async ([x, y]) => {
+      await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 0 }] });
+      await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      await evaluate(`new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))`);
+    };
+    const center = (id) =>
+      evaluate(`(() => { const b = document.getElementById('${id}').getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; })()`);
+    const r = {};
+    r.layout = await evaluate(`({ touch: document.documentElement.classList.contains('touch'), ship: document.documentElement.dataset.ship,
+      stick: getComputedStyle(document.getElementById('touch-stick')).display !== 'none',
+      mapButton: getComputedStyle(document.getElementById('touch-map')).display !== 'none',
+      panelFolded: game.debug.panel._closed, panelWidth: game.debug.panel.domElement.getBoundingClientRect().width,
+      back: !!document.querySelector('#lab-info a.lab-back') })`);
+    const yaw = await evaluate(`lab.level.orbit.targetYaw`);
+    await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 120, y: 520, id: 0 }] });
+    for (let i = 1; i <= 10; i++) {
+      await send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: 120 + i * 12, y: 520, id: 0 }] });
+      await sleep(16);
+    }
     await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     await evaluate(`new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))`);
-  };
-  const center = (id) =>
-    evaluate(`(() => { const b = document.getElementById('${id}').getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; })()`);
-  const r = {};
-  r.layout = await evaluate(`({ touch: document.documentElement.classList.contains('touch'), ship: document.documentElement.dataset.ship,
-    stick: getComputedStyle(document.getElementById('touch-stick')).display !== 'none',
-    mapButton: getComputedStyle(document.getElementById('touch-map')).display !== 'none',
-    panelFolded: game.debug.panel._closed, panelWidth: game.debug.panel.domElement.getBoundingClientRect().width,
-    back: !!document.querySelector('#lab-info a.lab-back') })`);
-  const yaw = await evaluate(`lab.level.orbit.targetYaw`);
-  await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 120, y: 520, id: 0 }] });
-  for (let i = 1; i <= 10; i++) {
-    await send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: 120 + i * 12, y: 520, id: 0 }] });
-    await sleep(16);
+    r.dragYaw = +((await evaluate(`lab.level.orbit.targetYaw`)) - yaw).toFixed(2);
+    // The middle of the globe, on screen.
+    await tap(await evaluate(`[innerWidth / 2, innerHeight / 2]`));
+    r.tapFlies = await evaluate(`lab.level.ship.enRoute`);
+    await tap(await center('touch-map'));
+    await sleep(300);
+    r.mapOpen = await evaluate(`lab.level.map.visible`);
+    r.screenshot = join(outDir, 'touch-lab.png');
+    writeFileSync(r.screenshot, await phone.screenshot());
+    // Its console errors count like the main page's.
+    errors.push(...phone.errors.map((e) => `touch lab: ${e}`));
+    r.ok =
+      r.layout.touch &&
+      r.layout.ship === 'surface' &&
+      r.layout.stick &&
+      r.layout.mapButton &&
+      r.layout.panelFolded &&
+      r.layout.back &&
+      Math.abs(r.dragYaw) > 0.2 &&
+      r.tapFlies &&
+      r.mapOpen;
+    return r;
+  } finally {
+    await phone.close();
   }
-  await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-  r.dragYaw = +((await evaluate(`lab.level.orbit.targetYaw`)) - yaw).toFixed(2);
-  // The middle of the globe, on screen.
-  await tap(await evaluate(`[innerWidth / 2, innerHeight / 2]`));
-  r.tapFlies = await evaluate(`lab.level.ship.enRoute`);
-  await tap(await center('touch-map'));
-  await sleep(300);
-  r.mapOpen = await evaluate(`lab.level.map.visible`);
-  r.screenshot = join(outDir, 'touch-lab.png');
-  writeFileSync(r.screenshot, await page.screenshot());
-  r.ok =
-    r.layout.touch &&
-    r.layout.ship === 'surface' &&
-    r.layout.stick &&
-    r.layout.mapButton &&
-    r.layout.panelFolded &&
-    r.layout.back &&
-    Math.abs(r.dragYaw) > 0.2 &&
-    r.tapFlies &&
-    r.mapOpen;
-  return r;
 }
 const touchLab = started ? await runTouchLab() : null;
 
