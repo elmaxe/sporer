@@ -16,6 +16,7 @@ import { SystemMap } from '../ui/SystemMap';
 import type { Tooltip } from '../ui/Tooltip';
 import { GalaxyBand } from '../world/GalaxyBand';
 import { OrbitTrails } from '../world/OrbitTrails';
+import type { CelestialBody } from '../world/CelestialBody';
 import { Planet } from '../world/Planet';
 import { Starfield } from '../world/Starfield';
 import { StarSystem } from '../world/StarSystem';
@@ -26,6 +27,12 @@ import { Level } from './Level';
 export const ARRIVAL_DISTANCE = 90;
 /** Flying to within this distance of a planet or moon's surface also descends to it (the ship's radius is 2). */
 const TOUCH_MARGIN = 3;
+/** The camera keeps this much clear of a body's surface (the view dips below the ecliptic, under the body). */
+const CAMERA_CLEARANCE = 1.5;
+/** Hovering at a star, the camera looks at the star but keeps the ship within this angle of the view's axis (the view is 65° tall). */
+const AIM_LIMIT = (24 * Math.PI) / 180;
+/** Seconds for the camera's aim to settle on the star, or back on the ship. */
+const AIM_EASE = 0.7;
 
 /**
  * A star system at system-scene units: the generated system, the player's
@@ -47,6 +54,9 @@ export class SystemLevel extends Level {
   private readonly starfield: Starfield;
   private readonly marker: TargetMarker;
   readonly trails: OrbitTrails;
+  /** The star the camera is looking at, rather than the ship hovering over it (until the ship goes elsewhere). */
+  private aimBody: CelestialBody | null = null;
+  private aimWeight = 0;
 
   constructor(
     readonly ref: StarRef,
@@ -81,13 +91,15 @@ export class SystemLevel extends Level {
           distance: ARRIVAL_DISTANCE,
           pitch: this.hoverElevation(ARRIVAL_DISTANCE, 0),
           onZoomPastLimit: (dir) => (dir > 0 ? onZoomOut() : onZoomIn()),
-          // Zoom in (and descend) where the autopilot is going, not at whatever it passes on the way.
-          holdZoomIn: () => this.ship.enRoute,
+          // Zoom freely on the way, but leave the system or descend only where the autopilot is going.
+          zoomLimitsHold: () => this.ship.enRoute,
+          keepOut: (position) => this.keepOutOfBodies(position),
         },
         debug,
         'System camera',
       ),
     );
+    this.aimAt(star, 1);
     this.eye = this.add(new EyeAdaptation(camera, this.world.stars, debug));
     const picker = this.add(new Picker(camera, input, this.ship, this.world.bodies, this.world.comets));
     this.trails = this.add(
@@ -108,12 +120,31 @@ export class SystemLevel extends Level {
   }
 
   /**
+   * Makes the camera look at `star`, which the ship hovers above, rather than
+   * at the ship, `weight` of the way (1 = at once; it eases in from 0 otherwise).
+   * It stays so until the ship goes to another body.
+   */
+  aimAt(star: CelestialBody, weight = 0): void {
+    this.aimBody = star;
+    this.aimWeight = weight;
+    this.orbit.setAim(star.renderPosition, weight, AIM_LIMIT);
+  }
+
+  /** While a transition drives the camera: looks at the star `k` (0–1) as much as it would (the transition fades it out). */
+  aimFade(k: number): void {
+    this.orbit.setAim(this.aimBody?.renderPosition ?? null, this.aimWeight * k, AIM_LIMIT);
+  }
+
+  /**
    * How high above the ecliptic (radians) a camera `distance` from the ship
    * should look down from to show the body the ship hovers at under it (see
    * `hoverViewElevation`), and no lower than `min` (e.g. the elevation it had).
    * Read after placing the ship: it uses the hover height for the ship's view.
+   * Over a star the camera looks at the star anyway, so it sits low, not
+   * looking down on the ship.
    */
   hoverElevation(distance: number, min: number): number {
+    if (this.world.stars.some((star) => star === this.ship.targetBody)) return arrivalParams.starElevation;
     const [low, high] = arrivalParams.cameraElevation;
     const needed = hoverViewElevation(distance, this.ship.parkDistance(this.ship.targetBody), arrivalParams.bodyBelowCentre);
     return THREE.MathUtils.clamp(Math.max(needed, min), low, high);
@@ -164,7 +195,25 @@ export class SystemLevel extends Level {
   override update(frameDt: number, alpha: number): void {
     super.update(frameDt, alpha);
     // The zoom sets how far from the body it's at the ship parks (read in the next fixed step).
-    if (!this.zoomLocked) this.ship.viewDistance = this.orbit.zoom;
+    if (this.zoomLocked) return;
+    this.ship.viewDistance = this.orbit.zoom;
+    // Looking at the star while hovering over it, back at the ship once it leaves.
+    const wanted = this.aimBody && this.ship.targetBody === this.aimBody ? 1 : 0;
+    this.aimWeight += (wanted - this.aimWeight) * (1 - Math.exp(-frameDt / AIM_EASE));
+    if (wanted === 0 && this.aimWeight < 1e-3) this.aimBody = null;
+    this.orbit.setAim(this.aimBody?.renderPosition ?? null, this.aimWeight, AIM_LIMIT);
+  }
+
+  /** Pushes a camera position out of any body it's inside of, radially. */
+  private keepOutOfBodies(position: THREE.Vector3): void {
+    for (const body of this.world.bodies) {
+      const centre = body.renderPosition;
+      const reach = body.radius + CAMERA_CLEARANCE;
+      const d = position.distanceTo(centre);
+      if (d >= reach) continue;
+      if (d < 1e-6) position.y += reach;
+      else position.sub(centre).multiplyScalar(reach / d).add(centre);
+    }
   }
 
   /**
