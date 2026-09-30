@@ -415,6 +415,7 @@ export class LabLevel extends Level {
   }
 
   override render(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera): void {
+    this.globe?.renderDepth(renderer, camera);
     if (this.view.wireframe) {
       this.hiddenLines(renderer, camera);
     } else {

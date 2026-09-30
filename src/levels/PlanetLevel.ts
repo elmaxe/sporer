@@ -70,6 +70,7 @@ export class PlanetLevel extends Level {
   readonly geysers: Geysers | null;
   /** Bodies with weather only: rain, lightning bolts and their light (the clouds are the globe's). */
   readonly weather: Weather | null;
+  private readonly globe: PlanetGlobe;
   private readonly hud: PlanetHud;
   /** The Equal Earth map in the corner (mouse players). */
   readonly map: PlanetMap;
@@ -94,7 +95,7 @@ export class PlanetLevel extends Level {
   ) {
     super();
     this.frame = this.add(new PlanetFrame(body, system.world.time, debug));
-    const globe = this.add(new PlanetGlobe(this.scene, body.config, this.frame, camera, debug));
+    const globe = (this.globe = this.add(new PlanetGlobe(this.scene, body.config, this.frame, camera, debug)));
     this.eruptions = globe.lava
       ? this.add(new LavaEruptions(this.scene, this.frame, globe.lava.activity, body.config.seed, body.config.style.sea!, debug))
       : null;
@@ -217,6 +218,7 @@ export class PlanetLevel extends Level {
     this.system.renderSky(renderer, sky, this.frame.renderTime, this.hidden, SKY_MIN_PIXELS * pixelAngle);
     // The planet is always in front of the sky (its own moons are in this scene).
     renderer.clearDepth();
+    this.globe.renderDepth(renderer, camera);
     renderer.render(this.scene, camera);
     this.map.render(renderer);
     renderer.autoClear = true;
