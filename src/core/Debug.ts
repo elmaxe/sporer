@@ -36,7 +36,7 @@ export class Debug {
       import('stats.js'),
     ]);
     const gui = new GUIClass({ title });
-    // Leave the bottom-right corner free for the sound button (#audio).
+    // Leave the bottom-right corner free for the menu button (#menu-toggle).
     gui.domElement.style.maxHeight = 'calc(100% - 72px)';
     // On a phone the open panel would cover the whole screen (and swallow every touch).
     if (matchMedia('(max-width: 600px)').matches) gui.close();

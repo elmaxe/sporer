@@ -10,6 +10,7 @@ import { AudioManager } from './audio/AudioManager';
 import { VolumeControl, loadAudioSettings } from './ui/VolumeControl';
 import { TouchControls } from './ui/TouchControls';
 import { FullscreenButton } from './ui/FullscreenButton';
+import { GameMenu } from './ui/GameMenu';
 
 const DEFAULT_SEED = '1337';
 
@@ -27,6 +28,7 @@ async function main(): Promise<void> {
   new VolumeControl(audio, audioSettings);
   new FullscreenButton();
   const levels = game.add(new SceneManager(game, galaxy, start, debug, audio));
+  const menu = new GameMenu(game, levels);
   game.add(new TouchControls(game));
 
   document.getElementById('loading')?.remove();
@@ -35,7 +37,7 @@ async function main(): Promise<void> {
   // Handles for poking at the game from the browser console / automation.
   // ship / world / system follow the current system level, planet the planet level (or null).
   if (import.meta.env.DEV) {
-    Object.assign(window, { game, galaxy, levels, audio, generateSystem, geyserKind });
+    Object.assign(window, { game, galaxy, levels, audio, menu, generateSystem, geyserKind });
     Object.defineProperties(window, {
       ship: { get: () => levels.systemLevel.ship, configurable: true },
       world: { get: () => levels.systemLevel.world, configurable: true },

@@ -1,4 +1,5 @@
 import type { Entity } from '../core/Entity';
+import type { Input } from '../core/Input';
 import { celsius, describeAtmosphere } from '../gen/climate';
 import { EARTH_RADIUS_KM, atmosphereLook, scaleHeight } from '../gen/atmosphere';
 import { describeLab, labClimateData, labEarthRadii } from './labPlanet';
@@ -15,37 +16,77 @@ const GAS: Record<string, string> = { oxygenNitrogen: 'N₂–O₂', nitrogen: '
  * after each build and refreshed a few times a second for the live values.
  */
 export class LabInfo implements Entity {
+  private readonly root = document.getElementById('lab-info')!;
+  private readonly back = document.createElement('a');
+  private readonly details = document.createElement('button');
   private readonly head = document.createElement('div');
   private readonly table = document.createElement('table');
   private readonly help = document.createElement('div');
   private since = REFRESH;
+  private touch: boolean | null = null;
 
-  constructor(private readonly lab: PlanetLab) {
+  constructor(
+    private readonly lab: PlanetLab,
+    private readonly input: Input,
+  ) {
+    const top = document.createElement('div');
+    top.className = 'lab-top';
+    this.back.className = 'lab-back';
+    this.back.textContent = '← Game';
+    this.details.type = 'button';
+    this.details.className = 'lab-details';
+    this.details.addEventListener('click', this.onDetails);
+    top.append(this.back, this.details);
     this.help.className = 'lab-help';
-    document.getElementById('lab-info')!.append(this.head, this.table, this.help);
+    this.root.append(top, this.head, this.table, this.help);
+    // Phones start with just the name, so the planet has the screen.
+    this.setCollapsed(matchMedia('(max-width: 700px)').matches);
   }
 
   /** The name, source and help line (after each build; the table refreshes by itself). */
   rebuilt(): void {
-    const { planet, view, source } = this.lab;
+    const { planet, source } = this.lab;
     const from = source
       ? `Star ${source.star}, planet ${source.planet}${source.moon !== undefined ? `, moon ${source.moon}` : ''} (seed ${source.seed})`
       : '';
-    const game = this.lab.gameLink;
+    // Back to the game: at this planet's system when it came from one.
+    this.back.href = this.lab.gameLink ?? new URL('./', location.href).href;
+    this.back.title = this.lab.gameLink ? 'The game, at this planet\'s system' : 'The game';
     this.head.innerHTML =
-      `<h1>${escape(planet.name)}</h1>` +
-      `<div class="lab-sub">${escape(describeLab(planet))}${from ? ` · ${escape(from)}` : ''}` +
-      `${game ? ` · <a href="${escape(game)}" target="_blank">open in game</a>` : ''}</div>`;
-    this.help.textContent =
-      view.view === 'globe'
-        ? 'Drag to orbit · scroll to zoom · click the globe to fly the UFO there' +
-          (view.camera === 'fly' ? ' · WASD flies' : '') +
-          (view.map ? ' · N folds the map' : '')
-        : 'Drag to orbit · scroll to zoom';
+      `<h1>${escape(planet.name)}</h1>` + `<div class="lab-sub">${escape(describeLab(planet))}${from ? ` · ${escape(from)}` : ''}</div>`;
+    this.touch = null;
     this.render();
   }
 
+  private setCollapsed(collapsed: boolean): void {
+    this.root.classList.toggle('collapsed', collapsed);
+    this.details.textContent = collapsed ? 'Details ▾' : 'Details ▴';
+    this.details.setAttribute('aria-expanded', String(!collapsed));
+  }
+
+  private onDetails = () => this.setCollapsed(!this.root.classList.contains('collapsed'));
+
+  private writeHelp(): void {
+    const { view } = this.lab;
+    const touch = this.input.touchMode;
+    if (view.view === 'system') {
+      this.help.textContent = touch ? 'Drag to orbit · pinch to zoom' : 'Drag to orbit · scroll to zoom';
+    } else if (touch) {
+      this.help.textContent =
+        'Drag to orbit · pinch to zoom · tap the globe to fly the UFO there · the stick flies it' + (view.map ? ' · Map button: the map' : '');
+    } else {
+      this.help.textContent =
+        'Drag to orbit · scroll to zoom · click the globe to fly the UFO there' +
+        (view.camera === 'fly' ? ' · WASD flies' : '') +
+        (view.map ? ' · N folds the map' : '');
+    }
+  }
+
   update(frameDt: number): void {
+    if (this.input.touchMode !== this.touch) {
+      this.touch = this.input.touchMode;
+      this.writeHelp();
+    }
     this.since += frameDt;
     if (this.since < REFRESH) return;
     this.since = 0;
@@ -103,7 +144,9 @@ export class LabInfo implements Entity {
     this.table.innerHTML = rows.map(([k, v]) => `<tr><th>${k}</th><td>${escape(v)}</td></tr>`).join('');
   }
 
-  dispose(): void {}
+  dispose(): void {
+    this.details.removeEventListener('click', this.onDetails);
+  }
 }
 
 function fmt(v: number): string {

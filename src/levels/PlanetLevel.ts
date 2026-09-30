@@ -2,8 +2,7 @@ import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
 import type { Input } from '../core/Input';
 import { describeClimateDetail } from '../gen/climate';
-import type { PlanetData } from '../gen/system';
-import { labFromBody, labLink } from '../lab/labPlanet';
+import { bodyLabLink } from '../lab/bodyLink';
 import { describeGeysers, geyserActivity } from '../gen/geysers';
 import { Geysers } from '../planet/Geysers';
 import { LavaEruptions } from '../planet/LavaEruptions';
@@ -140,9 +139,7 @@ export class PlanetLevel extends Level {
 
   /** A link to this planet (or moon, or planet with its moons) in the planet lab (lab.html). */
   labLink(): string {
-    const { config, parent } = this.body;
-    const moons = (config as Partial<PlanetData>).moons ?? [];
-    return labLink(labFromBody(config, parent !== null, moons), location.href);
+    return bodyLabLink(this.body);
   }
 
   /** System time here; the system level catches up to it on return. */

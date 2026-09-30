@@ -1,4 +1,8 @@
-/* The planet lab (lab.html): the control panel on the left, the readout top right, the map bottom right. */
+/*
+ * The planet lab (lab.html). Wide screens: the control panel on the left, the readout top right, the map
+ * bottom right. Phones: the panel folds into a bar across the top, the readout under it shows just the name
+ * (Details opens the rest), and the game's touch controls (stick, Boost, Map) sit at the bottom.
+ */
 
 body.lab .lil-gui.lil-auto-place {
   --width: 300px;
@@ -18,7 +22,8 @@ body.lab #stats {
   width: min(380px, calc(100vw - 340px));
   max-height: calc(100vh - 300px);
   overflow: auto;
-  padding: 10px 12px;
+  box-sizing: border-box;
+  padding: 8px 12px 10px;
   border-radius: 8px;
   background: rgba(8, 14, 28, 0.78);
   border: 1px solid rgba(102, 255, 204, 0.25);
@@ -26,6 +31,30 @@ body.lab #stats {
   line-height: 1.45;
   -webkit-user-select: text;
   user-select: text;
+}
+
+#lab-info .lab-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2px;
+}
+
+#lab-info .lab-back,
+#lab-info .lab-details {
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(102, 255, 204, 0.35);
+  background: transparent;
+  color: #66ffcc;
+  font: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+#lab-info .lab-back:hover,
+#lab-info .lab-details:hover {
+  border-color: rgba(102, 255, 204, 0.8);
 }
 
 #lab-info h1 {
@@ -37,10 +66,6 @@ body.lab #stats {
 #lab-info .lab-sub {
   margin-bottom: 6px;
   opacity: 0.8;
-}
-
-#lab-info a {
-  color: #66ffcc;
 }
 
 #lab-info table {
@@ -67,16 +92,56 @@ body.lab #stats {
   opacity: 0.6;
 }
 
+#lab-info.collapsed table,
+#lab-info.collapsed .lab-help {
+  display: none;
+}
+
+#lab-info.collapsed .lab-sub {
+  margin-bottom: 0;
+}
+
 body.lab #planet-map {
   bottom: 16px;
 }
 
+/* The game's touch controls sit where they do in the game; the lab has no menu button, so Boost moves down. */
+body.lab #touch-boost {
+  bottom: max(24px, env(safe-area-inset-bottom));
+}
+
+body.lab #touch-map {
+  bottom: calc(max(24px, env(safe-area-inset-bottom)) + 84px);
+}
+
+html.touch body.lab #stats {
+  display: none;
+}
+
 @media (max-width: 700px) {
-  #lab-info {
-    width: auto;
-    left: 12px;
+  /* The panel as a bar across the top; opened, it fills the upper part of the screen and scrolls. */
+  body.lab .lil-gui.lil-auto-place {
+    --width: 100%;
+    --widget-height: 28px;
+    --font-size: 13px;
+    --input-font-size: 14px;
+    width: 100%;
+    top: env(safe-area-inset-top);
+    max-height: 62vh;
+    max-height: 62dvh;
   }
-  #lab-info table {
-    display: none;
+
+  #lab-info {
+    top: calc(env(safe-area-inset-top) + 36px);
+    left: 8px;
+    right: 8px;
+    width: auto;
+    max-height: calc(100vh - 260px);
+    max-height: calc(100dvh - 260px);
+    background: rgba(8, 14, 28, 0.65);
+  }
+
+  #lab-info h1 {
+    font-size: 15px;
   }
 }

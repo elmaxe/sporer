@@ -33,7 +33,7 @@
 //   fps                          measure frames per second over 120 frames
 //   goto:<url or ?params>        load another page (e.g. goto:?star=2) and wait for the game
 //
-// Page globals (dev build): game, levels, galaxy, ship, world, system, planet, audio, generateSystem.
+// Page globals (dev build): game, levels, galaxy, ship, world, system, planet, audio, menu, generateSystem.
 // In the lab: game and lab (src/lab/PlanetLab.ts: lab.set, setView, generate, load, look, setTime, ...);
 // settle there waits for lab.ready (the latest edit built and drawn).
 // Prints JSON: { ok, failure, out, shots, results, errors } (errors: console errors/warnings/exceptions).

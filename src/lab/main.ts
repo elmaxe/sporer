@@ -3,6 +3,7 @@ import { Game } from '../core/Game';
 import { addLavaDebug } from '../world/lavaMaterial';
 import { addAtmosphereDebug } from '../world/atmosphereShell';
 import { Physics } from '../physics/Physics';
+import { TouchControls } from '../ui/TouchControls';
 import { LabInfo } from './LabInfo';
 import { LabPanel } from './LabPanel';
 import { PlanetLab } from './PlanetLab';
@@ -21,7 +22,9 @@ async function main(): Promise<void> {
   debug.nestFolders('Game tunables');
   addLavaDebug(debug);
   addAtmosphereDebug(debug);
-  const info = game.add(new LabInfo(lab));
+  const info = game.add(new LabInfo(lab, game.input));
+  // The game's stick, Boost and Map buttons on phones (low orbit only, see LabLevel.touchControls).
+  game.add(new TouchControls(game));
   lab.onBuilt = () => info.rebuilt();
   lab.rebuild();
 

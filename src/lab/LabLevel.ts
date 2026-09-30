@@ -5,7 +5,7 @@ import { FIXED_DT } from '../core/Game';
 import type { Input } from '../core/Input';
 import { geyserActivity } from '../gen/geysers';
 import { nominalStar, type SpectralClass, type StarData, type StarKind } from '../gen/stars';
-import { Level } from '../levels/Level';
+import { Level, type TouchShipControls } from '../levels/Level';
 import { PLANET_VIEW_DISTANCE, planetCameraParams } from '../levels/PlanetLevel';
 import { Physics } from '../physics/Physics';
 import { Geysers } from '../planet/Geysers';
@@ -220,6 +220,8 @@ export interface LabCarry {
  * planet changes, like the game builds a planet level on arrival.
  */
 export class LabLevel extends Level {
+  /** On phones: the planet level's stick, Boost and Map button in the globe view. */
+  override readonly touchControls: TouchShipControls;
   /** The planet's sea-level radius in this view's units. */
   readonly radius: number;
   /** The camera's centre: the planet's centre (orbit camera) or the UFO (fly camera). */
@@ -251,6 +253,7 @@ export class LabLevel extends Level {
     super(view.view === 'system' ? Physics.create(FIXED_DT) : null);
     const start = performance.now();
     this.mode = { view: view.view, camera: view.camera };
+    this.touchControls = view.view === 'globe' ? 'surface' : 'none';
     const config = toPlanetConfig(planet);
     this.add(clock);
     const globeView = view.view === 'globe';
