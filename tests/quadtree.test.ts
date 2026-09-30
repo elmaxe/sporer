@@ -8,6 +8,8 @@ import {
   cellAngle,
   childAt,
   edgeNeighbour,
+  cellDiagonal,
+  parentTarget,
   snapStep,
   snapTo,
   wantsSplit,
@@ -117,7 +119,7 @@ describe('LOD surface', () => {
     // One chunk per update, whatever the machine's speed: the same tree every run.
     const budget = lodParams.budgetMs;
     lodParams.budgetMs = 0;
-    for (let i = 0; i < 5000 && !(i > 0 && surface.settled); i++) surface.update(camera);
+    for (let i = 0; i < 5000 && !(i > 0 && surface.settled); i++) surface.update(camera, 0.05);
     lodParams.budgetMs = budget;
     return surface.settled;
   };
@@ -142,14 +144,10 @@ describe('LOD surface', () => {
     surface.dispose();
   });
 
-  it('has no cracks where chunks of different levels meet: every seam is the same segments on both sides', () => {
-    const surface = make();
-    const camera = new THREE.Vector3(0.3, 0.4, 1).setLength(R * 1.12);
-    expect(settle(surface, camera)).toBe(true);
-    const up = camera.clone().normalize();
+  /** Border segments of every drawn chunk near `up` that aren't shared by exactly two chunks with the same endpoint bits. */
+  const seams = (surface: LodSurface, up: THREE.Vector3) => {
     const side = CHUNK_CELLS + 1;
     const key = (v: THREE.Vector3) => `${v.x},${v.y},${v.z}`;
-    // Border segments of every drawn chunk, by their exact endpoints (either way round).
     const segments = new Map<string, number>();
     let collapsed = 0;
     let checked = 0;
@@ -171,12 +169,111 @@ describe('LOD surface', () => {
         }
       }
     }
-    // Every segment is shared by exactly two chunks: no T-junctions, no gaps.
-    const unmatched = [...segments.values()].filter((n) => n !== 2).length;
-    expect(checked).toBeGreaterThan(1000);
-    expect(unmatched).toBe(0);
+    return { checked, collapsed, unmatched: [...segments.values()].filter((n) => n !== 2).length };
+  };
+
+  it('has no cracks where chunks of different levels meet: every seam is the same segments on both sides', () => {
+    const surface = make();
+    const camera = new THREE.Vector3(0.3, 0.4, 1).setLength(R * 1.12);
+    expect(settle(surface, camera)).toBe(true);
+    const settled = seams(surface, camera.clone().normalize());
+    expect(settled.checked).toBeGreaterThan(1000);
+    expect(settled.unmatched).toBe(0);
     // And there were seams between levels to close.
-    expect(collapsed).toBeGreaterThan(20);
+    expect(settled.collapsed).toBeGreaterThan(20);
     surface.dispose();
+  });
+
+  it('stays closed while chunks blend in and out', () => {
+    const surface = make();
+    const camera = new THREE.Vector3(0.3, 0.4, 1).setLength(R * 3);
+    expect(settle(surface, camera)).toBe(true);
+    // Dive (chunks split below while the ones around, already finer or not, are still blending),
+    // fly along (split ahead, merge behind), climb out (everything blends back and merges).
+    const budget = lodParams.budgetMs;
+    lodParams.budgetMs = 0;
+    let blending = 0;
+    for (let i = 0; i < 200; i++) {
+      if (i < 80) camera.setLength(R * Math.max(1.09, 3 - i * 0.025));
+      else if (i < 140) camera.applyAxisAngle(new THREE.Vector3(1, 0, 0), 0.004);
+      else camera.setLength(R * (1.09 + (i - 140) * 0.03));
+      surface.update(camera, 0.03);
+      if (!surface.settled) blending++;
+      expect(seams(surface, camera.clone().normalize()).unmatched).toBe(0);
+    }
+    lodParams.budgetMs = budget;
+    expect(blending).toBeGreaterThan(100);
+    surface.dispose();
+  });
+
+  it('blends a new chunk in over morphSeconds instead of popping', () => {
+    const surface = make();
+    expect(settle(surface, new THREE.Vector3(0, 0, R * 20))).toBe(true);
+    const before = surface.stats().chunks;
+    const budget = lodParams.budgetMs;
+    lodParams.budgetMs = 1000;
+    // Close in: builds, then shows the children, still blending.
+    const camera = new THREE.Vector3(0, 0, R * 1.3);
+    surface.update(camera, 0);
+    surface.update(camera, 0);
+    expect(surface.stats().chunks).toBeGreaterThan(before);
+    expect(surface.settled).toBe(false);
+    // Frozen time: stays mid-blend. Time passing: done within morphSeconds (plus the next level's).
+    for (let i = 0; i < 5; i++) surface.update(camera, 0);
+    expect(surface.settled).toBe(false);
+    let frames = 0;
+    while (!surface.settled && frames < 1000) {
+      surface.update(camera, 0.05);
+      frames++;
+    }
+    lodParams.budgetMs = budget;
+    expect(surface.settled).toBe(true);
+    // Each level blends in for morphSeconds before the next can split.
+    expect(frames * 0.05).toBeGreaterThan(lodParams.morphSeconds);
+    surface.dispose();
+  });
+});
+
+describe('geomorphing targets', () => {
+  it('puts a child, blended all the way back, exactly on its parent’s triangles', () => {
+    const C = CHUNK_CELLS;
+    const side = C + 1;
+    const rnd = (k: number) => Math.sin(k * 12.9898) * 0.5;
+    // A bumpy parent grid, its diagonals (shorter or not, at random), and the child covering its lower-left quarter.
+    const parent = new Float32Array(side * side * 3);
+    for (let j = 0; j < side; j++) for (let i = 0; i < side; i++) parent.set([i, j, rnd(j * side + i)], (j * side + i) * 3);
+    const parentAC = Array.from({ length: C * C }, (_, k) => Math.sin(k * 7.1) > 0);
+    const child = new Float32Array(side * side * 3);
+    for (let j = 0; j < side; j++) {
+      for (let i = 0; i < side; i++) {
+        // Even points are the parent's; odd ones have their own height.
+        const own = i % 2 === 0 && j % 2 === 0 ? parent[((j / 2) * side + i / 2) * 3 + 2]! : rnd(1000 + j * side + i);
+        child.set([i / 2, j / 2, own], (j * side + i) * 3);
+      }
+    }
+    const acOf = (i: number, j: number) => parentAC[(j >> 1) * C + (i >> 1)]!;
+    const target = new Float32Array(child.length);
+    parentTarget(child, target, side, acOf);
+    const point = (i: number, j: number) => new THREE.Vector3().fromArray(target, (j * side + i) * 3);
+    const parentPoint = (i: number, j: number) => new THREE.Vector3().fromArray(parent, (j * side + i) * 3);
+    for (let j = 0; j < C; j++) {
+      for (let i = 0; i < C; i++) {
+        // The child's cell, split per cellDiagonal (with a random own preference), and the parent cell it lies in.
+        const ac = cellDiagonal(i, j, Math.sin(i * 3 + j * 5) > 0, acOf(i, j));
+        const [a, b, c, d] = [point(i, j), point(i + 1, j), point(i + 1, j + 1), point(i, j + 1)];
+        const tris = ac ? [[a, b, c], [a, c, d]] : [[a, b, d], [b, c, d]];
+        const pi = i >> 1;
+        const pj = j >> 1;
+        const [pa, pb, pc, pd] = [parentPoint(pi, pj), parentPoint(pi + 1, pj), parentPoint(pi + 1, pj + 1), parentPoint(pi, pj + 1)];
+        const parentTris = acOf(i, j) ? [[pa, pb, pc], [pa, pc, pd]] : [[pa, pb, pd], [pb, pc, pd]];
+        for (const tri of tris) {
+          const inOne = parentTris.some(([p, q, r]) => {
+            const plane = new THREE.Plane().setFromCoplanarPoints(p!, q!, r!);
+            return tri.every((v) => Math.abs(plane.distanceToPoint(v!)) < 1e-5);
+          });
+          expect(inOne).toBe(true);
+        }
+      }
+    }
   });
 });

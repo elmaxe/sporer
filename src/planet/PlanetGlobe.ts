@@ -79,7 +79,7 @@ export class PlanetGlobe implements Entity {
     const look = config.atmosphere && config.climate ? atmosphereLook(config.climate, config.radius) : null;
     if (look) this.object.add(createAtmosphere(R, config.atmosphere!, look, { vector: this.sun, point: false }, ATMOSPHERE_SEGMENTS));
     scene.add(this.object);
-    this.update();
+    this.update(0);
   }
 
   /** True when the surface has every chunk the camera wants (for automation). */
@@ -87,9 +87,14 @@ export class PlanetGlobe implements Entity {
     return this.surface.settled;
   }
 
-  update(): void {
+  /** The surface's chunks drawn now and their depths (the lab's readout). */
+  lodStats(): { chunks: number; minDepth: number; maxDepth: number } {
+    return this.surface.stats();
+  }
+
+  update(frameDt: number): void {
     this.lava?.animate(this.frame.renderTime);
-    this.surface.update(this.object.worldToLocal(this.camera.getWorldPosition(this.cameraPosition)));
+    this.surface.update(this.object.worldToLocal(this.camera.getWorldPosition(this.cameraPosition)), frameDt);
   }
 
   dispose(): void {

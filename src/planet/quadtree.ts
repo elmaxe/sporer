@@ -108,3 +108,54 @@ export function snapTo(e: number, step: number): number {
   const off = e % step;
   return off * 2 <= step ? e - off : e - off + step;
 }
+
+/**
+ * Whether cell (i, j) of a chunk splits along its a–c diagonal (from grid
+ * point (i, j) to (i + 1, j + 1)) rather than b–d. `shorter` is the cell's own
+ * preference (the shorter diagonal); `parent` the parent chunk's choice for
+ * the cell holding this one, or null at the top. A child cell on its parent's
+ * diagonal must split along it too, so the child's triangles lie in the
+ * parent's and, blended back to the parent's shape (geomorphing), it is the
+ * parent's surface exactly.
+ */
+export function cellDiagonal(i: number, j: number, shorter: boolean, parent: boolean | null): boolean {
+  if (parent === null) return shorter;
+  const onDiagonal = parent ? (i & 1) === (j & 1) : (i & 1) !== (j & 1);
+  return onDiagonal ? parent : shorter;
+}
+
+/**
+ * The parent chunk's surface at each of a chunk's grid points, from the
+ * chunk's own `values` (3 per point, `side` × `side` points; the parent's
+ * points are the even ones): the parent's point itself, the middle of the
+ * parent's cell edge, or the middle of the diagonal the parent split its
+ * cell along (`parentDiagonal(i, j)` for the cell whose centre is point (i, j)).
+ * Rounded to 32-bit floats, as stored.
+ */
+export function parentTarget(
+  values: Float32Array,
+  out: Float32Array,
+  side: number,
+  parentDiagonal: (i: number, j: number) => boolean,
+): void {
+  const at = (i: number, j: number) => (j * side + i) * 3;
+  for (let j = 0; j < side; j++) {
+    for (let i = 0; i < side; i++) {
+      const v = at(i, j);
+      let a = v;
+      let b = v;
+      if (i & 1 && j & 1) {
+        const ac = parentDiagonal(i, j);
+        a = ac ? at(i - 1, j - 1) : at(i + 1, j - 1);
+        b = ac ? at(i + 1, j + 1) : at(i - 1, j + 1);
+      } else if (i & 1) {
+        a = at(i - 1, j);
+        b = at(i + 1, j);
+      } else if (j & 1) {
+        a = at(i, j - 1);
+        b = at(i, j + 1);
+      }
+      for (let k = 0; k < 3; k++) out[v + k] = (values[a + k]! + values[b + k]!) * 0.5;
+    }
+  }
+}

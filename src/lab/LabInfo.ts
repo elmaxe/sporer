@@ -138,6 +138,8 @@ export class LabInfo implements Entity {
     if (planet.rings) rows.push(['Rings', `${fmt(planet.rings.inner / planet.radius)}–${fmt(planet.rings.outer / planet.radius)} R`]);
     if (planet.kind !== 'moon') rows.push(['Moons', `${planet.moons.length}${planet.moons.length ? ' (system view)' : ''}`]);
     if (level) rows.push(['Build', `${Math.round(level.triangles / 1000)}k triangles · ${Math.round(level.buildMs)} ms`]);
+    const lod = level?.globe?.lodStats();
+    if (lod) rows.push(['Detail', `${lod.chunks} chunks drawn · depth ${lod.minDepth}–${lod.maxDepth}`]);
     const clock = this.lab.clock;
     rows.push(['Time', `${clock.time.toFixed(1)} s${clock.paused ? ' · paused' : clock.speed !== 1 ? ` · ×${clock.speed}` : ''}`]);
 
