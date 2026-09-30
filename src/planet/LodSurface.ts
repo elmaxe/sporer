@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
+import { GLOBE_SIZE_FACTOR } from '../gen/planets';
 import { faceGridPoint, type FacePoint } from '../world/cubeSphereMath';
 import type { SurfaceSampler } from '../world/planetGeometry';
 import {
@@ -25,10 +26,12 @@ export const lodParams = {
    */
   cellAngle: 0.05,
   /**
-   * Deepest split. At 4 an Earth-sized globe's cells are ~0.6 units, a few
-   * per wiggle of detailedTerrain's finest octave; deeper only smooths it.
+   * Deepest split. At the original scale (Earth radius 100) depth 4 gave an
+   * Earth-sized globe ~0.6-unit cells, a few per wiggle of detailedTerrain's
+   * finest octave (deeper only smooths it); one more level per doubling of
+   * the globes keeps the cells that size next to the UFO.
    */
-  maxDepth: 4,
+  maxDepth: 4 + Math.max(0, Math.round(Math.log2(GLOBE_SIZE_FACTOR))),
   /** Milliseconds per frame spent building chunks (at least one is built). */
   budgetMs: 4,
   /** Seconds a new chunk takes to blend from its parent's shape to its own (and back before a merge). */
@@ -40,7 +43,7 @@ export const lodParams = {
 export function addLodDebug(debug: Debug): void {
   const f = debug.folder('Planet LOD');
   f?.add(lodParams, 'cellAngle', 0.01, 0.2, 0.005);
-  f?.add(lodParams, 'maxDepth', 0, 7, 1);
+  f?.add(lodParams, 'maxDepth', 0, 9, 1);
   f?.add(lodParams, 'budgetMs', 0.5, 16, 0.5);
   f?.add(lodParams, 'morphSeconds', 0, 3, 0.05);
   f?.add(lodParams, 'freeze');

@@ -1,6 +1,6 @@
 import type { ClimateData } from './climate';
 import { detailedTerrain } from './noise';
-import type { PlanetStyle } from './planets';
+import { GLOBE_SIZE_FACTOR, type PlanetStyle } from './planets';
 import { Rng, hashSeed } from './rng';
 import type { Vec3Tuple } from './starActivity';
 
@@ -59,16 +59,21 @@ export interface LavaActivity {
   eruption: EruptionSpec;
 }
 
-/** The arcs' gravity at 1 g, planet-level units per second² (a 1 g fountain thrown at 4 u/s peaks 2.7 units up and lands after 2.7 s). */
-export const LAVA_GRAVITY = 3;
+/**
+ * The arcs' gravity at 1 g, planet-level units per second²: 3 at the original
+ * scale (a 1 g fountain thrown at 4 u/s peaks 2.7 units up and lands after
+ * 2.7 s). Lengths and speeds grow with the globes (GLOBE_SIZE_FACTOR) and
+ * times don't, so arcs look the same next to the planet whatever its size.
+ */
+export const LAVA_GRAVITY = 3 * GLOBE_SIZE_FACTOR;
 /** Bodies weaker than this (in g) throw like this: small moons' arcs would otherwise take half a minute. */
 export const MIN_ARC_GRAVITY = 0.2;
 /** Blobs never climb higher than this fraction of the body's radius, per kind. */
 export const MAX_PEAK_FRACTION: Record<EruptionKind, number> = { fountain: 0.12, eruption: 0.3 };
 
 /** Launch speed of the fastest blobs at 1 g and full heat, planet-level units per second. */
-const FOUNTAIN_SPEED = [3, 4.5] as const;
-const ERUPTION_SPEED = [6.5, 9] as const;
+const FOUNTAIN_SPEED = [3 * GLOBE_SIZE_FACTOR, 4.5 * GLOBE_SIZE_FACTOR] as const;
+const ERUPTION_SPEED = [6.5 * GLOBE_SIZE_FACTOR, 9 * GLOBE_SIZE_FACTOR] as const;
 
 /**
  * A lava body's activity. `style` gives the sea (vents go where the detailed

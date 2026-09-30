@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
 import type { Input } from '../core/Input';
 import { describeClimateDetail } from '../gen/climate';
+import { GLOBE_SIZE_FACTOR } from '../gen/planets';
 import { bodyLabLink } from '../lab/bodyLink';
 import { describeGeysers, geyserActivity } from '../gen/geysers';
 import { Geysers } from '../planet/Geysers';
@@ -21,10 +22,14 @@ import type { Planet } from '../world/Planet';
 import { Level } from './Level';
 import type { SystemLevel } from './SystemLevel';
 
-/** Low-orbit camera, in planet-level units (an Earth-sized globe's radius is 100); maxDistance is for Earth-sized and bigger globes. */
+/**
+ * Low-orbit camera, in planet-level units (an Earth-sized globe's radius is
+ * EARTH_GLOBE_RADIUS). The near end is next to the UFO; maxDistance (for
+ * Earth-sized and bigger globes) takes in the globe, so it grows with them.
+ */
 export const planetCameraParams: OrbitParams = {
   minDistance: 8,
-  maxDistance: 260,
+  maxDistance: 260 * GLOBE_SIZE_FACTOR,
   zoomSpeed: 0.0025,
   rotateSpeed: 0.005,
   damping: 0.1,

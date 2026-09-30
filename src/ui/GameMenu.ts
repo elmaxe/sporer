@@ -2,16 +2,18 @@ import type { Game } from '../core/Game';
 import { bodyLabLink } from '../lab/bodyLink';
 import type { SceneManager } from '../levels/SceneManager';
 import { Planet } from '../world/Planet';
+import { buildInfo, formatBuildInfo } from './buildInfo';
 
 /**
  * The menu (#menu in index.html): Esc or the menu button (bottom right, the
  * only way in on touch) opens it and pauses the game (time stands still, the
  * view stays drawn). It holds the sound settings (VolumeControl), the Show
- * FPS switch (FpsCounter) and a link
+ * FPS switch (FpsCounter), a link
  * to the planet lab, for the planet you're at: in low orbit the one below,
  * in a system the one the autopilot is headed for (else the first planet),
- * from the galaxy an empty lab. Esc, Resume, × or a click beside the panel
- * closes it.
+ * from the galaxy an empty lab, and at the bottom which build is running
+ * (branch · build number · commit, see buildInfo.ts). Esc, Resume, × or a
+ * click beside the panel closes it.
  */
 export class GameMenu {
   private readonly root = document.getElementById('menu')!;
@@ -24,6 +26,7 @@ export class GameMenu {
     private readonly game: Game,
     private readonly levels: SceneManager,
   ) {
+    document.getElementById('menu-build')!.textContent = formatBuildInfo(buildInfo);
     this.toggle.addEventListener('click', this.onToggle);
     this.resume.addEventListener('click', this.onClose);
     this.close.addEventListener('click', this.onClose);

@@ -48,6 +48,15 @@ The far side in the lab's wireframe. On a phone, close to an ice dwarf with the 
 - Geomorphing in `LodSurface.write`: each frame, the shown chunks whose blend (or a neighbour's) changed are rewritten on the CPU from their sampled and parent positions; `parentTarget` and `cellDiagonal` in `quadtree.ts`.
 - Tunables in the debug panel's **Planet LOD** folder (the lab has them under Game tunables): `cellAngle`, `maxDepth`, `budgetMs`, `morphSeconds`, `freeze` (stop refining, to fly around and look at what was built).
 
+## Bigger globes (roadmap step 21)
+
+The numbers above are at the original scale, an Earth-sized globe of radius 100. Step 21 made every globe 4× bigger next to the UFO (`EARTH_GLOBE_RADIUS` = 400, `GLOBE_SIZE_FACTOR` = 4 in `gen/planets.ts`). To keep the same look under the UFO, two things follow the factor:
+
+- `lodParams.maxDepth` = 4 + log₂(factor) = 6: each level halves a cell, so two more levels bring the 4× cells back to 0.55–0.78 units on an Earth-sized globe.
+- `detailedTerrain` gets one more octave per 2.3× (its lacunarity): 3 + round(log(4) / log(2.3)) = 5 (`DETAIL_OCTAVES`), so the finest wiggle stays ~5 units long rather than 20, and the cells above still resolve it 7–9 times.
+
+Measured, same view as the table above (Earth-sized desert gen=8, the UFO's view, 1280×720 headless): 80k triangles at 1×, 108k at 2×, 123k at 3× and 143k at 4×, all 4–5 FPS in SwiftShader. More of the screen is ground, and that ground is detailed. In the game on desktop Chrome with a real GPU (the home system's super-Earth, 1767×1041), triangles per frame including the sky and the sea: 108k → 102k at the default zoom, 114k → 120k at the lowest, 88k → 72k at the top of the zoom, all at the display's 100 FPS.
+
 ## Open questions
 
 - Where a chunk's edge collapses onto a coarser neighbour, the cells along that edge are triangulated differently from the parent's, so when a neighbour's level changes that one row of facets can shift slightly.

@@ -464,6 +464,17 @@ html.touch #menu .menu-keys {
   display: none;
 }
 
+/* Which build is running (branch · build number · commit), selectable to paste into a bug report. */
+#menu .menu-build {
+  margin: 0;
+  font-size: 11px;
+  opacity: 0.45;
+  text-align: center;
+  overflow-wrap: anywhere;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 /* Touch play (html.touch, set by TouchControls): on-screen ship controls, HUD moved to the top. */
 #touch-controls {
   display: none;
