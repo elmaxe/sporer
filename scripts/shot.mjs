@@ -13,6 +13,8 @@
 //   --size <w>x<h>     page size in CSS pixels (default 1280x720)
 //   --phone            an emulated phone: 390x844 (unless --size), mobile, touch events (the game's touch mode)
 //   --clean            hide the debug panel and FPS meter
+//   --low              ?quality=low: half resolution, no antialiasing (about 5x faster under SwiftShader; for
+//                      checks where a soft picture will do)
 //   --sheet            also write sheet.png: every screenshot in a labelled grid (one Read for a sequence)
 //   --steps <file>     read more steps from a file, one per line (# comments), handy for long JS
 //
@@ -65,6 +67,7 @@ for (let i = 0; i < args.length; i++) {
     if (i + 1 < args.length && !args[i + 1].startsWith('--') && !/^[a-z]+(:|$)/.test(args[i + 1])) opts.labQuery = args[++i];
   } else if (a === '--phone') opts.phone = true;
   else if (a === '--clean') opts.clean = true;
+  else if (a === '--low') opts.params.quality = 'low';
   else if (a === '--sheet') opts.sheet = true;
   else if (a === '--steps') {
     for (const line of readFileSync(value(), 'utf8').split('\n')) {
@@ -107,8 +110,7 @@ const HIDE_DEBUG = `(() => { const s = document.createElement('style');
 
 /** Loads `href` and waits until the game is running (a few frames drawn). */
 async function load(href) {
-  await page.navigate(href);
-  if (!(await page.waitFor(STARTED, 30000))) {
+  if (!(await page.goto(href, STARTED, 30000))) {
     throw new Error(`The game didn't start at ${href}`);
   }
   if (opts.clean) await page.evaluate(HIDE_DEBUG);
@@ -247,8 +249,11 @@ async function run(step) {
           (function f() { if (++n === 120) r(Math.round(120000 / (performance.now() - t0))); else requestAnimationFrame(f); })(); })`),
       });
       return;
-    case 'goto':
-      return load(new URL(rest, url).href);
+    case 'goto': {
+      const next = new URL(rest, url);
+      if (opts.params.quality) next.searchParams.set('quality', opts.params.quality);
+      return load(next.href);
+    }
     default:
       throw new Error(`Unknown step "${step}"`);
   }
