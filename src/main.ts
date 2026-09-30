@@ -11,6 +11,7 @@ import { VolumeControl, loadAudioSettings } from './ui/VolumeControl';
 import { TouchControls } from './ui/TouchControls';
 import { FullscreenButton } from './ui/FullscreenButton';
 import { GameMenu } from './ui/GameMenu';
+import { FpsCounter } from './ui/FpsCounter';
 
 const DEFAULT_SEED = '1337';
 
@@ -29,6 +30,7 @@ async function main(): Promise<void> {
   new FullscreenButton();
   const levels = game.add(new SceneManager(game, galaxy, start, debug, audio));
   const menu = new GameMenu(game, levels);
+  game.add(new FpsCounter());
   game.add(new TouchControls(game));
 
   document.getElementById('loading')?.remove();
