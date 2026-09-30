@@ -129,14 +129,16 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
   // The zoom sets the altitude: all the way in skims the peaks, all the way out climbs to high orbit. Waits for the
   // camera to get there and the ship to follow (at headless frame rates the game runs slower than real time).
   const altitude = `+(planet.ship.object.position.length() - planet.radius).toFixed(1)`;
-  const settled = `Math.abs(planet.orbit.zoom - planet.orbit.targetDistance) < 0.5 &&
-    Math.abs(planet.ship.radius - planet.flyingRadius(planet.orbit.zoom)) < 0.5`;
-  const settle = async () => {
-    await sleep(500);
-    for (let i = 0; i < 40 && !(await evaluate(settled)); i++) await sleep(250);
+  // First the wheel must have been read (it waits for the next frame: a screenshot capture can stall the page for a
+  // while), so the camera's target is at the limit; then the camera and the ship have to get there.
+  const settle = async (limit) => {
+    const settled = `planet.orbit.targetDistance === planet.orbit.params.${limit} &&
+      Math.abs(planet.orbit.zoom - planet.orbit.targetDistance) < 0.5 &&
+      Math.abs(planet.ship.radius - planet.flyingRadius(planet.orbit.zoom)) < 0.5`;
+    for (let i = 0; i < 60 && !(await evaluate(settled)); i++) await sleep(250);
   };
   await wheel(-50000);
-  await settle();
+  await settle('minDistance');
   r.altitude = { low: await evaluate(altitude) };
   r.lava = await evaluate(
     `planet.eruptions && { vents: planet.eruptions.activity.vents.length, events: planet.eruptions.events.length, blobs: planet.eruptions.liveBlobs }`,
@@ -172,7 +174,7 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
   writeFileSync(r.screenshot, Buffer.from(shot.result.data, 'base64'));
 
   await wheel(50000); // to max zoom
-  await settle();
+  await settle('maxDistance');
   r.altitude.high = await evaluate(altitude);
   await wheel(300); // keep scrolling out
   for (let i = 0; i < 20 && (await evaluate(`levels.mode !== 'system' || levels.transitioning`)); i++) await sleep(250);
