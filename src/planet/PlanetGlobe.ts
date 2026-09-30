@@ -5,6 +5,7 @@ import { isGas, type PlanetConfig } from '../world/Planet';
 import { atmosphereLook } from '../gen/atmosphere';
 import { createAtmosphere } from '../world/atmosphereShell';
 import { SEA_RENDER_ORDER, createLavaLook, type LavaLook } from '../world/lavaMaterial';
+import { createGasMaterial } from '../world/gasMaterial';
 import { createRings, floorRadius, gasSampler, peakRadius, terrainSampler } from '../world/planetGeometry';
 import { createCubeSphere } from '../world/cubeSphere';
 import { GROUND_LAYER, GroundDepth } from '../world/groundDepth';
@@ -76,9 +77,11 @@ export class PlanetGlobe implements Entity {
       gas ? R : floorRadius(R, style, RELIEF_SCALE, seaFloor),
       this.top,
       gas
-        ? gasSampler(R, seed, config.bands, true)
+        ? gasSampler(R)
         : terrainSampler(R, seed, style, { noise: detailedTerrain, reliefScale: RELIEF_SCALE, seaFloor }),
-      new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: !gas, roughness: 0.9 }),
+      gas
+        ? createGasMaterial(seed, config.bands)
+        : new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9 }),
     );
     this.object.add(this.surface.object);
     addLodDebug(debug);

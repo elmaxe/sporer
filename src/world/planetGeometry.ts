@@ -127,17 +127,28 @@ function sampledSphere(geometry: THREE.BufferGeometry, sample: SurfaceSampler, d
  */
 export type GasPainter = (x: number, y: number, z: number, out: THREE.Color) => void;
 
-export function gasPainter(seed: number, bands: readonly string[], streaks = false): GasPainter {
+/** How much of a stripe's width (from its far edge) blends into the next stripe's colour: crisp edges, softened just enough not to alias. */
+export const GAS_EDGE_START = 0.88;
+
+/** The most stripes a gas giant gets, plus one (the colour above the last). */
+export const GAS_MAX_STRIPES = 13;
+
+/** A gas giant's stripes, seeded so a planet always looks the same: how many, and the colour of each (one more than that). */
+export function gasStripes(seed: number, bands: readonly string[]): { stripes: number; order: THREE.Color[] } {
   const palette = bands.map((b) => new THREE.Color(b));
-  // Which band colour each stripe uses, seeded so a planet always looks the same.
   const rng = new Rng(hashSeed(seed, 'stripes'));
   const stripes = rng.int(7, 12);
   const order = Array.from({ length: stripes + 1 }, () => palette[rng.int(0, palette.length - 1)]!);
+  return { stripes, order };
+}
+
+export function gasPainter(seed: number, bands: readonly string[], streaks = false): GasPainter {
+  const { stripes, order } = gasStripes(seed, bands);
   return (x, y, z, out) => {
     const lat = y + 0.05 * terrainNoise(x * 1.2, y * 2, z * 1.2, seed);
     const s = THREE.MathUtils.clamp((lat + 1) / 2, 0, 0.9999) * stripes;
     const k = Math.floor(s);
-    out.lerpColors(order[k]!, order[k + 1]!, THREE.MathUtils.smoothstep(s - k, 0.7, 1));
+    out.lerpColors(order[k]!, order[k + 1]!, THREE.MathUtils.smoothstep(s - k, GAS_EDGE_START, 1));
     if (streaks) {
       const wave = terrainNoise(x * 4, y * 6, z * 4, seed + 1);
       const swirl = terrainNoise(x * 12, y * 40, z * 12, seed + 2);
@@ -146,29 +157,21 @@ export function gasPainter(seed: number, bands: readonly string[], streaks = fal
   };
 }
 
-/** A gas giant's cloud tops: a sphere of `radius` striped by `gasPainter`. */
-export function gasSampler(radius: number, seed: number, bands: readonly string[], streaks = false): SurfaceSampler {
-  const paint = gasPainter(seed, bands, streaks);
-  return (dir, color) => {
-    paint(dir.x, dir.y, dir.z, color);
-    return radius;
-  };
+/**
+ * A gas giant's cloud tops: a smooth sphere of `radius`. The stripes and
+ * streaks aren't vertex colours (they would blur across the triangles):
+ * `createGasMaterial` paints them per pixel.
+ */
+export function createGasGeometry(radius: number, segments: number): THREE.BufferGeometry {
+  // The cube sphere's normals already point straight out: smooth shading.
+  const geometry = createCubeSphere(radius, segments);
+  geometry.computeBoundingSphere();
+  return geometry;
 }
 
-/**
- * Smooth sphere striped by latitude, the stripe edges wobbled by noise.
- * `streaks` adds thin, wavy cloud streaks for close-up views.
- */
-export function createGasGeometry(
-  radius: number,
-  seed: number,
-  bands: readonly string[],
-  segments: number,
-  streaks = false,
-): THREE.BufferGeometry {
-  // Stripe edges follow triangle edges, so this wants a finer sphere than terrain.
-  // The cube sphere's normals already point straight out: smooth shading.
-  return sampledSphere(createCubeSphere(1, segments), gasSampler(radius, seed, bands, streaks), false);
+/** The gas surface as a sampler: a sphere of `radius`, colour left to `createGasMaterial`. */
+export function gasSampler(radius: number): SurfaceSampler {
+  return () => radius;
 }
 
 /**

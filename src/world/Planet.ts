@@ -8,6 +8,7 @@ import type { CelestialBody } from './CelestialBody';
 import { atmosphereLook } from '../gen/atmosphere';
 import { createAtmosphere, type AtmosphereSun } from './atmosphereShell';
 import { createLavaLook, type LavaLook } from './lavaMaterial';
+import { createGasMaterial } from './gasMaterial';
 import { createGasGeometry, createRings, createTerrainGeometry } from './planetGeometry';
 import { createWeatherLook, type WeatherLook } from './weatherLook';
 import { globeRadius } from '../planet/frame';
@@ -91,9 +92,11 @@ export class Planet implements Entity, CelestialBody {
     this.lava = gas ? null : createLavaLook(config, COARSE_VENT_RADIUS);
     this.surface = new THREE.Mesh(
       gas
-        ? createGasGeometry(radius, seed, config.bands, GAS_SEGMENTS)
+        ? createGasGeometry(radius, GAS_SEGMENTS)
         : createTerrainGeometry(radius, seed, style, { segments: TERRAIN_SEGMENTS, seaFloor: this.lava !== null }),
-      new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: !gas, roughness: 0.9 }),
+      gas
+        ? createGasMaterial(seed, config.bands)
+        : new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9 }),
     );
     // Lava seas are a separate animated sphere over the sunken sea floor, turning with the surface.
     if (this.lava) this.surface.add(this.lava.createSeaSphere(radius));
