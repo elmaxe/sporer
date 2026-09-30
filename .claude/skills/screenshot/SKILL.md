@@ -25,6 +25,7 @@ npm run shot -- --out <dir> --clean [--sheet] [--star <id>] <steps...>
 - **`--sheet`** also writes `sheet.png`: every shot in one labelled grid. Use it for sequences, so a single Read shows them all. Read single shots for detail.
 - **`--star <id>` / `--seed <s>`**: which system/galaxy to start in (`--url` for anything else, e.g. a preview build on :4173). Default page size is 1280×720 (`--size`).
 - **`--steps <file>`**: steps from a file, one per line, `#` comments. Use it when the JS gets long or needs quotes; put the file in the scratchpad.
+- **`--phone`**: an emulated phone (390×844, mobile, real touch events), so the game (and the lab) run in touch mode with the on-screen controls; use `tap:<element id>` to press its buttons.
 - **`--lab [<query>]`**: shoot the planet lab (`lab.html`) instead of the game, e.g. `--lab "gen=7&type=ice&kind=moon"` or `--lab "seed=1337&star=5&planet=2"`. See *The planet lab* below.
 
 Steps run in order. With no steps, you get `shot:view`.
@@ -41,6 +42,7 @@ Steps run in order. With no steps, you get `shot:view`.
 | `freeze:<expression>` | stop the game loop on the first frame where the expression is true (checked after drawing), so the next `shot` is exactly that frame |
 | `resume` | restart the loop after a freeze |
 | `solo:<outgoing\|incoming>:<name>` | while frozen mid-crossfade: redraw with only that level showing and shoot it; compare the two sides of a handover (same place, same size?) |
+| `tap:<element id>` | tap (with `--phone`) or click the middle of that element, e.g. `tap:menu-toggle`, `tap:touch-map` |
 | `fps` | frames per second over 120 frames (headless SwiftShader: expect ~5–25) |
 | `goto:<url or ?params>` | load another page, e.g. `goto:?star=2`, and wait for the game |
 
@@ -124,6 +126,8 @@ npm run shot -- --out $OUT --clean --sheet --lab "gen=5" "js:lab.setType('lava')
 ```
 
 `--clean` hides the lab's control panel too; the readout (top right) stays, with the climate and what's active.
+
+On a phone: `npm run shot -- --out $OUT --phone --lab "gen=4&type=terran" tap:touch-map "until:lab.level.map.baked" shot:phone-map`.
 
 ## Tips
 

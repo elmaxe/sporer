@@ -101,7 +101,8 @@ body.lab #stats {
   margin-bottom: 0;
 }
 
-body.lab #planet-map {
+/* Mouse players: in the corner (no menu button under it). On touch it's the game's centred overlay. */
+html:not(.touch) body.lab #planet-map {
   bottom: 16px;
 }
 
@@ -127,8 +128,9 @@ html.touch body.lab #stats {
     --input-font-size: 14px;
     width: 100%;
     top: env(safe-area-inset-top);
-    max-height: 62vh;
-    max-height: 62dvh;
+    /* Debug sets an inline max-height for the game's corner layout. */
+    max-height: 62vh !important;
+    max-height: 62dvh !important;
   }
 
   #lab-info {

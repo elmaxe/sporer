@@ -11,6 +11,7 @@
 //                      "seed=1337&star=5&planet=2" (a game planet); drive it with js:lab.set(...) and the like
 //   --out <dir>        where PNGs go (default: a new temp dir); created if missing
 //   --size <w>x<h>     page size in CSS pixels (default 1280x720)
+//   --phone            an emulated phone: 390x844 (unless --size), mobile, touch events (the game's touch mode)
 //   --clean            hide the debug panel and FPS meter
 //   --sheet            also write sheet.png: every screenshot in a labelled grid (one Read for a sequence)
 //   --steps <file>     read more steps from a file, one per line (# comments), handy for long JS
@@ -30,6 +31,7 @@
 //   solo:<outgoing|incoming>:<name>
 //                                while frozen mid-crossfade: redraw showing only that level, screenshot → <name>.png,
 //                                then redraw the blend (compare the two sides of a handover)
+//   tap:<element id>             tap (--phone) or click the middle of that element, then wait two frames
 //   fps                          measure frames per second over 120 frames
 //   goto:<url or ?params>        load another page (e.g. goto:?star=2) and wait for the game
 //
@@ -61,7 +63,8 @@ for (let i = 0; i < args.length; i++) {
     opts.lab = true;
     // An optional query right after it (anything not starting with -- and not a step).
     if (i + 1 < args.length && !args[i + 1].startsWith('--') && !/^[a-z]+(:|$)/.test(args[i + 1])) opts.labQuery = args[++i];
-  } else if (a === '--clean') opts.clean = true;
+  } else if (a === '--phone') opts.phone = true;
+  else if (a === '--clean') opts.clean = true;
   else if (a === '--sheet') opts.sheet = true;
   else if (a === '--steps') {
     for (const line of readFileSync(value(), 'utf8').split('\n')) {
@@ -73,6 +76,7 @@ for (let i = 0; i < args.length; i++) {
 }
 if (steps.length === 0) steps.push('shot:view');
 
+if (opts.phone && !args.includes('--size')) opts.size = '390x844';
 const [width, height] = opts.size.split('x').map(Number);
 const url = new URL(opts.lab ? `lab.html${opts.labQuery ? `?${opts.labQuery.replace(/^\?/, '')}` : ''}` : '', opts.url);
 for (const [k, v] of Object.entries(opts.params)) url.searchParams.set(k, v);
@@ -89,6 +93,10 @@ if (!(await fetch(url).then((r) => r.ok, () => false))) {
 }
 
 const page = await launch({ width, height });
+if (opts.phone) {
+  await page.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: true });
+  await page.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+}
 const shots = [];
 const results = [];
 let last = null;
@@ -217,6 +225,21 @@ async function run(step) {
     case 'resume':
       await page.evaluate(`game.afterFrame = null; game.start()`);
       return;
+    case 'tap': {
+      const at = await page.evaluate(`(() => { const e = document.getElementById(${JSON.stringify(rest)}); if (!e) return null;
+        const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+      if (!at) throw new Error(`no element #${rest}`);
+      if (opts.phone) {
+        await page.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...at, id: 0 }] });
+        await page.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      } else {
+        for (const type of ['mousePressed', 'mouseReleased']) {
+          await page.send('Input.dispatchMouseEvent', { type, ...at, button: 'left', clickCount: 1 });
+        }
+      }
+      await page.evaluate(`new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))`);
+      return;
+    }
     case 'fps':
       results.push({
         step,
