@@ -24,3 +24,36 @@ export function pickPoint(origin: Vec3Like, dir: Vec3Like, positions: ArrayLike<
   }
   return best;
 }
+
+/** Share of a nebula's radius a ray must pass within to pick it: its visible, denser middle. */
+const NEBULA_PICK_REACH = 0.6;
+
+/**
+ * Index of the nebula (a sphere of `radius` round `position`) whose centre
+ * a ray passes closest to, relative to its size, if it passes within
+ * NEBULA_PICK_REACH of its radius; -1 if none. Nebulas behind the origin or
+ * containing it are skipped (from inside, one is all round you).
+ */
+export function pickNebula(
+  origin: Vec3Like,
+  dir: Vec3Like,
+  nebulas: readonly { position: Vec3Like; radius: number }[],
+): number {
+  let best = -1;
+  let bestRatio = NEBULA_PICK_REACH;
+  nebulas.forEach((n, i) => {
+    const vx = n.position.x - origin.x;
+    const vy = n.position.y - origin.y;
+    const vz = n.position.z - origin.z;
+    const dist2 = vx * vx + vy * vy + vz * vz;
+    if (dist2 <= n.radius * n.radius) return;
+    const depth = vx * dir.x + vy * dir.y + vz * dir.z;
+    if (depth <= 0) return;
+    const ratio = Math.sqrt(Math.max(0, dist2 - depth * depth)) / n.radius;
+    if (ratio < bestRatio) {
+      bestRatio = ratio;
+      best = i;
+    }
+  });
+  return best;
+}

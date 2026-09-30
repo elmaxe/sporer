@@ -3,6 +3,7 @@ import { FIXED_DT } from '../core/Game';
 import type { Debug } from '../core/Debug';
 import type { Input } from '../core/Input';
 import type { StarRef } from '../gen/galaxy';
+import type { NebulaData } from '../gen/nebulas';
 import { generateSystem, spawnDistance, type SystemData } from '../gen/system';
 import { Physics } from '../physics/Physics';
 import { EyeAdaptation } from '../player/EyeAdaptation';
@@ -16,6 +17,7 @@ import { SystemMap } from '../ui/SystemMap';
 import type { Tooltip } from '../ui/Tooltip';
 import type { CelestialBody } from '../world/CelestialBody';
 import { GalaxyBand } from '../world/GalaxyBand';
+import { NebulaSky, skyStarDimming } from '../world/NebulaSky';
 import { OrbitTrails } from '../world/OrbitTrails';
 import type { Planet } from '../world/Planet';
 import { Starfield } from '../world/Starfield';
@@ -42,6 +44,8 @@ export class SystemLevel extends Level {
   readonly ship: Ship;
   readonly orbit: OrbitCamera;
   readonly band: GalaxyBand;
+  /** Nebulas close enough to show in the sky, or null. */
+  readonly nebulaSky: NebulaSky | null;
   readonly eye: EyeAdaptation;
   private readonly hud: Hud;
   /** The star, planets and moons in a row, in the corner (mouse players) or from the Map button (touch). */
@@ -56,6 +60,8 @@ export class SystemLevel extends Level {
     input: Input,
     tooltip: Tooltip,
     debug: Debug,
+    /** The galaxy's nebulas: the ones nearby are in the sky. */
+    nebulas: readonly NebulaData[],
     /** Called when the player scrolls out past the system (to the galaxy). */
     onZoomOut: () => void,
     /** Called when the player scrolls in past the closest zoom (to descend to a planet). */
@@ -65,8 +71,11 @@ export class SystemLevel extends Level {
     super(physics);
     this.data = generateSystem(ref);
 
-    this.band = this.add(new GalaxyBand(this.scene, ref, this.data, debug));
-    this.starfield = this.add(new Starfield(this.scene, camera));
+    const near = NebulaSky.near(nebulas, ref.position);
+    const dim = skyStarDimming(near, ref.position, this.data);
+    this.band = this.add(new GalaxyBand(this.scene, ref, this.data, debug, dim));
+    this.nebulaSky = near.length > 0 ? this.add(new NebulaSky(this.scene, ref, this.data, near, debug)) : null;
+    this.starfield = this.add(new Starfield(this.scene, camera, dim));
     this.world = this.add(new StarSystem(this.scene, physics, this.data, debug));
     const spawn = new THREE.Vector3(0, 15, spawnDistance(this.data));
     this.ship = this.add(new Ship(this.scene, physics, input, camera, this.world.bodies, debug, spawn));
