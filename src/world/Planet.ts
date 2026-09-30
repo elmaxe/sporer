@@ -29,9 +29,12 @@ export interface PlanetConfig {
   climate?: ClimateData | null;
 }
 
-/** Icosphere subdivision of the system view's planets (gas giants need more for smooth bands). */
-export const TERRAIN_DETAIL = 5;
-export const GAS_DETAIL = 16;
+/**
+ * Cube sphere segments of the system view's planets (gas giants need more for
+ * smooth bands): 768 and 5808 triangles.
+ */
+export const TERRAIN_SEGMENTS = 8;
+export const GAS_SEGMENTS = 22;
 /** A vent's glow in the system view, radians (wider than up close, so it shows at that size). */
 export const COARSE_VENT_RADIUS = 0.15;
 
@@ -82,8 +85,8 @@ export class Planet implements Entity, CelestialBody {
     this.lava = gas ? null : createLavaLook(config, COARSE_VENT_RADIUS);
     this.surface = new THREE.Mesh(
       gas
-        ? createGasGeometry(radius, seed, config.bands, GAS_DETAIL)
-        : createTerrainGeometry(radius, seed, style, { detail: TERRAIN_DETAIL, seaFloor: this.lava !== null }),
+        ? createGasGeometry(radius, seed, config.bands, GAS_SEGMENTS)
+        : createTerrainGeometry(radius, seed, style, { segments: TERRAIN_SEGMENTS, seaFloor: this.lava !== null }),
       new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: !gas, roughness: 0.9 }),
     );
     // Lava seas are a separate animated sphere over the sunken sea floor, turning with the surface.

@@ -6,8 +6,8 @@ import {
   PLANET_SCALE,
   angularRadius,
   bodyFrame,
-  globeDetail,
   globeRadius,
+  globeSegments,
   lightDirection,
   localToSystem,
   maxViewDistance,
@@ -239,11 +239,11 @@ describe('globe sizes', () => {
   });
 
   it('adds terrain detail with size, within a budget', () => {
-    expect(globeDetail(EARTH_GLOBE_RADIUS)).toBe(60);
-    expect(globeDetail(10)).toBe(32);
-    expect(globeDetail(globeRadius(SIZE_CLASS_RADIUS.superEarth[1]))).toBeLessThanOrEqual(84);
-    expect(globeDetail(150)).toBeGreaterThan(60);
-    expect(globeDetail(50)).toBeLessThan(60);
+    expect(globeSegments(EARTH_GLOBE_RADIUS)).toBe(79);
+    expect(globeSegments(10)).toBe(43);
+    expect(globeSegments(globeRadius(SIZE_CLASS_RADIUS.superEarth[1]))).toBeLessThanOrEqual(110);
+    expect(globeSegments(150)).toBeGreaterThan(79);
+    expect(globeSegments(50)).toBeLessThan(79);
   });
 
   it('speeds up the autopilot on big globes, but not enough to hide the size', () => {

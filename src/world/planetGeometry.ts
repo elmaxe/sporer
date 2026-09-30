@@ -2,19 +2,21 @@ import * as THREE from 'three';
 import { terrainNoise } from '../gen/noise';
 import { hashSeed, Rng } from '../gen/rng';
 import type { PlanetStyle, RingData } from '../gen/system';
+import { createCubeSphere } from './cubeSphere';
 
 /*
  * Planet mesh builders shared by the system view (small, coarse bodies) and
- * the planet level (one big, fine globe). `detail` is the icosphere
- * subdivision: 20·(detail+1)² triangles.
+ * the planet level (one big, fine globe). `segments` is the cube sphere's
+ * grid size per cube face (see cubeSphere.ts): 12·segments² triangles, evenly
+ * spread, with no poles.
  */
 
 
 export type TerrainNoise = (x: number, y: number, z: number, seed: number) => number;
 
 export interface TerrainOptions {
-  /** Icosphere subdivision. */
-  detail: number;
+  /** Cube sphere segments per cube face edge. */
+  segments: number;
   noise?: TerrainNoise;
   /** Multiplies the style's relief (the close-up globe exaggerates it a little). */
   reliefScale?: number;
@@ -54,14 +56,14 @@ export function terrainPainter(style: PlanetStyle, seaFloor = false): TerrainPai
   };
 }
 
-/** Icosphere displaced by noise, with per-vertex colours and a flat sea. */
+/** Cube sphere displaced by noise, with per-vertex colours and a flat sea. */
 export function createTerrainGeometry(
   radius: number,
   seed: number,
   style: PlanetStyle,
-  { detail, noise = terrainNoise, reliefScale = 1, seaFloor = false }: TerrainOptions,
+  { segments, noise = terrainNoise, reliefScale = 1, seaFloor = false }: TerrainOptions,
 ): THREE.BufferGeometry {
-  const geometry = new THREE.IcosahedronGeometry(radius, detail);
+  const geometry = createCubeSphere(radius, segments);
   const position = geometry.getAttribute('position') as THREE.BufferAttribute;
   const colors = new Float32Array(position.count * 3);
   const dir = new THREE.Vector3();
@@ -73,8 +75,7 @@ export function createTerrainGeometry(
     dir.fromBufferAttribute(position, i).normalize();
     const height = paint(noise(dir.x, dir.y, dir.z, seed), color);
 
-    // The geometry is non-indexed, but shared corners have identical positions
-    // and therefore identical noise, so the surface stays watertight.
+    // Indexed: each point is displaced once and shared by its triangles, so the surface stays watertight.
     dir.multiplyScalar(radius * (1 + relief * (height < 0 ? 0.6 : 1) * height));
     position.setXYZ(i, dir.x, dir.y, dir.z);
     color.toArray(colors, i * 3);
@@ -119,26 +120,24 @@ export function createGasGeometry(
   radius: number,
   seed: number,
   bands: readonly string[],
-  detail: number,
+  segments: number,
   streaks = false,
 ): THREE.BufferGeometry {
   // Stripe edges follow triangle edges, so this wants a finer sphere than terrain.
-  const geometry = new THREE.IcosahedronGeometry(radius, detail);
-  const position = geometry.getAttribute('position') as THREE.BufferAttribute;
-  const normals = new Float32Array(position.count * 3);
-  const colors = new Float32Array(position.count * 3);
+  // The cube sphere's normals already point straight out: smooth shading.
+  const geometry = createCubeSphere(radius, segments);
+  const normal = geometry.getAttribute('normal') as THREE.BufferAttribute;
+  const colors = new Float32Array(normal.count * 3);
   const paint = gasPainter(seed, bands, streaks);
 
   const dir = new THREE.Vector3();
   const color = new THREE.Color();
-  for (let i = 0; i < position.count; i++) {
-    dir.fromBufferAttribute(position, i).normalize();
-    dir.toArray(normals, i * 3);
+  for (let i = 0; i < normal.count; i++) {
+    dir.fromBufferAttribute(normal, i);
     paint(dir.x, dir.y, dir.z, color);
     color.toArray(colors, i * 3);
   }
 
-  geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   return geometry;
 }

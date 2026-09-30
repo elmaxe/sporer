@@ -11,11 +11,17 @@ import {
   createTerrainGeometry,
   peakRadius,
 } from '../world/planetGeometry';
-import { PLANET_SCALE, globeDetail, globeRadius } from './frame';
+import { createCubeSphere } from '../world/cubeSphere';
+import { PLANET_SCALE, globeRadius, globeSegments } from './frame';
 import type { RenderClock } from './PlanetFrame';
 
-/** Gas giants are smooth-shaded, so their bands need less detail than terrain as they grow. */
-const GAS_DETAIL = 64;
+/** Gas giants are smooth-shaded, so their bands need less detail than terrain as they grow (cube sphere segments). */
+const GAS_SEGMENTS = 84;
+/** Cube sphere segments of the sea surface, and of the lava sea, whose shader works out its flow per vertex. */
+const SEA_SEGMENTS = 46;
+const LAVA_SEA_SEGMENTS = 37;
+/** Cube sphere segments of the atmosphere shell. */
+const ATMOSPHERE_SEGMENTS = 37;
 /** Mountains are exaggerated a little up close, where the system view's relief reads as flat. */
 export const RELIEF_SCALE = 1.6;
 /** A vent's glow on the lava sea, radians. */
@@ -56,10 +62,9 @@ export class PlanetGlobe implements Entity {
 
     const surface = new THREE.Mesh(
       gas
-        ? createGasGeometry(R, seed, config.bands, GAS_DETAIL, true)
+        ? createGasGeometry(R, seed, config.bands, GAS_SEGMENTS, true)
         : createTerrainGeometry(R, seed, style, {
-            // Earth-sized: 20·61² ≈ 74k triangles.
-            detail: globeDetail(R),
+            segments: globeSegments(R),
             noise: detailedTerrain,
             reliefScale: RELIEF_SCALE,
             seaFloor,
@@ -72,7 +77,7 @@ export class PlanetGlobe implements Entity {
     if (config.rings) this.object.add(createRings(config.rings, seed, PLANET_SCALE));
     // The same look as in the system view (in planet radii), so the two match across the zoom.
     const look = config.atmosphere && config.climate ? atmosphereLook(config.climate, config.radius) : null;
-    if (look) this.object.add(createAtmosphere(R, config.atmosphere!, look, { vector: this.sun, point: false }, 128));
+    if (look) this.object.add(createAtmosphere(R, config.atmosphere!, look, { vector: this.sun, point: false }, ATMOSPHERE_SEGMENTS));
     scene.add(this.object);
     this.update();
   }
@@ -99,7 +104,7 @@ export class PlanetGlobe implements Entity {
  */
 function createSea(type: PlanetConfig['type'], color: string, radius: number, lava: THREE.Material | null): THREE.Mesh {
   // The lava shader works out its flow per vertex, so it gets fewer (still smooth at the horizon).
-  const geometry = lava ? new THREE.SphereGeometry(radius, 128, 64) : new THREE.SphereGeometry(radius, 160, 80);
+  const geometry = createCubeSphere(radius, lava ? LAVA_SEA_SEGMENTS : SEA_SEGMENTS);
   let material: THREE.Material;
   if (lava) {
     material = lava;
