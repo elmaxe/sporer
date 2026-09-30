@@ -6,7 +6,8 @@ import { Planet } from '../world/Planet';
 /**
  * The menu (#menu in index.html): Esc or the menu button (bottom right, the
  * only way in on touch) opens it and pauses the game (time stands still, the
- * view stays drawn). It holds the sound settings (VolumeControl) and a link
+ * view stays drawn). It holds the sound settings (VolumeControl), the graphics
+ * settings (GraphicsSettings: weather on or off) and a link
  * to the planet lab, for the planet you're at: in low orbit the one below,
  * in a system the one the autopilot is headed for (else the first planet),
  * from the galaxy an empty lab. Esc, Resume, × or a click beside the panel

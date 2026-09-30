@@ -16,6 +16,9 @@ import { EARTH_GAME_RADIUS } from '../gen/planets';
 /** An Earth-sized body's radius in planet-level units (system radius EARTH_GAME_RADIUS). */
 export const EARTH_GLOBE_RADIUS = 100;
 
+/** Mountains are exaggerated a little up close, where the system view's relief reads as flat. */
+export const RELIEF_SCALE = 1.6;
+
 /** Planet-level units per system unit, the same for every body. */
 export const PLANET_SCALE = EARTH_GLOBE_RADIUS / EARTH_GAME_RADIUS;
 

@@ -11,13 +11,14 @@ import {
   createTerrainGeometry,
   peakRadius,
 } from '../world/planetGeometry';
-import { PLANET_SCALE, globeDetail, globeRadius } from './frame';
+import { createWeatherLook, type WeatherLook } from '../world/weatherLook';
+import { PLANET_SCALE, RELIEF_SCALE, globeDetail, globeRadius } from './frame';
 import type { RenderClock } from './PlanetFrame';
+
+export { RELIEF_SCALE };
 
 /** Gas giants are smooth-shaded, so their bands need less detail than terrain as they grow. */
 const GAS_DETAIL = 64;
-/** Mountains are exaggerated a little up close, where the system view's relief reads as flat. */
-export const RELIEF_SCALE = 1.6;
 /** A vent's glow on the lava sea, radians. */
 const VENT_RADIUS = 0.05;
 
@@ -41,6 +42,8 @@ export class PlanetGlobe implements Entity {
   readonly ambientLight = new THREE.Color(0, 0, 0);
   /** Lava worlds and moons: the animated sea and its eruptions' schedule. */
   readonly lava: LavaLook | null;
+  /** Bodies with weather: the cloud layer's look, its storms and lightning (planet/Weather.ts draws the rain and bolts). */
+  readonly weather: WeatherLook | null;
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -73,12 +76,16 @@ export class PlanetGlobe implements Entity {
     // The same look as in the system view (in planet radii), so the two match across the zoom.
     const look = config.atmosphere && config.climate ? atmosphereLook(config.climate, config.radius) : null;
     if (look) this.object.add(createAtmosphere(R, config.atmosphere!, look, { vector: this.sun, point: false }, 128));
+    this.weather = gas ? null : createWeatherLook(config, this.lava?.activity ?? null);
+    // Earth-sized: 20·43² ≈ 37k triangles.
+    if (this.weather) this.object.add(this.weather.createCloudLayer(1, Math.round(globeDetail(R) * 0.7), { vector: this.sun, point: false }));
     scene.add(this.object);
     this.update();
   }
 
   update(): void {
     this.lava?.animate(this.frame.renderTime);
+    this.weather?.animate(this.frame.renderTime);
   }
 
   dispose(): void {

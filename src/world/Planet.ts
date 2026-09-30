@@ -9,6 +9,8 @@ import { atmosphereLook } from '../gen/atmosphere';
 import { createAtmosphere, type AtmosphereSun } from './atmosphereShell';
 import { createLavaLook, type LavaLook } from './lavaMaterial';
 import { createGasGeometry, createRings, createTerrainGeometry } from './planetGeometry';
+import { createWeatherLook, type WeatherLook } from './weatherLook';
+import { globeRadius } from '../planet/frame';
 
 /** What the renderer needs; generated PlanetData and MoonData both satisfy it. */
 export interface PlanetConfig {
@@ -34,6 +36,8 @@ export const TERRAIN_DETAIL = 5;
 export const GAS_DETAIL = 16;
 /** A vent's glow in the system view, radians (wider than up close, so it shows at that size). */
 export const COARSE_VENT_RADIUS = 0.15;
+/** Icosphere subdivisions of the system view's cloud layers. */
+export const CLOUD_DETAIL = 14;
 
 /** True for gas giants, which are drawn as banded spheres instead of terrain. */
 export function isGas(config: PlanetConfig): config is PlanetConfig & { bands: string[] } {
@@ -61,6 +65,8 @@ export class Planet implements Entity, CelestialBody {
   private readonly surface: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
   /** Lava worlds and moons: the animated seas. */
   private readonly lava: LavaLook | null;
+  /** Bodies with weather: the clouds, storms and lightning (see gen/weather.ts). */
+  readonly weather: WeatherLook | null;
   private readonly body: RAPIER.RigidBody;
   private readonly prev = new THREE.Vector3();
   private readonly parentPosition = new THREE.Vector3();
@@ -88,6 +94,9 @@ export class Planet implements Entity, CelestialBody {
     );
     // Lava seas are a separate animated sphere over the sunken sea floor, turning with the surface.
     if (this.lava) this.surface.add(this.lava.createSeaSphere(radius));
+    // Clouds turn with the ground; the same layer as low orbit's, in planet radii.
+    this.weather = gas ? null : createWeatherLook(config, this.lava?.activity ?? null);
+    if (this.weather) this.surface.add(this.weather.createCloudLayer(radius / globeRadius(radius), CLOUD_DETAIL, sun));
 
     // The tilted group holds everything aligned with the equator: surface and rings.
     const tilted = new THREE.Group();
@@ -162,9 +171,10 @@ export class Planet implements Entity, CelestialBody {
     this.surface.rotation.y += this.config.spin * frameDt;
   }
 
-  /** Animated surfaces (lava seas) at system time `time`. */
+  /** Animated surfaces (lava seas) and weather at system time `time`. */
   animate(time: number): void {
     this.lava?.animate(time);
+    this.weather?.animate(time);
   }
 
   dispose(): void {
