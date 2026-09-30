@@ -1,4 +1,4 @@
-import { jitterHsl, type Hsl } from './color';
+import { hslToHex, jitterHsl, type Hsl } from './color';
 import type { Rng } from './rng';
 
 export type SpectralClass = 'O' | 'B' | 'A' | 'F' | 'G' | 'K' | 'M';
@@ -61,6 +61,26 @@ export function generateStar(rng: Rng, kind: StarKind = rng.weighted(KIND_WEIGHT
     // Bigger stars within a class are a bit brighter and heavier.
     luminosity: spec.luminosity * (0.85 + 0.3 * size),
     mass: spec.mass * (0.9 + 0.2 * size),
+  };
+}
+
+/**
+ * A typical star of a kind (and, for the main sequence, a class): the middle
+ * of its size range and its base colour, no jitter. For tools like the planet
+ * lab that want "a G star" rather than a generated one.
+ */
+export function nominalStar(kind: StarKind, spectralClass: SpectralClass = 'G'): StarData {
+  const spec =
+    kind === 'mainSequence'
+      ? (MAIN_SEQUENCE.find(([s]) => s.spectralClass === spectralClass)?.[0] ?? MAIN_SEQUENCE[4]![0])
+      : OTHER_KINDS[kind];
+  return {
+    kind,
+    spectralClass: spec.spectralClass,
+    color: hslToHex(...spec.color),
+    radius: (spec.radius[0] + spec.radius[1]) / 2,
+    luminosity: spec.luminosity,
+    mass: spec.mass,
   };
 }
 

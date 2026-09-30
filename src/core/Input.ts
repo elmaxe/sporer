@@ -158,6 +158,8 @@ export class Input {
   }
 
   private onKeyDown = (e: KeyboardEvent) => {
+    // Typing in a text field (e.g. a debug panel) isn't flying.
+    if (isTextField(e.target)) return;
     this.keys.add(e.code);
   };
 
@@ -258,4 +260,10 @@ export class Input {
     p.ndcY = -((clientY - rect.top) / rect.height) * 2 + 1;
     p.inside = clientX >= rect.left && clientX < rect.right && clientY >= rect.top && clientY < rect.bottom;
   }
+}
+
+function isTextField(target: EventTarget | null): boolean {
+  if (target instanceof HTMLTextAreaElement) return true;
+  if (!(target instanceof HTMLInputElement)) return false;
+  return !['range', 'checkbox', 'radio', 'button', 'color'].includes(target.type);
 }

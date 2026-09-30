@@ -18,6 +18,7 @@
 // weight and canvas brightness; each transition must crossfade and never go black (screenshots mid-handover).
 // Touch: on an emulated phone, hold/tap/drag/pinch and the on-screen stick and Boost work, down to a planet and out;
 // the full-screen button shows, and in low orbit the Map button opens the map, a tap on it flies there, × closes it.
+// Planet lab (lab.html): every type and a moon build and draw in both views, a game planet loads, the panel works.
 // Prints JSON with FPS, console errors and screenshot paths. Exit 1 on failure.
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -521,6 +522,72 @@ const shot = await send('Page.captureScreenshot', { format: 'png' });
 writeFileSync(screenshot, Buffer.from(shot.result.data, 'base64'));
 
 /**
+ * The planet lab (lab.html): every planet type and a moon build in the globe and system views and draw a lit
+ * planet (mean brightness of the middle of the canvas), lava worlds have eruptions, a game planet loads by
+ * star and index with its name, the panel's type control rebuilds the planet, and the page URL keeps a link.
+ */
+async function runLab() {
+  const r = { cases: [] };
+  await send('Page.navigate', { url: new URL('lab.html?gen=3', url).href });
+  if (!(await page.waitFor(`typeof window.lab !== 'undefined' && lab.ready`, 30000))) return { ok: false, started: false };
+  // Redraw and read the canvas in the same task (the drawing buffer is only valid until it's shown).
+  const brightness = `(() => {
+    game.redraw();
+    const gl = game.renderer.getContext(), w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
+    const px = new Uint8Array(w * h * 4);
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    let sum = 0, n = 0;
+    for (let y = Math.floor(h * 0.3); y < h * 0.7; y += 6) for (let x = Math.floor(w * 0.35); x < w * 0.65; x += 6) {
+      const i = 4 * (y * w + x); sum += px[i] + px[i + 1] + px[i + 2]; n++;
+    }
+    return +(sum / (3 * n)).toFixed(1);
+  })()`;
+  const cases = [...['lava', 'barren', 'desert', 'terran', 'ocean', 'ice', 'gas'].map((type) => ({ type })), { kind: 'moon' }];
+  for (const c of cases) {
+    const result = { case: c.type ?? c.kind };
+    for (const view of ['globe', 'system']) {
+      await evaluate(`lab.setView({ view: '${view}' }).then(() => lab.generate(17, ${JSON.stringify(c)}))`);
+      await page.waitFor(`lab.ready`, 30000);
+      result[view] = await evaluate(`({
+        type: lab.planet.type, kind: lab.planet.kind, triangles: lab.level.triangles,
+        eruptions: !!lab.level.eruptions, brightness: ${brightness} })`);
+    }
+    result.ok =
+      (!c.type || result.globe.type === c.type) &&
+      (!c.kind || result.globe.kind === c.kind) &&
+      result.globe.triangles > 5000 &&
+      result.system.triangles > 500 &&
+      result.globe.brightness > 8 &&
+      result.system.brightness > 8 &&
+      result.globe.eruptions === (result.globe.type === 'lava');
+    r.cases.push(result);
+  }
+  await evaluate(`lab.setView({ view: 'globe' })`);
+  r.loaded = await evaluate(`(async () => {
+    await lab.load('1337', 5, 1);
+    return { name: lab.planet.name, source: lab.source, hash: location.hash.length };
+  })()`);
+  r.panelType = await evaluate(`(async () => {
+    game.debug.panel.controllersRecursive().find((c) => c._name === 'type').setValue('ice');
+    await new Promise((ok) => setTimeout(ok, 50));
+    await lab.whenReady();
+    return lab.planet.type;
+  })()`);
+  r.screenshot = join(outDir, 'lab.png');
+  writeFileSync(r.screenshot, await page.screenshot());
+  r.ok =
+    r.cases.length === cases.length &&
+    r.cases.every((c) => c.ok) &&
+    // Planet index 1 is the system's second planet: "<star name> II".
+    / II$/.test(r.loaded?.name ?? '') &&
+    r.loaded.source?.star === 5 &&
+    r.loaded.hash > 100 &&
+    r.panelType === 'ice';
+  return r;
+}
+const lab = started ? await runLab() : null;
+
+/**
  * Touch play on an emulated phone (390x844, real CDP touch events): hold a finger on the star (tooltip), lift
  * (autopilot to it), drag (rotates, no tap), pinch (zoom), the on-screen stick with a second finger on Boost, then
  * pinch in at a planet to descend, tap the globe, and pinch out to the system and on to the galaxy, checking which
@@ -736,10 +803,12 @@ const planets =
   planetTypes.every((r) => r.ok) &&
   (quick || planetTypes.length === 13); // 7 types, ringed, moon and 4 geyser kinds
 const touched = started && touch.ok;
-const ok = started && moved && autopiloted && picked && skyOk && alive && looped && sounded && planets && touched && errors.length === 0;
+const labbed = started && lab.ok;
+const ok =
+  started && moved && autopiloted && picked && skyOk && alive && looped && sounded && planets && touched && labbed && errors.length === 0;
 console.log(
   JSON.stringify(
-    { ok, started, moved, autopiloted, picked, skyOk, alive, looped, sounded, planets, touched, before, after, autopilot, pick, sky, living, comet, eye, galaxyLoop, seamless, audio, planetLoop, heldZoom, planetTypes, touch, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
+    { ok, started, moved, autopiloted, picked, skyOk, alive, looped, sounded, planets, touched, labbed, before, after, autopilot, pick, sky, living, comet, eye, galaxyLoop, seamless, audio, planetLoop, heldZoom, planetTypes, touch, lab, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
     null,
     2,
   ),

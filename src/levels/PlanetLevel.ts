@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
 import type { Input } from '../core/Input';
 import { describeClimateDetail } from '../gen/climate';
+import type { PlanetData } from '../gen/system';
+import { labFromBody, labLink } from '../lab/labPlanet';
 import { describeGeysers, geyserActivity } from '../gen/geysers';
 import { Geysers } from '../planet/Geysers';
 import { LavaEruptions } from '../planet/LavaEruptions';
@@ -130,6 +132,17 @@ export class PlanetLevel extends Level {
     const detail = climate ? describeClimateDetail(climate) + (geysers ? ` · ${describeGeysers(geysers.kind)}` : '') : null;
     this.hud = this.add(new PlanetHud(this.ship, `${body.name} · ${body.description}`, input, detail));
     this.map = this.add(new PlanetMap(config, body.name, this.ship, globe, input, debug));
+    debug
+      .folder('Planet lab')
+      ?.add({ open: () => window.open(this.labLink(), '_blank') }, 'open')
+      .name('Open this planet in the lab');
+  }
+
+  /** A link to this planet (or moon, or planet with its moons) in the planet lab (lab.html). */
+  labLink(): string {
+    const { config, parent } = this.body;
+    const moons = (config as Partial<PlanetData>).moons ?? [];
+    return labLink(labFromBody(config, parent !== null, moons), location.href);
   }
 
   /** System time here; the system level catches up to it on return. */

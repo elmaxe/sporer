@@ -1,0 +1,82 @@
+/* The planet lab (lab.html): the control panel on the left, the readout top right, the map bottom right. */
+
+body.lab .lil-gui.lil-auto-place {
+  --width: 300px;
+  left: 0;
+  right: auto;
+}
+
+body.lab #stats {
+  top: auto !important;
+  bottom: 0;
+}
+
+#lab-info {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  width: min(380px, calc(100vw - 340px));
+  max-height: calc(100vh - 300px);
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(8, 14, 28, 0.78);
+  border: 1px solid rgba(102, 255, 204, 0.25);
+  font-size: 12px;
+  line-height: 1.45;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+#lab-info h1 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+#lab-info .lab-sub {
+  margin-bottom: 6px;
+  opacity: 0.8;
+}
+
+#lab-info a {
+  color: #66ffcc;
+}
+
+#lab-info table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+#lab-info th {
+  padding: 1px 10px 1px 0;
+  text-align: left;
+  vertical-align: top;
+  font-weight: 500;
+  color: #9fd8ff;
+  white-space: nowrap;
+}
+
+#lab-info td {
+  padding: 1px 0;
+  font-variant-numeric: tabular-nums;
+}
+
+#lab-info .lab-help {
+  margin-top: 6px;
+  opacity: 0.6;
+}
+
+body.lab #planet-map {
+  bottom: 16px;
+}
+
+@media (max-width: 700px) {
+  #lab-info {
+    width: auto;
+    left: 12px;
+  }
+  #lab-info table {
+    display: none;
+  }
+}
