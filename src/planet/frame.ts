@@ -15,6 +15,9 @@ import { EARTH_GAME_RADIUS, EARTH_GLOBE_RADIUS, GLOBE_SIZE_FACTOR } from '../gen
 
 export { EARTH_GLOBE_RADIUS };
 
+/** Mountains are exaggerated a little up close, where the system view's relief reads as flat. */
+export const RELIEF_SCALE = 1.6;
+
 /** Planet-level units per system unit, the same for every body. */
 export const PLANET_SCALE = EARTH_GLOBE_RADIUS / EARTH_GAME_RADIUS;
 

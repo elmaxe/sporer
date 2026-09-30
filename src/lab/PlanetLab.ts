@@ -5,6 +5,7 @@ import type { ClimateData, ClimateState } from '../gen/climate';
 import { generateGalaxy } from '../gen/galaxy';
 import { hashSeed, parseSeed } from '../gen/rng';
 import { generateSystem } from '../gen/system';
+import { offsetDirection, stormCentre } from '../gen/weather';
 import type { PlanetConfig } from '../world/Planet';
 import { LabClock, LabLevel } from './LabLevel';
 import {
@@ -258,6 +259,32 @@ export class PlanetLab {
     const lon = (Math.atan2(x, z) * 180) / Math.PI;
     const lat = (Math.asin(y) * 180) / Math.PI;
     return this.look(lon + 50, lat * 0.6, 2.2);
+  }
+
+  /**
+   * The camera over the biggest storm under way (of `kind` if given, e.g.
+   * 'cyclone', 'cell', 'ash'), at `zoom` radii, or, with the fly camera, the
+   * UFO parked beside it. Globe view only (the system view's surface spins
+   * under the camera). Resolves false if there is none.
+   */
+  lookAtStorm(kind?: string, zoom = 1.6): Promise<boolean> {
+    const level = this._level;
+    const weather = level?.globe?.weather;
+    if (!level || !weather) return Promise.resolve(false);
+    const storms = weather.shown.filter((e) => !kind || e.kind === kind).sort((a, b) => b.size - a.size);
+    const storm = storms[0];
+    if (!storm) return Promise.resolve(false);
+    const c: [number, number, number] = [0, 0, 0];
+    stormCentre(storm, this.clock.renderTime, c);
+    if (this.view.camera === 'fly' && level.ship) {
+      // Beside the storm, looking in under it.
+      const side = offsetDirection(c, 0, storm.size * 1.2, [0, 0, 0]);
+      level.ship.placeAt(new Vector3(side[0], side[1], side[2]));
+      return this.whenReady().then(() => true);
+    }
+    const lon = (Math.atan2(c[0], c[2]) * 180) / Math.PI;
+    const lat = (Math.asin(c[1]) * 180) / Math.PI;
+    return this.look(lon, lat, zoom).then(() => true);
   }
 
   /** Something was edited in place: rebuild once edits pause. */

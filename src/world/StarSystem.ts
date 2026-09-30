@@ -15,6 +15,7 @@ import { addAtmosphereDebug, type AtmosphereSun } from './atmosphereShell';
 import { stormParams } from './StarStorms';
 import { createGlowTexture } from './glowTexture';
 import { addLavaDebug } from './lavaMaterial';
+import { addWeatherDebug } from './weatherLook';
 import { starParams } from './starMaterials';
 
 /** Gap between a body's neighbourhood (rings, moon orbits) and where the autopilot parks. */
@@ -79,6 +80,7 @@ export class StarSystem implements Entity {
     if (debug) {
       addAtmosphereDebug(debug);
       addLavaDebug(debug);
+      addWeatherDebug(debug);
     }
     const stars = debug?.folder('Stars');
     stars?.add(starParams, 'pace', 0, 5);

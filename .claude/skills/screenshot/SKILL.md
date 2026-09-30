@@ -114,14 +114,19 @@ For anything about how a planet or moon looks (terrain, seas, gas bands, atmosph
 | `lab.setView({ view: 'system', camera: 'fly', star: 'redDwarf', sunAzimuth: 90, sunElevation: 10, paused: true, wireframe: true })` | view, camera (orbit the planet or follow the UFO), light, clock |
 | `lab.look(lon, lat, zoom)` | camera over longitude/latitude (degrees) at `zoom` planet radii |
 | `lab.lookAtVent()` | the next geyser or lava vent, from the side so plumes stand against the sky |
-| `lab.setTime(t)` | jump the clock (eruptions and geysers are pure functions of it) |
-| `lab.climate`, `lab.level.geysers`, `lab.level.eruptions`, `lab.level.globe`, `lab.level.triangles` | what got built |
+| `lab.lookAtStorm(kind?, zoom?)` | globe view: the camera over the biggest storm under way (`'cell'`, `'cyclone'`, `'dust'`, `'global'`, `'ash'`), or with the fly camera the UFO beside it; resolves false if none (step the clock with `setTime` until one is) |
+| `lab.setTime(t)` | jump the clock (eruptions, geysers, storms and lightning are pure functions of it) |
+| `lab.climate`, `lab.level.geysers`, `lab.level.eruptions`, `lab.level.globe`, `lab.level.globe.weather` (storms `shown`, `flashes`/`flashCount`), `lab.level.weather` (rain, bolts), `lab.level.triangles` | what got built |
 
 ```bash
 # A cryo-geyser moon: airless, some heat, look at a plume
 npm run shot -- --out $OUT --clean --lab "gen=21&type=ice&kind=moon" \
   "js:lab.terraform({ composition: 'none', pressure: 0 })" "js:lab.set({ climate: { setting: { heatFlow: 0.1 } } })" \
   "js:lab.lookAtVent()" wait:2500 shot:cryo
+# Under a thunderstorm: the fly camera, the UFO sunk below the clouds (it eases there), next to the storm
+npm run shot -- --out $OUT --clean --lab "seed=1337&star=0&planet=0" "js:lab.setView({ camera: 'fly', paused: true })" settle \
+  "js:(async () => { const L = lab.level; L.ship.setRadius(L.globe.top + 3); while (Math.abs(L.ship.radius - L.globe.top - 3) > 0.05) await new Promise((r) => requestAnimationFrame(r)); })()" \
+  "js:lab.lookAtStorm('cell')" settle shot:storm
 # The same planet across all types (a contact sheet)
 npm run shot -- --out $OUT --clean --sheet --lab "gen=5" "js:lab.setType('lava')" shot:lava "js:lab.setType('ocean')" shot:ocean "js:lab.setType('gas')" shot:gas
 ```

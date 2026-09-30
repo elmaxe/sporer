@@ -135,6 +135,17 @@ export class LabInfo implements Entity {
       const count = (k: string) => live.filter((e) => e.kind === k).length;
       rows.push(['Lava', `${a.vents.length} vents · ${count('fountain')} fountains, ${count('eruption')} eruptions`]);
     }
+    const weather = level?.globe?.weather ?? level?.bodies?.planet.weather;
+    if (weather) {
+      const w = weather.data;
+      const parts = [w.kind, `cover ${fmt(w.coverage)}`];
+      if (w.precipitation) parts.push(w.precipitation);
+      if (w.volcanic) parts.push('volcanic lightning');
+      parts.push(`${weather.shown.length} storms · ${weather.flashCount} flashes`);
+      rows.push(['Weather', parts.join(' · ')]);
+    } else if (planet.type !== 'gas') {
+      rows.push(['Weather', 'none']);
+    }
     if (planet.rings) rows.push(['Rings', `${fmt(planet.rings.inner / planet.radius)}–${fmt(planet.rings.outer / planet.radius)} R`]);
     if (planet.kind !== 'moon') rows.push(['Moons', `${planet.moons.length}${planet.moons.length ? ' (system view)' : ''}`]);
     if (level) rows.push(['Build', `${Math.round(level.triangles / 1000)}k triangles · ${Math.round(level.buildMs)} ms`]);

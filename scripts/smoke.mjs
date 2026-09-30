@@ -26,6 +26,9 @@
 // Living lava: in low orbit over the lava world, the eruptions have vents, events and blobs in the air.
 // Geysers: every body in the planet loop has the geyser kind its climate says (or none), with vents, eruptions and
 // particles in the air while one erupts; the loop also visits a body with each kind (steam, cryo planet and moon, sulphur).
+// Weather: every body in the planet loop has the weather its climate says (or none), as clouds in the system view and
+// low orbit, with storms and flashes coming and going over time; the loop also visits an acid-deck (Venus-like, with
+// volcanic lightning), a methane (Titan-like) and a dusty (Mars-like) world. The menu's Weather toggle switches it.
 // Seamless zooms: through the galaxy and planet loops, every frame of every level transition records the crossfade
 // weight and canvas brightness; each transition must crossfade and never go black (screenshots mid-handover).
 // Touch: on an emulated phone, hold/tap/drag/pinch and the on-screen stick and Boost work, down to a planet and out;
@@ -222,6 +225,25 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
       particles: planet.geysers.liveParticles, capacity: planet.geysers.capacity }`,
   );
   r.expectedGeysers = await evaluate(`geyserKind(__body.config.type, __body.config.climate)`);
+  // The body's weather (if its climate gives it any): the same look in the system view and here, storms coming and
+  // going and lightning where it should be, over a stretch of the level's clock.
+  r.expectedWeather = await evaluate(`({ kind: weatherKind(__body.config.type, __body.config.climate), volcanic: volcanicLightning(__body.config.type, __body.config.climate) })`);
+  r.weather = await evaluate(`planet.weather && new Promise((resolve) => {
+    const look = planet.weather.look;
+    const start = planet.frame.renderTime, wall = performance.now();
+    let storms = 0, flashes = 0, shafts = 0;
+    const clouds = planet.scene.getObjectByName('Clouds');
+    (function f() {
+      storms = Math.max(storms, look.shown.length);
+      flashes = Math.max(flashes, look.flashCount);
+      shafts = Math.max(shafts, planet.weather.shaftCount);
+      // 4 s of the level's clock (bounded in wall time, should the clock stall).
+      if (planet.frame.renderTime - start < 4 && performance.now() - wall < 20000) return requestAnimationFrame(f);
+      resolve({ kind: look.data.kind, volcanic: look.data.volcanic, lightning: look.data.storms.some((s) => s.lightning > 0) || look.data.backgroundLightning > 0,
+        storms, flashes, shafts, clouds: !!clouds && clouds.visible, systemView: !!__body.weather && __body.weather.data.kind === look.data.kind,
+        cloudRadius: +(look.data.cloudRadius / look.data.radius).toFixed(3) });
+    })();
+  })`);
   // The Equal Earth map: shown and baked; clicking it sends the autopilot to that point of the globe.
   for (let i = 0; i < 40 && !(await evaluate(`planet.map.baked`)); i++) await sleep(250);
   r.map = await evaluate(`new Promise((resolve) => {
@@ -272,6 +294,13 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
     (r.type !== 'lava' || (r.lava && r.lava.vents > 0 && r.lava.events > 0 && r.lava.blobs > 0)) &&
     (r.expectedGeysers ?? null) === (r.geysers?.kind ?? null) &&
     (!r.geysers || (r.geysers.vents > 0 && r.geysers.events > 0 && (r.geysers.erupting === 0 || r.geysers.particles > 0))) &&
+    !!r.weather === (r.expectedWeather.kind !== null || r.expectedWeather.volcanic) &&
+    (!r.weather ||
+      ((r.expectedWeather.kind === null || r.weather.kind === r.expectedWeather.kind) &&
+        r.weather.volcanic === r.expectedWeather.volcanic &&
+        r.weather.clouds &&
+        r.weather.systemView &&
+        r.weather.cloudRadius > 1)) &&
     r.modeAfter === 'system' &&
     r.parkedAt === r.name &&
     Math.abs(r.standoffs - 1) < 0.2;
@@ -601,6 +630,19 @@ await section('audio', async () => {
     effectsSlider: !!document.querySelector('#menu #audio input[data-key="sfx"]'),
     labLink: document.getElementById('menu-lab').href.includes('lab.html#'),
     labText: document.getElementById('menu-lab').textContent })`);
+  // The Weather toggle (Graphics): off hides every body's clouds, on brings them back.
+  audio.weatherToggle = await evaluate(`new Promise((resolve) => {
+    const button = document.getElementById('graphics-weather');
+    const clouds = () => world.planets.concat(world.moons).filter((p) => p.weather).map((p) => p.object.getObjectByName('Clouds'));
+    const on = button.getAttribute('aria-pressed') === 'true';
+    const frames = (n, then) => (n ? requestAnimationFrame(() => frames(n - 1, then)) : then());
+    button.click();
+    frames(3, () => {
+      const offText = button.textContent, offHidden = clouds().every((c) => !c.visible);
+      button.click();
+      frames(3, () => resolve({ on, offText, offHidden, back: button.getAttribute('aria-pressed') === 'true' && clouds().every((c) => c.visible), bodies: clouds().length }));
+    });
+  })`);
   audio.menuShot = join(outDir, 'menu.png');
   writeFileSync(audio.menuShot, await page.screenshot());
   for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, code: 'Escape', key: 'Escape', windowsVirtualKeyCode: 27 });
@@ -641,6 +683,10 @@ await section('audio', async () => {
     audio.paused &&
     audio.effectsSlider &&
     audio.labLink &&
+    audio.weatherToggle.on &&
+    audio.weatherToggle.offText === 'Weather: off' &&
+    audio.weatherToggle.offHidden &&
+    audio.weatherToggle.back &&
     audio.closedByEsc &&
     audio.sfx.out?.name === 'transitionOut' &&
     audio.sfx.travel?.name === 'travel' &&
@@ -727,6 +773,10 @@ await section('types', async () => {
         // One body with each kind of geyser (moons included: cryo moons have tiger stripes).
         const kind = geyserKind(p.type, p.climate);
         if (kind && !(('geysers-' + kind) in found)) found['geysers-' + kind] = { star: ref.id, expr: 'world.planets[' + i + ']' };
+        // One world with each kind of weather the types above don't guarantee.
+        const w = weatherKind(p.type, p.climate);
+        if ((w === 'acid' || w === 'methane' || w === 'dust') && !(('weather-' + w) in found))
+          found['weather-' + w] = { star: ref.id, expr: 'world.planets[' + i + ']' };
         for (const m of p.moons) {
           const k = geyserKind(m.type, m.climate);
           if (k === 'cryo' && !('geysers-cryo-moon' in found))
@@ -735,7 +785,7 @@ await section('types', async () => {
             found['geysers-sulphur'] = { star: ref.id, expr: 'world.moons.find((m) => m.name === ' + JSON.stringify(m.name) + ')' };
         }
       });
-      if (Object.keys(found).length === want.length + 6) break;
+      if (Object.keys(found).length === want.length + 9) break;
     }
     return found;
   })()`);
@@ -748,7 +798,7 @@ await section('types', async () => {
     const r = loaded ? await runPlanetLoop(expr, `planet-${type}`) : { ok: false, loaded };
     planetTypes.push({ case: type, star, ...r, seconds: +((Date.now() - t0) / 1000).toFixed(1) });
   }
-  return planetTypes.every((r) => r.ok) && planetTypes.length === 13; // 7 types, ringed, moon and 4 geyser kinds
+  return planetTypes.every((r) => r.ok) && planetTypes.length === 16; // 7 types, ringed, moon, 4 geyser kinds and 3 weather kinds
 });
 const screenshot = join(outDir, 'screenshot.png');
 if (started && !stalled) writeFileSync(screenshot, await page.screenshot());

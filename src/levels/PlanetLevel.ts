@@ -5,7 +5,9 @@ import { describeClimateDetail } from '../gen/climate';
 import { GLOBE_SIZE_FACTOR } from '../gen/planets';
 import { bodyLabLink } from '../lab/bodyLink';
 import { describeGeysers, geyserActivity } from '../gen/geysers';
+import { describeWeather } from '../gen/weather';
 import { Geysers } from '../planet/Geysers';
+import { Weather } from '../planet/Weather';
 import { LavaEruptions } from '../planet/LavaEruptions';
 import { LocalMoons } from '../planet/LocalMoons';
 import { PlanetFrame } from '../planet/PlanetFrame';
@@ -66,6 +68,8 @@ export class PlanetLevel extends Level {
   readonly eruptions: LavaEruptions | null;
   /** Bodies with geothermal activity only (see gen/geysers.ts). */
   readonly geysers: Geysers | null;
+  /** Bodies with weather only: rain, lightning bolts and their light (the clouds are the globe's). */
+  readonly weather: Weather | null;
   private readonly hud: PlanetHud;
   /** The Equal Earth map in the corner (mouse players). */
   readonly map: PlanetMap;
@@ -135,9 +139,18 @@ export class PlanetLevel extends Level {
         'Planet camera',
       ),
     );
+    // After the camera: the bolts face this frame's view.
+    this.weather = globe.weather
+      ? this.add(
+          new Weather(this.scene, this.frame, globe.weather, config, camera, globe.sun, globe.sunLight, globe.ambientLight, debug),
+        )
+      : null;
     this.add(new PlanetPicker(this.scene, camera, input, this.ship, globe.radius));
     const { climate } = config;
-    const detail = climate ? describeClimateDetail(climate) + (geysers ? ` · ${describeGeysers(geysers.kind)}` : '') : null;
+    const weatherLine = globe.weather ? describeWeather(globe.weather.data) : '';
+    const detail = climate
+      ? describeClimateDetail(climate) + (geysers ? ` · ${describeGeysers(geysers.kind)}` : '') + (weatherLine ? ` · ${weatherLine}` : '')
+      : null;
     this.hud = this.add(new PlanetHud(this.ship, `${body.name} · ${body.description}`, input, detail));
     this.map = this.add(new PlanetMap(config, body.name, this.ship, globe, input, debug));
     debug

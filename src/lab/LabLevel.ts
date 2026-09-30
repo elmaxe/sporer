@@ -9,6 +9,7 @@ import { Level, type TouchShipControls } from '../levels/Level';
 import { PLANET_VIEW_DISTANCE, planetCameraParams } from '../levels/PlanetLevel';
 import { Physics } from '../physics/Physics';
 import { Geysers } from '../planet/Geysers';
+import { Weather } from '../planet/Weather';
 import { LavaEruptions } from '../planet/LavaEruptions';
 import { planetParams, type RenderClock } from '../planet/PlanetFrame';
 import { PlanetGlobe, RELIEF_SCALE } from '../planet/PlanetGlobe';
@@ -228,6 +229,8 @@ export class LabLevel extends Level {
   readonly globe: PlanetGlobe | null = null;
   readonly eruptions: LavaEruptions | null = null;
   readonly geysers: Geysers | null = null;
+  /** Rain, lightning bolts and their light (globe view, bodies with weather). */
+  readonly weather: Weather | null = null;
   readonly ship: PlanetShip | null = null;
   readonly map: PlanetMap | null = null;
   readonly bodies: LabBodies | null = null;
@@ -312,6 +315,12 @@ export class LabLevel extends Level {
         'Lab camera',
       ),
     );
+    // After the camera: the bolts face this frame's view.
+    const globe = this.globe;
+    if (globe?.weather)
+      this.weather = this.add(
+        new Weather(this.scene, clock, globe.weather, config, camera, globe.sun, globe.sunLight, globe.ambientLight, debug),
+      );
     if (carry) {
       this.orbit.lookFrom(carry.direction);
       this.orbit.setDistance(THREE.MathUtils.clamp(carry.zoom * this.radius, min, max));
