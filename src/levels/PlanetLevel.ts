@@ -10,6 +10,7 @@ import { PlanetFrame } from '../planet/PlanetFrame';
 import { PlanetGlobe, RELIEF_SCALE } from '../planet/PlanetGlobe';
 import { PlanetHud } from '../planet/PlanetHud';
 import { PlanetLights } from '../planet/PlanetLights';
+import { PlanetMap } from '../planet/PlanetMap';
 import { PlanetPicker } from '../planet/PlanetPicker';
 import { PlanetShip } from '../planet/PlanetShip';
 import { maxViewDistance, travelScale } from '../planet/frame';
@@ -60,6 +61,8 @@ export class PlanetLevel extends Level {
   /** Bodies with geothermal activity only (see gen/geysers.ts). */
   readonly geysers: Geysers | null;
   private readonly hud: PlanetHud;
+  /** The Equal Earth map in the corner (mouse players). */
+  readonly map: PlanetMap;
   /** Bodies drawn by this level, left out of the sky: the planet and its moons. */
   private readonly hidden: readonly Planet[];
   private readonly skyCamera = new THREE.PerspectiveCamera(65, 1, SKY_NEAR, SKY_FAR);
@@ -130,6 +133,7 @@ export class PlanetLevel extends Level {
     const { climate } = config;
     const detail = climate ? describeClimateDetail(climate) + (geysers ? ` · ${describeGeysers(geysers.kind)}` : '') : null;
     this.hud = this.add(new PlanetHud(this.ship, `${body.name} · ${body.description}`, input, detail));
+    this.map = this.add(new PlanetMap(config, body.name, this.ship, globe, input, debug));
   }
 
   /** The ship's distance from the centre with the camera `view` from it: the zoom sets the altitude. */
@@ -186,6 +190,7 @@ export class PlanetLevel extends Level {
     // The planet is always in front of the sky (its own moons are in this scene).
     renderer.clearDepth();
     renderer.render(this.scene, camera);
+    this.map.render(renderer);
     renderer.autoClear = true;
   }
 
@@ -201,9 +206,11 @@ export class PlanetLevel extends Level {
 
   override enter(): void {
     this.hud.activate();
+    this.map.activate();
   }
 
   override exit(): void {
     this.hud.deactivate();
+    this.map.deactivate();
   }
 }
