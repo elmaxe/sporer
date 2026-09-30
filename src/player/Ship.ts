@@ -6,7 +6,7 @@ import type { Vec3Like } from '../gen/orbit';
 import { RAPIER, type Physics } from '../physics/Physics';
 import type { CelestialBody } from '../world/CelestialBody';
 import { arriveImpulse, detourWaypoint, hoverPoint, type ArriveParams, type Obstacle } from './autopilot';
-import { parkGap, referenceGap, zoomCurveParams } from './zoomCurve';
+import { hoverGap, parkGap, zoomCurveParams } from './zoomCurve';
 import { AFTER_ATMOSPHERE_RENDER_ORDER } from '../world/atmosphereShell';
 
 /** Tunables, exposed in the debug panel. */
@@ -71,8 +71,6 @@ export class Ship implements Entity {
 
   private _targetBody!: CelestialBody;
   private arrived = true;
-  /** The hover's gap from the body's surface at the reference view (see zoomCurve.ts). */
-  private gapAtReference = 0;
   /** Arrive steering for a fly-in (`flyIn`) until it arrives; null for the usual autopilot. */
   private approach: ArriveParams | null = null;
   /** Seconds of hover drift so far, and how much of it shows (0 flying, 1 hovering). */
@@ -156,33 +154,30 @@ export class Ship implements Entity {
 
   /**
    * Autopilot to a body: the ship flies there, round anything in the way, and
-   * hovers above it (its standoff distance at the reference zoom) until it's
-   * sent somewhere else. Sending it where it's already going does nothing.
+   * hovers above it (`hoverGap` at the reference zoom) until it's sent
+   * somewhere else. Sending it where it's already going does nothing.
    */
   moveTo(target: CelestialBody): void {
     if (target === this._targetBody) return;
     this._targetBody = target;
     this.arrived = false;
     this.approach = null;
-    this.gapAtReference = target.standoff - target.radius;
     hoverPoint(target.position, this.parkDistance(target), this.destination);
   }
 
-  /** How far above `body`'s centre the ship hovers at the current zoom. */
+  /** How far above `body`'s centre the ship hovers at the current zoom (see zoomCurve.ts). */
   parkDistance(body: CelestialBody): number {
-    return body.radius + parkGap(this.gapAtReference, this.viewDistance);
+    return body.radius + parkGap(hoverGap(body.radius), this.viewDistance);
   }
 
   /**
    * Teleports the ship to hover above `body`, moving with it (starting out,
    * or coming back from the planet level after the system clock jumped). The
-   * camera is `view` from the ship, and the ship hovers `gap` above the
-   * surface at that view (default: the body's usual standoff gap, scaled by
-   * the zoom). It follows the zoom from then on.
+   * camera is `view` from the ship, which sets how high it hovers; it
+   * follows the zoom from then on.
    */
-  parkAt(body: CelestialBody, view = this.viewDistance, gap?: number): void {
+  parkAt(body: CelestialBody, view = this.viewDistance): void {
     this.viewDistance = view;
-    this.gapAtReference = gap === undefined ? body.standoff - body.radius : referenceGap(gap, view);
     hoverPoint(body.position, this.parkDistance(body), this.pos);
     this.teleport(this.pos, body.velocity);
     this.destination.copy(this.pos);
@@ -194,13 +189,12 @@ export class Ship implements Entity {
 
   /**
    * Arriving in the system: the ship appears at `start` flying at `speed`
-   * towards `body` and brakes evenly all the way in, to hover `gap` above its
-   * surface at camera distance `view` (it follows the zoom from then on).
+   * towards `body` and brakes evenly all the way in, to hover above it at
+   * camera distance `view` (it follows the zoom from then on).
    */
-  flyIn(body: CelestialBody, start: THREE.Vector3, speed: number, gap: number, view: number): void {
+  flyIn(body: CelestialBody, start: THREE.Vector3, speed: number, view: number): void {
     this._targetBody = body;
     this.arrived = false;
-    this.gapAtReference = referenceGap(gap, view);
     this.viewDistance = view;
     hoverPoint(body.position, this.parkDistance(body), this.destination);
     const dist = start.distanceTo(this.destination);

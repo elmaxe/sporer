@@ -1,12 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { generateGalaxy } from '../src/gen/galaxy';
-import { ARRIVAL_DIAMETERS, arrivalDistance, findHomeSystem, generateSystem } from '../src/gen/system';
 import {
   flightAltitude,
   highAltitude,
+  hoverGap,
   minPitchAt,
   parkGap,
-  referenceGap,
   zoomCurveParams as params,
   zoomFraction,
 } from '../src/player/zoomCurve';
@@ -21,8 +19,8 @@ describe('zoomFraction', () => {
   });
 });
 
-describe('system parking gap', () => {
-  it("is the body's own standoff at the reference view", () => {
+describe('system hover gap', () => {
+  it('is the hover gap at the reference view', () => {
     expect(parkGap(10, params.referenceView)).toBeCloseTo(10);
   });
 
@@ -34,17 +32,15 @@ describe('system parking gap', () => {
       if (last > params.minGap) expect(gap / last).toBeLessThan(1.05);
       last = gap;
     }
-    // Zoomed all the way out, the ship has pulled well back from the body.
-    expect(parkGap(10, 2500)).toBeGreaterThan(80);
+    // Zooming in brings it down towards the body; zoomed all the way out it has hardly climbed.
+    expect(parkGap(10, 12)).toBeLessThan(6);
+    expect(parkGap(10, 2500)).toBeGreaterThan(10);
+    expect(parkGap(10, 2500)).toBeLessThan(20);
   });
 
   it('never parks close enough to dive into the body', () => {
     // The system level descends into a body the ship comes within 3 of.
     for (const gap of [6, 10, 25]) expect(parkGap(gap, 12)).toBeGreaterThan(3);
-  });
-
-  it('inverts: a parking made at one zoom is back where it was at that zoom', () => {
-    expect(parkGap(referenceGap(180, 90), 90)).toBeCloseTo(180);
   });
 });
 
@@ -79,42 +75,12 @@ describe('planet flight altitude', () => {
   });
 });
 
-describe('arrivalDistance', () => {
-  const galaxy = generateGalaxy(1337);
-  const systems = [findHomeSystem(galaxy), ...galaxy.stars.slice(0, 60)].map(generateSystem);
-  const directions = [
-    { x: 1, y: 0, z: 0 },
-    { x: 0, y: 0, z: -1 },
-    { x: Math.SQRT1_2, y: 0, z: Math.SQRT1_2 },
-    { x: 0.6, y: 0.8, z: 0 },
-    { x: 0, y: -1, z: 0 },
-  ];
-
-  it('parks clear of every orbit, near a few star diameters out', () => {
-    for (const system of systems) {
-      for (const dir of directions) {
-        const d = arrivalDistance(system, dir);
-        expect(d).toBeGreaterThan(system.starZone + 20);
-        for (const p of system.planets) {
-          // Sample the orbit: no planet (with its moons) passes within its extent of the parked ship.
-          let closest = Infinity;
-          for (let k = 0; k < 360; k++) {
-            const a = (k / 360) * 2 * Math.PI;
-            const { radius: r, inclination: i } = p.orbit;
-            const x = r * Math.cos(a) - d * dir.x;
-            const y = r * Math.sin(a) * Math.sin(i) - d * dir.y;
-            const z = r * Math.sin(a) * Math.cos(i) - d * dir.z;
-            closest = Math.min(closest, Math.hypot(x, y, z));
-          }
-          expect(closest).toBeGreaterThan(p.extent);
-        }
-      }
-    }
-  });
-
-  it('keeps the ideal distance when it is already clear', () => {
-    // Straight above the ecliptic nothing orbits.
-    const system = systems[0]!;
-    expect(arrivalDistance(system, { x: 0, y: 1, z: 0 })).toBeCloseTo(ARRIVAL_DIAMETERS * 2 * system.starZone);
+describe('hoverGap', () => {
+  it('is a share of the radius, never closer than the least gap nor farther than the cap', () => {
+    expect(hoverGap(10)).toBeCloseTo(params.hoverRadii * 10);
+    expect(hoverGap(0.5)).toBe(params.minGap);
+    // A star or a giant: capped, so the ship hovers low over it too.
+    expect(hoverGap(31)).toBe(params.maxHoverGap);
+    expect(hoverGap(300)).toBe(params.maxHoverGap);
   });
 });

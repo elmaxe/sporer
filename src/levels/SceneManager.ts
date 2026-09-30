@@ -4,8 +4,7 @@ import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
 import type { Game } from '../core/Game';
 import type { GalaxyData, StarRef } from '../gen/galaxy';
-import { arrivalDistance } from '../gen/system';
-import { zoomCurveParams } from '../player/zoomCurve';
+import { hoverGap, parkGap, zoomCurveParams } from '../player/zoomCurve';
 import { Tooltip } from '../ui/Tooltip';
 import type { Planet } from '../world/Planet';
 import { arrivalParams, clampElevation, descentParams, leaveParams } from './arrival';
@@ -112,7 +111,10 @@ export class SceneManager implements Entity {
     f?.add(descentParams, 'maxLatitude', 0, 1.5);
     const z = debug.folder('Zoom moves the ship');
     z?.add(zoomCurveParams, 'referenceView', 12, 200);
+    z?.add(zoomCurveParams, 'hoverRadii', 0.1, 4);
     z?.add(zoomCurveParams, 'gapExponent', 0, 1.5);
+    z?.add(zoomCurveParams, 'gapOutExponent', 0, 1.5);
+    z?.add(zoomCurveParams, 'maxHoverGap', 4.5, 60);
     z?.add(zoomCurveParams, 'minGap', 3.5, 20);
     z?.add(zoomCurveParams, 'lowAltitude', 1, 20);
     z?.add(zoomCurveParams, 'highRadii', 0.5, 4);
@@ -448,15 +450,16 @@ export class SceneManager implements Entity {
    * Starts the system ship's arrival: it appears `dir` from the barycentre
    * (the camera's side of the star, just above the ecliptic), `handover` out
    * being about where the camera is, already flying at the star, and brakes
-   * evenly to hover a few star diameters above it, clear of the planets'
-   * orbits, as the camera settles.
+   * evenly to hover above it as the camera settles.
    */
   private flyIn(system: SystemLevel, dir: THREE.Vector3, handover: number): void {
     const star = system.world.stars[0]!;
-    const park = arrivalDistance(system.data, UP);
+    const park = star.radius + parkGap(hoverGap(star.radius), ARRIVAL_DISTANCE);
     const start = Math.min(0.8 * handover, Math.max(arrivalParams.start * handover, arrivalParams.minStart * park));
-    const speed = (2 * (start - park)) / arrivalParams.flightTime;
-    system.ship.flyIn(star, this.side.copy(dir).multiplyScalar(start), speed, park - star.radius, ARRIVAL_DISTANCE);
+    const from = this.side.copy(dir).multiplyScalar(start);
+    // Braking evenly from `speed` to rest covers the way in at half that speed on average.
+    const way = from.distanceTo(this.direction.copy(UP).multiplyScalar(park).add(star.position));
+    system.ship.flyIn(star, from, (2 * way) / arrivalParams.flightTime, ARRIVAL_DISTANCE);
   }
 
   /**

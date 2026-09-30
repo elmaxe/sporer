@@ -3,7 +3,7 @@ import { FIXED_DT } from '../core/Game';
 import type { Debug } from '../core/Debug';
 import type { Input } from '../core/Input';
 import type { StarRef } from '../gen/galaxy';
-import { arrivalDistance, generateSystem, type SystemData } from '../gen/system';
+import { generateSystem, type SystemData } from '../gen/system';
 import { Physics } from '../physics/Physics';
 import { EyeAdaptation } from '../player/EyeAdaptation';
 import { sceneExposure } from '../player/exposure';
@@ -24,7 +24,6 @@ import { Level } from './Level';
 
 /** Where the camera settles after flying in from the galaxy (or starting out in a system). */
 export const ARRIVAL_DISTANCE = 90;
-const UP = new THREE.Vector3(0, 1, 0);
 /** Flying to within this distance of a planet or moon's surface also descends to it (the ship's radius is 2). */
 const TOUCH_MARGIN = 3;
 
@@ -70,7 +69,7 @@ export class SystemLevel extends Level {
     // Starting out here, the ship hovers above the star as if it had just flown in from the galaxy.
     const star = this.world.stars[0]!;
     this.ship = this.add(new Ship(this.scene, physics, input, this.world.bodies, debug, star));
-    this.ship.parkAt(star, ARRIVAL_DISTANCE, arrivalDistance(this.data, UP) - star.radius);
+    this.ship.parkAt(star, ARRIVAL_DISTANCE);
     // Visual-only entities below run in this order each frame: camera first, then what reads it.
     this.orbit = this.add(
       new OrbitCamera(

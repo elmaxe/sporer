@@ -12,7 +12,7 @@
 // Checks: the ship starts hovering above the star and there's no manual flying (W and a click on empty space leave
 // it there), hovering + clicking the star targets it, the system map shows every planet and moon (hover, click to
 // fly, N folds it), and the galaxy loop works (scroll out to the galaxy, click the nearest star, travel, scroll in to
-// its system, where the ship flies in and hovers a few star diameters above the star with the camera over it; the galaxy shows distant
+// its system, where the ship flies in and hovers straight above the star with the camera over it; the galaxy shows distant
 // galaxies, twinkles, spins and draws binaries as two dots, and picking works while it's turned), a real click on the
 // menu button starts audio and opens the menu (the game pauses; volume sliders and a planet lab link; a real Esc
 // closes it); then the transitions and galaxy travel play their whooshes, and M mutes. Then the planet loop (hover at
@@ -249,6 +249,16 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
     const V = game.camera.position.constructor;
     const want = planet.ship.direction.clone().applyAxisAngle(new V(0, 1, 0), 1).applyAxisAngle(new V(1, 0, 0), 0.2);
     const p = planet.map.mapPosition(want);
+    // Degrees per pixel of the map around that point, east-west and north-south (Equal Earth squeezes both away
+    // from the equator), for the coarser of the two.
+    const east = new V(0, 1, 0).cross(want).normalize();
+    const north = want.clone().cross(east);
+    const step = 0.01;
+    const pixels = (axis) => {
+      const q = planet.map.mapPosition(want.clone().applyAxisAngle(axis, step));
+      return Math.hypot(q.x - p.x, q.y - p.y);
+    };
+    const localDegrees = (step * 180) / Math.PI / Math.min(pixels(north), pixels(east));
     const at = { clientX: rect.left + p.x, clientY: rect.top + p.y, button: 0, bubbles: true };
     canvas.dispatchEvent(new MouseEvent('click', at));
     requestAnimationFrame(() => requestAnimationFrame(() => resolve({
@@ -257,7 +267,7 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
       enRoute: planet.ship.enRoute,
       targetDegrees: +(planet.ship.destination.angleTo(want) * 180 / Math.PI).toFixed(2),
       // Click coordinates are whole pixels, so the target is within a pixel or so of the point.
-      pixelDegrees: +(360 / rect.width).toFixed(2),
+      pixelDegrees: +Math.max(360 / rect.width, localDegrees).toFixed(2),
     })));
   })`);
   const shot = await send('Page.captureScreenshot', { format: 'png' });
@@ -609,10 +619,10 @@ await section('galaxy', async () => {
   galaxyLoop.modeAfterZoomIn = await evaluate(`levels.mode`);
   galaxyLoop.to = await evaluate(`system.id`);
   galaxyLoop.shipSpeed = await evaluate(`ship.speed`);
-  // Arriving, the ship flies in from far out and brakes to park a few star diameters from the star.
+  // Arriving, the ship flies in from far out and brakes to hover straight above the star.
   const arrival = `({ target: ship.targetBody?.name ?? null, star: world.stars[0].name, enRoute: ship.enRoute,
     distance: +ship.object.position.distanceTo(world.stars[0].position).toFixed(0),
-    park: +ship.parkDistance(world.stars[0]).toFixed(0), zone: +system.starZone.toFixed(0),
+    park: +ship.parkDistance(world.stars[0]).toFixed(0),
     aboveEcliptic: +(ship.object.position.y - world.stars[0].position.y).toFixed(1),
     cameraAboveShip: +(game.camera.position.y - ship.object.position.y).toFixed(1) })`;
   galaxyLoop.arrival = { flying: await evaluate(arrival) };
@@ -638,9 +648,8 @@ await section('galaxy', async () => {
     galaxyLoop.arrival.parked.target === galaxyLoop.arrival.parked.star &&
     !galaxyLoop.arrival.parked.enRoute &&
     Math.abs(galaxyLoop.arrival.parked.distance - galaxyLoop.arrival.parked.park) < 3 &&
-    galaxyLoop.arrival.parked.distance > 2 * galaxyLoop.arrival.parked.zone &&
-    // Always arrives just above the ecliptic, with the camera over the ship.
-    galaxyLoop.arrival.parked.aboveEcliptic > 0 &&
+    // Always hovers straight above the star, with the camera over the ship.
+    galaxyLoop.arrival.parked.aboveEcliptic > 0.98 * galaxyLoop.arrival.parked.distance &&
     galaxyLoop.arrival.parked.cameraAboveShip > 0 &&
     typeof galaxyLoop.shipSpeed === 'number'
   );
