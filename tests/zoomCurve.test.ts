@@ -97,14 +97,16 @@ describe('arrivalDistance', () => {
         expect(d).toBeGreaterThan(system.starZone + 20);
         for (const p of system.planets) {
           // Sample the orbit: no planet (with its moons) passes within its extent of the parked ship.
+          let closest = Infinity;
           for (let k = 0; k < 360; k++) {
             const a = (k / 360) * 2 * Math.PI;
             const { radius: r, inclination: i } = p.orbit;
             const x = r * Math.cos(a) - d * dir.x;
             const y = r * Math.sin(a) * Math.sin(i) - d * dir.y;
             const z = r * Math.sin(a) * Math.cos(i) - d * dir.z;
-            expect(Math.hypot(x, y, z)).toBeGreaterThan(p.extent);
+            closest = Math.min(closest, Math.hypot(x, y, z));
           }
+          expect(closest).toBeGreaterThan(p.extent);
         }
       }
     }
