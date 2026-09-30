@@ -54,13 +54,15 @@ ${SIMPLEX_GLSL}
       if (fade <= 0.0) break;
       n += amp * fade * snoise(q * freq);
       total += amp;
-      amp *= 0.5;
+      amp *= 0.42;
       freq *= 2.1;
     }
     n /= total * 0.6;
-    // Puffs lighter than the band, gaps between them darker, softly.
-    float cloud = smoothstep(-0.5, 0.7, n);
-    float shade = mix(-0.11, 0.1, cloud);
+    // Thin, see-through wisps: a veil of lighter gas thickening over the band (which shows through it)
+    // in the puffs, and the band's own colour, a little darker, in the gaps. No hard edges.
+    float cloud = smoothstep(-1.0, 1.0, n);
+    float veil = 0.22 * cloud * cloud;
+    float shade = mix(-0.08, 0.0, cloud);
     float lat = d.y + 0.05 * gasNoise(vec3(d.x * 1.2, d.y * 2.0, d.z * 1.2), uGasPhaseA) + 0.02 * n;
     float s = clamp((lat + 1.0) * 0.5, 0.0, 0.9999) * uGasCount;
     int k = int(floor(s));
@@ -69,7 +71,7 @@ ${SIMPLEX_GLSL}
     float soft = max(1.0 - edge, px * uGasCount * 0.5);
     vec3 col = mix(uGasStripes[k], uGasStripes[k + 1], smoothstep(1.0 - soft, 1.0, s - float(k)));
 
-    return col * (1.0 + shade);
+    return mix(col * (1.0 + shade), vec3(1.0, 0.97, 0.92) * dot(col, vec3(0.33)) * 1.6, veil);
   }
 `;
 
