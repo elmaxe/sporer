@@ -162,14 +162,15 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
   r.expectedWeather = await evaluate(`({ kind: weatherKind(__body.config.type, __body.config.climate), volcanic: volcanicLightning(__body.config.type, __body.config.climate) })`);
   r.weather = await evaluate(`planet.weather && new Promise((resolve) => {
     const look = planet.weather.look;
-    const start = planet.frame.renderTime;
+    const start = planet.frame.renderTime, wall = performance.now();
     let storms = 0, flashes = 0, shafts = 0;
     const clouds = planet.scene.getObjectByName('Clouds');
     (function f() {
       storms = Math.max(storms, look.shown.length);
       flashes = Math.max(flashes, look.flashCount);
       shafts = Math.max(shafts, planet.weather.shaftCount);
-      if (planet.frame.renderTime - start < 4) return requestAnimationFrame(f);
+      // 4 s of the level's clock (bounded in wall time, should the clock stall).
+      if (planet.frame.renderTime - start < 4 && performance.now() - wall < 20000) return requestAnimationFrame(f);
       resolve({ kind: look.data.kind, volcanic: look.data.volcanic, lightning: look.data.storms.some((s) => s.lightning > 0) || look.data.backgroundLightning > 0,
         storms, flashes, shafts, clouds: !!clouds && clouds.visible, systemView: !!__body.weather && __body.weather.data.kind === look.data.kind,
         cloudRadius: +(look.data.cloudRadius / look.data.radius).toFixed(3) });
@@ -659,6 +660,7 @@ if (started && !quick) {
     await send('Page.navigate', { url: base.href });
     await sleep(4000);
     const r = await runPlanetLoop(expr, `planet-${type}`);
+    console.error(`planet case ${type} (star ${star}): ${r.ok ? 'ok' : 'FAILED'}`);
     planetTypes.push({ case: type, star, ...r });
   }
 }
