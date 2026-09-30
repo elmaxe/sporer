@@ -18,6 +18,9 @@ import { PlanetPicker } from '../planet/PlanetPicker';
 import { PlanetShip } from '../planet/PlanetShip';
 import { maxViewDistance, travelScale } from '../planet/frame';
 import { OrbitCamera } from '../player/OrbitCamera';
+import { SurfaceChanges } from '../surface/changes';
+import { plantSetup } from '../surface/plantSetup';
+import { SurfaceEntities } from '../surface/SurfaceEntities';
 import { Planet } from '../world/Planet';
 import { Starfield } from '../world/Starfield';
 import { starLightIntensity } from '../world/Star';
@@ -231,6 +234,8 @@ export class LabLevel extends Level {
   readonly geysers: Geysers | null = null;
   /** Rain, lightning bolts and their light (globe view, bodies with weather). */
   readonly weather: Weather | null = null;
+  /** Plants on habitable bodies (globe view; the lab's menu-free switch is plantParams.enabled). */
+  readonly plants: SurfaceEntities | null = null;
   readonly ship: PlanetShip | null = null;
   readonly map: PlanetMap | null = null;
   readonly bodies: LabBodies | null = null;
@@ -321,6 +326,8 @@ export class LabLevel extends Level {
       this.weather = this.add(
         new Weather(this.scene, clock, globe.weather, config, camera, globe.sun, globe.sunLight, globe.ambientLight, debug),
       );
+    const plants = globe ? plantSetup(config) : null;
+    if (globe && plants) this.plants = this.add(new SurfaceEntities(this.scene, plants.plan, plants.ground, camera, new SurfaceChanges(), debug));
     if (carry) {
       this.orbit.lookFrom(carry.direction);
       this.orbit.setDistance(THREE.MathUtils.clamp(carry.zoom * this.radius, min, max));

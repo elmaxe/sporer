@@ -1,0 +1,616 @@
+import * as THREE from 'three';
+import type { Debug } from '../core/Debug';
+import type { Entity } from '../core/Entity';
+import { PLANT_CELL_SIZE, generateCell, parsePlantId, plantGridSize, type GroundRadius, type PlantData, type PlantPlan, type PlantSpecies } from '../gen/plants';
+import { faceGridPoint } from '../world/cubeSphereMath';
+import type { SurfaceChanges } from './changes';
+import {
+  FADE_START,
+  PLANT_RANGES,
+  createPlantGeometry,
+  createPlantMaterial,
+  type PlantFadeUniforms,
+  type PlantLevel,
+} from './plantLook';
+import { addPlantDebug, plantParams } from './plantParams';
+
+/** A cell stays loaded until it is this much further out than it was wanted (so it doesn't flicker at the edge). */
+const KEEP_EXTRA = 1.15;
+/** The camera must move this far (units) before cells are looked at again (the per-plant fade is in the shader, so nothing waits on it). */
+const SCAN_DISTANCE = 4;
+/** Instances a batch starts with; it doubles when full. */
+const FIRST_CAPACITY = 64;
+
+/** The plant a ray hit. The same object every time: read it before the next `pick`. */
+export interface PlantHit {
+  id: string;
+  plant: PlantData;
+  species: PlantSpecies;
+  /** Along the ray. */
+  distance: number;
+}
+
+/** A plant taken out of the instanced batches as an object of its own (see `SurfaceEntities.promote`). */
+export interface LivePlant {
+  readonly id: string;
+  readonly species: PlantSpecies;
+  /** Positioned on the ground where the plant stood, in the level's scene: move it, lift it, hit it. */
+  readonly object: THREE.Group;
+  /** It is gone for good: recorded as removed, like `remove`. */
+  destroy(): void;
+  /** Put it back where it grew. */
+  restore(): void;
+}
+
+/** One species' plants of a cell, as instance matrices (removed and promoted plants left out). */
+interface SpeciesGroup {
+  matrices: Float32Array;
+  count: number;
+}
+
+interface Cell {
+  readonly key: string;
+  readonly face: number;
+  readonly i: number;
+  readonly j: number;
+  /** The cell's centre at sea level, and how far its ground and plants can reach from it. */
+  readonly centre: THREE.Vector3;
+  readonly bound: number;
+  readonly plants: PlantData[];
+  groups: (SpeciesGroup | null)[];
+  /** Per species: in the near and the mid batch now. */
+  readonly near: boolean[];
+  readonly mid: boolean[];
+}
+
+/** The instances of one species at one level of detail: one draw call. */
+interface Batch {
+  mesh: THREE.InstancedMesh;
+  readonly geometry: THREE.BufferGeometry;
+  readonly material: THREE.MeshStandardMaterial;
+  readonly uniforms: PlantFadeUniforms;
+  readonly level: PlantLevel;
+}
+
+/** What `SurfaceEntities` holds now, for the lab's readout and the tests. */
+export interface SurfaceStats {
+  cells: number;
+  /** Plants in the loaded cells (not removed). */
+  plants: number;
+  /** Instances in the near and mid batches, and the draw calls they make. */
+  near: number;
+  mid: number;
+  drawCalls: number;
+  /** Triangles in those instances (before culling and the fade's discards). */
+  triangles: number;
+}
+
+/**
+ * Things standing on a planet's ground, for now plants (gen/plants.ts): the
+ * cells around the camera are generated a few per frame within a time budget,
+ * far ones dropped, and each species is drawn as one `InstancedMesh` per level
+ * of detail: the full placeholder mesh near the camera, a few-triangle one
+ * further out and nothing beyond, with distances in the plant's own heights so
+ * trees show further than bushes. The levels change per pixel in the shader
+ * with a dithered (screen-door) fade, so nothing pops and nothing is sorted,
+ * and a cell's instances are only rewritten when a cell comes, goes or moves
+ * between levels.
+ *
+ * The API later steps need: `pick(ray)` (nearest plant along a ray), `remove(id)`
+ * (recorded in the planet's change list, which outlives the level) and
+ * `promote(id)` (a plant as an object of its own, for a beam to lift or a
+ * weapon to hit). Static in the planet's body frame, like the globe.
+ */
+export class SurfaceEntities implements Entity {
+  readonly object = new THREE.Group();
+  private readonly cells = new Map<string, Cell>();
+  /** Every cell's centre, unit direction: face by face, row by row. */
+  private readonly centres: Float32Array;
+  private readonly gridSize: number;
+  private readonly cellBound: number;
+  private readonly cellCount: number;
+  private readonly geometries: { full: THREE.BufferGeometry; simple: THREE.BufferGeometry }[];
+  private readonly batches: Batch[][] = [];
+  private readonly liveMaterials: (THREE.MeshStandardMaterial | null)[];
+  private readonly live = new Map<string, LivePlant>();
+  private readonly promoted = new Set<string>();
+  /** The farthest any species is drawn (units, before plantParams.range). */
+  private readonly maxReach: number;
+  private readonly camera = new THREE.Vector3();
+  private readonly lastScan = new THREE.Vector3(Infinity, 0, 0);
+  /** Cell indices in range, nearest first, and every cell's distance from the last scan (scratch, so a scan allocates nothing). */
+  private readonly wanted: number[] = [];
+  private readonly distances: Float32Array;
+  /** Cells wanted but not made yet (over the frame's time budget). */
+  private pending = 0;
+  private dirty = false;
+  private rescan = true;
+  private readonly hit: PlantHit;
+  private readonly sphere = new THREE.Sphere();
+  private readonly middle = new THREE.Vector3();
+  private readonly entry = new THREE.Vector3();
+  private readonly matrix = new THREE.Matrix4();
+  private lastRange = 1;
+
+  constructor(
+    private readonly scene: THREE.Scene,
+    readonly plan: PlantPlan,
+    private readonly ground: GroundRadius,
+    private readonly cameraSource: THREE.Camera,
+    private readonly changes: SurfaceChanges,
+    debug: Debug,
+  ) {
+    const R = plan.radius;
+    const n = (this.gridSize = plantGridSize(R));
+    this.cellCount = 6 * n * n;
+    // A cell's ground and plants stay within its corners' reach (a cell is ~PLANT_CELL_SIZE wide) and the terrain's relief.
+    this.cellBound = PLANT_CELL_SIZE * 0.9 + (plan.peak - R);
+    this.centres = new Float32Array(this.cellCount * 3);
+    this.distances = new Float32Array(this.cellCount);
+    const c = { x: 0, y: 0, z: 0 };
+    for (let face = 0, k = 0; face < 6; face++) {
+      for (let j = 0; j < n; j++) {
+        for (let i = 0; i < n; i++, k += 3) {
+          faceGridPoint(face, i + 0.5, j + 0.5, n, c);
+          this.centres[k] = c.x;
+          this.centres[k + 1] = c.y;
+          this.centres[k + 2] = c.z;
+        }
+      }
+    }
+    this.geometries = plan.species.map((s) => ({ full: createPlantGeometry(s, 'full'), simple: createPlantGeometry(s, 'simple') }));
+    this.liveMaterials = plan.species.map(() => null);
+    this.maxReach = Math.max(...plan.species.map((s) => s.height * 1.25 * PLANT_RANGES[s.kind].far));
+    for (const s of plan.species) {
+      const ranges = PLANT_RANGES[s.kind];
+      const row: Batch[] = [];
+      for (const level of ['near', 'mid'] as const) {
+        const { material, uniforms } = createPlantMaterial(level, s.height, ranges);
+        const geometry = level === 'near' ? this.geometries[s.index]!.full : this.geometries[s.index]!.simple;
+        const mesh = this.createMesh(geometry, material, FIRST_CAPACITY);
+        row.push({ mesh, geometry, material, uniforms, level });
+      }
+      this.batches.push(row);
+    }
+    this.hit = { id: '', plant: null as unknown as PlantData, species: plan.species[0]!, distance: 0 };
+    this.object.name = 'Plants';
+    scene.add(this.object);
+    addPlantDebug(debug);
+  }
+
+  private createMesh(geometry: THREE.BufferGeometry, material: THREE.Material, capacity: number): THREE.InstancedMesh {
+    const mesh = new THREE.InstancedMesh(geometry, material, capacity);
+    mesh.count = 0;
+    mesh.visible = false;
+    // Instances are spread over the whole planet: the bounding sphere would be the planet's anyway.
+    mesh.frustumCulled = false;
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.object.add(mesh);
+    return mesh;
+  }
+
+  /** Counts of what is loaded and drawn. */
+  stats(): SurfaceStats {
+    const s: SurfaceStats = { cells: this.cells.size, plants: 0, near: 0, mid: 0, drawCalls: 0, triangles: 0 };
+    for (const cell of this.cells.values()) for (const g of cell.groups) if (g) s.plants += g.count;
+    for (const row of this.batches) {
+      for (const b of row) {
+        const count = b.mesh.count;
+        if (b.level === 'near') s.near += count;
+        else s.mid += count;
+        if (count > 0 && b.mesh.visible) {
+          s.drawCalls++;
+          s.triangles += count * trianglesOf(b.geometry);
+        }
+      }
+    }
+    return s;
+  }
+
+  /** True when no cell the camera wants is still to be made (for automation). */
+  get settled(): boolean {
+    return !this.rescan && !this.dirty && this.pending === 0;
+  }
+
+  update(): void {
+    const enabled = plantParams.enabled;
+    this.object.visible = enabled;
+    if (!enabled) {
+      if (this.cells.size > 0) this.clear();
+      return;
+    }
+    for (const row of this.batches) for (const b of row) b.uniforms.uRange.value = plantParams.range;
+    this.object.worldToLocal(this.cameraSource.getWorldPosition(this.camera));
+    if (plantParams.range !== this.lastRange) {
+      this.lastRange = plantParams.range;
+      this.rescan = true;
+    }
+    if (!plantParams.freeze && (this.rescan || this.camera.distanceTo(this.lastScan) > SCAN_DISTANCE)) this.scan();
+    if (this.dirty) this.rebuild();
+  }
+
+  /** The cells near the camera, loaded nearest first within the frame's time budget; far ones dropped; each cell's levels updated. */
+  private scan(): void {
+    this.lastScan.copy(this.camera);
+    this.rescan = false;
+    const { plan, camera } = this;
+    const R = plan.radius;
+    const n = this.gridSize;
+    const camLen = camera.length();
+    const reach = this.maxReach * plantParams.range;
+    const limit = reach + this.cellBound;
+    // Cells past the horizon (to the lowest and highest ground) can't be seen.
+    const horizon = Math.acos(Math.min(1, R / Math.max(camLen, R))) + Math.acos(R / plan.peak) + (PLANT_CELL_SIZE * 0.9) / R;
+    const cosHorizon = Math.cos(Math.min(Math.PI, horizon));
+    const cx = camera.x / camLen;
+    const cy = camera.y / camLen;
+    const cz = camera.z / camLen;
+    const wanted = this.wanted;
+    wanted.length = 0;
+    for (let index = 0, k = 0; index < this.cellCount; index++, k += 3) {
+      const x = this.centres[k]!;
+      const y = this.centres[k + 1]!;
+      const z = this.centres[k + 2]!;
+      if (x * cx + y * cy + z * cz < cosHorizon) continue;
+      const distance = Math.hypot(camera.x - x * R, camera.y - y * R, camera.z - z * R);
+      if (distance > limit) continue;
+      this.distances[index] = distance;
+      wanted.push(index);
+    }
+    wanted.sort(this.byDistance);
+    // Drop the cells that fell out of range, update the levels of those that stay.
+    const keep = limit * KEEP_EXTRA;
+    for (const [key, cell] of this.cells) {
+      const distance = camera.distanceTo(cell.centre);
+      if (distance > keep || !this.facesCamera(cell, cx, cy, cz, cosHorizon)) {
+        this.cells.delete(key);
+        this.dirty = true;
+      } else this.setLevels(cell, distance);
+    }
+    // Load the missing ones nearest first, until the time budget is spent.
+    const start = performance.now();
+    this.pending = 0;
+    let budgetSpent = false;
+    for (const index of wanted) {
+      const face = Math.floor(index / (n * n));
+      const rest = index - face * n * n;
+      const j = Math.floor(rest / n);
+      const i = rest - j * n;
+      const key = `${face}:${i}:${j}`;
+      if (this.cells.has(key)) continue;
+      if (budgetSpent) {
+        this.pending++;
+        continue;
+      }
+      const cell = this.createCell(key, face, i, j, index);
+      this.cells.set(key, cell);
+      this.setLevels(cell, this.distances[index]!);
+      this.dirty = true;
+      if (performance.now() - start > plantParams.budgetMs) budgetSpent = true;
+    }
+    // Something is still to load: look again next frame, wherever the camera goes.
+    if (this.pending > 0) this.rescan = true;
+  }
+
+  private readonly byDistance = (a: number, b: number): number => this.distances[a]! - this.distances[b]!;
+
+  private facesCamera(cell: Cell, cx: number, cy: number, cz: number, cosHorizon: number): boolean {
+    const r = this.plan.radius;
+    return (cell.centre.x * cx + cell.centre.y * cy + cell.centre.z * cz) / r >= cosHorizon;
+  }
+
+  private createCell(key: string, face: number, i: number, j: number, index: number): Cell {
+    const R = this.plan.radius;
+    const k = index * 3;
+    const plants = generateCell(this.plan, this.ground, face, i, j);
+    const cell: Cell = {
+      key,
+      face,
+      i,
+      j,
+      centre: new THREE.Vector3(this.centres[k]! * R, this.centres[k + 1]! * R, this.centres[k + 2]! * R),
+      bound: this.cellBound,
+      plants,
+      groups: [],
+      near: this.plan.species.map(() => false),
+      mid: this.plan.species.map(() => false),
+    };
+    this.fillGroups(cell);
+    return cell;
+  }
+
+  /** Writes a cell's instance matrices per species, leaving out the removed and promoted plants. */
+  private fillGroups(cell: Cell): void {
+    const counts = new Int32Array(this.plan.species.length);
+    const live: PlantData[] = [];
+    for (const p of cell.plants) {
+      if (this.changes.isRemoved(p.id) || this.promoted.has(p.id)) continue;
+      live.push(p);
+      counts[p.species]!++;
+    }
+    cell.groups = this.plan.species.map((s) => (counts[s.index]! > 0 ? { matrices: new Float32Array(counts[s.index]! * 16), count: 0 } : null));
+    for (const p of live) {
+      const g = cell.groups[p.species]!;
+      writeMatrix(g.matrices, g.count * 16, p);
+      g.count++;
+    }
+  }
+
+  /** Which batches a cell's species belong in at `distance` from the camera (the fade itself is per pixel). */
+  private setLevels(cell: Cell, distance: number): void {
+    const range = plantParams.range;
+    const slack = SCAN_DISTANCE * 2;
+    for (const s of this.plan.species) {
+      const r = PLANT_RANGES[s.kind];
+      const unit = s.height * 1.25 * range;
+      const nearEnd = r.near * unit;
+      const nearStart = nearEnd * FADE_START;
+      const farEnd = r.far * unit;
+      const closest = distance - cell.bound - slack;
+      const farthest = distance + cell.bound + slack;
+      const near = closest < nearEnd;
+      const mid = farthest > nearStart && closest < farEnd;
+      if (cell.near[s.index] !== near || cell.mid[s.index] !== mid) this.dirty = true;
+      cell.near[s.index] = near;
+      cell.mid[s.index] = mid;
+    }
+  }
+
+  /** Writes every batch from the cells in it. */
+  private rebuild(): void {
+    this.dirty = false;
+    for (const s of this.plan.species) {
+      for (const batch of this.batches[s.index]!) {
+        const isNear = batch.level === 'near';
+        let total = 0;
+        for (const cell of this.cells.values()) {
+          if (!(isNear ? cell.near[s.index] : cell.mid[s.index])) continue;
+          total += cell.groups[s.index]?.count ?? 0;
+        }
+        if (total > batch.mesh.instanceMatrix.count) this.grow(batch, total);
+        const array = batch.mesh.instanceMatrix.array as Float32Array;
+        let at = 0;
+        for (const cell of this.cells.values()) {
+          if (!(isNear ? cell.near[s.index] : cell.mid[s.index])) continue;
+          const g = cell.groups[s.index];
+          if (!g) continue;
+          array.set(g.matrices.subarray(0, g.count * 16), at);
+          at += g.count * 16;
+        }
+        batch.mesh.count = total;
+        batch.mesh.visible = total > 0;
+        batch.mesh.instanceMatrix.clearUpdateRanges();
+        if (total > 0) batch.mesh.instanceMatrix.addUpdateRange(0, total * 16);
+        batch.mesh.instanceMatrix.needsUpdate = true;
+      }
+    }
+  }
+
+  /** A bigger mesh for the batch (the instance buffer of a built mesh can't be resized). */
+  private grow(batch: Batch, needed: number): void {
+    let capacity = batch.mesh.instanceMatrix.count;
+    while (capacity < needed) capacity *= 2;
+    this.object.remove(batch.mesh);
+    batch.mesh.dispose();
+    batch.mesh = this.createMesh(batch.geometry, batch.material, capacity);
+  }
+
+  private clear(): void {
+    this.cells.clear();
+    this.rescan = true;
+    this.pending = 0;
+    this.dirty = false;
+    for (const row of this.batches) {
+      for (const b of row) {
+        b.mesh.count = 0;
+        b.mesh.visible = false;
+      }
+    }
+  }
+
+  /** Nothing is drawn or picked from plants that aren't loaded or are beyond their view distance. */
+  private visibleAt(plant: PlantData, distance: number): boolean {
+    const s = this.plan.species[plant.species]!;
+    return distance <= PLANT_RANGES[s.kind].far * s.height * plant.scale * plantParams.range;
+  }
+
+  /**
+   * The nearest plant a ray passes through, within `maxDistance`: the ray is
+   * tested against each loaded cell's bounding sphere, then against a sphere
+   * round each plant in it (a rough stand-in for its body, like the system
+   * view's picking of bodies). Only plants that are drawn count. The returned
+   * object is reused: read it before calling again. Points in the planet's body frame.
+   */
+  pick(ray: THREE.Ray, maxDistance = Infinity): PlantHit | null {
+    if (!plantParams.enabled) return null;
+    let best = maxDistance;
+    let found = false;
+    const { sphere, middle, entry, hit } = this;
+    for (const cell of this.cells.values()) {
+      if (cell.plants.length === 0) continue;
+      sphere.set(cell.centre, cell.bound);
+      if (!ray.intersectsSphere(sphere)) continue;
+      for (const p of cell.plants) {
+        if (this.changes.isRemoved(p.id) || this.promoted.has(p.id)) continue;
+        const s = this.plan.species[p.species]!;
+        // A sphere about the middle of the plant, as wide as its crown (at least a third of its height).
+        const size = s.height * p.scale;
+        middle.set(p.x, p.y, p.z).multiplyScalar(p.radius + size * 0.5);
+        sphere.set(middle, Math.max(s.crownRadius * p.scale, size * 0.3));
+        const at = ray.intersectSphere(sphere, entry);
+        if (!at) continue;
+        const distance = at.distanceTo(ray.origin);
+        if (distance >= best || !this.visibleAt(p, distance)) continue;
+        best = distance;
+        found = true;
+        hit.id = p.id;
+        hit.plant = p;
+        hit.species = s;
+        hit.distance = distance;
+      }
+    }
+    return found ? hit : null;
+  }
+
+  /** A generated plant by id, from the loaded cells or made afresh (null if there's none). */
+  find(id: string): PlantData | null {
+    const address = parsePlantId(id);
+    if (!address) return null;
+    const { face, i, j } = address;
+    const n = this.gridSize;
+    if (i >= n || j >= n) return null;
+    const loaded = this.cells.get(`${face}:${i}:${j}`);
+    const plants = loaded ? loaded.plants : generateCell(this.plan, this.ground, face, i, j);
+    return plants.find((p) => p.id === id) ?? null;
+  }
+
+  isRemoved(id: string): boolean {
+    return this.changes.isRemoved(id);
+  }
+
+  /** Removes a plant for good (it stays gone when the planet is left and visited again). False if there is no such plant or it is gone already. */
+  remove(id: string): boolean {
+    if (this.promoted.has(id) || this.changes.isRemoved(id) || !this.find(id)) return false;
+    this.changes.remove(id);
+    this.refreshCell(id);
+    return true;
+  }
+
+  /**
+   * Takes a plant out of the instanced batches and gives it back as an object
+   * of its own (the placeholder's full mesh, where it stood) for a beam to
+   * lift or a weapon to hit. `destroy()` removes it for good, `restore()`
+   * puts it back. Null if there is no such plant or it is gone or promoted already.
+   */
+  promote(id: string): LivePlant | null {
+    if (this.promoted.has(id) || this.changes.isRemoved(id)) return null;
+    const plant = this.find(id);
+    if (!plant) return null;
+    const species = this.plan.species[plant.species]!;
+    const material = (this.liveMaterials[species.index] ??= new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9 }));
+    // The plant's own transform on the group, so it can be moved, turned and scaled as a whole.
+    const object = new THREE.Group();
+    object.name = species.name;
+    plantMatrix(plant, this.matrix).decompose(object.position, object.quaternion, object.scale);
+    object.add(new THREE.Mesh(this.geometries[species.index]!.full, material));
+    this.scene.add(object);
+    this.promoted.add(id);
+    this.refreshCell(id);
+    const done = (): void => {
+      if (this.live.get(id) !== handle) return;
+      this.live.delete(id);
+      this.scene.remove(object);
+    };
+    const handle: LivePlant = {
+      id,
+      species,
+      object,
+      destroy: () => {
+        if (this.live.get(id) !== handle) return;
+        done();
+        this.changes.remove(id);
+        this.promoted.delete(id);
+        this.refreshCell(id);
+      },
+      restore: () => {
+        if (this.live.get(id) !== handle) return;
+        done();
+        this.promoted.delete(id);
+        this.refreshCell(id);
+      },
+    };
+    this.live.set(id, handle);
+    return handle;
+  }
+
+  /** Rewrites the instances of the loaded cell a plant belongs to. */
+  private refreshCell(id: string): void {
+    const a = parsePlantId(id);
+    if (!a) return;
+    const cell = this.cells.get(`${a.face}:${a.i}:${a.j}`);
+    if (!cell) return;
+    this.fillGroups(cell);
+    this.dirty = true;
+  }
+
+  dispose(): void {
+    for (const handle of [...this.live.values()]) handle.restore();
+    this.scene.remove(this.object);
+    for (const row of this.batches) {
+      for (const b of row) {
+        b.mesh.dispose();
+        b.material.dispose();
+      }
+    }
+    for (const g of this.geometries) {
+      g.full.dispose();
+      g.simple.dispose();
+    }
+    for (const m of this.liveMaterials) m?.dispose();
+  }
+}
+
+function trianglesOf(g: THREE.BufferGeometry): number {
+  return (g.index ? g.index.count : g.getAttribute('position').count) / 3;
+}
+
+/**
+ * Writes the instance matrix of a plant into `out` at `at`: up along the
+ * direction from the planet's centre, turned by the plant's yaw, scaled by its
+ * size, at the ground. (Column-major, as THREE's matrices.)
+ */
+function writeMatrix(out: Float32Array, at: number, p: PlantData): void {
+  // Any direction across the surface: cross the up axis with the world axis it is least aligned with.
+  const ax = Math.abs(p.x);
+  const ay = Math.abs(p.y);
+  const az = Math.abs(p.z);
+  let rx = 0;
+  let ry = 0;
+  let rz = 0;
+  if (ax <= ay && ax <= az) rx = 1;
+  else if (ay <= az) ry = 1;
+  else rz = 1;
+  // e1 = normalize(up × ref), e2 = up × e1.
+  let e1x = p.y * rz - p.z * ry;
+  let e1y = p.z * rx - p.x * rz;
+  let e1z = p.x * ry - p.y * rx;
+  const l = Math.hypot(e1x, e1y, e1z);
+  e1x /= l;
+  e1y /= l;
+  e1z /= l;
+  const e2x = p.y * e1z - p.z * e1y;
+  const e2y = p.z * e1x - p.x * e1z;
+  const e2z = p.x * e1y - p.y * e1x;
+  const c = Math.cos(p.yaw) * p.scale;
+  const s = Math.sin(p.yaw) * p.scale;
+  // x axis: turned by the yaw in the tangent plane; z = x × up.
+  const xx = e1x * c + e2x * s;
+  const xy = e1y * c + e2y * s;
+  const xz = e1z * c + e2z * s;
+  const zx = xy * p.z - xz * p.y;
+  const zy = xz * p.x - xx * p.z;
+  const zz = xx * p.y - xy * p.x;
+  out[at] = xx;
+  out[at + 1] = xy;
+  out[at + 2] = xz;
+  out[at + 3] = 0;
+  out[at + 4] = p.x * p.scale;
+  out[at + 5] = p.y * p.scale;
+  out[at + 6] = p.z * p.scale;
+  out[at + 7] = 0;
+  out[at + 8] = zx;
+  out[at + 9] = zy;
+  out[at + 10] = zz;
+  out[at + 11] = 0;
+  out[at + 12] = p.x * p.radius;
+  out[at + 13] = p.y * p.radius;
+  out[at + 14] = p.z * p.radius;
+  out[at + 15] = 1;
+}
+
+/** The matrix of a plant as the instance batches and its live object use it. */
+export function plantMatrix(p: PlantData, out: THREE.Matrix4): THREE.Matrix4 {
+  const m = new Float32Array(16);
+  writeMatrix(m, 0, p);
+  return out.fromArray(m);
+}

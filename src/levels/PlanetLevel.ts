@@ -20,6 +20,11 @@ import { PlanetShip } from '../planet/PlanetShip';
 import { maxViewDistance, travelScale } from '../planet/frame';
 import { OrbitCamera, type OrbitParams } from '../player/OrbitCamera';
 import { flightAltitude, minPitchAt, zoomFraction } from '../player/zoomCurve';
+import type { SurfaceChanges } from '../surface/changes';
+import { PlantTooltip } from '../surface/PlantTooltip';
+import { plantSetup } from '../surface/plantSetup';
+import { SurfaceEntities } from '../surface/SurfaceEntities';
+import type { Tooltip } from '../ui/Tooltip';
 import type { Planet } from '../world/Planet';
 import { Level } from './Level';
 import type { SystemLevel } from './SystemLevel';
@@ -70,6 +75,9 @@ export class PlanetLevel extends Level {
   readonly geysers: Geysers | null;
   /** Bodies with weather only: rain, lightning bolts and their light (the clouds are the globe's). */
   readonly weather: Weather | null;
+  /** Habitable bodies (T1 and up) only: plants standing on the ground (see gen/plants.ts). */
+  readonly plants: SurfaceEntities | null;
+  private readonly plantTooltip: PlantTooltip | null;
   private readonly globe: PlanetGlobe;
   private readonly hud: PlanetHud;
   /** The Equal Earth map in the corner (mouse players). */
@@ -92,6 +100,10 @@ export class PlanetLevel extends Level {
     debug: Debug,
     /** Called when the player scrolls out past low orbit (back to the system). */
     onZoomOut: () => void,
+    /** What has been done to this body's surface entities, kept by the scene manager across visits. */
+    changes: SurfaceChanges,
+    /** Shows the plant under the pointer. */
+    tooltip: Tooltip,
   ) {
     super();
     this.frame = this.add(new PlanetFrame(body, system.world.time, debug));
@@ -146,6 +158,9 @@ export class PlanetLevel extends Level {
           new Weather(this.scene, this.frame, globe.weather, config, camera, globe.sun, globe.sunLight, globe.ambientLight, debug),
         )
       : null;
+    const plantsSetup = plantSetup(config);
+    this.plants = plantsSetup ? this.add(new SurfaceEntities(this.scene, plantsSetup.plan, plantsSetup.ground, camera, changes, debug)) : null;
+    this.plantTooltip = this.plants ? this.add(new PlantTooltip(camera, input, this.plants, tooltip)) : null;
     this.add(new PlanetPicker(this.scene, camera, input, this.ship, globe.radius));
     const { climate } = config;
     const weatherLine = globe.weather ? describeWeather(globe.weather.data) : '';
@@ -232,10 +247,12 @@ export class PlanetLevel extends Level {
   override enter(): void {
     this.hud.activate();
     this.map.activate();
+    this.plantTooltip?.activate();
   }
 
   override exit(): void {
     this.hud.deactivate();
     this.map.deactivate();
+    this.plantTooltip?.deactivate();
   }
 }
