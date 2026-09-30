@@ -222,8 +222,8 @@ describe('planet frame and sky mapping', () => {
 
 describe('globe sizes', () => {
   it('keeps every body at its true size relative to the ship: one scale for all', () => {
-    expect(globeRadius(8)).toBe(100);
-    expect(globeRadius(SIZE_CLASS_RADIUS.dwarf[0])).toBeCloseTo(25, 6);
+    expect(globeRadius(8)).toBe(EARTH_GLOBE_RADIUS);
+    expect(globeRadius(SIZE_CLASS_RADIUS.dwarf[0])).toBeCloseTo(EARTH_GLOBE_RADIUS / 4, 6);
     expect(globeRadius(SIZE_CLASS_RADIUS.gasGiant[1]) / globeRadius(SIZE_CLASS_RADIUS.dwarf[0])).toBeCloseTo(
       SIZE_CLASS_RADIUS.gasGiant[1] / SIZE_CLASS_RADIUS.dwarf[0],
       9,
@@ -248,8 +248,8 @@ describe('globe sizes', () => {
 
   it('pulls the max camera distance in for small globes', () => {
     expect(maxViewDistance(EARTH_GLOBE_RADIUS, 260)).toBe(260);
-    expect(maxViewDistance(400, 260)).toBe(260);
-    expect(maxViewDistance(50, 260)).toBe(130);
-    expect(maxViewDistance(10, 260)).toBe(100);
+    expect(maxViewDistance(EARTH_GLOBE_RADIUS * 4, 260)).toBe(260);
+    expect(maxViewDistance(EARTH_GLOBE_RADIUS / 2, 260)).toBe(130);
+    expect(maxViewDistance(EARTH_GLOBE_RADIUS / 10, 260)).toBe(100);
   });
 });

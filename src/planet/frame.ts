@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { EARTH_GAME_RADIUS } from '../gen/planets';
+import { EARTH_GAME_RADIUS, EARTH_GLOBE_RADIUS } from '../gen/planets';
 
 /*
  * Maths linking the planet level to the system it sits in. Pure (THREE maths
@@ -13,13 +13,12 @@ import { EARTH_GAME_RADIUS } from '../gen/planets';
  * nearly flat horizon.
  */
 
-/** An Earth-sized body's radius in planet-level units (system radius EARTH_GAME_RADIUS). */
-export const EARTH_GLOBE_RADIUS = 100;
+export { EARTH_GLOBE_RADIUS };
 
 /** Planet-level units per system unit, the same for every body. */
 export const PLANET_SCALE = EARTH_GLOBE_RADIUS / EARTH_GAME_RADIUS;
 
-/** A planet or moon's radius in planet-level units: 10 for the smallest moons, 100 for Earth, 425 for the biggest giants. */
+/** A planet or moon's radius in planet-level units: EARTH_GLOBE_RADIUS for Earth, 0.1× that for the smallest moons, 4.25× for the biggest giants. */
 export function globeRadius(systemRadius: number): number {
   return systemRadius * PLANET_SCALE;
 }
