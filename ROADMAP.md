@@ -303,6 +303,66 @@ Status: ⬜ todo · 🟨 in progress · ✅ done
 
 *Checks:* unit tests for determinism, independent cells, stable ids, nothing under the sea, no plants on T0 and more on higher tiers, and the change list. Smoke test: plants near the ship on a T3 planet, none on a T0 one, and the setting turns them off. Triangles, draw calls and FPS measured in the lab with plants on and off.
 
+### 25. ⬜ Irregular small bodies: visitable comets
+**Needs step 23** (the ship following the ground): on a lumpy body "radius + altitude" means nothing, so low orbit must already hug the drawn surface.
+
+- Comets become places: clickable and visitable in low orbit like a moon, with an irregular nucleus instead of a sphere. Their tooltip and HUD keep today's orbit facts.
+- Up close, a comet near the star is active: gas and dust jets on its sunlit side, the coma around the ship, the tails streaming away from the star across the sky. Far out it's a dark, dead, frozen rock. The activity follows the same 1/r² the tails already use.
+- The shape system is the base for step 26's asteroids and contact binaries, so build it general: **one shape function, many small bodies**.
+- Done when every comet can be visited from the system view (zoom in and out crossfade like planets, never black), the nucleus looks irregular from every side, jets turn on and off with the comet's distance from the star, and the lab shows comets.
+
+**Implementation notes (proposed design; confirm with the user before building):**
+- *Shape (pure, `src/gen/shape.ts`, tested):* a body's surface is `r(dir) = radius · shape(dir)` on the existing cube sphere and `LodSurface`, so the LOD, horizon culling and terrain sampler keep working. `shape` is a smooth union (smooth-min on the SDF, then the distance along the ray) of 1–3 squashed ellipsoids offset from the centre, plus low-frequency noise and a few craters. This can't do overhangs or arches; that's accepted. Keep `shape(dir)` > ~0.25 everywhere so the mesh never pinches to a point (a narrow neck would stretch triangles). `ShapeData` goes in the body's data from its own `rng.fork('shape')`, so existing systems don't change.
+- *Contact binaries* are the two-lobe case: two ellipsoids of similar size touching along one axis, blended with a neck at least ~40% of the smaller lobe's width (Arrokoth, 67P). Generated here, used in step 26.
+- *Where the shape is read:* the terrain sampler (height = shape plus fine detail), the planet level's camera and ship (step 23's ground ray), the system view's mesh for the body (a small cube sphere displaced by the same function, so the zoom matches), picking (a ray against the shape, not a sphere) and the minimap (`PlanetMap` on an irregular body: equal-area projection of direction, as today).
+- *Low orbit on a small body:* no atmosphere, sea, weather or plants; black sky; a slow spin (and maybe a tumble about a second axis). The ship's zoom range is relative to the body's longest axis. Research tumbling rates and nucleus sizes, albedo (comet nuclei are very dark, ~4%) and jet speeds with the `research` skill.
+- *Jets:* reuse the geysers' particle system (step 15) pointed along the local normal with no fall-back, on vents in the sunlit half, strength × 1/r² from the star (0 beyond a cut-off distance, research where real comets switch on: water ice sublimates inside ~3 AU). A faint coma sphere around the nucleus and the tails drawn in low orbit's sky (the system level posing the sky already, as for stars).
+- *Data:* comets gain a seed and `ShapeData`; they become `CelestialBody`s (today they're `Sight`s), so the `Picker`, autopilot and level transitions treat them like moons. The body moves fast near perihelion: check the autopilot can catch it (it may need to lead the target).
+- *Lab:* `kind=comet` (and later `asteroid`) in `lab.html`, with the shape's lobes, noise and activity in the panel.
+- *Checks:* unit tests for the shape (deterministic, never below the floor, contact binaries have one connected surface, the sampler matches the mesh). Smoke test: visit a comet in the home system (or a seeded one), zoom in and out, jets on near the star and off far out.
+
+### 26. ⬜ Asteroid belts
+- Some systems have an asteroid belt: a ring of rocks between the rocky and gas-giant zones, and sometimes an icy one beyond the outermost planet (Kuiper-style). Gas giants can have Trojan swarms 60° ahead of and behind them.
+- Dense-looking on purpose (real belts are almost empty; say so in the research notes). Far away it's a dusty band, closer it's thousands of tumbling rocks.
+- A few named asteroids per belt (some of them contact binaries) are visitable, built on step 25's shapes. The rest are scenery. Clicking the belt flies to the nearest named one.
+- Done when belts appear in a fair share of systems, the system view stays smooth with thousands of rocks, and named asteroids can be visited (smoke test visits one, and a contact binary).
+
+**Implementation notes (proposed design; confirm with the user before building):**
+- *Data (`gen/belts.ts`, `rng.fork('belts')`):* `BeltData` {inner, outer radius, thickness, inclination, rock count, colour range, icy or rocky, named asteroids: `AsteroidData` with orbit, radius, `ShapeData`, name}. Placement rules (gaps in the planets, not overlapping a planet's neighbourhood, Trojans at L4/L5) researched, not guessed: real belt positions relative to the frost line and giants.
+- *View (`world/AsteroidBelt.ts`):* one `InstancedMesh` of a few low-poly rock shapes (made from the shape function), each instance on its own circular Kepler orbit computed in the vertex shader from the system clock (like the star storms), with its own tumble. A faint dusty ring mesh fades in as the rocks fade out with distance. Named asteroids are separate `CelestialBody`s. Measure draw calls and FPS (target: no visible drop on the user's GPU, and report SwiftShader numbers).
+- *System map and planet sky:* the belt shows on the system map; from low orbit over a belt asteroid, nearby rocks drift through the sky.
+
+### 27. ⬜ Nebulas
+- Nebulas are places you can see on the galaxy map and fly into, but **only to look at**: no gameplay, just beauty.
+- Kinds: **emission** (pink-red, where stars are born), **reflection** (blue dust lit by a star), **dark** (hides the stars behind it), **planetary** (a ring or shell around a white dwarf), **supernova remnant** (glowing filaments). Each is named.
+- On the galaxy map they're big, soft, glowing volumes (and dark ones dim what's behind them). Systems inside one have its gas in their sky: the system view and low orbit are tinted and hazy, with glowing clouds around. A planetary nebula's shell is visible in its white dwarf's system view.
+- Done when every kind appears in a default galaxy, can be told apart on the galaxy map, and a system inside each kind looks different from one outside; FPS measured on the galaxy map and in a nebula system.
+
+**Implementation notes (proposed design; confirm with the user before building):**
+- *Data (`gen/nebulas.ts`, from `hashSeed(galaxy seed, 'nebulas')` so nothing else changes):* `NebulaData` {kind, name, position, size, orientation, colours, a noise seed}. Emission and reflection nebulas sit along the arms (reuse `armPosition`), planetary ones are attached to some white-dwarf systems (in their `SystemData`), remnants anywhere. Research real sizes and colours (H-alpha red, O-III teal, reflection blue) with the `research` skill, scaled to the galaxy map.
+- *Galaxy view:* build on `glowVolume.ts` (closed-form Gaussian gas) and `GalaxyDust`: a few Gaussian blobs per nebula with a noise-modulated shader for structure, additive for glowing kinds, multiplicative dimming for dark ones. Filaments for remnants as a shell of noise.
+- *Which systems are inside:* a pure function `nebulaAt(position)` (density and colour at a point), tested; `SystemData` gets the nebula (if any) the system sits in.
+- *System and planet sky:* the system sky (`Starfield`, `GalaxyBand`) gains a nebula backdrop: a sky sphere with the nebula's colours and noise, brighter towards its centre as seen from the system, and a faint haze. Low orbit shows the same sky. Keep it cheap: one extra full-screen pass at most.
+- *Galaxy ↔ system zoom:* the nebula must match across the crossfade (the seamless zoom, step 9); freeze a frame mid-transition to check.
+
+### 28. ⬜ Rogue planets
+- A few planets drift between the stars with no sun: dark, frozen worlds, some warmed from inside (glowing cracks, geysers, maybe a hidden sea under ice), some with a moon. They're on the galaxy map as faint points and can be visited like a one-planet system.
+- Done when a default galaxy has a handful, you can fly to one from the galaxy map, it's lit by the galaxy's glow (and its own heat) rather than a star, and it plays well in low orbit.
+
+**Implementation notes (proposed design; confirm with the user before building):**
+- *Data:* a separate list in `GalaxyData` (`rogues`, from its own seed stream so the star list doesn't change), each a position plus a `PlanetData` without an orbit around a star. Climate from internal heat only (research what a rogue Earth or super-Earth would really be like: surface temperature from internal heat, whether a thick hydrogen atmosphere could keep a sea liquid).
+- *Level:* the system level with no star: a "system" of one body (and its moons). Lighting: a dim ambient from the galaxy band and any nebula, plus the body's own glow; eye adaptation (step 8) opens up so it isn't pitch black. Check every place that assumes a system has a star (`starZone`, `habitableRadius`, the star's light, eye adaptation, the HUD, the URL's `?star=`).
+- *Galaxy map:* faint, distinctive points (not star-like), with a tooltip; picking and travel as for stars.
+
+### 29. ⬜ Dust in systems
+- Young stars have a dusty disc with gaps and clumps instead of (some of) their planets. Some systems have a faint dust band along the planets' plane, lit by the star.
+- Comets leave dust along their orbits; a planet whose orbit crosses one gets meteor showers in low orbit's sky.
+- Done when young-star discs and meteor showers show up in a default galaxy and match between the system view and low orbit.
+
+**Implementation notes (proposed design; confirm with the user before building):**
+- *Young stars:* a star age (or a "young" flag) decides it; research what fraction of stars keep discs and for how long. Disc: a flat ring mesh with a noise shader (gaps at the few forming planets), lit by the star.
+- *Meteor showers:* pure test for whether a planet's orbit passes within some distance of a comet's orbit (minimum orbit distance, tested), then streaks in low orbit's sky while the planet is near the crossing point.
+
 ## Later / ideas
 
 - **Beam (abduction):** lift a plant (later an animal) into the UFO with a ray beam, using the surface entities' `pick` and `promote`. For now a beamed plant just disappears (recorded in the change list). Aborting the beam drops it, and it falls back to the ground (this may need a Rapier world on the planet level, or a scripted fall).
