@@ -76,9 +76,11 @@ export class PlanetGlobe implements Entity {
       gas ? R : floorRadius(R, style, RELIEF_SCALE, seaFloor),
       this.top,
       gas
-        ? gasSampler(R, seed, config.bands, true)
+        ? gasSampler(R, seed, config.bands, true, true)
         : terrainSampler(R, seed, style, { noise: detailedTerrain, reliefScale: RELIEF_SCALE, seaFloor }),
       new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: !gas, roughness: 0.9 }),
+      // The cloud tops' detail is all colour, so their cells go well under the terrain's size.
+      gas ? { cellScale: 0.4, extraDepth: 3 } : undefined,
     );
     this.object.add(this.surface.object);
     addLodDebug(debug);

@@ -62,7 +62,7 @@ export function terrainPainter(style: PlanetStyle, seaFloor = false): TerrainPai
  * `dir`, writes the colour into `color` and returns the radius there. The
  * whole-globe meshes and the planet level's LOD chunks are built from these.
  */
-export type SurfaceSampler = (dir: Vec3Like, color: THREE.Color) => number;
+export type SurfaceSampler = (dir: Vec3Like, color: THREE.Color, cell?: number) => number;
 
 /** Terrain displaced by noise and coloured by height (see TerrainOptions; `segments` is unused). */
 export function terrainSampler(
@@ -124,16 +124,27 @@ function sampledSphere(geometry: THREE.BufferGeometry, sample: SurfaceSampler, d
  * Colours a gas giant at unit direction (x, y, z) into `out`: stripes by
  * latitude, their edges wobbled by noise, plus thin wavy cloud streaks with
  * `streaks`. Shared by the globe meshes and the planet level's map.
+ * `cell` (radians: how wide the grid cell being coloured is) fades in the
+ * fine cloud detail (with `fine`) as the cells get small enough to show it;
+ * leave it out for all of it.
  */
-export type GasPainter = (x: number, y: number, z: number, out: THREE.Color) => void;
+export type GasPainter = (x: number, y: number, z: number, out: THREE.Color, cell?: number) => void;
 
-export function gasPainter(seed: number, bands: readonly string[], streaks = false): GasPainter {
+/** Fine cloud octaves of a close-up gas giant: the first one's frequency, and each next one's factor. */
+const FINE_FREQUENCY = 60;
+const FINE_LACUNARITY = 2.3;
+const FINE_OCTAVES = 5;
+/** Brightness swing of the first fine octave, and each next one's factor. */
+const FINE_AMPLITUDE = 0.16;
+const FINE_FALLOFF = 0.82;
+
+export function gasPainter(seed: number, bands: readonly string[], streaks = false, fine = false): GasPainter {
   const palette = bands.map((b) => new THREE.Color(b));
   // Which band colour each stripe uses, seeded so a planet always looks the same.
   const rng = new Rng(hashSeed(seed, 'stripes'));
   const stripes = rng.int(7, 12);
   const order = Array.from({ length: stripes + 1 }, () => palette[rng.int(0, palette.length - 1)]!);
-  return (x, y, z, out) => {
+  return (x, y, z, out, cell = 0) => {
     const lat = y + 0.05 * terrainNoise(x * 1.2, y * 2, z * 1.2, seed);
     const s = THREE.MathUtils.clamp((lat + 1) / 2, 0, 0.9999) * stripes;
     const k = Math.floor(s);
@@ -143,14 +154,38 @@ export function gasPainter(seed: number, bands: readonly string[], streaks = fal
       const swirl = terrainNoise(x * 12, y * 40, z * 12, seed + 2);
       out.multiplyScalar(1 + 0.08 * Math.sin(lat * 90 + 4 * wave) + 0.06 * swirl);
     }
+    if (fine) {
+      // Turbulence finer and finer, stretched along the bands (latitude varies fastest) and swirled
+      // by the coarser streaks. An octave only shows once the cells are under half its wavelength
+      // (else it would alias into noise); it fades in over the next factor of 3.
+      let freq = FINE_FREQUENCY;
+      let amp = FINE_AMPLITUDE;
+      let shade = 0;
+      for (let octave = 0; octave < FINE_OCTAVES; octave++) {
+        const wavelength = (2 * Math.PI) / (freq * 2.5);
+        const weight = THREE.MathUtils.clamp((wavelength / cell - 2) / 4, 0, 1);
+        if (cell > 0 && weight === 0) break;
+        const warp = 0.6 * octave + 2 * terrainNoise(x * 4, y * 6, z * 4, seed + 1);
+        shade +=
+          (cell > 0 ? weight : 1) *
+          amp *
+          2.5 *
+          Math.sin(y * freq * 3.1 + (x * 1.7 + z * 0.9) * freq * 0.3 + seed * 3.1 + warp) *
+          Math.sin((x * 1.1 - z * 1.3) * freq * 0.5 + y * freq * 0.4 + seed * 1.9) *
+          Math.sin(y * freq * 1.3 + z * freq * 0.4 + seed * 0.3);
+        freq *= FINE_LACUNARITY;
+        amp *= FINE_FALLOFF;
+      }
+      out.multiplyScalar(1 + shade);
+    }
   };
 }
 
 /** A gas giant's cloud tops: a sphere of `radius` striped by `gasPainter`. */
-export function gasSampler(radius: number, seed: number, bands: readonly string[], streaks = false): SurfaceSampler {
-  const paint = gasPainter(seed, bands, streaks);
-  return (dir, color) => {
-    paint(dir.x, dir.y, dir.z, color);
+export function gasSampler(radius: number, seed: number, bands: readonly string[], streaks = false, fine = false): SurfaceSampler {
+  const paint = gasPainter(seed, bands, streaks, fine);
+  return (dir, color, cell) => {
+    paint(dir.x, dir.y, dir.z, color, cell);
     return radius;
   };
 }

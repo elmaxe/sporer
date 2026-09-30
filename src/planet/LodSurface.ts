@@ -128,6 +128,8 @@ export class LodSurface {
     private readonly top: number,
     private readonly sample: SurfaceSampler,
     private readonly material: THREE.Material,
+    /** Finer than the default where the colour carries the detail (gas giants): cells this much of lodParams.cellAngle, this many levels deeper. */
+    private readonly detail: { readonly cellScale: number; readonly extraDepth: number } = { cellScale: 1, extraDepth: 0 },
   ) {
     this.object.name = 'Surface';
     for (let face = 0; face < 6; face++) {
@@ -202,7 +204,7 @@ export class LodSurface {
     const distance = Math.hypot(this.camera.x - c.x * R, this.camera.y - c.y * R, this.camera.z - c.z * R);
     const bound = R * node.angle + Math.max(this.top - R, R - this.floor);
     const cells = cellAngle(R, node.depth, distance, bound);
-    const wants = !hidden && node.depth < lodParams.maxDepth && wantsSplit(cells, lodParams.cellAngle, node.split);
+    const wants = !hidden && node.depth < lodParams.maxDepth + this.detail.extraDepth && wantsSplit(cells, lodParams.cellAngle * this.detail.cellScale, node.split);
 
     if (node.split) {
       const kids = node.children!;
@@ -327,11 +329,13 @@ export class LodSurface {
     const normals = new Float32Array(VERTICES * 3);
     const colors = new Float32Array(VERTICES * 3);
     const { dir, color } = this;
+    // One grid cell's angle from the centre, for samplers that fade detail the cells are too coarse for.
+    const cell = Math.PI / 2 / n;
     for (let j = 0; j < SIDE; j++) {
       for (let i = 0; i < SIDE; i++) {
         const v = (j * SIDE + i) * 3;
         faceGridPoint(node.face, node.x * CHUNK_CELLS + i, node.y * CHUNK_CELLS + j, n, dir);
-        const r = this.sample(dir, color);
+        const r = this.sample(dir, color, cell);
         dir.toArray(normals, v);
         positions[v] = dir.x * r;
         positions[v + 1] = dir.y * r;
