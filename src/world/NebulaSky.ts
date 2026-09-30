@@ -74,7 +74,9 @@ export class NebulaSky implements Entity {
         blendDst: THREE.SrcAlphaFactor,
         blendSrcAlpha: THREE.ZeroFactor,
         blendDstAlpha: THREE.OneFactor,
-        transparent: true,
+        // Not 'transparent': that queue is drawn after every solid object, so with no depth test the sky would
+        // cover the planets and stars. In the opaque queue, its render order puts it with the rest of the sky.
+        transparent: false,
         depthTest: false,
         depthWrite: false,
       }),
@@ -86,7 +88,7 @@ export class NebulaSky implements Entity {
     };
     this.sphere.name = 'Nebula sky';
     this.sphere.frustumCulled = false;
-    // After the galaxy band (-3), before its stars (-2) and the Starfield (-1).
+    // After the galaxy band (-3), before its stars (-2), the Starfield (-1) and everything in the system (all opaque-queue sky).
     this.sphere.renderOrder = -2.5;
     scene.add(this.sphere);
     addNebulaDebug(debug, 'System nebulas', () => (this.baked = false));

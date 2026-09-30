@@ -55,7 +55,8 @@ export class GalaxyNebulas implements Entity {
         varying vec2 vUv;
         void main() {
           vUv = uv;
-          gl_Position = vec4(position.xy * 2.0, 0.0, 1.0);
+          // On the far plane, depth-tested: it only covers what nothing solid (the UFO, a star close up) is in front of.
+          gl_Position = vec4(position.xy * 2.0, 1.0, 1.0);
         }`,
       fragmentShader: /* glsl */ `
         uniform sampler2D map;
@@ -69,7 +70,6 @@ export class GalaxyNebulas implements Entity {
             texture2D(map, vUv + vec2(o.x, -o.y)) + texture2D(map, vUv + vec2(-o.x, -o.y)));
           #include <colorspace_fragment>
         }`,
-      depthTest: false,
     });
     applyNebulaBlending(material);
     this.quad = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
