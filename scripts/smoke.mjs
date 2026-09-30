@@ -251,7 +251,7 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
     r.plants = await evaluate(`planet.plants && { tier: planet.plants.plan.tier, species: planet.plants.plan.species.length, ...planet.plants.stats() }`);
     r.plants.tierOk = await evaluate(`planet.plants.plan.tier === __body.config.climate.habitability`);
     // Hovering a plant shows it in the tooltip (the nearest plant in view, if any is).
-    r.plants.tooltip = await evaluate(`new Promise((resolve) => {
+    const hover = () => evaluate(`new Promise((resolve) => {
       const P = planet.plants;
       const cam = game.camera;
       const V = cam.position.constructor;
@@ -270,6 +270,14 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
         resolve({ shown: !document.getElementById('tooltip').hidden, name, known: P.plan.species.some((s) => s.name === name) });
       }));
     })`);
+    r.plants.tooltip = await hover();
+    if (r.plants.tooltip.skipped && r.plants.plants > 0) {
+      // Over the sea, or land too far off: hover above the first loaded plant and try again.
+      await evaluate(`(() => { const p = [...planet.plants.cells.values()].flatMap((c) => c.plants)[0]; if (p) planet.ship.placeAt(new (planet.ship.direction.constructor)(p.x, p.y, p.z)); })()`);
+      await sleep(1500);
+      for (let i = 0; i < 80 && !(await evaluate(`planet.plants.settled`)); i++) await sleep(250);
+      r.plants.tooltip = await hover();
+    }
     if (handoverShot) {
       const toggle = async (want) => {
         await evaluate(`document.getElementById('graphics-plants').click()`);
