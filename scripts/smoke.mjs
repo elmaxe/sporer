@@ -84,7 +84,8 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
   if (handoverShot) await evaluate(`__seamless.freezeWhen = 'planet'`);
   await wheel(-300); // keep scrolling in
   if (handoverShot) r.handoverShot = await freezeShot(handoverShot);
-  for (let i = 0; i < 20 && (await evaluate(`levels.mode !== 'planet' || levels.transitioning`)); i++) await sleep(250);
+  // Right after a page load the headless frame rate can be ~2 FPS, and a click while the zoom still runs is ignored.
+  for (let i = 0; i < 40 && (await evaluate(`levels.mode !== 'planet' || levels.transitioning`)); i++) await sleep(250);
   r.mode = await evaluate(`levels.mode`);
   r.soundIn = await evaluate(`audio.lastPlayed?.name ?? null`);
   if (r.mode !== 'planet') return r;
@@ -123,10 +124,17 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
   r.skyClock = +(skyAfter[1] - skyBefore[1]).toFixed(2);
   r.flewDegrees = await evaluate(`+(planet.ship.direction.angleTo(__start) * 180 / Math.PI).toFixed(1)`);
   r.altitudeOk = await evaluate(`Math.abs(planet.ship.object.position.length() - planet.ship.radius) < 0.5`);
-  // The zoom sets the altitude: all the way in skims the peaks, all the way out climbs to high orbit.
-  await wheel(-50000);
-  await sleep(1500);
+  // The zoom sets the altitude: all the way in skims the peaks, all the way out climbs to high orbit. Waits for the
+  // camera to get there and the ship to follow (at headless frame rates the game runs slower than real time).
   const altitude = `+(planet.ship.object.position.length() - planet.radius).toFixed(1)`;
+  const settled = `Math.abs(planet.orbit.zoom - planet.orbit.targetDistance) < 0.5 &&
+    Math.abs(planet.ship.radius - planet.flyingRadius(planet.orbit.zoom)) < 0.5`;
+  const settle = async () => {
+    await sleep(500);
+    for (let i = 0; i < 40 && !(await evaluate(settled)); i++) await sleep(250);
+  };
+  await wheel(-50000);
+  await settle();
   r.altitude = { low: await evaluate(altitude) };
   r.lava = await evaluate(
     `planet.eruptions && { vents: planet.eruptions.activity.vents.length, events: planet.eruptions.events.length, blobs: planet.eruptions.liveBlobs }`,
@@ -143,7 +151,7 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
   writeFileSync(r.screenshot, Buffer.from(shot.result.data, 'base64'));
 
   await wheel(50000); // to max zoom
-  await sleep(1500);
+  await settle();
   r.altitude.high = await evaluate(altitude);
   await wheel(300); // keep scrolling out
   for (let i = 0; i < 20 && (await evaluate(`levels.mode !== 'system' || levels.transitioning`)); i++) await sleep(250);
