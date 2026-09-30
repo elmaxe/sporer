@@ -127,8 +127,8 @@ function sampledSphere(geometry: THREE.BufferGeometry, sample: SurfaceSampler, d
  */
 export type GasPainter = (x: number, y: number, z: number, out: THREE.Color) => void;
 
-/** How much of a stripe's width (from its far edge) blends into the next stripe's colour: crisp edges, softened just enough not to alias. */
-export const GAS_EDGE_START = 0.88;
+/** How much of a stripe's width (from its far edge) blends into the next stripe's colour: soft enough to read as cloud, not a painted line. */
+export const GAS_EDGE_START = 0.75;
 
 /** The most stripes a gas giant gets, plus one (the colour above the last). */
 export const GAS_MAX_STRIPES = 13;

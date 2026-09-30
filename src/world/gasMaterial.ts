@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { SIMPLEX_GLSL } from './noiseGlsl';
 import { GAS_EDGE_START, GAS_MAX_STRIPES, gasStripes } from './planetGeometry';
 
 /*
@@ -16,10 +17,9 @@ const GAS_GLSL = /* glsl */ `
   uniform vec3 uGasStripes[${GAS_MAX_STRIPES}];
   uniform float uGasCount;
   uniform vec3 uGasPhaseA;
-  uniform vec3 uGasPhaseB;
-  uniform vec3 uGasPhaseC;
   uniform vec3 uGasPhaseFine;
   varying vec3 vGasDir;
+${SIMPLEX_GLSL}
 
   // gen/noise.ts terrainNoise, with the seed's phases worked out on the CPU.
   float gasNoise(vec3 p, vec3 ph) {
@@ -39,7 +39,29 @@ const GAS_GLSL = /* glsl */ `
   vec3 gasColor(vec3 d) {
     // Width of a pixel in direction units: detail narrower than a few of them fades out.
     float px = max(length(fwidth(d)), 1e-6);
-    float lat = d.y + 0.05 * gasNoise(vec3(d.x * 1.2, d.y * 2.0, d.z * 1.2), uGasPhaseA);
+    // Clouds: billowy turbulence, stretched along the bands (latitude changes fastest) and swirled
+    // by warping the lookup with a coarser pass of itself. Octaves narrower than a few pixels fade out.
+    vec3 off = uGasPhaseFine * 3.0;
+    vec3 q = vec3(d.x * 5.0, d.y * 15.0, d.z * 5.0) + off;
+    vec3 warp = vec3(snoise(q * 0.45), snoise(q * 0.45 + 17.0), snoise(q * 0.45 + 41.0));
+    q += 0.3 * warp;
+    float n = 0.0;
+    float amp = 0.5;
+    float total = 0.0;
+    float freq = 1.0;
+    for (int o = 0; o < 8; o++) {
+      float fade = smoothstep(1.5, 5.0, (1.0 / (freq * 15.0)) / px);
+      if (fade <= 0.0) break;
+      n += amp * fade * snoise(q * freq);
+      total += amp;
+      amp *= 0.5;
+      freq *= 2.1;
+    }
+    n /= total * 0.6;
+    // Puffs lighter than the band, gaps between them darker, softly.
+    float cloud = smoothstep(-0.5, 0.7, n);
+    float shade = mix(-0.11, 0.1, cloud);
+    float lat = d.y + 0.05 * gasNoise(vec3(d.x * 1.2, d.y * 2.0, d.z * 1.2), uGasPhaseA) + 0.02 * n;
     float s = clamp((lat + 1.0) * 0.5, 0.0, 0.9999) * uGasCount;
     int k = int(floor(s));
     float edge = ${GAS_EDGE_START.toFixed(2)};
@@ -47,24 +69,6 @@ const GAS_GLSL = /* glsl */ `
     float soft = max(1.0 - edge, px * uGasCount * 0.5);
     vec3 col = mix(uGasStripes[k], uGasStripes[k + 1], smoothstep(1.0 - soft, 1.0, s - float(k)));
 
-    float wave = gasNoise(vec3(d.x * 4.0, d.y * 6.0, d.z * 4.0), uGasPhaseB);
-    float swirl = gasNoise(vec3(d.x * 12.0, d.y * 40.0, d.z * 12.0), uGasPhaseC);
-    float band = smoothstep(2.0, 6.0, 0.07 / px);
-    float shade = 0.08 * sin(lat * 90.0 + 4.0 * wave) * band + 0.06 * swirl * smoothstep(2.0, 6.0, 0.15 / px);
-
-    // Fine turbulence stretched along the bands (latitude changes fastest), swirled by the wave.
-    float freq = 60.0;
-    float amp = 0.1;
-    for (int o = 0; o < 5; o++) {
-      float fade = smoothstep(2.0, 6.0, (6.2831853 / (freq * 2.5)) / px);
-      if (fade <= 0.0) break;
-      float n = sin(d.y * freq * 3.1 + (d.x * 1.7 + d.z * 0.9) * freq * 0.3 + uGasPhaseFine.x + 0.6 * float(o) + 2.0 * wave)
-              * sin((d.x * 1.1 - d.z * 1.3) * freq * 0.5 + d.y * freq * 0.4 + uGasPhaseFine.y)
-              * sin(d.y * freq * 1.3 + d.z * freq * 0.4 + uGasPhaseFine.z);
-      shade += fade * amp * 2.5 * n;
-      freq *= 2.3;
-      amp *= 0.82;
-    }
     return col * (1.0 + shade);
   }
 `;
@@ -87,10 +91,8 @@ export function createGasMaterial(seed: number, bands: readonly string[]): THREE
   const uniforms = {
     uGasStripes: { value: colours },
     uGasCount: { value: stripes },
-    // terrainNoise's phases for the seeds the painter uses (seed, seed + 1, seed + 2), and the fine octaves'.
+    // terrainNoise's phases for the seeds the painter uses (seed), and the clouds' offset in the noise.
     uGasPhaseA: { value: phases(seed, 1.3, 2.7, 0.7) },
-    uGasPhaseB: { value: phases(seed + 1, 1.3, 2.7, 0.7) },
-    uGasPhaseC: { value: phases(seed + 2, 1.3, 2.7, 0.7) },
     uGasPhaseFine: { value: phases(seed, 3.1, 1.9, 0.3) },
   };
   const material = new THREE.MeshStandardMaterial({ roughness: 0.9 });
