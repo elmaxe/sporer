@@ -270,7 +270,7 @@ export class LabLevel extends Level {
     let target: THREE.Object3D = this.pivot;
     let up: THREE.Vector3 | undefined;
     if (globeView) {
-      const globe = (this.globe = this.add(new PlanetGlobe(this.scene, config, clock)));
+      const globe = (this.globe = this.add(new PlanetGlobe(this.scene, config, clock, camera, debug)));
       this.sun.link(globe);
       const R = (this.radius = globe.radius);
       this.eruptions = globe.lava
@@ -346,6 +346,35 @@ export class LabLevel extends Level {
     });
   }
 
+  /**
+   * The wireframe with hidden lines removed. WebGL draws a wireframe as
+   * lines, which are never back-face culled, so the far side of every sphere
+   * would show through the near side. First the solid surfaces go into the
+   * depth buffer only (pushed back a little, so the lines on them still pass),
+   * then the scene is drawn as usual over it.
+   */
+  private hiddenLines(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera): void {
+    const solids = this.solids;
+    const others = this.others;
+    solids.length = 0;
+    others.length = 0;
+    this.scene.traverseVisible((o) => {
+      if (o instanceof THREE.Mesh && o.material instanceof THREE.MeshStandardMaterial) solids.push(o.material);
+      else if (o !== this.scene && (o instanceof THREE.Mesh || o instanceof THREE.Points || o instanceof THREE.Sprite || o instanceof THREE.Line)) others.push(o);
+    });
+    for (const m of solids) Object.assign(m, { wireframe: false, colorWrite: false, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
+    for (const o of others) o.visible = false;
+    renderer.render(this.scene, camera);
+    for (const m of solids) Object.assign(m, { wireframe: true, colorWrite: true, polygonOffset: false });
+    for (const o of others) o.visible = true;
+    renderer.autoClear = false;
+    renderer.render(this.scene, camera);
+    renderer.autoClear = true;
+  }
+
+  private readonly solids: THREE.MeshStandardMaterial[] = [];
+  private readonly others: THREE.Object3D[] = [];
+
   /** Where the camera is now, for the next build. */
   carry(): LabCarry {
     this.cameraCenter(this.center);
@@ -369,11 +398,11 @@ export class LabLevel extends Level {
     if (zoom !== undefined) this.orbit.setDistance(zoom * this.radius);
   }
 
-  /** Triangles drawn for the planet (surface, sea, rings, atmosphere). */
+  /** Triangles drawn for the planet (surface, sea, rings, atmosphere; the surface chunks shown now, before frustum culling). */
   get triangles(): number {
     let n = 0;
     const root = this.globe?.object ?? this.bodies?.planet.object;
-    root?.traverse((o) => {
+    root?.traverseVisible((o) => {
       if (!(o instanceof THREE.Mesh)) return;
       const g = o.geometry as THREE.BufferGeometry;
       n += (g.index ? g.index.count : g.getAttribute('position').count) / 3;
@@ -386,7 +415,11 @@ export class LabLevel extends Level {
   }
 
   override render(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera): void {
-    renderer.render(this.scene, camera);
+    if (this.view.wireframe) {
+      this.hiddenLines(renderer, camera);
+    } else {
+      renderer.render(this.scene, camera);
+    }
     // The map draws into the same canvas: no clearing in between.
     renderer.autoClear = false;
     this.map?.render(renderer);

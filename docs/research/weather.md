@@ -2,7 +2,7 @@
 
 ## Question
 
-Roadmap step 18 gives some bodies weather (`gen/weather.ts`, drawn by `world/weatherLook.ts` and `planet/Weather.ts`). It needs:
+Roadmap step 22 gives some bodies weather (`gen/weather.ts`, drawn by `world/weatherLook.ts` and `planet/Weather.ts`). It needs:
 
 1. **Which bodies** have weather, and what kind, from the climate (step 12): what condenses into cloud and rain (water, sulphuric acid, methane), or whether only dust gets lifted.
 2. **How cloudy** a world is: Earth's cloud fraction, and how it differs over land and sea; Titan's.

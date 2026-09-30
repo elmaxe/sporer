@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "smoke": "node scripts/smoke.mjs",
@@ -20,6 +20,7 @@
     "three": "^0.186.1"
   },
   "devDependencies": {
+    "@types/node": "^24.19.0",
     "@types/stats.js": "^0.17.4",
     "@types/three": "^0.186.0",
     "typescript": "^7.0.2",

@@ -96,10 +96,11 @@
           <label>Effects <input type="range" data-key="sfx" min="0" max="1" step="0.01" /><output data-key="sfx"></output></label>
           <button id="audio-mute" class="menu-button" type="button"></button>
         </section>
-        <section id="graphics">
-          <h3>Graphics</h3>
-          <p>Clouds, storms, rain and lightning. Turn off if the game runs slowly.</p>
+        <section id="menu-display">
+          <h3>Display</h3>
+          <button id="menu-fps" class="menu-button" type="button" aria-pressed="false">Show FPS</button>
           <button id="graphics-weather" class="menu-button" type="button" aria-pressed="true">Weather: on</button>
+          <p>Weather is clouds, storms, rain and lightning. Turn it off if the game runs slowly.</p>
         </section>
         <section id="menu-lab-section">
           <h3>Planet lab</h3>
@@ -107,8 +108,10 @@
           <a id="menu-lab" class="menu-button" href="lab.html" target="_blank" rel="noopener">Open the planet lab</a>
         </section>
         <p class="menu-keys">Esc: menu · M: mute</p>
+        <p id="menu-build" class="menu-build"></p>
       </div>
     </div>
+    <div id="fps" hidden></div>
     <div id="loading">Loading…</div>
     <script type="module" src="/src/main.ts"></script>
   </body>

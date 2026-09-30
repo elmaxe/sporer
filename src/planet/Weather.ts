@@ -2,20 +2,21 @@ import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
 import { groundRadius } from '../gen/geysers';
-import type { PlanetStyle } from '../gen/planets';
+import { GLOBE_SIZE_FACTOR, type PlanetStyle } from '../gen/planets';
 import { MAX_STORMS, flashBrightness, hash01, stormCentre, stormStrength, type Flash, type Precipitation } from '../gen/weather';
 import type { Vec3Tuple } from '../gen/starActivity';
 import { BOLT_RENDER_ORDER, RAIN_RENDER_ORDER, weatherParams, type WeatherLook } from '../world/weatherLook';
 import type { RenderClock } from './PlanetFrame';
 import { RELIEF_SCALE } from './frame';
 
+/** Lengths grow with the globes (GLOBE_SIZE_FACTOR), like the rest of the weather; the light ×16 for its inverse-square falloff. */
 export const lowWeatherParams = {
   /** Opacity of the rain shafts. */
   rain: 1,
   /** Peak intensity of the light a flash throws on the ground. */
-  light: 1500,
+  light: 1500 * GLOBE_SIZE_FACTOR ** 2,
   /** Width of a bolt's core, units. */
-  boltWidth: 0.16,
+  boltWidth: 0.16 * GLOBE_SIZE_FACTOR,
 };
 
 /** Rain, snow, acid and methane colours (lit by the sun in the shader). */
@@ -202,7 +203,7 @@ export class Weather implements Entity {
             uTime: { value: 0 },
             uFall: { value: data.fallSpeed },
             // Snowflakes are specks, drops streaks.
-            uStreak: { value: snow ? 0.7 : 2.2 },
+            uStreak: { value: (snow ? 0.7 : 2.2) * GLOBE_SIZE_FACTOR },
             uReach: { value: data.reach },
             uOpacity: { value: 1 },
             uColor: { value: new THREE.Color(PRECIPITATION_COLOR[data.precipitation]) },
@@ -257,8 +258,8 @@ export class Weather implements Entity {
 
     const f = debug.folder('Weather up close');
     f?.add(lowWeatherParams, 'rain', 0, 3);
-    f?.add(lowWeatherParams, 'light', 0, 5000);
-    f?.add(lowWeatherParams, 'boltWidth', 0.02, 1);
+    f?.add(lowWeatherParams, 'light', 0, 5000 * GLOBE_SIZE_FACTOR ** 2);
+    f?.add(lowWeatherParams, 'boltWidth', 0.02, 1 * GLOBE_SIZE_FACTOR);
     this.update();
   }
 
@@ -292,7 +293,7 @@ export class Weather implements Entity {
       const radius = e.size * R * (e.kind === 'cyclone' ? 0.55 : 0.45);
       this.rainCentre!.setXYZW(n, this.centre[0], this.centre[1], this.centre[2], radius);
       // From the cloud base (a little under the layer) to just under sea level (the terrain hides the rest).
-      this.rainSpan!.setXYZW(n, R * 0.99, top - 0.6, s, e.seed % 1000);
+      this.rainSpan!.setXYZW(n, R * 0.99, top - 0.6 * GLOBE_SIZE_FACTOR, s, e.seed % 1000);
       n++;
     }
     rain.count = this.shaftCount = n;
@@ -315,7 +316,7 @@ export class Weather implements Entity {
       if (!f.ground || this.boltFor(f.seed)) continue;
       const free = this.boltFor(-1);
       if (!free) break;
-      this.shapeBolt(free, f, data.cloudRadius - 0.6);
+      this.shapeBolt(free, f, data.cloudRadius - 0.6 * GLOBE_SIZE_FACTOR);
     }
 
     const cam = this.camera.position;
@@ -340,7 +341,7 @@ export class Weather implements Entity {
     for (let i = 0; i < flashCount; i++) {
       const f = flashes[i]!;
       const d = this.a.set(f.dir[0], f.dir[1], f.dir[2]).multiplyScalar(data.cloudRadius).distanceTo(cam);
-      const score = flashBrightness(f, time) / (1 + d / 60);
+      const score = flashBrightness(f, time) / (1 + d / (60 * GLOBE_SIZE_FACTOR));
       if (score > bestLight) {
         bestLight = score;
         best = f;

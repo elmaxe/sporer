@@ -27,6 +27,18 @@ export const SIZE_CLASSES: readonly SizeClass[] = ['dwarf', 'small', 'earth', 's
 export const EARTH_GAME_RADIUS = 8;
 
 /**
+ * An Earth-sized body's radius in the planet level's units (low orbit), where
+ * the UFO is ~4 wide. The planet level's scale: raising it makes every globe
+ * bigger next to the UFO. The low-orbit terrain's finest detail
+ * (`detailedTerrain`'s octaves) and the LOD's deepest level follow it, so hills
+ * and facets keep their size next to the UFO.
+ */
+export const EARTH_GLOBE_RADIUS = 400;
+
+/** How many times bigger globes are than the original low-orbit scale (Earth radius 100). */
+export const GLOBE_SIZE_FACTOR = EARTH_GLOBE_RADIUS / 100;
+
+/**
  * Real radius (Earth radii) → game radius. Square-root compression: Earth is
  * 8, Mercury 4.9, Neptune 15.7, Jupiter 26.8, so a Jupiter is ~3× an Earth
  * instead of 11× and a Ceres still reads as a world. Deliberately stylised;

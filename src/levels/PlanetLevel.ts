@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
 import type { Input } from '../core/Input';
 import { describeClimateDetail } from '../gen/climate';
+import { GLOBE_SIZE_FACTOR } from '../gen/planets';
 import { bodyLabLink } from '../lab/bodyLink';
 import { describeGeysers, geyserActivity } from '../gen/geysers';
 import { describeWeather } from '../gen/weather';
@@ -23,10 +24,14 @@ import type { Planet } from '../world/Planet';
 import { Level } from './Level';
 import type { SystemLevel } from './SystemLevel';
 
-/** Low-orbit camera, in planet-level units (an Earth-sized globe's radius is 100); maxDistance is for Earth-sized and bigger globes. */
+/**
+ * Low-orbit camera, in planet-level units (an Earth-sized globe's radius is
+ * EARTH_GLOBE_RADIUS). The near end is next to the UFO; maxDistance (for
+ * Earth-sized and bigger globes) takes in the globe, so it grows with them.
+ */
 export const planetCameraParams: OrbitParams = {
   minDistance: 8,
-  maxDistance: 260,
+  maxDistance: 260 * GLOBE_SIZE_FACTOR,
   zoomSpeed: 0.0025,
   rotateSpeed: 0.005,
   damping: 0.1,
@@ -89,7 +94,7 @@ export class PlanetLevel extends Level {
   ) {
     super();
     this.frame = this.add(new PlanetFrame(body, system.world.time, debug));
-    const globe = this.add(new PlanetGlobe(this.scene, body.config, this.frame));
+    const globe = this.add(new PlanetGlobe(this.scene, body.config, this.frame, camera, debug));
     this.eruptions = globe.lava
       ? this.add(new LavaEruptions(this.scene, this.frame, globe.lava.activity, body.config.seed, body.config.style.sea!, debug))
       : null;

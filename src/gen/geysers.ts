@@ -1,7 +1,7 @@
 import type { ClimateData } from './climate';
 import { LAVA_GRAVITY, MIN_ARC_GRAVITY, randomDirection, tangent } from './lavaActivity';
 import { detailedTerrain } from './noise';
-import type { MoonType, PlanetStyle, PlanetType } from './planets';
+import { GLOBE_SIZE_FACTOR, type MoonType, type PlanetStyle, type PlanetType } from './planets';
 import { Rng, hashSeed } from './rng';
 import type { Vec3Tuple } from './starActivity';
 
@@ -72,28 +72,32 @@ export interface GeyserSpec {
 
 export const GEYSER_SPECS: Record<GeyserKind, GeyserSpec> = {
   // Near-continuous, like Enceladus's jets; the moons' output swells and fades with the orbit (see geyserPulse).
-  cryo: { period: [20, 35], duty: [0.7, 0.95], rate: 10, spread: 0.14, size: 0.16, minSize: 1, growth: 3 },
+  cryo: { period: [20, 35], duty: [0.7, 0.95], rate: 10, spread: 0.14, size: 0.16, minSize: 1 * GLOBE_SIZE_FACTOR, growth: 3 },
   // Every so often, like Old Faithful and Strokkur (compressed from minutes to seconds).
-  steam: { period: [20, 55], duty: [0.2, 0.35], rate: 30, spread: 0.08, size: 0.3, minSize: 1, growth: 4 },
+  steam: { period: [20, 55], duty: [0.2, 0.35], rate: 30, spread: 0.08, size: 0.3, minSize: 1 * GLOBE_SIZE_FACTOR, growth: 4 },
   // Long-lived, like Io's plumes (months to years).
-  sulphur: { period: [45, 90], duty: [0.6, 0.9], rate: 16, spread: 0.6, size: 0.3, minSize: 1.2, growth: 2.5 },
+  sulphur: { period: [45, 90], duty: [0.6, 0.9], rate: 16, spread: 0.6, size: 0.3, minSize: 1.2 * GLOBE_SIZE_FACTOR, growth: 2.5 },
 };
 
-/** Peak height of a cryo / steam plume at 1 g, planet-level units (they scale as g^−½, like the lava's arcs). */
-export const PEAK_1G: Record<'cryo' | 'steam', number> = { cryo: 6, steam: 5 };
+/**
+ * Peak height of a cryo / steam plume at 1 g, planet-level units (they scale as g^−½, like the lava's arcs).
+ * Like the lava's, every length and speed here grows with the globes (GLOBE_SIZE_FACTOR) and no time does,
+ * so plumes look the same next to the planet whatever its size.
+ */
+export const PEAK_1G: Record<'cryo' | 'steam', number> = { cryo: 6 * GLOBE_SIZE_FACTOR, steam: 5 * GLOBE_SIZE_FACTOR };
 /** Plumes never climb higher than this fraction of the body's radius. Io's are real fractions (sulphur). */
 export const MAX_PEAK_FRACTION: Record<GeyserKind, number> = { cryo: 0.6, steam: 0.06, sulphur: 0.23 };
-/** No plume is lower than this, units (a small moon's Prometheus-type plume would be a speck under the ship, 4 units wide). */
-export const MIN_PEAK = 3;
+/** No plume is lower than this, units (a small moon's Prometheus-type plume would be a speck on the globe). */
+export const MIN_PEAK = 3 * GLOBE_SIZE_FACTOR;
 /** Io's plumes as fractions of its 1821.49 km radius: Prometheus-type 50–120 km, Pele-type 300–426 km. */
 export const IO_PLUMES = { prometheus: [50 / 1821.49, 120 / 1821.49], pele: [300 / 1821.49, 426 / 1821.49], peleShare: 0.25 } as const;
 
 /** Steam: the rising cloud. Drag (1/s) that stops the jet, buoyancy (units/s², upwards) and lifetime range. */
-export const STEAM_PUFF = { drag: 1.2, buoyancy: 0.35, life: [5, 9] as const, share: 0.7 };
+export const STEAM_PUFF = { drag: 1.2, buoyancy: 0.35 * GLOBE_SIZE_FACTOR, life: [5, 9] as const, share: 0.7 };
 /** Drag (1/s) on cryo grains where there's air. */
 export const CRYO_AIR_DRAG = 0.3;
 /** Wind speed range, units/s, where there's air. */
-export const WIND_SPEED = [0.5, 1.2] as const;
+export const WIND_SPEED = [0.5 * GLOBE_SIZE_FACTOR, 1.2 * GLOBE_SIZE_FACTOR] as const;
 
 export interface GeyserVent {
   /** Unit direction (body frame). */

@@ -59,6 +59,32 @@ body {
   opacity: 0.7;
 }
 
+/* The FPS counter (menu → Show FPS): top centre, out of the HUD's and maps' way. */
+#fps {
+  position: fixed;
+  top: max(8px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 50;
+}
+
+#fps[hidden] {
+  display: none;
+}
+
+/* On touch the HUD sits at the top: the counter goes to the bottom, between the stick and the buttons. */
+html.touch #fps {
+  top: auto;
+  bottom: max(8px, env(safe-area-inset-bottom));
+}
+
 /* Above the maps, which show tooltips for their bodies too. */
 #tooltip {
   position: fixed;
@@ -436,6 +462,17 @@ html:not(.touch) .map-panel.folded .map-body {
 
 html.touch #menu .menu-keys {
   display: none;
+}
+
+/* Which build is running (branch · build number · commit), selectable to paste into a bug report. */
+#menu .menu-build {
+  margin: 0;
+  font-size: 11px;
+  opacity: 0.45;
+  text-align: center;
+  overflow-wrap: anywhere;
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 /* Touch play (html.touch, set by TouchControls): on-screen ship controls, HUD moved to the top. */

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
 import { groundDensity, PATH_SAMPLES, type AtmosphereLook } from '../gen/atmosphere';
+import { createCubeSphere } from './cubeSphere';
 
 /**
  * Tunables of the atmosphere shader (the look's shape comes from
@@ -64,8 +65,9 @@ export function createAtmosphere(
   color: string,
   look: AtmosphereLook,
   sun: AtmosphereSun,
-  segments = 64,
-): THREE.Mesh<THREE.SphereGeometry, THREE.ShaderMaterial> {
+  /** Cube sphere segments (see cubeSphere.ts). */
+  segments = 18,
+): THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial> {
   // The polygons sit inside the sphere they approximate; push them out so the shell's true top is covered.
   const meshRadius = radius * look.top * MESH_MARGIN;
   const material = new THREE.ShaderMaterial({
@@ -179,7 +181,7 @@ export function createAtmosphere(
     blendDstAlpha: THREE.OneFactor,
     depthWrite: false,
   });
-  const mesh = new THREE.Mesh(new THREE.SphereGeometry(meshRadius, segments, segments / 2), material);
+  const mesh = new THREE.Mesh(createCubeSphere(meshRadius, segments), material);
   mesh.name = 'Atmosphere';
   mesh.renderOrder = ATMOSPHERE_RENDER_ORDER;
   const centre = new THREE.Vector3();

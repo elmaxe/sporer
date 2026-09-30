@@ -1,5 +1,14 @@
 // Headless browser smoke test over the Chrome DevTools Protocol.
-// Usage: npm run smoke [-- http://localhost:5173/]   (dev server must be running)
+// Usage: npm run smoke [-- [options] [http://localhost:5173/]]   (dev server must be running)
+//   --only <sections>  run just these, comma-separated, in the usual order: core (flying, picking, system map,
+//                      living stars, comets, eye, sky), galaxy (the galaxy loop), audio, planet (the home planet
+//                      loop, held zoom, seamless zooms), types (every planet type and geyser kind), lab, touch
+//   --quick            everything but types
+//   --timeout <s>      give up after this long (default 900), reporting the section it was in
+//   --full-quality     render as players see it (default: ?quality=low, half resolution without antialiasing,
+//                      about 5x the frame rate under SwiftShader)
+// Each section prints its time and result on stderr as it finishes. A page that stops answering (SwiftShader can
+// block it for minutes) fails the run at once, naming the step, instead of hanging.
 // Checks: W moves the ship along -Z, the autopilot flies back to a point, hovering + clicking
 // the star targets it, the system map shows every planet and moon (hover, click to fly, N folds it), and the galaxy
 // loop works (scroll out to the galaxy, click the nearest star, travel, scroll in to its system, where the ship flies
@@ -31,30 +40,86 @@
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { launch, sleep } from './lib/browser.mjs';
+import { launch, sleep, StallError } from './lib/browser.mjs';
 
 const args = process.argv.slice(2);
+const option = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
+const SECTIONS = ['core', 'galaxy', 'audio', 'planet', 'types', 'lab', 'touch'];
+const only = option('--only')?.split(',');
+if (only?.some((name) => !SECTIONS.includes(name))) {
+  console.error(`--only takes some of: ${SECTIONS.join(', ')}`);
+  process.exit(2);
+}
 const quick = args.includes('--quick');
-const url = args.find((a) => !a.startsWith('--')) ?? 'http://localhost:5173/';
+const runs = (name) => (only ? only.includes(name) : name !== 'types' || !quick);
+const deadline = Number(option('--timeout') ?? 900);
+const gameUrl = new URL(args.find((a, i) => !a.startsWith('--') && !['--only', '--timeout'].includes(args[i - 1])) ?? 'http://localhost:5173/');
+if (!args.includes('--full-quality') && !gameUrl.searchParams.has('quality')) gameUrl.searchParams.set('quality', 'low');
+const url = gameUrl.href;
+/** Another page of the game (e.g. lab.html?gen=3) at the same render quality. */
+const pageUrl = (path) => {
+  const u = new URL(path, url);
+  if (gameUrl.searchParams.has('quality')) u.searchParams.set('quality', gameUrl.searchParams.get('quality'));
+  return u.href;
+};
+if (!(await fetch(url).then((r) => r.ok, () => false))) {
+  console.error(`Nothing at ${gameUrl.origin}: start the dev server first (npm run dev -- --strictPort)`);
+  process.exit(1);
+}
 
 const outDir = mkdtempSync(join(tmpdir(), 'spore2-smoke-'));
 // A fresh browser and profile every run (so no saved volume or mute carries over), at 1280x720.
 const page = await launch({ width: 1280, height: 720 });
 const { send, errors } = page;
-// Never throws: a failed expression reads as undefined and fails the checks that use it.
+// Only throws if the page stops answering: a failed expression reads as undefined and fails the checks that use it.
 const evaluate = page.tryEvaluate;
+/** Polls `expression` until it's truthy, for at most `ms`; returns whether it got there. */
+const until = (expression, ms) => page.waitFor(expression, ms);
+/** Waits for `n` frames to be drawn. */
+const drawFrames = (n) => evaluate(`new Promise((r) => { let n = 0; (function f() { if (++n > ${n}) r(); else requestAnimationFrame(f); })(); })`);
+/** True once the game has loaded and no level transition runs. */
+const READY = `typeof window.levels !== 'undefined' && typeof window.ship !== 'undefined' && !levels.transitioning`;
 
-await send('Page.navigate', { url });
-await sleep(4000);
+const T0 = Date.now();
+const sections = {};
+let current = 'loading';
+const report = () => ({ ok: false, sections, seconds: Math.round((Date.now() - T0) / 1000), errors });
+const timer = setTimeout(() => {
+  console.error(`[smoke] gave up after ${deadline} s, in ${current}`);
+  console.log(JSON.stringify({ ...report(), timedOut: current }, null, 2));
+  process.exit(1);
+}, deadline * 1000);
 
 // Let the first frames draw (shader compiles, the sky's one-off bake) before timing anything.
-await page.waitFor(`typeof window.levels !== 'undefined'`, 30000);
-await evaluate(`new Promise((r) => { let n = 0; (function f() { if (++n > 20) r(); else requestAnimationFrame(f); })(); })`);
+const started = await page.goto(url, READY, 60000);
+if (started) await drawFrames(20);
 
 const state = `({ speed: +ship.speed.toFixed(1), pos: ship.object.position.toArray().map((n) => +n.toFixed(1)) })`;
-const started = await evaluate(`typeof window.ship !== 'undefined'`);
 let before, after, autopilot, pick, systemMap, sky, living, comet, eye, galaxyLoop, fps, audio, planetLoop, heldZoom, seamless;
 const planetTypes = [];
+let lab = null;
+let touch = null;
+let touchLab = null;
+
+/**
+ * Runs section `name` (if it was asked for) and records whether it passed and how long it took. A page that
+ * stops answering skips everything after it: the browser is stuck.
+ */
+let stalled = null;
+async function section(name, run) {
+  if (!runs(name) || stalled || !started) return;
+  current = name;
+  const t0 = Date.now();
+  const s = (sections[name] = { ok: false });
+  try {
+    s.ok = !!(await run());
+  } catch (e) {
+    s.error = e.message;
+    if (e instanceof StallError) stalled = `${name}: ${e.message}`;
+  }
+  s.seconds = +((Date.now() - t0) / 1000).toFixed(1);
+  console.error(`[smoke] ${name}: ${s.ok ? 'ok' : 'FAILED'} in ${s.seconds} s${s.error ? ` (${s.error})` : ''}`);
+}
 const wheel = (deltaY) =>
   evaluate(`game.renderer.domElement.dispatchEvent(new WheelEvent('wheel', { deltaY: ${deltaY}, bubbles: true, cancelable: true }))`);
 
@@ -89,7 +154,9 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
   })()`);
   await sleep(300);
   await wheel(-50000); // to min zoom
-  await sleep(1500);
+  // Keep scrolling only once the camera has (almost) got there, or the extra scroll doesn't count as past it.
+  await until(`(() => { const o = levels.systemLevel.orbit;
+    return o.targetDistance <= o.params.minDistance && o.zoom < o.params.minDistance * 1.2; })()`, 10000);
   if (handoverShot) await evaluate(`__seamless.freezeWhen = 'planet'`);
   await wheel(-300); // keep scrolling in
   if (handoverShot) r.handoverShot = await freezeShot(handoverShot);
@@ -125,7 +192,8 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
       targetAngle: +planet.ship.destination.angleTo(point).toFixed(3),
     })));
   })`);
-  await sleep(3000);
+  // Until it has flown a few degrees and a little game time has passed.
+  await until(`planet.ship.direction.angleTo(__start) * 180 / Math.PI > 4 && ${skyTime}[1] - ${JSON.stringify(skyBefore?.[1] ?? 0)} > 0.6`, 10000);
   // The sky's star keeps living, and its clock follows the planet level's (compared with that clock, not the
   // wall clock: at headless frame rates game time runs slower than real time).
   const skyAfter = await evaluate(skyTime);
@@ -240,10 +308,10 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
 }
 const measureFps = `new Promise((r) => { let n = 0; const t0 = performance.now();
   (function f() { if (++n === 120) r(Math.round(120000 / (performance.now() - t0))); else requestAnimationFrame(f); })(); })`;
-if (started) {
+await section('core', async () => {
   before = await evaluate(state);
   await evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }))`);
-  await sleep(2000);
+  await until(`ship.object.position.z < ${before?.pos[2]} - 12 && ship.speed > 5`, 6000);
   after = await evaluate(state);
   await evaluate(`window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }))`);
 
@@ -251,7 +319,7 @@ if (started) {
   const home = `{ x: ${before.pos[0]}, y: ${before.pos[1]}, z: ${before.pos[2]} }`;
   const distHome = `ship.object.position.distanceTo(${home})`;
   const startDist = await evaluate(`ship.moveTo(${home}), ${distHome}`);
-  await sleep(4000);
+  await until(`${distHome} < ${Math.max(2, startDist * 0.05)}`, 12000);
   autopilot = { startDist: +startDist.toFixed(1), endDist: +(await evaluate(distHome)).toFixed(1) };
 
   // Hover and click the (first) star at its on-screen position.
@@ -333,7 +401,7 @@ if (started) {
     pickable: world.bodies.some((b) => world.comets.includes(b)),
   })`;
   const first = await evaluate(sample);
-  await sleep(2000);
+  await until(`world.time - ${first.clock} > 1`, 6000);
   const second = await evaluate(sample);
   living = {
     starSeconds: +(second.starTime - first.starTime).toFixed(2),
@@ -378,7 +446,7 @@ if (started) {
   eye = { start: await evaluate(`+levels.systemLevel.eye.exposure.toFixed(2)`) };
   await evaluate(`(() => { const s = world.stars[0], o = levels.systemLevel.orbit;
     o.setFocus(s.renderPosition); o.setDistance(s.radius * 3); })()`);
-  await sleep(2500);
+  await until(`levels.systemLevel.eye.exposure < ${eye.start} - 0.2`, 8000);
   eye.close = await evaluate(`+levels.systemLevel.eye.exposure.toFixed(2)`);
   await evaluate(`levels.systemLevel.orbit.setFocus(null), levels.systemLevel.orbit.setDistance(45)`);
 
@@ -394,14 +462,30 @@ if (started) {
       expectedTrails: world.planets.length + world.moons.length,
     };
   })()`);
-  await sleep(1500);
+  await until(`levels.systemLevel.trails.visibleCount >= 1`, 4000);
+  await drawFrames(5);
   sky.visibleTrails = await evaluate(`levels.systemLevel.trails.visibleCount`);
   const bandShot = await send('Page.captureScreenshot', { format: 'png' });
   sky.screenshot = join(outDir, 'band.png');
   writeFileSync(sky.screenshot, Buffer.from(bandShot.result.data, 'base64'));
 
-  // Galaxy loop, driven by real wheel and pointer events.
-  galaxyLoop = { from: await evaluate(`system.id`) };
+  const moved = after.pos[2] < before.pos[2] - 10 && after.speed > 5;
+  const autopiloted = autopilot.endDist < Math.max(3, autopilot.startDist * 0.1);
+  const picked = pick.target === pick.star && pick.tooltip === pick.star && systemMap.ok;
+  const skyOk = sky.band && sky.trails === sky.expectedTrails && sky.visibleTrails >= 1;
+  const alive =
+    living.clockSeconds > 0.3 &&
+    Math.abs(living.starSeconds - living.clockSeconds) < 0.25 &&
+    living.liveParticles.some((n) => n > 0) &&
+    living.cometsMoved &&
+    !living.pickable &&
+    (comet.none || (comet.tooltip === comet.name && !comet.autopilot)) &&
+    eye.close < eye.start - 0.1;
+  Object.assign(sections.core, { moved, autopiloted, picked, skyOk, alive });
+  return moved && autopiloted && picked && skyOk && alive;
+});
+
+if (started && (runs('galaxy') || runs('audio') || runs('planet'))) {
   // Seamless zooms: while a level transition runs, sample every drawn frame (after drawing, before it's shown):
   // the crossfade weight and the canvas brightness (mean over a sparse grid). Each transition is one segment,
   // from the level it left to the one it reached. Setting __seamless.freezeWhen to a mode stops the game once
@@ -431,11 +515,16 @@ if (started) {
       }
     };
   })()`);
+}
+
+await section('galaxy', async () => {
+  // Galaxy loop, driven by real wheel and pointer events.
+  galaxyLoop = { from: await evaluate(`system.id`) };
   await wheel(50000); // to max zoom
-  await sleep(1500);
+  await until(`(() => { const o = levels.systemLevel.orbit;
+    return o.targetDistance >= o.params.maxDistance && o.zoom > o.params.maxDistance * 0.85; })()`, 10000);
   await wheel(300); // keep scrolling past it
-  await sleep(1800);
-  for (let i = 0; i < 40 && (await evaluate(`levels.transitioning`)); i++) await sleep(250);
+  await until(`levels.mode === 'galaxy' && !levels.transitioning`, 20000);
   galaxyLoop.modeAfterZoomOut = await evaluate(`levels.mode`);
   galaxyLoop.fps = await evaluate(measureFps);
   // Step 6 polish: distant galaxies, twinkle, a slow spin, binaries as two dots.
@@ -498,7 +587,34 @@ if (started) {
   for (let i = 0; i < 60 && (await evaluate(`ship.enRoute`)); i++) await sleep(250);
   galaxyLoop.arrival.parked = await evaluate(arrival);
   fps = await evaluate(measureFps);
+  return (
+    galaxyLoop.modeAfterZoomOut === 'galaxy' &&
+    galaxyLoop.polish.distantGalaxies >= 100 &&
+    galaxyLoop.polish.spinRadPerSec > 0 &&
+    galaxyLoop.polish.spinRadPerSec < 0.01 &&
+    galaxyLoop.polish.dots === galaxyLoop.polish.expectedDots &&
+    galaxyLoop.polish.dots > galaxyLoop.polish.stars &&
+    galaxyLoop.polish.twinkle > 0 &&
+    galaxyLoop.polish.twinkleTime > 0 &&
+    galaxyLoop.clicked.destination === galaxyLoop.clicked.nearest &&
+    galaxyLoop.heldWhileTravelling &&
+    galaxyLoop.dockedAt === galaxyLoop.clicked.nearest &&
+    galaxyLoop.handoverShot !== null &&
+    galaxyLoop.modeAfterZoomIn === 'system' &&
+    galaxyLoop.to === galaxyLoop.clicked.nearest &&
+    galaxyLoop.arrival.flying.target === galaxyLoop.arrival.flying.star &&
+    galaxyLoop.arrival.parked.target === galaxyLoop.arrival.parked.star &&
+    !galaxyLoop.arrival.parked.enRoute &&
+    Math.abs(galaxyLoop.arrival.parked.distance - galaxyLoop.arrival.parked.park) < 3 &&
+    galaxyLoop.arrival.parked.distance > 2 * galaxyLoop.arrival.parked.zone &&
+    // Always arrives just above the ecliptic, with the camera over the ship.
+    galaxyLoop.arrival.parked.aboveEcliptic > 0 &&
+    galaxyLoop.arrival.parked.cameraAboveShip > 0 &&
+    typeof galaxyLoop.shipSpeed === 'number'
+  );
+});
 
+await section('audio', async () => {
   // Audio: a real (trusted) click on the menu button unlocks audio and opens the menu, which pauses the game and
   // holds the volume sliders and a link to the planet lab (for the first planet here); a real Esc closes it.
   const button = await evaluate(`(() => { const r = document.getElementById('menu-toggle').getBoundingClientRect();
@@ -506,7 +622,7 @@ if (started) {
   for (const type of ['mousePressed', 'mouseReleased']) {
     await send('Input.dispatchMouseEvent', { type, ...button, button: 'left', clickCount: 1 });
   }
-  await sleep(1000);
+  await until(`menu.isOpen && game.paused`, 5000);
   const clock = `levels.systemLevel.world.time`;
   const pausedAt = await evaluate(clock);
   await sleep(500);
@@ -530,19 +646,15 @@ if (started) {
   audio.menuShot = join(outDir, 'menu.png');
   writeFileSync(audio.menuShot, await page.screenshot());
   for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, code: 'Escape', key: 'Escape', windowsVirtualKeyCode: 27 });
-  // Closed at once; the clock then has to tick on (a few frames at headless frame rates).
-  audio.closedByEsc = false;
-  for (let i = 0; i < 12 && !audio.closedByEsc; i++) {
-    await sleep(250);
-    audio.closedByEsc = await evaluate(`!menu.isOpen && !game.paused && ${clock} > ${pausedAt}`);
-  }
+  await until(`!menu.isOpen && ${clock} > ${pausedAt}`, 5000);
+  audio.closedByEsc = await evaluate(`!menu.isOpen && !game.paused && ${clock} > ${pausedAt}`);
 
   // Whooshes: zoom out (transition), travel to a neighbour, zoom back in.
   const played = `(audio.lastPlayed && { name: audio.lastPlayed.name, seconds: +audio.lastPlayed.seconds.toFixed(2), count: audio.lastPlayed.count })`;
   audio.sfx = {};
   await evaluate(`levels.toGalaxy()`);
   audio.sfx.out = await evaluate(played);
-  await sleep(1500);
+  await until(`levels.mode === 'galaxy' && !levels.transitioning`, 20000);
   audio.sfx.travel = await evaluate(`(() => {
     const ship = levels.galaxyLevel.ship;
     const here = ship.current.position;
@@ -557,16 +669,35 @@ if (started) {
   for (let i = 0; i < 60 && (await evaluate(`levels.galaxyLevel.ship.travelling || levels.transitioning`)); i++) await sleep(250);
   await evaluate(`levels.toSystem()`);
   audio.sfx.in = await evaluate(played);
-  await sleep(500);
   // The zoom runs slower than real time at headless frame rates (each frame advances it by at most 0.25 s).
-  for (let i = 0; i < 40 && (await evaluate(`levels.transitioning`)); i++) await sleep(250);
+  await until(`levels.mode === 'system' && !levels.transitioning`, 20000);
   audio.sfx.modeAfter = await evaluate(`levels.mode`);
   await send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'KeyM', key: 'm' });
   await send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'KeyM', key: 'm' });
   audio.mutedByKey = await evaluate(
     `document.getElementById('audio').classList.contains('muted') && document.getElementById('menu-toggle').classList.contains('muted')`,
   );
+  return (
+    audio.state === 'running' &&
+    audio.panelOpen &&
+    audio.paused &&
+    audio.effectsSlider &&
+    audio.labLink &&
+    audio.weatherToggle.on &&
+    audio.weatherToggle.offText === 'Weather: off' &&
+    audio.weatherToggle.offHidden &&
+    audio.weatherToggle.back &&
+    audio.closedByEsc &&
+    audio.sfx.out?.name === 'transitionOut' &&
+    audio.sfx.travel?.name === 'travel' &&
+    audio.sfx.in?.name === 'transitionIn' &&
+    audio.sfx.in.count === 3 &&
+    audio.sfx.modeAfter === 'system' &&
+    audio.mutedByKey
+  );
+});
 
+await section('planet', async () => {
   // Planet loop in the current system: the first terran or ocean world, else the first planet.
   planetLoop = await runPlanetLoop(
     `world.planets.find((p) => ['terran', 'ocean'].includes(p.config.type)) ?? world.planets[0]`,
@@ -618,13 +749,17 @@ if (started) {
     const kinds = [...new Set(segments.map((x) => x.zoom))];
     return { segments, kinds };
   })()`);
-  seamless.handoverShots = [galaxyLoop.handoverShot, planetLoop.handoverShot];
+  seamless.handoverShots = [galaxyLoop?.handoverShot, planetLoop.handoverShot];
+  // Each zoom this run went through (the galaxy loop's only if that section ran).
+  const kinds = [...(sections.galaxy ? ['system → galaxy', 'galaxy → system'] : []), 'system → planet', 'planet → system'];
   seamless.ok =
-    ['system → galaxy', 'galaxy → system', 'system → planet', 'planet → system'].every((k) => seamless.kinds.includes(k)) &&
-    seamless.segments.every((x) => x.crossfadeFrames > 0 && x.minBrightness > 0.5);
-}
+    kinds.every((k) => seamless.kinds.includes(k)) && seamless.segments.every((x) => x.crossfadeFrames > 0 && x.minBrightness > 0.5);
+  // Audio is only unlocked by the audio section's real click, so only then can the loop hear its whooshes.
+  const heard = !sections.audio || (planetLoop.soundIn === 'transitionIn' && planetLoop.soundOut === 'transitionOut');
+  return planetLoop.ok && heard && heldZoom.ok && planetLoop.handoverShot !== null && seamless.ok;
+});
 
-if (started && !quick) {
+await section('types', async () => {
   // Every planet type (plus a ringed solid planet and a moon), each in the first system of this galaxy that has one.
   const found = await evaluate(`(() => {
     const want = ['lava', 'barren', 'desert', 'terran', 'ocean', 'ice', 'gas'];
@@ -657,16 +792,16 @@ if (started && !quick) {
   const base = new URL(url);
   for (const [type, { star, expr }] of Object.entries(found)) {
     base.searchParams.set('star', String(star));
-    await send('Page.navigate', { url: base.href });
-    await sleep(4000);
-    const r = await runPlanetLoop(expr, `planet-${type}`);
-    console.error(`planet case ${type} (star ${star}): ${r.ok ? 'ok' : 'FAILED'}`);
-    planetTypes.push({ case: type, star, ...r });
+    current = `types (${type})`;
+    const t0 = Date.now();
+    const loaded = await page.goto(base.href, READY, 30000);
+    const r = loaded ? await runPlanetLoop(expr, `planet-${type}`) : { ok: false, loaded };
+    planetTypes.push({ case: type, star, ...r, seconds: +((Date.now() - t0) / 1000).toFixed(1) });
   }
-}
+  return planetTypes.every((r) => r.ok) && planetTypes.length === 16; // 7 types, ringed, moon, 4 geyser kinds and 3 weather kinds
+});
 const screenshot = join(outDir, 'screenshot.png');
-const shot = await send('Page.captureScreenshot', { format: 'png' });
-writeFileSync(screenshot, Buffer.from(shot.result.data, 'base64'));
+if (started && !stalled) writeFileSync(screenshot, await page.screenshot());
 
 /**
  * The planet lab (lab.html): every planet type and a moon build in the globe and system views and draw a lit
@@ -675,8 +810,7 @@ writeFileSync(screenshot, Buffer.from(shot.result.data, 'base64'));
  */
 async function runLab() {
   const r = { cases: [] };
-  await send('Page.navigate', { url: new URL('lab.html?gen=3', url).href });
-  if (!(await page.waitFor(`typeof window.lab !== 'undefined' && lab.ready`, 30000))) return { ok: false, started: false };
+  if (!(await page.goto(pageUrl('lab.html?gen=3'), `typeof window.lab !== 'undefined' && lab.ready`, 30000))) return { ok: false, started: false };
   // Redraw and read the canvas in the same task (the drawing buffer is only valid until it's shown).
   const brightness = `(() => {
     game.redraw();
@@ -732,7 +866,7 @@ async function runLab() {
     r.panelType === 'ice';
   return r;
 }
-const lab = started ? await runLab() : null;
+await section('lab', async () => (lab = await runLab()).ok);
 
 /**
  * Touch play on an emulated phone (390x844, real CDP touch events): hold a finger on the star (tooltip), lift
@@ -745,11 +879,9 @@ async function runTouch() {
   const H = 844;
   await send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 1, mobile: true });
   await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
-  const home = new URL(url);
-  home.searchParams.delete('star');
-  await send('Page.navigate', { url: home.href });
-  await sleep(4000);
-  await page.waitFor(`typeof window.levels !== 'undefined' && !levels.transitioning`, 30000);
+  const start = new URL(url);
+  start.searchParams.delete('star');
+  await page.goto(start.href, READY, 30000);
   const touch = (type, points) => send('Input.dispatchTouchEvent', { type, touchPoints: points.map(([x, y], id) => ({ x, y, id })) });
   const frames = () => evaluate(`new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))`);
   const swipe = async (from, to, steps = 10) => {
@@ -941,133 +1073,83 @@ async function runTouch() {
     !r.galaxy.shown;
   return r;
 }
-const touch = started ? await runTouch() : null;
 
 /**
- * The planet lab on the same emulated phone: the controls panel starts folded, the on-screen stick and Map
- * button show in low orbit, a drag turns the camera, a tap on the globe flies the UFO there, and the Map button
- * opens the map over the screen.
+ * The planet lab on an emulated phone: the controls panel starts folded, the on-screen stick and Map button show
+ * in low orbit, a drag turns the camera, a tap on the globe flies the UFO there, and the Map button opens the map
+ * over the screen. In a browser of its own: in the same tab, after runTouch's gestures headless Chrome stopped
+ * sending the lab page pointer events at all (no pointerdown in 20 probe touches, while a tap on a button still
+ * clicked it), so the drag and the globe tap never reached the game's input and this failed every run.
  */
 async function runTouchLab() {
-  await send('Page.navigate', { url: new URL('lab.html?gen=4&type=terran', url).href });
-  if (!(await page.waitFor(`typeof window.lab !== 'undefined' && lab.ready`, 30000))) return { ok: false, started: false };
-  const tap = async ([x, y]) => {
-    await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 0 }] });
+  const W = 390;
+  const H = 844;
+  const phone = await launch({ width: W, height: H });
+  try {
+    const send = phone.send;
+    const evaluate = phone.tryEvaluate;
+    await send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 1, mobile: true });
+    await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+    if (!(await phone.goto(pageUrl('lab.html?gen=4&type=terran'), `typeof window.lab !== 'undefined' && lab.ready`, 30000))) return { ok: false, started: false };
+    const tap = async ([x, y]) => {
+      await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 0 }] });
+      await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      await evaluate(`new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))`);
+    };
+    const center = (id) =>
+      evaluate(`(() => { const b = document.getElementById('${id}').getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; })()`);
+    const r = {};
+    r.layout = await evaluate(`({ touch: document.documentElement.classList.contains('touch'), ship: document.documentElement.dataset.ship,
+      stick: getComputedStyle(document.getElementById('touch-stick')).display !== 'none',
+      mapButton: getComputedStyle(document.getElementById('touch-map')).display !== 'none',
+      panelFolded: game.debug.panel._closed, panelWidth: game.debug.panel.domElement.getBoundingClientRect().width,
+      back: !!document.querySelector('#lab-info a.lab-back') })`);
+    const yaw = await evaluate(`lab.level.orbit.targetYaw`);
+    await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 120, y: 520, id: 0 }] });
+    for (let i = 1; i <= 10; i++) {
+      await send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: 120 + i * 12, y: 520, id: 0 }] });
+      await sleep(16);
+    }
     await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     await evaluate(`new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))`);
-  };
-  const center = (id) =>
-    evaluate(`(() => { const b = document.getElementById('${id}').getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; })()`);
-  const r = {};
-  r.layout = await evaluate(`({ touch: document.documentElement.classList.contains('touch'), ship: document.documentElement.dataset.ship,
-    stick: getComputedStyle(document.getElementById('touch-stick')).display !== 'none',
-    mapButton: getComputedStyle(document.getElementById('touch-map')).display !== 'none',
-    panelFolded: game.debug.panel._closed, panelWidth: game.debug.panel.domElement.getBoundingClientRect().width,
-    back: !!document.querySelector('#lab-info a.lab-back') })`);
-  const yaw = await evaluate(`lab.level.orbit.targetYaw`);
-  await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 120, y: 520, id: 0 }] });
-  for (let i = 1; i <= 10; i++) {
-    await send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: 120 + i * 12, y: 520, id: 0 }] });
-    await sleep(16);
+    r.dragYaw = +((await evaluate(`lab.level.orbit.targetYaw`)) - yaw).toFixed(2);
+    // The middle of the globe, on screen.
+    await tap(await evaluate(`[innerWidth / 2, innerHeight / 2]`));
+    r.tapFlies = await evaluate(`lab.level.ship.enRoute`);
+    await tap(await center('touch-map'));
+    await phone.waitFor(`lab.level.map.visible`, 3000);
+    r.mapOpen = await evaluate(`lab.level.map.visible`);
+    r.screenshot = join(outDir, 'touch-lab.png');
+    writeFileSync(r.screenshot, await phone.screenshot());
+    // Its console errors count like the main page's.
+    errors.push(...phone.errors.map((e) => `touch lab: ${e}`));
+    r.ok =
+      r.layout.touch &&
+      r.layout.ship === 'surface' &&
+      r.layout.stick &&
+      r.layout.mapButton &&
+      r.layout.panelFolded &&
+      r.layout.back &&
+      Math.abs(r.dragYaw) > 0.2 &&
+      r.tapFlies &&
+      r.mapOpen;
+    return r;
+  } finally {
+    await phone.close();
   }
-  await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-  r.dragYaw = +((await evaluate(`lab.level.orbit.targetYaw`)) - yaw).toFixed(2);
-  // The middle of the globe, on screen.
-  await tap(await evaluate(`[innerWidth / 2, innerHeight / 2]`));
-  r.tapFlies = await evaluate(`lab.level.ship.enRoute`);
-  await tap(await center('touch-map'));
-  await sleep(300);
-  r.mapOpen = await evaluate(`lab.level.map.visible`);
-  r.screenshot = join(outDir, 'touch-lab.png');
-  writeFileSync(r.screenshot, await page.screenshot());
-  r.ok =
-    r.layout.touch &&
-    r.layout.ship === 'surface' &&
-    r.layout.stick &&
-    r.layout.mapButton &&
-    r.layout.panelFolded &&
-    r.layout.back &&
-    Math.abs(r.dragYaw) > 0.2 &&
-    r.tapFlies &&
-    r.mapOpen;
-  return r;
 }
-const touchLab = started ? await runTouchLab() : null;
+await section('touch', async () => {
+  touch = await runTouch();
+  touchLab = await runTouchLab();
+  return touch.ok && touchLab.ok;
+});
+clearTimeout(timer);
 
-const moved = started && after.pos[2] < before.pos[2] - 10 && after.speed > 5;
-const autopiloted = started && autopilot.endDist < Math.max(3, autopilot.startDist * 0.1);
-const picked = started && pick.target === pick.star && pick.tooltip === pick.star && systemMap.ok;
-const skyOk = started && sky.band && sky.trails === sky.expectedTrails && sky.visibleTrails >= 1;
-const alive =
-  started &&
-  living.clockSeconds > 0.3 &&
-  Math.abs(living.starSeconds - living.clockSeconds) < 0.25 &&
-  living.liveParticles.some((n) => n > 0) &&
-  living.cometsMoved &&
-  !living.pickable &&
-  (comet.none || (comet.tooltip === comet.name && !comet.autopilot)) &&
-  eye.close < eye.start - 0.1;
-const looped =
-  started &&
-  galaxyLoop.modeAfterZoomOut === 'galaxy' &&
-  galaxyLoop.polish.distantGalaxies >= 100 &&
-  galaxyLoop.polish.spinRadPerSec > 0 &&
-  galaxyLoop.polish.spinRadPerSec < 0.01 &&
-  galaxyLoop.polish.dots === galaxyLoop.polish.expectedDots &&
-  galaxyLoop.polish.dots > galaxyLoop.polish.stars &&
-  galaxyLoop.polish.twinkle > 0 &&
-  galaxyLoop.polish.twinkleTime > 0 &&
-  galaxyLoop.clicked.destination === galaxyLoop.clicked.nearest &&
-  galaxyLoop.heldWhileTravelling &&
-  galaxyLoop.dockedAt === galaxyLoop.clicked.nearest &&
-  galaxyLoop.handoverShot !== null &&
-  galaxyLoop.modeAfterZoomIn === 'system' &&
-  galaxyLoop.to === galaxyLoop.clicked.nearest &&
-  galaxyLoop.arrival.flying.target === galaxyLoop.arrival.flying.star &&
-  galaxyLoop.arrival.parked.target === galaxyLoop.arrival.parked.star &&
-  !galaxyLoop.arrival.parked.enRoute &&
-  Math.abs(galaxyLoop.arrival.parked.distance - galaxyLoop.arrival.parked.park) < 3 &&
-  galaxyLoop.arrival.parked.distance > 2 * galaxyLoop.arrival.parked.zone &&
-  // Always arrives just above the ecliptic, with the camera over the ship.
-  galaxyLoop.arrival.parked.aboveEcliptic > 0 &&
-  galaxyLoop.arrival.parked.cameraAboveShip > 0 &&
-  typeof galaxyLoop.shipSpeed === 'number';
-const sounded =
-  started &&
-  audio.state === 'running' &&
-  audio.panelOpen &&
-  audio.paused &&
-  audio.effectsSlider &&
-  audio.labLink &&
-  audio.weatherToggle.on &&
-  audio.weatherToggle.offText === 'Weather: off' &&
-  audio.weatherToggle.offHidden &&
-  audio.weatherToggle.back &&
-  audio.closedByEsc &&
-  audio.sfx.out?.name === 'transitionOut' &&
-  audio.sfx.travel?.name === 'travel' &&
-  audio.sfx.in?.name === 'transitionIn' &&
-  audio.sfx.in.count === 3 &&
-  audio.sfx.modeAfter === 'system' &&
-  audio.mutedByKey;
-// Audio is only unlocked in the first page load, so only the home system's loop can hear its whooshes.
-const planets =
-  started &&
-  planetLoop.ok &&
-  planetLoop.soundIn === 'transitionIn' &&
-  planetLoop.soundOut === 'transitionOut' &&
-  heldZoom.ok &&
-  planetLoop.handoverShot !== null &&
-  seamless.ok &&
-  planetTypes.every((r) => r.ok) &&
-  (quick || planetTypes.length === 16); // 7 types, ringed, moon, 4 geyser kinds and 3 weather kinds
-const touched = started && touch.ok && touchLab.ok;
-const labbed = started && lab.ok;
-const ok =
-  started && moved && autopiloted && picked && skyOk && alive && looped && sounded && planets && touched && labbed && errors.length === 0;
+const ok = started && !stalled && Object.keys(sections).length > 0 && Object.values(sections).every((x) => x.ok) && errors.length === 0;
+console.error(`[smoke] ${ok ? 'ok' : 'FAILED'} in ${Math.round((Date.now() - T0) / 1000)} s${errors.length ? `, ${errors.length} console errors` : ''}`);
 console.log(
   JSON.stringify(
-    { ok, started, moved, autopiloted, picked, skyOk, alive, looped, sounded, planets, touched, labbed, before, after, autopilot, pick, systemMap, sky, living, comet, eye, galaxyLoop, seamless, audio, planetLoop, heldZoom, planetTypes, touch, touchLab, lab, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
+    { ok, started, stalled, sections, before, after, autopilot, pick, systemMap, sky, living, comet, eye, galaxyLoop, seamless, audio, planetLoop, heldZoom, planetTypes, touch, touchLab, lab, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
     null,
     2,
   ),

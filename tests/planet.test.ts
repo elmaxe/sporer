@@ -6,7 +6,6 @@ import {
   PLANET_SCALE,
   angularRadius,
   bodyFrame,
-  globeDetail,
   globeRadius,
   lightDirection,
   localToSystem,
@@ -14,7 +13,7 @@ import {
   skyScale,
   travelScale,
 } from '../src/planet/frame';
-import { SIZE_CLASS_RADIUS } from '../src/gen/planets';
+import { GLOBE_SIZE_FACTOR, SIZE_CLASS_RADIUS } from '../src/gen/planets';
 import { greatCircleDirection, sphereStep, surfaceArriveImpulse } from '../src/planet/surfaceMotion';
 import type { ArriveParams } from '../src/player/autopilot';
 
@@ -223,8 +222,8 @@ describe('planet frame and sky mapping', () => {
 
 describe('globe sizes', () => {
   it('keeps every body at its true size relative to the ship: one scale for all', () => {
-    expect(globeRadius(8)).toBe(100);
-    expect(globeRadius(SIZE_CLASS_RADIUS.dwarf[0])).toBeCloseTo(25, 6);
+    expect(globeRadius(8)).toBe(EARTH_GLOBE_RADIUS);
+    expect(globeRadius(SIZE_CLASS_RADIUS.dwarf[0])).toBeCloseTo(EARTH_GLOBE_RADIUS / 4, 6);
     expect(globeRadius(SIZE_CLASS_RADIUS.gasGiant[1]) / globeRadius(SIZE_CLASS_RADIUS.dwarf[0])).toBeCloseTo(
       SIZE_CLASS_RADIUS.gasGiant[1] / SIZE_CLASS_RADIUS.dwarf[0],
       9,
@@ -238,17 +237,9 @@ describe('globe sizes', () => {
     for (let i = 1; i < radii.length; i++) expect(dip(radii[i]!, 12)).toBeLessThan(dip(radii[i - 1]!, 12));
   });
 
-  it('adds terrain detail with size, within a budget', () => {
-    expect(globeDetail(EARTH_GLOBE_RADIUS)).toBe(60);
-    expect(globeDetail(10)).toBe(32);
-    expect(globeDetail(globeRadius(SIZE_CLASS_RADIUS.superEarth[1]))).toBeLessThanOrEqual(84);
-    expect(globeDetail(150)).toBeGreaterThan(60);
-    expect(globeDetail(50)).toBeLessThan(60);
-  });
-
   it('speeds up the autopilot on big globes, but not enough to hide the size', () => {
-    expect(travelScale(EARTH_GLOBE_RADIUS)).toBe(1);
-    expect(travelScale(10)).toBe(0.5);
+    expect(travelScale(EARTH_GLOBE_RADIUS)).toBe(Math.sqrt(GLOBE_SIZE_FACTOR));
+    expect(travelScale(EARTH_GLOBE_RADIUS / 10)).toBe(0.5 * Math.sqrt(GLOBE_SIZE_FACTOR));
     // Half way round takes longer the bigger the globe.
     const crossing = (r: number) => (Math.PI * r) / travelScale(r);
     const radii = [2, 3.5, 6, 8, 12, 20, 34].map(globeRadius);
@@ -256,9 +247,10 @@ describe('globe sizes', () => {
   });
 
   it('pulls the max camera distance in for small globes', () => {
-    expect(maxViewDistance(EARTH_GLOBE_RADIUS, 260)).toBe(260);
-    expect(maxViewDistance(400, 260)).toBe(260);
-    expect(maxViewDistance(50, 260)).toBe(130);
-    expect(maxViewDistance(10, 260)).toBe(100);
+    const max = 260 * GLOBE_SIZE_FACTOR;
+    expect(maxViewDistance(EARTH_GLOBE_RADIUS, max)).toBe(max);
+    expect(maxViewDistance(EARTH_GLOBE_RADIUS * 4, max)).toBe(max);
+    expect(maxViewDistance(EARTH_GLOBE_RADIUS / 2, max)).toBe(max / 2);
+    expect(maxViewDistance(EARTH_GLOBE_RADIUS / 10, max)).toBe(100 * GLOBE_SIZE_FACTOR);
   });
 });

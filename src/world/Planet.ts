@@ -31,13 +31,16 @@ export interface PlanetConfig {
   climate?: ClimateData | null;
 }
 
-/** Icosphere subdivision of the system view's planets (gas giants need more for smooth bands). */
-export const TERRAIN_DETAIL = 5;
-export const GAS_DETAIL = 16;
+/**
+ * Cube sphere segments of the system view's planets (gas giants need more for
+ * smooth bands): 768 and 5808 triangles.
+ */
+export const TERRAIN_SEGMENTS = 8;
+export const GAS_SEGMENTS = 22;
 /** A vent's glow in the system view, radians (wider than up close, so it shows at that size). */
 export const COARSE_VENT_RADIUS = 0.15;
-/** Icosphere subdivisions of the system view's cloud layers. */
-export const CLOUD_DETAIL = 14;
+/** Cube sphere segments of the system view's cloud layers (4800 triangles; the drift is worked out per vertex). */
+export const CLOUD_SEGMENTS = 20;
 
 /** True for gas giants, which are drawn as banded spheres instead of terrain. */
 export function isGas(config: PlanetConfig): config is PlanetConfig & { bands: string[] } {
@@ -88,15 +91,15 @@ export class Planet implements Entity, CelestialBody {
     this.lava = gas ? null : createLavaLook(config, COARSE_VENT_RADIUS);
     this.surface = new THREE.Mesh(
       gas
-        ? createGasGeometry(radius, seed, config.bands, GAS_DETAIL)
-        : createTerrainGeometry(radius, seed, style, { detail: TERRAIN_DETAIL, seaFloor: this.lava !== null }),
+        ? createGasGeometry(radius, seed, config.bands, GAS_SEGMENTS)
+        : createTerrainGeometry(radius, seed, style, { segments: TERRAIN_SEGMENTS, seaFloor: this.lava !== null }),
       new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: !gas, roughness: 0.9 }),
     );
     // Lava seas are a separate animated sphere over the sunken sea floor, turning with the surface.
     if (this.lava) this.surface.add(this.lava.createSeaSphere(radius));
     // Clouds turn with the ground; the same layer as low orbit's, in planet radii.
     this.weather = gas ? null : createWeatherLook(config, this.lava?.activity ?? null);
-    if (this.weather) this.surface.add(this.weather.createCloudLayer(radius / globeRadius(radius), CLOUD_DETAIL, sun));
+    if (this.weather) this.surface.add(this.weather.createCloudLayer(radius / globeRadius(radius), CLOUD_SEGMENTS, sun));
 
     // The tilted group holds everything aligned with the equator: surface and rings.
     const tilted = new THREE.Group();

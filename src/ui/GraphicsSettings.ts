@@ -47,9 +47,9 @@ export function applyGraphicsSettings(s: GraphicsSettings): void {
 }
 
 /**
- * The graphics settings in the menu (#graphics in index.html, see GameMenu):
- * a Weather toggle for clouds, storms, rain and lightning. Changes apply
- * live and are saved to localStorage.
+ * The graphics settings in the menu's Display section (#graphics-weather in
+ * index.html, see GameMenu): a Weather toggle for clouds, storms, rain and
+ * lightning. Changes apply live and are saved to localStorage.
  */
 export class GraphicsSettingsControl {
   private readonly weatherButton = document.getElementById('graphics-weather') as HTMLButtonElement;

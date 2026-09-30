@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { Debug } from '../core/Debug';
 import { tileableCloudNoise } from '../gen/cloudNoise';
 import type { LavaActivity } from '../gen/lavaActivity';
@@ -20,6 +19,7 @@ import {
 import type { Vec3Tuple } from '../gen/starActivity';
 import { RELIEF_SCALE, globeRadius } from '../planet/frame';
 import type { AtmosphereSun } from './atmosphereShell';
+import { createCubeSphere } from './cubeSphere';
 import type { PlanetConfig } from './Planet';
 
 /**
@@ -400,10 +400,10 @@ export class WeatherLook {
   /**
    * The cloud layer: a sphere at the layer's height, `scale` times the
    * planet-level radii (1 in low orbit, the system view's radius over the
-   * planet level's there), with `detail` icosphere subdivisions. `sun` is the
-   * star (a point in world space, or a direction), `sunColor` its light.
+   * planet level's there), a cube sphere of `segments` cells per cube edge.
+   * `sun` is the star (a point in world space, or a direction), `sunColor` its light.
    */
-  createCloudLayer(scale: number, detail: number, sun: AtmosphereSun, sunColor?: THREE.Color): THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial> {
+  createCloudLayer(scale: number, segments: number, sun: AtmosphereSun, sunColor?: THREE.Color): THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial> {
     const material = new THREE.ShaderMaterial({
       vertexShader,
       fragmentShader,
@@ -412,14 +412,14 @@ export class WeatherLook {
         uSun: { value: sun.vector },
         uSunPoint: { value: sun.point ? 1 : 0 },
         uSunColor: { value: sunColor ?? new THREE.Color(1, 1, 1) },
-        // A little over an icosphere triangle's angular size (the edge of a detail-d icosphere is ~1.1/(d+1) rad).
-        uNearMargin: { value: 1.3 / (detail + 1) },
+        // A little over a cell's angular size: a cube edge's quarter turn over `segments` cells, up to ~1.3× at the face centres.
+        uNearMargin: { value: (1.5 * (Math.PI / 2)) / segments },
       },
       transparent: true,
       depthWrite: false,
     });
     const radius = this.data.cloudRadius * scale;
-    const mesh = new THREE.Mesh(cloudSphere(radius, detail), material);
+    const mesh = new THREE.Mesh(createCubeSphere(radius, segments), material);
     // Only the near side from outside (the far side would show past the planet's edge), the whole sheet overhead from inside.
     mesh.onBeforeRender = (_renderer, _scene, camera) => {
       mesh.getWorldPosition(scratchCentre);
@@ -433,21 +433,6 @@ export class WeatherLook {
     this.layers.push(mesh);
     return mesh;
   }
-}
-
-/**
- * An evenly spaced sphere (an icosphere, no crowding at the poles), welded
- * into an indexed mesh so each vertex is shaded once rather than once per
- * triangle (three builds icospheres unindexed). Only positions: the shader
- * works everything else out.
- */
-function cloudSphere(radius: number, detail: number): THREE.BufferGeometry {
-  const ico = new THREE.IcosahedronGeometry(radius, detail);
-  ico.deleteAttribute('normal');
-  ico.deleteAttribute('uv');
-  const welded = mergeVertices(ico, 1e-4 * radius);
-  ico.dispose();
-  return welded;
 }
 
 /**

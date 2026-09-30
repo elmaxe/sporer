@@ -17,11 +17,18 @@ const BROWSERS = [
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
+ * A DevTools call that got no answer in time. Under SwiftShader the page's main thread can block on the GPU
+ * process for minutes, so every call has a deadline; polling helpers pass this error on instead of retrying.
+ */
+export class StallError extends Error {}
+
+/**
  * Launches a fresh headless browser (its own profile, on a free debugging port) with a page of exactly
  * `width` × `height` CSS pixels, and connects to it. Console errors, warnings, failed asserts and
- * uncaught exceptions are collected in `errors`. `await close()` when done.
+ * uncaught exceptions are collected in `errors`. A DevTools call without an answer in `callTimeoutMs`
+ * rejects with a StallError. `await close()` when done (the browser is also killed when Node exits).
  */
-export async function launch({ width = 1280, height = 720 } = {}) {
+export async function launch({ width = 1280, height = 720, callTimeoutMs = 60000 } = {}) {
   const executable = process.env.CHROME_PATH ?? BROWSERS.find(existsSync);
   if (!executable) throw new Error('No Chrome/Edge found; set CHROME_PATH');
   const profile = mkdtempSync(join(tmpdir(), 'spore2-browser-'));
@@ -37,6 +44,10 @@ export async function launch({ width = 1280, height = 720 } = {}) {
     ...(process.getuid?.() === 0 ? ['--no-sandbox'] : []),
     'about:blank',
   ]);
+  // A browser left behind keeps SwiftShader busy on every core, so it goes when we do (crash, timeout, Ctrl-C).
+  const kill = () => proc.exitCode === null && proc.kill('SIGKILL');
+  process.once('exit', kill);
+  for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => process.exit(130));
 
   let target;
   for (let i = 0; i < 80 && !target; i++) {
@@ -71,24 +82,39 @@ export async function launch({ width = 1280, height = 720 } = {}) {
     }
   });
 
-  /** Sends a DevTools protocol command and resolves with its message ({ result } or { error }). */
-  const send = (method, params = {}) =>
-    new Promise((r) => {
+  /**
+   * Sends a DevTools protocol command and resolves with its message ({ result } or { error }); rejects with a
+   * StallError if there's no answer within `timeoutMs`.
+   */
+  const send = (method, params = {}, timeoutMs = callTimeoutMs) =>
+    new Promise((resolve, reject) => {
       const id = ++nextId;
-      pending.set(id, r);
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        const what = method === 'Runtime.evaluate' ? `evaluate(${params.expression.trim().slice(0, 80)}…)` : method;
+        reject(new StallError(`No answer from the page in ${timeoutMs / 1000} s: ${what}`));
+      }, timeoutMs);
+      pending.set(id, (m) => {
+        clearTimeout(timer);
+        resolve(m);
+      });
       ws.send(JSON.stringify({ id, method, params }));
     });
 
   /** Evaluates `expression` in the page (awaiting promises) and returns its value; throws on exceptions. */
-  const evaluate = async (expression) => {
-    const m = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
+  const evaluate = async (expression, timeoutMs = callTimeoutMs) => {
+    const m = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }, timeoutMs);
     const details = m.result?.exceptionDetails;
     if (details) throw new Error(details.exception?.description ?? details.text);
     return m.result?.result?.value;
   };
 
-  /** Like `evaluate`, but returns undefined instead of throwing (for polling). */
-  const tryEvaluate = (expression) => evaluate(expression).catch(() => undefined);
+  /** Like `evaluate`, but returns undefined instead of throwing (for polling). A stalled page still throws. */
+  const tryEvaluate = (expression, timeoutMs) =>
+    evaluate(expression, timeoutMs).catch((e) => {
+      if (e instanceof StallError) throw e;
+      return undefined;
+    });
 
   /** Polls `expression` until it's truthy; returns whether it got there within `timeoutMs`. */
   const waitFor = async (expression, timeoutMs = 20000, everyMs = 100) => {
@@ -106,11 +132,22 @@ export async function launch({ width = 1280, height = 720 } = {}) {
 
   const navigate = (url) => send('Page.navigate', { url });
 
+  /**
+   * Loads `url` and waits (up to `timeoutMs`) until `ready` is truthy in the new page, never the old one.
+   * Returns whether it got there.
+   */
+  const goto = async (url, ready, timeoutMs = 30000) => {
+    await tryEvaluate(`window.__leaving = true`);
+    await navigate(url);
+    return waitFor(`!window.__leaving && (${ready})`, timeoutMs);
+  };
+
   /** Closes the browser and deletes its profile. */
   const close = async () => {
     ws.close();
     const exited = new Promise((r) => proc.once('exit', r));
     proc.kill();
+    process.off('exit', kill);
     await Promise.race([exited, sleep(3000)]);
     try {
       rmSync(profile, { recursive: true, force: true, maxRetries: 3 });
@@ -123,5 +160,5 @@ export async function launch({ width = 1280, height = 720 } = {}) {
   await send('Page.enable');
   // Exactly width × height CSS pixels at DPR 1 (the window size alone leaves room for browser chrome).
   await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
-  return { send, evaluate, tryEvaluate, waitFor, screenshot, navigate, close, errors, width, height };
+  return { send, evaluate, tryEvaluate, waitFor, screenshot, navigate, goto, close, errors, width, height };
 }

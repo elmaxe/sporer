@@ -1,6 +1,6 @@
 import { cloudCovered, type ClimateData } from './climate';
 import { eruptionEvent, eruptionSlots, eruptionSpan, type LavaActivity } from './lavaActivity';
-import type { MoonType, PlanetStyle, PlanetType } from './planets';
+import { GLOBE_SIZE_FACTOR, type MoonType, type PlanetStyle, type PlanetType } from './planets';
 import { Rng, hashSeed } from './rng';
 import type { Vec3Tuple } from './starActivity';
 
@@ -101,17 +101,20 @@ export const ACID_FLASH_RATE = 1 / 40;
 
 /** Fall speeds, m/s: water drops up to 9.2, Titan's methane drops 1.6 (Lorenz 1993), snow aggregates 0.4–1.2 (Locatelli & Hobbs 1974). */
 export const FALL_SPEED = { rain: 9.2, acid: 9.2, methane: 1.6, snow: 1 } as const;
-/** Planet-level units per second a 9.2 m/s drop falls at (stylised; the ratios between kinds are kept). */
-export const RAIN_UNITS_PER_SECOND = 22;
+/**
+ * Planet-level units per second a 9.2 m/s drop falls at (stylised; the ratios between kinds are kept). Like the
+ * lava's and the geysers', lengths and speeds here grow with the globes (GLOBE_SIZE_FACTOR); no time does.
+ */
+export const RAIN_UNITS_PER_SECOND = 22 * GLOBE_SIZE_FACTOR;
 /** Venus's acid rain falls from the cloud base (48 km) and evaporates by ~30 km: 37% of the way down. */
 export const ACID_VIRGA = (48 - 30) / 48;
 
 /** Per kind: layer height above the highest terrain (fraction of the radius, at least `min` units, at most `max` of the radius). */
 const CLOUD_GAP: Record<WeatherKind, { fraction: number; min: number; max: number }> = {
-  water: { fraction: 0.07, min: 6, max: 0.2 },
-  acid: { fraction: 0.1, min: 8, max: 0.25 },
-  methane: { fraction: 0.07, min: 6, max: 0.2 },
-  dust: { fraction: 0.04, min: 4, max: 0.15 },
+  water: { fraction: 0.07, min: 6 * GLOBE_SIZE_FACTOR, max: 0.2 },
+  acid: { fraction: 0.1, min: 8 * GLOBE_SIZE_FACTOR, max: 0.25 },
+  methane: { fraction: 0.07, min: 6 * GLOBE_SIZE_FACTOR, max: 0.2 },
+  dust: { fraction: 0.04, min: 4 * GLOBE_SIZE_FACTOR, max: 0.15 },
 };
 
 export interface StormSpec {
