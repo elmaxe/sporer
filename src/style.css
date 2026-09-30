@@ -59,8 +59,10 @@ body {
   opacity: 0.7;
 }
 
+/* Above the maps, which show tooltips for their bodies too. */
 #tooltip {
   position: fixed;
+  z-index: 1005;
   left: 0;
   top: 0;
   padding: 6px 10px;
@@ -173,9 +175,10 @@ body {
   line-height: 1.4;
 }
 
-/* The planet level's map (mouse players only), above the sound button. The map itself is drawn into the
-   game's canvas under #planet-map-marks (PlanetMap.render), which carries the markers. */
-#planet-map {
+/* The maps (the planet level's #planet-map, the system level's #system-map): a panel above the sound button
+   for mouse players. The planet map is drawn into the game's canvas under #planet-map-marks
+   (PlanetMap.render), which carries the markers; the system map is all on its own canvas (SystemMap). */
+.map-panel {
   position: fixed;
   right: max(16px, env(safe-area-inset-right));
   bottom: calc(max(16px, env(safe-area-inset-bottom)) + 52px);
@@ -185,12 +188,18 @@ body {
   overflow: hidden;
 }
 
-#planet-map[hidden] {
+/* A row of planets wants more width than a globe's map. */
+#system-map {
+  width: min(440px, 55vw);
+  background: rgba(8, 14, 28, 0.72);
+}
+
+.map-panel[hidden] {
   display: none;
 }
 
-/* On touch, the map opens over the middle of the screen from the Map button (#touch-map), as large as fits. */
-html.touch #planet-map {
+/* On touch, a map opens over the middle of the screen from the Map button (#touch-map), as large as fits. */
+html.touch .map-panel {
   z-index: 1004;
   left: 50%;
   right: auto;
@@ -201,17 +210,21 @@ html.touch #planet-map {
   width: min(calc(100vw - 32px), calc((100dvh - 150px) * 2), 640px);
 }
 
-html.touch #planet-map-head {
+html.touch #system-map {
+  width: min(calc(100vw - 32px), 640px);
+}
+
+html.touch .map-head {
   padding: 6px 6px 6px 12px;
   font-size: 14px;
 }
 
-html.touch #planet-map-toggle {
+html.touch .map-toggle {
   width: 32px;
   height: 32px;
 }
 
-#planet-map-head {
+.map-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -221,14 +234,14 @@ html.touch #planet-map-toggle {
   background: rgba(8, 14, 28, 0.72);
 }
 
-#planet-map-title {
+.map-title {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
   opacity: 0.9;
 }
 
-#planet-map-toggle {
+.map-toggle {
   display: grid;
   place-items: center;
   width: 22px;
@@ -241,32 +254,36 @@ html.touch #planet-map-toggle {
   cursor: pointer;
 }
 
-#planet-map-toggle:hover {
+.map-toggle:hover {
   color: #66ffcc;
 }
 
-#planet-map-toggle .close,
-html.touch #planet-map-toggle .fold {
+.map-toggle .close,
+html.touch .map-toggle .fold {
   display: none;
 }
 
-html.touch #planet-map-toggle .close {
+html.touch .map-toggle .close {
   display: block;
 }
 
-#planet-map.folded #planet-map-toggle .fold {
+.map-panel.folded .map-toggle .fold {
   transform: rotate(180deg);
 }
 
-html:not(.touch) #planet-map.folded #planet-map-body {
+html:not(.touch) .map-panel.folded .map-body {
   display: none;
 }
 
-#planet-map-marks {
+.map-canvas {
   display: block;
   width: 100%;
   height: auto;
   cursor: crosshair;
+}
+
+#system-map-canvas {
+  cursor: default;
 }
 
 #audio .cross,
@@ -428,7 +445,7 @@ html:not([data-ship='space']) #touch-down {
   display: none;
 }
 
-/* Low orbit only, where ▲ / ▼ would be in space. */
+/* In low orbit where ▲ / ▼ would be in space; in space above them. */
 #touch-map {
   width: 52px;
   height: 52px;
@@ -436,6 +453,10 @@ html:not([data-ship='space']) #touch-down {
   bottom: calc(max(16px, env(safe-area-inset-bottom)) + 140px);
 }
 
-html:not([data-ship='surface']) #touch-map {
+html[data-ship='space'] #touch-map {
+  bottom: calc(max(16px, env(safe-area-inset-bottom)) + 268px);
+}
+
+html:not([data-ship='surface']):not([data-ship='space']) #touch-map {
   display: none;
 }
