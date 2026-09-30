@@ -259,7 +259,7 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
         const s = P.plan.species[p.species];
         const v = new V(p.x, p.y, p.z).multiplyScalar(p.radius + s.height * p.scale * 0.5);
         return { s, d: v.distanceTo(cam.position), n: v.clone().project(cam) };
-      }).filter((c) => Math.abs(c.n.x) < 0.7 && Math.abs(c.n.y) < 0.7 && c.n.z < 1 && c.d < 60).sort((a, b) => a.d - b.d);
+      }).filter((c) => Math.abs(c.n.x) < 0.8 && Math.abs(c.n.y) < 0.8 && c.n.z < 1 && c.d < 150).sort((a, b) => a.d - b.d);
       if (!candidates.length) return resolve({ skipped: true });
       const c = candidates[0];
       const rect = game.renderer.domElement.getBoundingClientRect();
@@ -366,7 +366,7 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
     (r.expectedPlants
       ? r.plants.tierOk &&
         r.plants.cells > 0 &&
-        (r.plants.tooltip.skipped || (r.plants.tooltip.shown && r.plants.tooltip.known)) &&
+        (r.plants.tooltip.skipped ? r.type !== 'terran' : r.plants.tooltip.shown && r.plants.tooltip.known) &&
         (r.type !== 'terran' || (r.plants.plants > 50 && r.plants.drawCalls > 0)) &&
         (!handoverShot ||
           (r.plants.switch.off &&
