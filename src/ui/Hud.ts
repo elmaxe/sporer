@@ -10,12 +10,11 @@ import type { Tooltip } from './Tooltip';
 
 const REFRESH_SECONDS = 0.1;
 const HELP =
-  'Click: fly to a planet, star or point · Scroll: move in or out (in at a planet to descend, out past the system for the galaxy) · ' +
-  'Drag: rotate view · ' +
-  'WASD: nudge · E/Q: up/down · Shift: boost · N: map · M: mute · Esc: menu';
+  'Click: fly to a planet, moon or star · Scroll: move in or out (in at a planet to descend, out past the system for the galaxy) · ' +
+  'Drag: rotate view · Shift: boost · N: map · M: mute · Esc: menu';
 const TOUCH_HELP =
-  'Tap: fly to a planet, star or point · Pinch: move in or out (in at a planet to descend, out past the system for the galaxy) · ' +
-  'Drag: rotate view · Hold: identify · Stick: nudge · ▲/▼: up/down · Boost · Map';
+  'Tap: fly to a planet, moon or star · Pinch: move in or out (in at a planet to descend, out past the system for the galaxy) · ' +
+  'Drag: rotate view · Hold: identify · Boost · Map';
 
 /**
  * The system level's DOM overlay (see #hud in index.html). The DOM is shared
@@ -74,11 +73,7 @@ export class Hud implements Entity {
     this.help.refresh();
     this.speedEl.textContent = `${this.ship.speed.toFixed(0)} u/s`;
     const target = this.ship.targetBody;
-    this.targetEl.textContent = !this.ship.autopilotActive
-      ? ''
-      : target
-        ? `${this.ship.enRoute ? 'Autopilot → ' : 'Parked at '}${target.name}`
-        : 'Autopilot → point in space';
+    this.targetEl.textContent = `${this.ship.enRoute ? 'Autopilot → ' : 'Hovering at '}${target.name}`;
   }
 
   dispose(): void {

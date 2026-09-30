@@ -8,7 +8,7 @@ const STICK_RADIUS = 44;
 
 /**
  * On-screen ship controls for touch players (#touch-controls in index.html):
- * a stick standing in for WASD, and hold buttons for keys (boost, up, down),
+ * a stick standing in for WASD (low orbit only) and hold buttons for keys (boost),
  * all fed to `Input` as analog key presses so the ships read them like the
  * keyboard. Shown while `input.touchMode`, with the set the active level asks
  * for (`Level.touchControls`), by the `touch` class and `data-ship` attribute

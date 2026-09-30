@@ -159,25 +159,14 @@ export function detourWaypoint(
 }
 
 /**
- * Point where the ship should park next to a body: `standoff` from its centre,
- * on the side the ship is approaching from. Writes into `out` and returns it.
+ * Where the ship hovers at a body: `height` straight above its centre, on the
+ * ecliptic's north side (+Y in system space), whichever way it came from. Over
+ * the pole it stays clear of rings (they lie in the tilted equatorial plane)
+ * and of moons (they orbit near the ecliptic). Writes into `out` and returns it.
  */
-export function standoffPoint<T extends Vec3Like>(ship: Vec3Like, body: Vec3Like, standoff: number, out: T): T {
-  let dx = ship.x - body.x;
-  let dy = ship.y - body.y;
-  let dz = ship.z - body.z;
-  const len = Math.hypot(dx, dy, dz);
-  if (len < 1e-6) {
-    dx = 0;
-    dy = 0;
-    dz = 1;
-  } else {
-    dx /= len;
-    dy /= len;
-    dz /= len;
-  }
-  out.x = body.x + dx * standoff;
-  out.y = body.y + dy * standoff;
-  out.z = body.z + dz * standoff;
+export function hoverPoint<T extends Vec3Like>(body: Vec3Like, height: number, out: T): T {
+  out.x = body.x;
+  out.y = body.y + height;
+  out.z = body.z;
   return out;
 }

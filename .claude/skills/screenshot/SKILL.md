@@ -87,8 +87,8 @@ js:(() => { const p = world.planets[2], o = levels.systemLevel.orbit; o.setFocus
 wait:500
 shot:planet-close
 js:levels.systemLevel.orbit.setFocus(null)
-# Down to low orbit over the first planet, arriving on its day side
-js:(() => { const p = world.planets[0]; ship.parkAt(p, world.stars[0].position.clone().sub(p.position)); levels.toPlanet(p); })()
+# Down to low orbit over the first planet, arriving on its day side (you arrive under the camera: look from the star)
+js:(() => { const p = world.planets[0]; ship.parkAt(p); levels.systemLevel.orbit.lookFrom(world.stars[0].position.clone().sub(p.position)); levels.toPlanet(p); })()
 until:levels.mode === 'planet'
 settle
 shot:low-orbit
