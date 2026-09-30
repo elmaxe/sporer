@@ -78,11 +78,14 @@ export class OrbitCamera implements Entity {
   private distance: number;
   private targetYaw = 0;
   private targetPitch: number;
+  /** The pitch the player asked for (by dragging); `targetPitch` is it held above the live minimum. */
+  private wantedPitch: number;
   private targetDistance: number;
   private pastLimit = 0;
   /** Scroll-in (negative wheel pixels) held back by `holdZoomIn`, still to be played out. */
   private heldWheel = 0;
-  private readonly minPitch: number;
+  private readonly baseMinPitch: number;
+  private minPitch: number;
   private focus: THREE.Vector3 | null = null;
   private focusBlend = 0;
   private view: THREE.Quaternion | null = null;
@@ -107,8 +110,8 @@ export class OrbitCamera implements Entity {
     debugName: string,
   ) {
     this.distance = this.targetDistance = options.distance;
-    this.pitch = this.targetPitch = options.pitch ?? THREE.MathUtils.degToRad(22);
-    this.minPitch = options.minPitch ?? MIN_PITCH;
+    this.pitch = this.targetPitch = this.wantedPitch = options.pitch ?? THREE.MathUtils.degToRad(22);
+    this.minPitch = this.baseMinPitch = options.minPitch ?? MIN_PITCH;
     const f = debug.folder(debugName);
     f?.add(params, 'minDistance', 0.5, 100);
     f?.add(params, 'maxDistance', 100, 10000);
@@ -167,7 +170,18 @@ export class OrbitCamera implements Entity {
       d.applyQuaternion(frame.invert());
     }
     this.yaw = this.targetYaw = Math.atan2(d.x, d.z);
-    if (!keepPitch) this.pitch = this.targetPitch = THREE.MathUtils.clamp(Math.asin(d.y), this.minPitch, MAX_PITCH);
+    if (!keepPitch) {
+      this.pitch = this.targetPitch = this.wantedPitch = THREE.MathUtils.clamp(Math.asin(d.y), this.minPitch, MAX_PITCH);
+    }
+  }
+
+  /**
+   * Raises or lowers the lowest pitch (radians, never below the one it was
+   * made with): the view tips up smoothly while below it, and back down to
+   * the pitch the player chose as it lowers again.
+   */
+  setMinPitch(pitch: number): void {
+    this.minPitch = THREE.MathUtils.clamp(pitch, this.baseMinPitch, MAX_PITCH);
   }
 
   /** Smoothly zooms to `distance` (clamped to the limits). */
@@ -179,7 +193,10 @@ export class OrbitCamera implements Entity {
     const p = this.params;
     const drag = this.input.consumeDrag();
     this.targetYaw -= drag.x * p.rotateSpeed;
-    this.targetPitch = THREE.MathUtils.clamp(this.targetPitch + drag.y * p.rotateSpeed, this.minPitch, MAX_PITCH);
+    if (drag.y !== 0) {
+      this.wantedPitch = THREE.MathUtils.clamp(this.targetPitch + drag.y * p.rotateSpeed, this.baseMinPitch, MAX_PITCH);
+    }
+    this.targetPitch = THREE.MathUtils.clamp(this.wantedPitch, this.minPitch, MAX_PITCH);
 
     const wheel = this.holdZoomIn(this.input.consumeWheel(), frameDt);
     this.trackPastLimit(wheel, frameDt);

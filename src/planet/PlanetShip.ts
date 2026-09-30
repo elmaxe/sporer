@@ -25,15 +25,19 @@ export const planetAutopilotParams: ArriveParams = {
   damping: planetShipParams.damping,
 };
 
+/** Seconds to close ~63% of the gap to a new altitude. */
+const CLIMB_TIME = 0.35;
 /** The autopilot counts as arrived within this arc length and speed. */
 const ARRIVE_DISTANCE = 0.5;
 const ARRIVE_SPEED = 1;
 
 /**
  * The UFO in low orbit. Scripted, no physics: its state is a unit direction
- * from the planet's centre plus a velocity tangent to the sphere, at a fixed
- * flying radius above the highest terrain. The autopilot (`moveTo`) flies the
- * great circle to a point with the same arrive steering as in the system;
+ * from the planet's centre plus a velocity tangent to the sphere, at a flying
+ * radius above the highest terrain that the zoom sets (`setRadius`; it climbs
+ * and sinks smoothly). The autopilot (`moveTo`) flies the great circle to a
+ * point with the same arrive steering as in the system (as fast in angle at
+ * every altitude);
  * WASD pushes it in the tangent plane relative to the camera. It stays level
  * with the ground (up = the radial direction) and turns to face its course.
  */
@@ -47,6 +51,9 @@ export class PlanetShip implements Entity {
   private readonly hull: THREE.Object3D;
   private readonly ring: THREE.Object3D;
   private hasTarget = false;
+  /** Distance from the planet's centre it flies at, and the one it's climbing or sinking to. */
+  private _radius: number;
+  private targetRadius: number;
 
   // Simulation state: direction from the centre, tangent velocity, facing (tangent).
   private readonly u = new THREE.Vector3();
@@ -74,8 +81,8 @@ export class PlanetShip implements Entity {
     /** WASD moves relative to where this camera looks. */
     private readonly camera: THREE.Camera,
     debug: Debug,
-    /** Distance from the planet's centre it flies at. */
-    readonly radius: number,
+    /** Distance from the planet's centre it flies at, to begin with (the autopilot's speeds are for this one). */
+    private readonly baseRadius: number,
     /** Starting direction from the centre. */
     start: THREE.Vector3,
     /** Autopilot speed factor for this globe's size (see planet/frame.ts travelScale). */
@@ -85,6 +92,7 @@ export class PlanetShip implements Entity {
     this.object.add(group);
     this.hull = group;
     this.ring = ring;
+    this._radius = this.targetRadius = baseRadius;
     scene.add(this.object);
     this.placeAt(start);
 
@@ -109,6 +117,16 @@ export class PlanetShip implements Entity {
     return this.hasTarget;
   }
 
+  /** Distance from the planet's centre it flies at now (simulation). */
+  get radius(): number {
+    return this._radius;
+  }
+
+  /** Climbs or sinks smoothly to fly `radius` from the planet's centre. */
+  setRadius(radius: number): void {
+    this.targetRadius = radius;
+  }
+
   /** The (simulation) direction from the planet's centre. */
   get direction(): THREE.Vector3 {
     return this.u;
@@ -124,7 +142,7 @@ export class PlanetShip implements Entity {
     if (this.heading.lengthSq() < 1e-6) this.heading.set(1, 0, 0);
     this.heading.normalize();
     this.orient(this.currRot);
-    this.currPos.copy(this.u).multiplyScalar(this.radius);
+    this.currPos.copy(this.u).multiplyScalar(this._radius);
     this.prevPos.copy(this.currPos);
     this.prevRot.copy(this.currRot);
     this.update(0, 0);
@@ -139,7 +157,7 @@ export class PlanetShip implements Entity {
   /** Autopilot to the point of the flying sphere above `point` (any point off the centre). */
   moveTo(point: THREE.Vector3): void {
     this.target.copy(point).normalize();
-    this.destination.copy(this.target).multiplyScalar(this.radius);
+    this.destination.copy(this.target).multiplyScalar(this._radius);
     this.hasTarget = true;
   }
 
@@ -168,17 +186,22 @@ export class PlanetShip implements Entity {
         .multiplyScalar(planetShipParams.thrust * boost * dt);
       vel.add(this.impulse);
     } else if (this.hasTarget) {
-      Object.assign(this.arrive, planetAutopilotParams).maxSpeed *= boost * this.travelScale;
-      this.arrive.accel *= this.travelScale;
-      const arc = surfaceArriveImpulse(u, vel, this.target, this.radius, this.arrive, dt, this.impulse);
+      // Higher up, faster, so it crosses the ground below at the same pace.
+      const scale = (this.travelScale * this._radius) / this.baseRadius;
+      Object.assign(this.arrive, planetAutopilotParams).maxSpeed *= boost * scale;
+      this.arrive.accel *= scale;
+      const arc = surfaceArriveImpulse(u, vel, this.target, this._radius, this.arrive, dt, this.impulse);
       vel.add(this.impulse);
       if (arc < ARRIVE_DISTANCE && vel.length() < ARRIVE_SPEED) this.stop();
     }
     // Damping like the system ship's Rapier body (the autopilot compensates for it).
     vel.divideScalar(1 + planetShipParams.damping * dt);
 
+    this._radius += (this.targetRadius - this._radius) * (1 - Math.exp(-dt / CLIMB_TIME));
+    this.destination.copy(this.target).multiplyScalar(this._radius);
+
     // Slide over the sphere, carrying the velocity and heading along.
-    sphereStep(u, vel, this.radius, dt, this.step);
+    sphereStep(u, vel, this._radius, dt, this.step);
     u.applyQuaternion(this.step).normalize();
     vel.applyQuaternion(this.step).addScaledVector(u, -vel.dot(u));
     this.heading.applyQuaternion(this.step).addScaledVector(u, -this.heading.dot(u)).normalize();
@@ -192,7 +215,7 @@ export class PlanetShip implements Entity {
 
     this.prevPos.copy(this.currPos);
     this.prevRot.copy(this.currRot);
-    this.currPos.copy(u).multiplyScalar(this.radius);
+    this.currPos.copy(u).multiplyScalar(this._radius);
     this.orient(this.currRot);
   }
 

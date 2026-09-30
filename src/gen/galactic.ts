@@ -61,10 +61,35 @@ export interface GalacticSky {
 }
 
 /**
- * A uniformly random rotation (Shoemake's method). Used as a system's
- * `galacticTilt`: real ecliptics are tilted every which way against the
- * galactic plane, so the band crosses each system's sky at its own angle.
+ * Largest angle between a system's ecliptic and the galactic plane. Real
+ * ecliptics are tilted every which way (median 60°, the Sun's is 60.19°),
+ * but that made zooming between the galaxy and a system roll the view a long
+ * way, so the game keeps systems within 30° of the galactic plane: a
+ * deliberate, stylised departure (see docs/research/system-orientation.md).
  */
+export const MAX_GALACTIC_TILT = Math.PI / 6;
+
+/**
+ * A system's `galacticTilt` (system → galaxy rotation): any turn about the
+ * pole, then the ecliptic tilted by up to `maxTilt` about a random axis in
+ * the plane, spread evenly over that cap of directions (cos θ uniform), so
+ * the band still crosses each system's sky at its own angle.
+ */
+export function flatTilt(rng: Rng, maxTilt = MAX_GALACTIC_TILT): Quat {
+  const turn = rng.range(0, Math.PI * 2);
+  const axis = rng.range(0, Math.PI * 2);
+  const tilt = Math.acos(1 - rng.next() * (1 - Math.cos(maxTilt)));
+  // Tilt about (cos axis, 0, sin axis), after the turn about +Y.
+  const ts = Math.sin(tilt / 2);
+  const tx = Math.cos(axis) * ts;
+  const tz = Math.sin(axis) * ts;
+  const tw = Math.cos(tilt / 2);
+  const ys = Math.sin(turn / 2);
+  const yw = Math.cos(turn / 2);
+  return { x: tx * yw - tz * ys, y: tw * ys, z: tz * yw + tx * ys, w: tw * yw };
+}
+
+/** A uniformly random rotation (Shoemake's method). */
 export function randomRotation(rng: Rng): Quat {
   const u1 = rng.next();
   const u2 = rng.range(0, Math.PI * 2);

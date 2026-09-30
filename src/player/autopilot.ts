@@ -72,15 +72,22 @@ export interface Obstacle {
   readonly radius: number;
 }
 
-/** How far beyond an obstacle's keep-out radius the detour waypoint sits. */
+/** How far beyond the keep-out radius the detour waypoint sits (sets how far round the obstacle it is). */
 const DETOUR_SCALE = 1.15;
+/** Share of `clearance` the keep-out may shrink to when the ship or destination is already closer than that. */
+const MIN_CLEARANCE_SHARE = 0.5;
 
 /**
  * If the straight path from `pos` to `dest` passes within `clearance` of an
- * obstacle's surface, writes a detour waypoint beside the first such obstacle
- * into `out` and returns true. Re-evaluated every step, the waypoint slides
- * around the obstacle until the path is clear. Obstacles whose keep-out zone
- * already contains the ship or the destination are ignored.
+ * obstacle's surface, writes a detour waypoint for the first such obstacle
+ * into `out` and returns true. The waypoint is where the tangent from the
+ * ship to the keep-out sphere reaches `DETOUR_SCALE` times its radius, in the
+ * plane through the ship, the obstacle and the destination: flying straight
+ * at it never enters the keep-out zone, even from right beside the obstacle
+ * (a moon behind the planet the ship is parked at). Re-evaluated every step,
+ * the waypoint slides round the obstacle until the path is clear. When the
+ * ship or the destination is closer than `clearance`, the keep-out shrinks to
+ * fit, down to half of it; obstacles closer than that are ignored.
  */
 export function detourWaypoint(
   pos: Vec3Like,
@@ -98,35 +105,55 @@ export function detourWaypoint(
   let first = Infinity;
   for (const o of obstacles) {
     const c = o.position;
-    const r = o.radius + clearance;
-    const r2 = r * r;
-    if ((c.x - pos.x) ** 2 + (c.y - pos.y) ** 2 + (c.z - pos.z) ** 2 < r2) continue;
-    if ((c.x - dest.x) ** 2 + (c.y - dest.y) ** 2 + (c.z - dest.z) ** 2 < r2) continue;
+    // Ship and destination relative to the obstacle's centre.
+    const px = pos.x - c.x;
+    const py = pos.y - c.y;
+    const pz = pos.z - c.z;
+    const qx = dest.x - c.x;
+    const qy = dest.y - c.y;
+    const qz = dest.z - c.z;
+    const dp = Math.hypot(px, py, pz);
+    const dq = Math.hypot(qx, qy, qz);
+    const r = Math.min(o.radius + clearance, dp, dq);
+    if (r < o.radius + clearance * MIN_CLEARANCE_SHARE) continue;
 
     // Closest point on the segment to the obstacle's centre.
-    const t = Math.min(1, Math.max(0, ((c.x - pos.x) * dx + (c.y - pos.y) * dy + (c.z - pos.z) * dz) / len2));
+    const t = Math.min(1, Math.max(0, -(px * dx + py * dy + pz * dz) / len2));
     if (t >= first) continue;
-    let nx = pos.x + dx * t - c.x;
-    let ny = pos.y + dy * t - c.y;
-    let nz = pos.z + dz * t - c.z;
-    const miss = Math.hypot(nx, ny, nz);
-    if (miss >= r) continue;
+    const miss = Math.hypot(px + dx * t, py + dy * t, pz + dz * t);
+    // (A start or end on the shrunk sphere itself doesn't count as entering it.)
+    if (miss >= r * (1 - 1e-9)) continue;
 
-    if (miss > 1e-6) {
-      nx /= miss;
-      ny /= miss;
-      nz /= miss;
-    } else {
-      // Dead centre: sidestep horizontally, perpendicular to the path.
-      const h = Math.hypot(dx, dz);
-      nx = h > 1e-6 ? -dz / h : 1;
-      ny = 0;
-      nz = h > 1e-6 ? dx / h : 0;
+    // In-plane unit vectors: u towards the ship, w perpendicular to it towards the destination.
+    const ux = px / dp;
+    const uy = py / dp;
+    const uz = pz / dp;
+    const along = qx * ux + qy * uy + qz * uz;
+    let wx = qx - along * ux;
+    let wy = qy - along * uy;
+    let wz = qz - along * uz;
+    let wl = Math.hypot(wx, wy, wz);
+    if (wl < 1e-6 * dq) {
+      // Destination straight behind the obstacle: go round horizontally.
+      const h = Math.hypot(ux, uz);
+      wx = h > 1e-6 ? -uz / h : 1;
+      wy = 0;
+      wz = h > 1e-6 ? ux / h : 0;
+      wl = 1;
     }
+    wx /= wl;
+    wy /= wl;
+    wz /= wl;
+
+    // Tangent from the ship to the sphere, then on to the waypoint's radius.
+    const rw = r * DETOUR_SCALE;
+    const angle = Math.acos(Math.min(1, r / dp)) + Math.acos(1 / DETOUR_SCALE);
+    const cos = Math.cos(angle) * rw;
+    const sin = Math.sin(angle) * rw;
     first = t;
-    out.x = c.x + nx * r * DETOUR_SCALE;
-    out.y = c.y + ny * r * DETOUR_SCALE;
-    out.z = c.z + nz * r * DETOUR_SCALE;
+    out.x = c.x + ux * cos + wx * sin;
+    out.y = c.y + uy * cos + wy * sin;
+    out.z = c.z + uz * cos + wz * sin;
   }
   return first !== Infinity;
 }

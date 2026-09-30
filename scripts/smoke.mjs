@@ -1,13 +1,15 @@
 // Headless browser smoke test over the Chrome DevTools Protocol.
 // Usage: npm run smoke [-- http://localhost:5173/]   (dev server must be running)
 // Checks: W moves the ship along -Z, the autopilot flies back to a point, hovering + clicking
-// the star targets it, the system map shows every planet and moon (hover, click to fly, N folds it), and the galaxy loop works (scroll out to the galaxy, click the nearest
-// star, travel, scroll in to its system; the galaxy shows distant galaxies, twinkles, spins and draws binaries
-// as two dots, and picking works while it's turned), a real click on the menu button starts audio and opens the
-// menu (the game pauses; volume sliders and a planet lab link; a real Esc closes it); then the transitions and
-// galaxy travel play their whooshes, and M mutes. Then the planet loop (park at a planet,
-// scroll in to low orbit, click the globe and fly, the Equal Earth map is shown and a click on it sets the
-// autopilot there, scroll back out beside it), and again for every planet
+// the star targets it, the system map shows every planet and moon (hover, click to fly, N folds it), and the galaxy
+// loop works (scroll out to the galaxy, click the nearest star, travel, scroll in to its system, where the ship flies
+// in and parks a few star diameters out, just above the ecliptic with the camera over it; the galaxy shows distant
+// galaxies, twinkles, spins and draws binaries as two dots, and picking works while it's turned), a real click on the
+// menu button starts audio and opens the menu (the game pauses; volume sliders and a planet lab link; a real Esc
+// closes it); then the transitions and galaxy travel play their whooshes, and M mutes. Then the planet loop (park at
+// a planet, scroll in to low orbit, click the globe and fly, the Equal Earth map is shown and a click on it sets the
+// autopilot there, scroll all the way in and out and check the ship's altitude follows, scroll back out beside it,
+// parked as far out as the zoom says), and again for every planet
 // type, a ringed rocky/icy/lava world and a moon in other systems (skip those with --quick). The system sky has
 // the galaxy band (screenshot looking at the galactic centre) and a smoke trail per planet and moon. Living stars: the
 // surface clock advances and storms have particles under way (and keep animating in the planet level's sky); comets
@@ -88,7 +90,8 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
   if (handoverShot) await evaluate(`__seamless.freezeWhen = 'planet'`);
   await wheel(-300); // keep scrolling in
   if (handoverShot) r.handoverShot = await freezeShot(handoverShot);
-  for (let i = 0; i < 20 && (await evaluate(`levels.mode !== 'planet' || levels.transitioning`)); i++) await sleep(250);
+  // Right after a page load the headless frame rate can be ~2 FPS, and a click while the zoom still runs is ignored.
+  for (let i = 0; i < 40 && (await evaluate(`levels.mode !== 'planet' || levels.transitioning`)); i++) await sleep(250);
   r.mode = await evaluate(`levels.mode`);
   r.soundIn = await evaluate(`audio.lastPlayed?.name ?? null`);
   if (r.mode !== 'planet') return r;
@@ -127,6 +130,20 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
   r.skyClock = +(skyAfter[1] - skyBefore[1]).toFixed(2);
   r.flewDegrees = await evaluate(`+(planet.ship.direction.angleTo(__start) * 180 / Math.PI).toFixed(1)`);
   r.altitudeOk = await evaluate(`Math.abs(planet.ship.object.position.length() - planet.ship.radius) < 0.5`);
+  // The zoom sets the altitude: all the way in skims the peaks, all the way out climbs to high orbit. Waits for the
+  // camera to get there and the ship to follow (at headless frame rates the game runs slower than real time).
+  const altitude = `+(planet.ship.object.position.length() - planet.radius).toFixed(1)`;
+  // First the wheel must have been read (it waits for the next frame: a screenshot capture can stall the page for a
+  // while), so the camera's target is at the limit; then the camera and the ship have to get there.
+  const settle = async (limit) => {
+    const settled = `planet.orbit.targetDistance === planet.orbit.params.${limit} &&
+      Math.abs(planet.orbit.zoom - planet.orbit.targetDistance) < 0.5 &&
+      Math.abs(planet.ship.radius - planet.flyingRadius(planet.orbit.zoom)) < 0.5`;
+    for (let i = 0; i < 60 && !(await evaluate(settled)); i++) await sleep(250);
+  };
+  await wheel(-50000);
+  await settle('minDistance');
+  r.altitude = { low: await evaluate(altitude) };
   r.lava = await evaluate(
     `planet.eruptions && { vents: planet.eruptions.activity.vents.length, events: planet.eruptions.events.length, blobs: planet.eruptions.liveBlobs }`,
   );
@@ -161,13 +178,15 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
   writeFileSync(r.screenshot, Buffer.from(shot.result.data, 'base64'));
 
   await wheel(50000); // to max zoom
-  await sleep(1500);
+  await settle('maxDistance');
+  r.altitude.high = await evaluate(altitude);
   await wheel(300); // keep scrolling out
   for (let i = 0; i < 20 && (await evaluate(`levels.mode !== 'system' || levels.transitioning`)); i++) await sleep(250);
   r.modeAfter = await evaluate(`levels.mode`);
   r.soundOut = await evaluate(`audio.lastPlayed?.name ?? null`);
   r.parkedAt = await evaluate(`ship.targetBody?.name ?? null`);
-  r.standoffs = await evaluate(`+(ship.object.position.distanceTo(__body.renderPosition) / __body.standoff).toFixed(2)`);
+  // Parked as far from the body as the system camera's zoom puts it.
+  r.standoffs = await evaluate(`+(ship.object.position.distanceTo(__body.renderPosition) / ship.parkDistance(__body)).toFixed(2)`);
   r.ok =
     r.mode === 'planet' &&
     r.sky.bodies === r.expectedSky.bodies &&
@@ -177,6 +196,7 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
     r.skyClock > 0.3 &&
     Math.abs(r.skyStarTime - r.skyClock) < 0.25 &&
     r.altitudeOk &&
+    r.altitude.high > r.altitude.low + 20 &&
     r.map.visible &&
     r.map.baked &&
     r.map.enRoute &&
@@ -439,6 +459,15 @@ if (started) {
   galaxyLoop.modeAfterZoomIn = await evaluate(`levels.mode`);
   galaxyLoop.to = await evaluate(`system.id`);
   galaxyLoop.shipSpeed = await evaluate(`ship.speed`);
+  // Arriving, the ship flies in from far out and brakes to park a few star diameters from the star.
+  const arrival = `({ target: ship.targetBody?.name ?? null, star: world.stars[0].name, enRoute: ship.enRoute,
+    distance: +ship.object.position.distanceTo(world.stars[0].position).toFixed(0),
+    park: +ship.parkDistance(world.stars[0]).toFixed(0), zone: +system.starZone.toFixed(0),
+    aboveEcliptic: +(ship.object.position.y - world.stars[0].position.y).toFixed(1),
+    cameraAboveShip: +(game.camera.position.y - ship.object.position.y).toFixed(1) })`;
+  galaxyLoop.arrival = { flying: await evaluate(arrival) };
+  for (let i = 0; i < 60 && (await evaluate(`ship.enRoute`)); i++) await sleep(250);
+  galaxyLoop.arrival.parked = await evaluate(arrival);
   fps = await evaluate(measureFps);
 
   // Audio: a real (trusted) click on the menu button unlocks audio and opens the menu, which pauses the game and
@@ -943,6 +972,14 @@ const looped =
   galaxyLoop.handoverShot !== null &&
   galaxyLoop.modeAfterZoomIn === 'system' &&
   galaxyLoop.to === galaxyLoop.clicked.nearest &&
+  galaxyLoop.arrival.flying.target === galaxyLoop.arrival.flying.star &&
+  galaxyLoop.arrival.parked.target === galaxyLoop.arrival.parked.star &&
+  !galaxyLoop.arrival.parked.enRoute &&
+  Math.abs(galaxyLoop.arrival.parked.distance - galaxyLoop.arrival.parked.park) < 3 &&
+  galaxyLoop.arrival.parked.distance > 2 * galaxyLoop.arrival.parked.zone &&
+  // Always arrives just above the ecliptic, with the camera over the ship.
+  galaxyLoop.arrival.parked.aboveEcliptic > 0 &&
+  galaxyLoop.arrival.parked.cameraAboveShip > 0 &&
   typeof galaxyLoop.shipSpeed === 'number';
 const sounded =
   started &&
