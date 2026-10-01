@@ -146,6 +146,16 @@ export class LabInfo implements Entity {
     } else if (planet.type !== 'gas') {
       rows.push(['Weather', 'none']);
     }
+    const plants = level?.plants;
+    if (plants) {
+      const st = plants.stats();
+      rows.push([
+        'Plants',
+        `T${plants.plan.tier} · ${plants.plan.species.length} species · ${st.plants} in ${st.cells} cells · ${st.near} near, ${st.mid} mid · ${st.drawCalls} draws, ${Math.round(st.triangles / 1000)}k triangles`,
+      ]);
+    } else if (view.view === 'globe' && planet.type !== 'gas') {
+      rows.push(['Plants', 'none']);
+    }
     if (planet.rings) rows.push(['Rings', `${fmt(planet.rings.inner / planet.radius)}–${fmt(planet.rings.outer / planet.radius)} R`]);
     if (planet.kind !== 'moon') rows.push(['Moons', `${planet.moons.length}${planet.moons.length ? ' (system view)' : ''}`]);
     if (level) rows.push(['Build', `${Math.round(level.triangles / 1000)}k triangles · ${Math.round(level.buildMs)} ms`]);

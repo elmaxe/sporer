@@ -9,6 +9,7 @@ import { hoverGap, parkGap, zoomCurveParams } from '../player/zoomCurve';
 import { Tooltip } from '../ui/Tooltip';
 import type { Planet } from '../world/Planet';
 import { arrivalParams, clampElevation, descentParams, leaveParams } from './arrival';
+import { SurfaceChangeStore } from '../surface/changes';
 import { GALAXY_VIEW_DISTANCE, GALAXY_VIEW_ELEVATION, GalaxyLevel } from './GalaxyLevel';
 import { PLANET_VIEW_DISTANCE, PlanetLevel } from './PlanetLevel';
 import type { Level } from './Level';
@@ -80,6 +81,8 @@ export class SceneManager implements Entity {
   private _planetLevel: PlanetLevel | null = null;
   private readonly side = new THREE.Vector3();
   private readonly tooltip = new Tooltip();
+  /** What the player has done to each visited planet's surface (removed plants), kept across visits. */
+  private readonly surfaceChanges = new SurfaceChangeStore();
   private seamless: SeamlessTransition | null = null;
   // Scratch for the seamless zoom (live: the cameras read them every frame).
   private readonly view = new THREE.Quaternion();
@@ -499,8 +502,16 @@ export class SceneManager implements Entity {
 
   private createPlanet(body: Planet, side: THREE.Vector3): PlanetLevel {
     const { camera, input } = this.game;
-    this._planetLevel = new PlanetLevel(this._systemLevel, body, side, camera, input, this.debug, () =>
-      this.leavePlanet(),
+    this._planetLevel = new PlanetLevel(
+      this._systemLevel,
+      body,
+      side,
+      camera,
+      input,
+      this.debug,
+      () => this.leavePlanet(),
+      this.surfaceChanges.forPlanet(`${body.config.name}:${body.config.seed}`),
+      this.tooltip,
     );
     return this._planetLevel;
   }

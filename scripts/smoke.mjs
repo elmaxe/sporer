@@ -27,6 +27,8 @@
 // Living lava: in low orbit over the lava world, the eruptions have vents, events and blobs in the air.
 // Geysers: every body in the planet loop has the geyser kind its climate says (or none), with vents, eruptions and
 // particles in the air while one erupts; the loop also visits a body with each kind (steam, cryo planet and moon, sulphur).
+// Plants: bodies of tier 1 and up have plants around the ship (none on tier 0 or gas giants), hovering one shows it in the
+// tooltip, the menu's Plants button turns them off and on, and a removed plant stays in the change list.
 // Weather: every body in the planet loop has the weather its climate says (or none), as clouds in the system view and
 // low orbit, with storms and flashes coming and going over time; the loop also visits an acid-deck (Venus-like, with
 // volcanic lightning), a methane (Titan-like) and a dusty (Mars-like) world. The menu's Weather toggle switches it.
@@ -211,12 +213,14 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
   const settle = async (limit) => {
     const settled = `planet.orbit.targetDistance === planet.orbit.params.${limit} &&
       Math.abs(planet.orbit.zoom - planet.orbit.targetDistance) < 0.5 &&
-      Math.abs(planet.ship.radius - planet.flyingRadius(planet.orbit.zoom)) < 0.5`;
+      Math.abs(planet.ship.radius - planet.ship.goalRadius) < 0.5`;
     for (let i = 0; i < 60 && !(await evaluate(settled)); i++) await sleep(250);
   };
   await wheel(-50000);
   await settle('minDistance');
   r.altitude = { low: await evaluate(altitude) };
+  // Zoomed in, the UFO keeps its clearance over the ground beneath it (about 3 units, a bit more when it climbs ahead of a slope).
+  r.clearance = await evaluate(`planet.ship.clearance`);
   r.lava = await evaluate(
     `planet.eruptions && { vents: planet.eruptions.activity.vents.length, events: planet.eruptions.events.length, blobs: planet.eruptions.liveBlobs }`,
   );
@@ -246,6 +250,64 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
         cloudRadius: +(look.data.cloudRadius / look.data.radius).toFixed(3) });
     })();
   })`);
+  // Plants: bodies of tier 1 and up (not gas giants) have them, standing around the ship; tier 0 has none. The menu's
+  // Plants button turns them off (and back on), and what is left is gone for good once removed.
+  r.expectedPlants = await evaluate(`!!__body.config.climate && __body.config.climate.habitability > 0 && !__body.config.bands`);
+  if (r.expectedPlants) {
+    for (let i = 0; i < 80 && !(await evaluate(`planet.plants && planet.plants.settled && planet.plants.stats().cells > 0`)); i++) await sleep(250);
+    r.plants = await evaluate(`planet.plants && { tier: planet.plants.plan.tier, species: planet.plants.plan.species.length, ...planet.plants.stats() }`);
+    r.plants.tierOk = await evaluate(`planet.plants.plan.tier === __body.config.climate.habitability`);
+    // Hovering a plant shows it in the tooltip (the nearest plant in view, if any is).
+    const hover = () => evaluate(`new Promise((resolve) => {
+      const P = planet.plants;
+      const cam = game.camera;
+      const V = cam.position.constructor;
+      const candidates = [...P.cells.values()].flatMap((c) => c.plants).map((p) => {
+        const s = P.plan.species[p.species];
+        const v = new V(p.x, p.y, p.z).multiplyScalar(p.radius + s.height * p.scale * 0.5);
+        return { s, d: v.distanceTo(cam.position), n: v.clone().project(cam) };
+      }).filter((c) => Math.abs(c.n.x) < 0.8 && Math.abs(c.n.y) < 0.8 && c.n.z < 1 && c.d < 150).sort((a, b) => a.d - b.d);
+      if (!candidates.length) return resolve({ skipped: true });
+      const c = candidates[0];
+      const rect = game.renderer.domElement.getBoundingClientRect();
+      const at = { clientX: rect.left + ((c.n.x + 1) / 2) * rect.width, clientY: rect.top + ((1 - c.n.y) / 2) * rect.height, bubbles: true };
+      game.renderer.domElement.dispatchEvent(new PointerEvent('pointermove', at));
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const name = document.getElementById('tooltip-name').textContent;
+        resolve({ shown: !document.getElementById('tooltip').hidden, name, known: P.plan.species.some((s) => s.name === name) });
+      }));
+    })`);
+    r.plants.tooltip = await hover();
+    if (r.plants.tooltip.skipped && r.plants.plants > 0) {
+      // Over the sea, or land too far off: hover above the first loaded plant and try again.
+      await evaluate(`(() => { const p = [...planet.plants.cells.values()].flatMap((c) => c.plants)[0]; if (p) planet.ship.placeAt(new (planet.ship.direction.constructor)(p.x, p.y, p.z)); })()`);
+      await sleep(1500);
+      for (let i = 0; i < 80 && !(await evaluate(`planet.plants.settled`)); i++) await sleep(250);
+      r.plants.tooltip = await hover();
+    }
+    if (handoverShot) {
+      const toggle = async (want) => {
+        await evaluate(`document.getElementById('graphics-plants').click()`);
+        for (let i = 0; i < 80 && !(await evaluate(want)); i++) await sleep(250);
+        return evaluate(want);
+      };
+      const off = await toggle(`planet.plants.stats().cells === 0 && !planet.plants.object.visible`);
+      const on = await toggle(`planet.plants.stats().cells > 0 && planet.plants.settled && planet.plants.object.visible`);
+      // Removing a plant is recorded in the change list, which lives on after the planet level.
+      r.plants.switch = { off, on };
+      const removal = await evaluate(`(() => {
+        const cells = planet.plants.cells;
+        const plant = [...cells.values()].flatMap((c) => c.plants)[0];
+        if (!plant) return { skipped: true };
+        const before = planet.plants.stats().plants;
+        const removed = planet.plants.remove(plant.id);
+        return { removed, recorded: planet.plants.isRemoved(plant.id), before, id: plant.id };
+      })()`);
+      r.plants.removal = { ...(removal ?? { failed: true }), after: await evaluate(`(() => { planet.plants.update(); return planet.plants.stats().plants; })()`) };
+    }
+  } else {
+    r.plants = { none: await evaluate(`planet.plants === null`) };
+  }
   // The Equal Earth map: shown and baked; clicking it sends the autopilot to that point of the globe.
   for (let i = 0; i < 40 && !(await evaluate(`planet.map.baked`)); i++) await sleep(250);
   r.map = await evaluate(`new Promise((resolve) => {
@@ -308,6 +370,8 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
     r.skyClock > 0.3 &&
     Math.abs(r.skyStarTime - r.skyClock) < 0.25 &&
     r.altitudeOk &&
+    r.clearance >= 1 &&
+    r.clearance < 15 &&
     r.altitude.high > r.altitude.low + 20 &&
     r.map.visible &&
     r.map.baked &&
@@ -316,6 +380,16 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
     (r.type !== 'lava' || (r.lava && r.lava.vents > 0 && r.lava.events > 0 && r.lava.blobs > 0)) &&
     (r.expectedGeysers ?? null) === (r.geysers?.kind ?? null) &&
     (!r.geysers || (r.geysers.vents > 0 && r.geysers.events > 0 && (r.geysers.erupting === 0 || r.geysers.particles > 0))) &&
+    (r.expectedPlants
+      ? r.plants.tierOk &&
+        r.plants.cells > 0 &&
+        (r.plants.tooltip.skipped ? r.type !== 'terran' : r.plants.tooltip.shown && r.plants.tooltip.known) &&
+        (r.type !== 'terran' || (r.plants.plants > 50 && r.plants.drawCalls > 0)) &&
+        (!handoverShot ||
+          (r.plants.switch.off &&
+            r.plants.switch.on &&
+            (r.plants.removal.skipped || (r.plants.removal.removed && r.plants.removal.recorded && r.plants.removal.after === r.plants.removal.before - 1))))
+      : r.plants.none) &&
     !!r.weather === (r.expectedWeather.kind !== null || r.expectedWeather.volcanic) &&
     (!r.weather ||
       ((r.expectedWeather.kind === null || r.weather.kind === r.expectedWeather.kind) &&

@@ -4,7 +4,9 @@ import { addLavaDebug } from '../world/lavaMaterial';
 import { addAtmosphereDebug } from '../world/atmosphereShell';
 import { addWeatherDebug } from '../world/weatherLook';
 import { Physics } from '../physics/Physics';
+import { addPlantDebug, plantParams } from '../surface/plantParams';
 import { FpsCounter } from '../ui/FpsCounter';
+import { isTouchDevice } from '../ui/GraphicsSettings';
 import { TouchControls } from '../ui/TouchControls';
 import { LabInfo } from './LabInfo';
 import { LabPanel } from './LabPanel';
@@ -26,6 +28,9 @@ async function main(): Promise<void> {
   addLavaDebug(debug);
   addAtmosphereDebug(debug);
   addWeatherDebug(debug);
+  // Plants are off by default on touch devices, as in the game's menu.
+  plantParams.enabled = !isTouchDevice();
+  addPlantDebug(debug);
   const info = game.add(new LabInfo(lab, game.input));
   // The game's stick, Boost and Map buttons on phones (low orbit only, see LabLevel.touchControls).
   game.add(new TouchControls(game));

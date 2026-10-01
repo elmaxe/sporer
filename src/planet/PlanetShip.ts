@@ -4,6 +4,7 @@ import type { Entity } from '../core/Entity';
 import type { Input } from '../core/Input';
 import type { ArriveParams } from '../player/autopilot';
 import { buildUfoMesh } from '../player/Ship';
+import { climbStep, flightRadius, groundAhead, groundParams, type GroundHeight } from './ground';
 import { sphereStep, surfaceArriveImpulse } from './surfaceMotion';
 
 /** Tunables, exposed in the debug panel. Planet-level units (an Earth-sized globe's radius is 100). */
@@ -25,8 +26,12 @@ export const planetAutopilotParams: ArriveParams = {
   damping: planetShipParams.damping,
 };
 
-/** Seconds to close ~63% of the gap to a new altitude. */
-const CLIMB_TIME = 0.35;
+/** What the ship can follow: the ground's radius in any direction, and the highest it gets. */
+export interface Terrain {
+  readonly height: GroundHeight;
+  readonly top: number;
+}
+
 /** The autopilot counts as arrived within this arc length and speed. */
 const ARRIVE_DISTANCE = 0.5;
 const ARRIVE_SPEED = 1;
@@ -34,8 +39,10 @@ const ARRIVE_SPEED = 1;
 /**
  * The UFO in low orbit. Scripted, no physics: its state is a unit direction
  * from the planet's centre plus a velocity tangent to the sphere, at a flying
- * radius above the highest terrain that the zoom sets (`setRadius`; it climbs
- * and sinks smoothly). The autopilot (`moveTo`) flies the great circle to a
+ * radius that the zoom sets (`setRadius`; it climbs and sinks smoothly): above
+ * the highest terrain zoomed out, and, zoomed in, a fixed clearance over the
+ * ground beneath it (`follow`), looking ahead along its velocity so it rises
+ * before a slope. The autopilot (`moveTo`) flies the great circle to a
  * point with the same arrive steering as in the system (as fast in angle at
  * every altitude);
  * WASD pushes it in the tangent plane relative to the camera. It stays level
@@ -53,7 +60,12 @@ export class PlanetShip implements Entity {
   private hasTarget = false;
   /** Distance from the planet's centre it flies at, and the one it's climbing or sinking to. */
   private _radius: number;
-  private targetRadius: number;
+  /** What the zoom asks for: the altitude above the highest terrain (it sets the autopilot's pace too). */
+  private zoomRadius: number;
+  /** How much of the way down to the ground it follows (see ground.ts followWeight). */
+  private follow = 0;
+  /** The radius it's climbing or sinking to: the zoom's, lowered towards the ground ahead. */
+  private _goal: number;
 
   // Simulation state: direction from the centre, tangent velocity, facing (tangent).
   private readonly u = new THREE.Vector3();
@@ -87,12 +99,14 @@ export class PlanetShip implements Entity {
     start: THREE.Vector3,
     /** Autopilot speed factor for this globe's size (see planet/frame.ts travelScale). */
     private readonly travelScale = 1,
+    /** The ground to stay above, if it should follow it (else it flies at the radius the zoom sets). */
+    private readonly terrain: Terrain | null = null,
   ) {
     const { group, ring } = buildUfoMesh();
     this.object.add(group);
     this.hull = group;
     this.ring = ring;
-    this._radius = this.targetRadius = baseRadius;
+    this._radius = this._goal = this.zoomRadius = baseRadius;
     scene.add(this.object);
     this.placeAt(start);
 
@@ -105,6 +119,15 @@ export class PlanetShip implements Entity {
     a?.add(planetAutopilotParams, 'maxSpeed', 10, 300);
     a?.add(planetAutopilotParams, 'accel', 10, 600);
     a?.add(planetAutopilotParams, 'gain', 1, 20);
+    const g = debug.folder('Ground following');
+    g?.add(groundParams, 'followFrom', 0, 1);
+    g?.add(groundParams, 'followTo', 0, 1);
+    g?.add(groundParams, 'lookAhead', 0, 3);
+    g?.add(groundParams, 'footprint', 0, 20);
+    g?.add(groundParams, 'samples', 0, 12, 1);
+    g?.add(groundParams, 'climbTime', 0.05, 2);
+    g?.add(groundParams, 'sinkTime', 0.05, 3);
+    g?.add(groundParams, 'minClearance', 0, 5);
   }
 
   /** Current speed in units per second. */
@@ -122,9 +145,24 @@ export class PlanetShip implements Entity {
     return this._radius;
   }
 
-  /** Climbs or sinks smoothly to fly `radius` from the planet's centre. */
-  setRadius(radius: number): void {
-    this.targetRadius = radius;
+  /** The radius it is climbing or sinking to (the zoom's, adjusted for the ground ahead). */
+  get goalRadius(): number {
+    return this._goal;
+  }
+
+  /** Height above the ground right beneath it (the sea's surface over water); null if it has no terrain to follow. */
+  get clearance(): number | null {
+    return this.terrain ? this._radius - this.terrain.height(this.u) : null;
+  }
+
+  /**
+   * Asks to fly `radius` from the planet's centre (above the highest terrain, as
+   * the zoom sets it), following the ground by `follow` (0 to 1) of the way down,
+   * and climbs or sinks there smoothly.
+   */
+  setRadius(radius: number, follow = 0): void {
+    this.zoomRadius = radius;
+    this.follow = this.terrain ? follow : 0;
   }
 
   /** The (simulation) direction from the planet's centre. */
@@ -142,6 +180,7 @@ export class PlanetShip implements Entity {
     if (this.heading.lengthSq() < 1e-6) this.heading.set(1, 0, 0);
     this.heading.normalize();
     this.orient(this.currRot);
+    this._radius = this._goal = this.goal();
     this.currPos.copy(this.u).multiplyScalar(this._radius);
     this.prevPos.copy(this.currPos);
     this.prevRot.copy(this.currRot);
@@ -187,7 +226,7 @@ export class PlanetShip implements Entity {
       vel.add(this.impulse);
     } else if (this.hasTarget) {
       // Higher up, faster, so it crosses the ground below at the same pace.
-      const scale = (this.travelScale * this._radius) / this.baseRadius;
+      const scale = (this.travelScale * this.zoomRadius) / this.baseRadius;
       Object.assign(this.arrive, planetAutopilotParams).maxSpeed *= boost * scale;
       this.arrive.accel *= scale;
       const arc = surfaceArriveImpulse(u, vel, this.target, this._radius, this.arrive, dt, this.impulse);
@@ -197,7 +236,11 @@ export class PlanetShip implements Entity {
     // Damping like the system ship's Rapier body (the autopilot compensates for it).
     vel.divideScalar(1 + planetShipParams.damping * dt);
 
-    this._radius += (this.targetRadius - this._radius) * (1 - Math.exp(-dt / CLIMB_TIME));
+    const { terrain } = this;
+    this._goal = this.goal();
+    // Never closer to the ground right beneath it than the hull allows, whatever the smoothing says.
+    const floor = terrain ? terrain.height(u) + groundParams.minClearance : 0;
+    this._radius = climbStep(this._radius, this._goal, floor, dt);
     this.destination.copy(this.target).multiplyScalar(this._radius);
 
     // Slide over the sphere, carrying the velocity and heading along.
@@ -234,6 +277,15 @@ export class PlanetShip implements Entity {
         (o.material as THREE.Material).dispose();
       }
     });
+  }
+
+  /** The radius to fly at from here: the zoom's, lowered towards the highest ground beneath and ahead of the ship. */
+  private goal(): number {
+    const { terrain } = this;
+    if (!terrain || this.follow <= 0) return this.zoomRadius;
+    const ground = groundAhead(terrain.height, this.u, this.vel, this.heading, this._radius);
+    // Not below the ground right under the hull.
+    return Math.max(flightRadius(this.zoomRadius, terrain.top, ground, this.follow), terrain.height(this.u) + groundParams.minClearance);
   }
 
   /** Level with the ground (+Y = radial) and facing the heading (the UFO's front is -Z). */
