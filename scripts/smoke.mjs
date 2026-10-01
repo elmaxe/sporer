@@ -1392,7 +1392,8 @@ async function runLab() {
     result.ok =
       (!c.type || result.globe.type === c.type) &&
       (!c.kind || result.globe.kind === c.kind) &&
-      result.globe.triangles > 5000 &&
+      // Comet nuclei and asteroids are small: from the lab's default view their six root chunks (3072 triangles) are fine enough.
+      result.globe.triangles > (c.kind === 'comet' || c.kind === 'asteroid' ? 3000 : 5000) &&
       result.system.triangles > 500 &&
       // A comet's nucleus is nearly black (albedo ~4%), as are carbonaceous asteroids, so less light comes back from them.
       result.globe.brightness > (c.kind === 'comet' || c.kind === 'asteroid' ? 3 : 8) &&

@@ -28,6 +28,7 @@ import { Planet } from '../world/Planet';
 import { Starfield } from '../world/Starfield';
 import { starLightIntensity } from '../world/Star';
 import { createGlowTexture } from '../world/glowTexture';
+import { renderScene } from '../world/wireframe';
 import { STILL_ORBIT, describeLab, toPlanetConfig, type LabPlanet, type LabStar, type LabView } from './labPlanet';
 
 /** The UFO's height above the highest terrain, as in the planet level. */
@@ -359,42 +360,10 @@ export class LabLevel extends Level {
     this.buildMs = performance.now() - start;
   }
 
-  /** Copies the view options that don't need a rebuild (wireframe, axes). */
+  /** Copies the view options that don't need a rebuild (the axes; the wireframe is read as it draws). */
   applyLive(): void {
     this.axes.visible = this.view.axes;
-    this.scene.traverse((o) => {
-      if (o instanceof THREE.Mesh && o.material instanceof THREE.MeshStandardMaterial) o.material.wireframe = this.view.wireframe;
-    });
   }
-
-  /**
-   * The wireframe with hidden lines removed. WebGL draws a wireframe as
-   * lines, which are never back-face culled, so the far side of every sphere
-   * would show through the near side. First the solid surfaces go into the
-   * depth buffer only (pushed back a little, so the lines on them still pass),
-   * then the scene is drawn as usual over it.
-   */
-  private hiddenLines(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera): void {
-    const solids = this.solids;
-    const others = this.others;
-    solids.length = 0;
-    others.length = 0;
-    this.scene.traverseVisible((o) => {
-      if (o instanceof THREE.Mesh && o.material instanceof THREE.MeshStandardMaterial) solids.push(o.material);
-      else if (o !== this.scene && (o instanceof THREE.Mesh || o instanceof THREE.Points || o instanceof THREE.Sprite || o instanceof THREE.Line)) others.push(o);
-    });
-    for (const m of solids) Object.assign(m, { wireframe: false, colorWrite: false, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
-    for (const o of others) o.visible = false;
-    renderer.render(this.scene, camera);
-    for (const m of solids) Object.assign(m, { wireframe: true, colorWrite: true, polygonOffset: false });
-    for (const o of others) o.visible = true;
-    renderer.autoClear = false;
-    renderer.render(this.scene, camera);
-    renderer.autoClear = true;
-  }
-
-  private readonly solids: THREE.MeshStandardMaterial[] = [];
-  private readonly others: THREE.Object3D[] = [];
 
   /** Where the camera is now, for the next build. */
   carry(): LabCarry {
@@ -437,11 +406,7 @@ export class LabLevel extends Level {
 
   override render(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera): void {
     this.globe?.renderDepth(renderer, camera);
-    if (this.view.wireframe) {
-      this.hiddenLines(renderer, camera);
-    } else {
-      renderer.render(this.scene, camera);
-    }
+    renderScene(renderer, this.scene, camera, this.view.wireframe);
     // The map draws into the same canvas: no clearing in between.
     renderer.autoClear = false;
     this.map?.render(renderer);

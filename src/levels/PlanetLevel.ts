@@ -35,6 +35,7 @@ import { galacticLightParams } from '../world/galacticLight';
 import type { Planet } from '../world/Planet';
 import { Level } from './Level';
 import type { SystemLevel } from './SystemLevel';
+import { renderScene } from '../world/wireframe';
 
 /**
  * Low-orbit camera, in planet-level units (an Earth-sized globe's radius is
@@ -329,7 +330,7 @@ export class PlanetLevel extends Level {
     // The planet is always in front of the sky (its own moons are in this scene).
     renderer.clearDepth();
     this.globe.renderDepth(renderer, camera);
-    renderer.render(this.scene, camera);
+    renderScene(renderer, this.scene, camera);
     renderer.toneMappingExposure = 1;
     this.map.render(renderer);
     renderer.autoClear = true;

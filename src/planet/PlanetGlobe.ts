@@ -84,7 +84,6 @@ export class PlanetGlobe implements Entity {
       ? gasSampler(R, seed, config.bands, true)
       : terrainSampler(R, seed, style, { noise: detailedTerrain, reliefScale: RELIEF_SCALE, seaFloor, shape: config.shape });
     this.surface = new LodSurface(
-      R,
       gas ? R : floorRadius(R, style, RELIEF_SCALE, seaFloor, config.shape != null),
       this.top,
       this.sample,

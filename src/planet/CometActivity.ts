@@ -113,8 +113,8 @@ const jetFragment = /* glsl */ `
  * so it has none; brighter looking towards the sun (dust scatters forwards).
  * The tails stream away from the sun, so from the nucleus they're glows
  * converging on the point opposite it: the narrow blue ion tail straight
- * there, the broader warm dust tail bent back along the orbit, both
- * streaked. Drawn on the far side of the sphere with the depth test on, so
+ * there, the broader warm dust tail bent back along the orbit, both soft
+ * (streaks round that point would converge on it like a starburst). Drawn on the far side of the sphere with the depth test on, so
  * the dark nucleus stands out against them.
  */
 const comaVertex = /* glsl */ `
@@ -137,7 +137,6 @@ const comaFragment = /* glsl */ `
   uniform vec3 uColor;
   uniform vec3 uIonColor;
   uniform vec3 uDustColor;
-  uniform float uTime;
   varying vec3 vWorld;
 
   // ∫ (1/(b² + s²) − 1/R²) ds from 0 to s.
@@ -145,14 +144,10 @@ const comaFragment = /* glsl */ `
     return atan(s / b) / b - s / (R * R);
   }
 
-  // A glow round unit direction 'axis', 'width' radians wide, streaked by the angle round it.
-  float streamer(vec3 ray, vec3 axis, float width, float streaks, float contrast, float drift) {
+  // A soft glow round unit direction 'axis', 'width' radians wide.
+  float streamer(vec3 ray, vec3 axis, float width) {
     float x = 1.0 - dot(ray, axis); // ≈ angle² / 2
-    vec3 t1 = normalize(cross(axis, abs(axis.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
-    vec3 t2 = cross(axis, t1);
-    float turn = atan(dot(ray, t2), dot(ray, t1));
-    float streak = 1.0 + contrast * sin(turn * streaks + 2.0 * sin(turn * 5.0 + drift));
-    return exp(-x / (0.5 * width * width)) * streak;
+    return exp(-x / (0.5 * width * width));
   }
 
   void main() {
@@ -171,7 +166,7 @@ const comaFragment = /* glsl */ `
 
     vec3 away = -uSun;
     vec3 dust = normalize(away + 0.45 * uBack);
-    glow += uTails * (uIonColor * streamer(ray, away, 0.08, 31.0, 0.35, uTime * 0.2) + 0.5 * uDustColor * streamer(ray, dust, 0.32, 9.0, 0.15, 0.0));
+    glow += uTails * (uIonColor * streamer(ray, away, 0.08) + 0.5 * uDustColor * streamer(ray, dust, 0.32));
     gl_FragColor = vec4(glow, 1.0);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
@@ -292,7 +287,6 @@ export class CometActivity implements Entity {
           uColor: { value: new THREE.Color('#cfe4ff') },
           uIonColor: { value: new THREE.Color(colors.ion) },
           uDustColor: { value: new THREE.Color(colors.dust) },
-          uTime: { value: 0 },
         },
         side: THREE.BackSide,
         blending: THREE.AdditiveBlending,
@@ -336,7 +330,6 @@ export class CometActivity implements Entity {
     c.uRadius!.value = comaRadius;
     c.uBrightness!.value = p.coma * strength;
     c.uTails!.value = p.tails * strength;
-    c.uTime!.value = this.clock.renderTime;
     this.coma.visible = strength > 0;
   }
 

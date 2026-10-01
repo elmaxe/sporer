@@ -114,7 +114,7 @@ describe('LOD surface', () => {
     color.setRGB(1, 1, 1);
     return R * (1 + 0.04 * Math.sin(dir.x * 300) * Math.sin(dir.y * 280 + dir.z * 230));
   };
-  const make = () => new LodSurface(R, R * 0.92, R * 1.08, bumpy, new THREE.MeshBasicMaterial());
+  const make = () => new LodSurface(R * 0.92, R * 1.08, bumpy, new THREE.MeshBasicMaterial());
   const settle = (surface: LodSurface, camera: THREE.Vector3) => {
     // One chunk per update, whatever the machine's speed: the same tree every run.
     const budget = lodParams.budgetMs;
@@ -142,6 +142,28 @@ describe('LOD surface', () => {
     expect(settle(surface, new THREE.Vector3(0, 0, R * 20))).toBe(true);
     expect(triangles(surface)).toBe(far);
     surface.dispose();
+  });
+
+  it('refines a lumpy small body no more than a sphere its size, close up', () => {
+    // A small body's ground spans SHAPE_FLOOR to its longest reach; this one
+    // is 0.8 R under the camera, from 0.6 R to R round the sides.
+    const lumpy = (dir: Vec3Like, color: THREE.Color) => {
+      color.setRGB(1, 1, 1);
+      return R * (0.8 + 0.2 * dir.x);
+    };
+    const sphere = (_dir: Vec3Like, color: THREE.Color) => {
+      color.setRGB(1, 1, 1);
+      return R * 0.8;
+    };
+    const camera = new THREE.Vector3(0, 0, R * 0.8 * 1.1);
+    const shaped = new LodSurface(R * 0.25, R, lumpy, new THREE.MeshBasicMaterial());
+    const round = new LodSurface(R * 0.8, R * 0.8, sphere, new THREE.MeshBasicMaterial());
+    expect(settle(shaped, camera)).toBe(true);
+    expect(settle(round, camera)).toBe(true);
+    // Not the same (the lumpy one's horizon is farther and its sides steeper), but no blow-up.
+    expect(triangles(shaped)).toBeLessThan(triangles(round) * 3);
+    shaped.dispose();
+    round.dispose();
   });
 
   /** Border segments of every drawn chunk near `up` that aren't shared by exactly two chunks with the same endpoint bits. */

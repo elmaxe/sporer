@@ -26,6 +26,13 @@ const VELOCITY_DT = 0.25;
 /** The dust tail is shorter and wider than the ion tail. */
 const DUST_LENGTH = 0.75;
 const ION_WIDTH = 0.6;
+/**
+ * The tails fade out as the line of sight comes within these sines of the
+ * tail's direction (about 6° to 27°), where the end-on glow fades in.
+ */
+const END_ON_FADE = [0.1, 0.45] as const;
+/** The end-on glow's size, in tail widths. */
+const END_ON_SIZE = 4;
 
 /*
  * Both tails are ribbons in one mesh (one draw call per comet), bent and
@@ -33,6 +40,7 @@ const ION_WIDTH = 0.6;
  * ion tail, 1 = the curved dust tail. Uniform vec2s hold (ion, dust) values.
  */
 const tailVertex = /* glsl */ `
+  const vec2 END_ON_FADE = vec2(${END_ON_FADE[0].toFixed(3)}, ${END_ON_FADE[1].toFixed(3)});
   attribute float aS;       // 0 at the head, 1 at the tip
   attribute float aSide;    // -1 or 1 across the ribbon
   attribute float aTail;    // 0 ion, 1 dust
@@ -55,10 +63,14 @@ const tailVertex = /* glsl */ `
     vec3 tangent = normalize(uAway * len + uBack * (2.0 * s * len * curve) + vec3(1e-4));
     // Billboard: widen across the view direction.
     vec3 side = normalize(cross(tangent, cameraPosition - p) + vec3(1e-4));
+    // A flat ribbon can't show a tail seen end-on (its width turns round the line of sight and fans into rays):
+    // it fades out as the view lines up with the tail, and the head's end-on glow takes over (see Comet).
+    float edgeOn = length(cross(tangent, normalize(cameraPosition - p)));
     p += side * aSide * mix(uWidth.x, uWidth.y, aTail) * (0.25 + 1.5 * s);
     vUv = vec2(s, aSide);
     vTail = aTail;
-    vBrightness = mix(uBrightness.x, uBrightness.y, aTail) * smoothstep(uNearFade.x, uNearFade.y, distance(p, cameraPosition));
+    vBrightness = mix(uBrightness.x, uBrightness.y, aTail) * smoothstep(uNearFade.x, uNearFade.y, distance(p, cameraPosition))
+      * smoothstep(END_ON_FADE.x, END_ON_FADE.y, edgeOn);
     gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.0);
   }
 `;
@@ -148,7 +160,12 @@ export class Comet {
   private readonly head = new THREE.Group();
   private readonly coma: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
   private readonly tails: THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial>;
+  /** The tails seen end-on: a soft glow round the head, as bright as the ribbons are faded. */
+  private readonly endOn: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
+  private endOnBrightness = 0;
   private readonly before = new THREE.Vector3();
+  private readonly away = new THREE.Vector3();
+  private readonly view = new THREE.Vector3();
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -175,6 +192,27 @@ export class Comet {
       this.coma.updateMatrixWorld();
     };
     this.head.add(this.coma);
+
+    this.endOn = new THREE.Mesh(
+      new THREE.PlaneGeometry(1, 1),
+      new THREE.MeshBasicMaterial({
+        map: glowTexture,
+        color: new THREE.Color(data.ionColor).lerp(new THREE.Color(data.dustColor), 0.5),
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        transparent: true,
+        toneMapped: false,
+      }),
+    );
+    this.endOn.onBeforeRender = (_renderer, _scene, camera) => {
+      this.endOn.lookAt(camera.position);
+      this.endOn.updateMatrixWorld();
+      // The sine of the angle between the line of sight and the tail, as the ribbons' shader works it out.
+      const sine = this.view.subVectors(camera.position, this.position).normalize().cross(this.away).length();
+      const [a, b] = END_ON_FADE;
+      this.endOn.material.opacity = this.endOnBrightness * (1 - THREE.MathUtils.smoothstep(sine, a, b));
+    };
+    this.head.add(this.endOn);
 
     this.tails = new THREE.Mesh(
       tailGeometry(),
@@ -225,7 +263,7 @@ export class Comet {
 
     const u = this.tails.material.uniforms;
     (u.uHead!.value as THREE.Vector3).copy(this.position);
-    (u.uAway!.value as THREE.Vector3).copy(this.position).divideScalar(r);
+    (u.uAway!.value as THREE.Vector3).copy(this.away.copy(this.position).divideScalar(r));
     (u.uBack!.value as THREE.Vector3).subVectors(this.before, this.position).normalize();
     (u.uLength!.value as THREE.Vector2).set(length, length * DUST_LENGTH);
     (u.uCurve!.value as THREE.Vector2).set(0, cometParams.dustCurve);
@@ -237,6 +275,9 @@ export class Comet {
     (u.uNearFade!.value as THREE.Vector2).fromArray(cometParams.nearFade);
     u.uTime!.value = time;
     this.tails.visible = length > 0.5;
+    this.endOn.visible = this.tails.visible;
+    this.endOn.scale.setScalar(END_ON_SIZE * cometParams.tailWidth);
+    this.endOnBrightness = 0.6 * (0.3 + 0.7 * this.activity) * faint;
 
     const comaSize = this.data.radius * 6 + 18 * this.activity;
     this.coma.scale.setScalar(comaSize);
@@ -251,5 +292,7 @@ export class Comet {
     this.coma.material.dispose(); // the glow texture is shared; its owner disposes it
     this.tails.geometry.dispose();
     this.tails.material.dispose();
+    this.endOn.geometry.dispose();
+    this.endOn.material.dispose();
   }
 }

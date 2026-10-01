@@ -388,4 +388,10 @@ describe('graphics settings', () => {
     expect(parseGraphicsSettings('not json').weather).toBe(true);
     expect(parseGraphicsSettings('{"weather":"no"}').weather).toBe(true);
   });
+
+  it('starts with the wireframe off and reads a saved choice', () => {
+    expect(parseGraphicsSettings(null).wireframe).toBe(false);
+    expect(parseGraphicsSettings('{"wireframe":true}').wireframe).toBe(true);
+    expect(parseGraphicsSettings('{"wireframe":1}').wireframe).toBe(false);
+  });
 });

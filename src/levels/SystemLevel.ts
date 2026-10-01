@@ -27,6 +27,7 @@ import { Starfield } from '../world/Starfield';
 import { StarSystem } from '../world/StarSystem';
 import { arrivalParams, hoverViewElevation } from './arrival';
 import { Level } from './Level';
+import { renderScene } from '../world/wireframe';
 
 /** Where the camera settles after flying in from the galaxy (or starting out in a system). */
 export const ARRIVAL_DISTANCE = 90;
@@ -207,7 +208,7 @@ export class SystemLevel extends Level {
     for (const body of hidden) body.object.visible = false;
     // A visited comet's coma and tails are all round the camera: low orbit draws them as seen from inside.
     for (const comet of this.world.comets) comet.object.visible = !hidden.includes(comet.nucleus);
-    renderer.render(this.scene, camera);
+    renderScene(renderer, this.scene, camera);
     for (const body of hidden) body.object.visible = true;
     for (const comet of this.world.comets) comet.object.visible = true;
     this.trails.visible = trails;
@@ -247,7 +248,7 @@ export class SystemLevel extends Level {
   override render(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera): void {
     this.world.setExposure(this.eye.exposure);
     renderer.toneMappingExposure = sceneExposure(this.eye.exposure) * (this.starless ? galacticLightParams.exposure : 1);
-    renderer.render(this.scene, camera);
+    renderScene(renderer, this.scene, camera);
     renderer.toneMappingExposure = 1;
   }
 
