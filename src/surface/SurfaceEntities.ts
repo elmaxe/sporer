@@ -3,6 +3,7 @@ import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
 import { PLANT_CELL_SIZE, generateCell, parsePlantId, plantGridSize, type GroundRadius, type PlantData, type PlantPlan, type PlantSpecies } from '../gen/plants';
 import { faceGridPoint } from '../world/cubeSphereMath';
+import { GROUND_DETAIL_LAYER } from '../world/groundDepth';
 import type { SurfaceChanges } from './changes';
 import {
   FADE_START,
@@ -184,6 +185,7 @@ export class SurfaceEntities implements Entity {
     mesh.visible = false;
     // Instances are spread over the whole planet: the bounding sphere would be the planet's anyway.
     mesh.frustumCulled = false;
+    mesh.layers.enable(GROUND_DETAIL_LAYER);
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.object.add(mesh);
     return mesh;
@@ -492,7 +494,9 @@ export class SurfaceEntities implements Entity {
     const object = new THREE.Group();
     object.name = species.name;
     plantMatrix(plant, this.matrix).decompose(object.position, object.quaternion, object.scale);
-    object.add(new THREE.Mesh(this.geometries[species.index]!.full, material));
+    const mesh = new THREE.Mesh(this.geometries[species.index]!.full, material);
+    mesh.layers.enable(GROUND_DETAIL_LAYER);
+    object.add(mesh);
     this.scene.add(object);
     this.promoted.add(id);
     this.refreshCell(id);
