@@ -9,6 +9,7 @@ import {
   asteroidClass,
   asteroidRadius,
   beltFraction,
+  carbonShare,
   describeAsteroid,
   describeBelt,
   generateBelts,
@@ -53,9 +54,11 @@ describe('belt placement rules', () => {
       for (let i = 0; i < 1000; i++) if (asteroidClass({ kind: 'main' }, t, (i + 0.5) / 1000) === 'carbon') carbon++;
       return carbon / 1000;
     };
-    expect(share(0)).toBeLessThan(0.3);
-    expect(share(1)).toBeGreaterThan(0.7);
-    expect(share(0.2)).toBeLessThan(share(0.8));
+    // The measured dark shares of the inner, middle and outer belt (albedos of asteroids ≥ 5 km).
+    expect(share(0.21)).toBeCloseTo(0.55, 1);
+    expect(share(0.55)).toBeCloseTo(0.68, 1);
+    expect(share(0.85)).toBeCloseTo(0.87, 1);
+    for (let t = 0; t < 1; t += 0.05) expect(carbonShare(t + 0.05)).toBeGreaterThanOrEqual(carbonShare(t));
     expect(asteroidClass({ kind: 'trojan' }, 0.5, 0.5)).toBe('dtype');
     expect(asteroidClass({ kind: 'kuiper' }, 0.5, 0.5)).toBe('icy');
   });
@@ -81,7 +84,7 @@ describe('generateBelts', () => {
     expect(any).toBeLessThan(0.8);
     for (const kind of ['main', 'kuiper', 'trojan'] as const) {
       expect(share(kind)).toBeGreaterThan(0.15);
-      expect(share(kind)).toBeLessThan(0.45);
+      expect(share(kind)).toBeLessThan(0.55);
     }
   });
 

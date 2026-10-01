@@ -137,47 +137,72 @@ export const BELT_MARGIN = 10;
 /** Narrower than this and there is no belt (system units). */
 export const MIN_BELT_WIDTH = 12;
 
-/** Chances, of the systems where one fits: gameplay shares (debris discs are common, see the note). */
-export const BELT_CHANCE = { main: 0.6, kuiper: 0.3 } as const;
-/** Chance of a Trojan swarm pair per giant: Jupiter and Neptune both have them, Saturn none. */
+/**
+ * Chances, of the systems where one fits. Herschel finds cold debris belts round
+ * ~20% of FGK stars, but only ones ≳10× brighter than the Sun's (which has
+ * two), so real belts are probably far more common: gameplay shares.
+ */
+export const BELT_CHANCE = { main: 0.6, kuiper: 0.45 } as const;
+/** Chance of a Trojan swarm pair per giant: Jupiter (15 765 known) and Neptune (35) have them, Saturn none (gameplay shares). */
 export const TROJAN_CHANCE: Record<'gasGiant' | 'iceGiant', number> = { gasGiant: 0.25, iceGiant: 0.15 };
 
 /**
- * Inclination spread (σ, radians) by belt: the real belts' are wider (see the
- * note), halved so the game's compressed belts read as bands, not clouds.
+ * Inclination spread (σ of a half-Gaussian, radians) by belt, half the real
+ * one so the game's compressed belts read as bands, not clouds: the main
+ * belt's median inclination is 7.15° (σ ≈ 0.185), the Jupiter Trojans' 12°
+ * (σ ≈ 0.31), the Kuiper belt's hot population's σ 17° (0.30; its cold one,
+ * 19% of objects, 2.2°: KUIPER_COLD).
  */
 export const BELT_INCLINATION: Record<BeltKind, readonly [number, number]> = {
-  main: [0.05, 0.08],
-  kuiper: [0.06, 0.1],
-  trojan: [0.08, 0.12],
+  main: [0.085, 0.1],
+  kuiper: [0.14, 0.16],
+  trojan: [0.14, 0.17],
 };
+/** The Kuiper belt's cold classicals: their share and inclination spread (halved like the rest). */
+export const KUIPER_COLD = { share: 0.19, inclination: 0.019 } as const;
 
-/** Trojans librate about L4/L5 by up to this (radians), over this many of the host's orbits (Jupiter's: ~150 yr / 11.86 yr). */
-export const TROJAN_LIBRATION = [0.25, 0.45] as const;
-export const TROJAN_LIBRATION_ORBITS = 12.6;
-/** A Trojan swarm's radial spread, as a share of the host's orbit. */
+/**
+ * Trojans librate about L4/L5 by up to this (radians; real ones "a few
+ * degrees to about 35°"), over this many of the host's orbits (linear theory:
+ * 1 / √(27μ/4) = 12.5 for Jupiter, 147.8 yr).
+ */
+export const TROJAN_LIBRATION = [0.45, 0.61] as const;
+export const TROJAN_LIBRATION_ORBITS = 12.5;
+/** L4 leads L5 by about 1.5 to 1 in number (measured 1.35–1.85): the rocks are shared out so. */
+export const TROJAN_L4_SHARE = 0.6;
+/** A Trojan swarm's radial spread, as a share of the host's orbit (gameplay: room for its named asteroids). */
 export const TROJAN_WIDTH = 0.04;
 
-/** Scenery rocks per 1000 square units of belt (stylised: real belts are almost empty), and the most per belt. */
-export const ROCK_DENSITY = 50;
-export const MAX_ROCKS = { main: 6000, kuiper: 6000, trojan: 1200 } as const;
+/**
+ * Scenery rocks per 1000 square units of belt, and the most per belt. Stylised:
+ * a real main-belt asteroid is ~10⁵–10⁶ of its own diameters from the next;
+ * these are tens.
+ */
+export const ROCK_DENSITY = 100;
+export const MAX_ROCKS = { main: 12000, kuiper: 12000, trojan: 2500 } as const;
 export const MIN_ROCKS = 400;
 /** The most scenery rocks in one system, over all its belts (the view's budget; belts share it by size). */
-export const MAX_SYSTEM_ROCKS = 12000;
+export const MAX_SYSTEM_ROCKS = 24000;
 
 // --- Named asteroids ---
 
 /** Real radii (km) of the named, visitable asteroids per belt: from the size where they stop being specks to the largest non-dwarf members. */
 export const NAMED_RADIUS_KM: Record<BeltKind, readonly [number, number]> = {
-  main: [64, 265],
-  kuiper: [64, 400],
-  trojan: [64, 113],
+  // Vesta 522.77 km across; Hektor's bilobed equivalent 250 km; Ixion 697 km (dwarf candidates left out).
+  main: [64, 261],
+  kuiper: [64, 349],
+  trojan: [64, 125],
 };
 /** How many named asteroids a belt has. */
 export const NAMED_COUNT: Record<BeltKind, readonly [number, number]> = { main: [3, 6], kuiper: [2, 4], trojan: [1, 3] };
-/** Share of contact binaries among the named asteroids, by belt (see the note). */
-export const CONTACT_BINARY_SHARE: Record<BeltKind, number> = { main: 0.2, kuiper: 0.3, trojan: 0.2 };
-/** A single asteroid's longest over shortest axis. */
+/**
+ * Share of contact binaries among the named asteroids, by belt: ~14% of
+ * near-Earth asteroids (radar; they come from the main belt), 14–23% of
+ * Jupiter Trojan candidates, 10–25% of cold classical KBOs (a lower limit;
+ * Plutinos up to ~40%).
+ */
+export const CONTACT_BINARY_SHARE: Record<BeltKind, number> = { main: 0.14, kuiper: 0.25, trojan: 0.18 };
+/** A single asteroid's longest over shortest axis: 15 imaged ones have a median of 1.6 (1.05 to 3.6). */
 export const ASTEROID_ELONGATION = [1.2, 2.2] as const;
 
 const EARTH_KM = 6371;
@@ -204,6 +229,7 @@ export function generateBelts(rng: Rng, ctx: BeltContext): BeltData[] {
     if (!trng.chance(TROJAN_CHANCE[planet.size])) return;
     for (const [point, lead] of [['L4', Math.PI / 3], ['L5', -Math.PI / 3]] as const) {
       const prng = trng.fork(point);
+      const share = point === 'L4' ? TROJAN_L4_SHARE : 1 - TROJAN_L4_SHARE;
       const r = planet.orbit.radius;
       const host: TrojanHost = {
         planet: i,
@@ -219,7 +245,7 @@ export function generateBelts(rng: Rng, ctx: BeltContext): BeltData[] {
       if (prev) half = Math.min(half, r - (prev.orbit.radius + prev.extent + BELT_MARGIN));
       if (next) half = Math.min(half, next.orbit.radius - next.extent - BELT_MARGIN - r);
       if (half < MIN_BELT_WIDTH / 4) return;
-      belts.push(makeBelt(prng, 'trojan', `${planet.name} ${point} Trojans`, r - half, r + half, ctx, host));
+      belts.push(makeBelt(prng, 'trojan', `${planet.name} ${point} Trojans`, r - half, r + half, ctx, host, 2 * share));
     }
   });
   const total = belts.reduce((n, b) => n + b.rocks, 0);
@@ -253,9 +279,19 @@ export function kuiperSpan(ctx: BeltContext): [number, number] | null {
   return [inner, outer];
 }
 
-function makeBelt(rng: Rng, kind: BeltKind, name: string, inner: number, outer: number, ctx: BeltContext, trojan: TrojanHost | null): BeltData {
+function makeBelt(
+  rng: Rng,
+  kind: BeltKind,
+  name: string,
+  inner: number,
+  outer: number,
+  ctx: BeltContext,
+  trojan: TrojanHost | null,
+  /** Rocks relative to the area's share (a Trojan swarm's L4 / L5). */
+  weight = 1,
+): BeltData {
   const area = trojan ? 2 * trojan.libration * (inner + outer) * 0.5 * (outer - inner) : Math.PI * (outer * outer - inner * inner);
-  const rocks = Math.round(Math.min(MAX_ROCKS[kind], Math.max(MIN_ROCKS, (area / 1000) * ROCK_DENSITY)));
+  const rocks = Math.round(weight * Math.min(MAX_ROCKS[kind], Math.max(MIN_ROCKS, (area / 1000) * ROCK_DENSITY)));
   const classes: AsteroidClass[] = kind === 'main' ? ['stony', 'carbon'] : kind === 'trojan' ? ['dtype'] : ['icy'];
   const belt: BeltData = {
     kind,
@@ -277,19 +313,35 @@ function makeBelt(rng: Rng, kind: BeltKind, name: string, inner: number, outer: 
 }
 
 /**
- * Where across a main belt (0 inner edge, 1 outer, in log radius) the stony
- * S-types give way to carbonaceous C-types: the crossover sits near 2.7 AU
- * (DeMeo & Carry 2014), 0.585 of the way from 2.065 to 3.278 AU.
+ * The share of dark (C-like) asteroids across a main belt, at log fractions
+ * from its inner to outer edge: measured from albedos (dark p_V < 0.10 against
+ * bright > 0.15) of numbered asteroids ≥ 5 km in the inner (2.065–2.502 AU),
+ * middle (–2.825) and outer (–3.279) belt, at each zone's middle. Bright,
+ * stony S-types lead inside the 3:1 for the big ones; dark wins outwards.
  */
-export const STONY_TO_CARBON = 0.585;
+export const CARBON_SHARE: readonly (readonly [t: number, share: number])[] = [
+  [0.21, 0.55],
+  [0.55, 0.68],
+  [0.85, 0.87],
+];
 
-/** The class of a main-belt rock at log fraction `t` across the belt (others by belt kind), with a blurred crossover. */
+/** The class of a main-belt rock at log fraction `t` across the belt (others by belt kind), `u` a uniform draw. */
 export function asteroidClass(belt: Pick<BeltData, 'kind'>, t: number, u: number): AsteroidClass {
   if (belt.kind === 'trojan') return 'dtype';
   if (belt.kind === 'kuiper') return 'icy';
-  // The share of C-types climbs from ~20% at the inner edge to ~80% at the outer.
-  const carbon = 0.2 + 0.6 * smoothstep(STONY_TO_CARBON - 0.35, STONY_TO_CARBON + 0.35, t);
-  return u < carbon ? 'carbon' : 'stony';
+  return u < carbonShare(t) ? 'carbon' : 'stony';
+}
+
+/** CARBON_SHARE interpolated (and held at the ends). */
+export function carbonShare(t: number): number {
+  const points = CARBON_SHARE;
+  if (t <= points[0]![0]) return points[0]![1];
+  for (let i = 1; i < points.length; i++) {
+    const [t1, s1] = points[i]!;
+    const [t0, s0] = points[i - 1]!;
+    if (t <= t1) return s0 + ((s1 - s0) * (t - t0)) / (t1 - t0);
+  }
+  return points[points.length - 1]![1];
 }
 
 /** Log fraction across a belt for orbital radius `r`. */
@@ -354,15 +406,17 @@ function namedAsteroids(rng: Rng, belt: BeltData, ctx: BeltContext): AsteroidDat
 }
 
 /**
- * Colours by class (see the note): stony S-types a light reddish grey,
- * carbonaceous C-types and D-types dark (C neutral grey, D red-brown),
- * icy outer-belt bodies red with pale ice.
+ * Colours by class, from the Bus-DeMeo mean spectra scaled by albedo (see the
+ * note): stony S-types a light reddish grey (#8b847a, p_V 0.23), C-types a
+ * neutral dark grey (#464544, 0.06), D-types the same with a red-brown cast
+ * (#484542), cold Kuiper belt objects red (B−R 1.70, p_V 0.15) with pale ice.
+ * Stylised: the dark ones are lifted a little, or they'd vanish against space.
  */
 export const ASTEROID_COLORS: Record<AsteroidClass, { hue: readonly [number, number]; sat: readonly [number, number]; low: readonly [number, number]; high: readonly [number, number] }> = {
-  stony: { hue: [20, 40], sat: [0.12, 0.22], low: [0.3, 0.38], high: [0.5, 0.6] },
-  carbon: { hue: [25, 45], sat: [0.03, 0.08], low: [0.13, 0.17], high: [0.24, 0.3] },
-  dtype: { hue: [8, 22], sat: [0.25, 0.4], low: [0.14, 0.18], high: [0.26, 0.32] },
-  icy: { hue: [10, 25], sat: [0.3, 0.45], low: [0.3, 0.38], high: [0.72, 0.82] },
+  stony: { hue: [28, 40], sat: [0.06, 0.12], low: [0.36, 0.42], high: [0.56, 0.64] },
+  carbon: { hue: [30, 45], sat: [0.01, 0.04], low: [0.19, 0.23], high: [0.32, 0.38] },
+  dtype: { hue: [15, 30], sat: [0.06, 0.12], low: [0.19, 0.23], high: [0.32, 0.38] },
+  icy: { hue: [25, 35], sat: [0.25, 0.4], low: [0.35, 0.42], high: [0.72, 0.82] },
 };
 
 /** A named asteroid's colours and fine relief. */
@@ -398,7 +452,136 @@ export function describeBelt(belt: Pick<BeltData, 'kind' | 'asteroids'>): string
   return `${kind} · ${n} named ${n === 1 ? 'asteroid' : 'asteroids'}`;
 }
 
-function smoothstep(a: number, b: number, x: number): number {
-  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
-  return t * t * (3 - 2 * t);
+
+// --- Scenery rocks ---
+
+/**
+ * One scenery rock, as the view's shader moves it (and `rockPosition` mirrors
+ * it): a circular orbit tilted by `inclination` about a line of nodes at
+ * `node`, `turn` of the way round at time 0, going round `rate` times as fast
+ * as the belt's inner edge (Kepler: (inner / r)^1.5; Trojans 1), swinging
+ * by up to `libration` turns (Trojans) over the host's libration period.
+ */
+export interface RockData {
+  radius: number;
+  /** Turns round the star at time 0 (Trojans: the host's place plus the lead and an offset). */
+  turn: number;
+  rate: number;
+  inclination: number;
+  node: number;
+  /** Libration amplitude and phase, turns (0 off a Trojan swarm). */
+  libration: number;
+  libPhase: number;
+  /** Longest reach, system units. */
+  size: number;
+  class: AsteroidClass;
+  /** Unit spin axis and radians per second. */
+  axis: [number, number, number];
+  spin: number;
+  /** Which of the view's rock meshes it uses. */
+  mesh: number;
+}
+
+/** Scenery rocks' sizes (longest reach, system units): smaller than the named asteroids (0.8 and up). */
+export const ROCK_SIZE = [0.15, 1] as const;
+/**
+ * The cumulative size slope the rocks are drawn with, N(>s) ∝ s^−q: SDSS's
+ * 1.3 for main-belt asteroids of 0.4–5 km (steeper, 2.5–3, for bigger ones;
+ * a steeper slope here would leave mostly specks).
+ */
+export const ROCK_SIZE_SLOPE = 1.3;
+/** Belt edges thin out over this share of the width (log radius). */
+const EDGE_TAPER = 0.12;
+/** Share of rocks a Kirkwood gap removes at its centre. */
+const GAP_DEPTH = 0.9;
+
+/** The belt's scenery rocks, from its seed (pure: the same every visit). `meshes` is how many rock meshes the view has. */
+export function generateRocks(belt: BeltData, rng: Rng, meshes: number): RockData[] {
+  const rocks: RockData[] = [];
+  const logSpan = Math.log(belt.outer / belt.inner);
+  const [s0, s1] = ROCK_SIZE;
+  const trojan = belt.trojan;
+  for (let tries = 0; rocks.length < belt.rocks && tries < belt.rocks * 4; tries++) {
+    const t = rng.next();
+    const radius = belt.inner * Math.exp(t * logSpan);
+    const turnDraw = rng.next();
+    // Thin out at the edges and in the gaps.
+    const edge = Math.min(1, t / EDGE_TAPER, (1 - t) / EDGE_TAPER);
+    let keep = edge * edge * (3 - 2 * edge);
+    for (const gap of belt.gaps) {
+      const d = (t - gap.at) / gap.width;
+      keep *= 1 - GAP_DEPTH * Math.exp(-d * d * 2);
+    }
+    const u = rng.next();
+    if (u > keep) continue;
+    // Truncated power law: N(>s) ∝ s^−q between s0 and s1.
+    const q = ROCK_SIZE_SLOPE;
+    const v = rng.next();
+    const size = Math.pow(Math.pow(s0, -q) - v * (Math.pow(s0, -q) - Math.pow(s1, -q)), -1 / q);
+    const z = rng.range(-1, 1);
+    const a = rng.range(0, Math.PI * 2);
+    const sz = Math.sqrt(1 - z * z);
+    const cold = belt.kind === 'kuiper' && rng.chance(KUIPER_COLD.share);
+    const inclination = Math.abs(rng.gaussian(0, cold ? KUIPER_COLD.inclination : belt.inclination));
+    const node = rng.range(0, Math.PI * 2);
+    let turn: number;
+    let libration = 0;
+    let libPhase = 0;
+    if (trojan) {
+      // Spread round the Lagrange point as the libration takes them, more near it.
+      libration = (trojan.libration * Math.sqrt(rng.next())) / (Math.PI * 2);
+      libPhase = rng.next();
+      turn = (trojan.orbit.phase + trojan.lead) / (Math.PI * 2) + rng.gaussian(0, 0.01);
+    } else {
+      turn = turnDraw;
+    }
+    rocks.push({
+      radius,
+      turn,
+      rate: trojan ? 1 : Math.pow(belt.inner / radius, 1.5),
+      inclination,
+      node,
+      libration,
+      libPhase,
+      size,
+      class: asteroidClass(belt, t, rng.next()),
+      axis: [sz * Math.cos(a), sz * Math.sin(a), z],
+      // Turning in ~4–20 s (the game's compressed days; real ones of 10–100 km take a median 10 h), small ones faster.
+      spin: rng.range(0.3, 1.5) * rng.sign() * Math.sqrt(s0 / size),
+      mesh: rng.int(0, meshes - 1),
+    });
+  }
+  return rocks;
+}
+
+/** Turns of the belt's inner edge (Trojans: of the host) at system time `time`, as the view's shader takes them. */
+export function beltTurns(belt: Pick<BeltData, 'period'>, time: number): number {
+  return time / belt.period;
+}
+
+/** Turns of the libration cycle at `time` (0 without a Trojan host). */
+export function librationTurns(belt: Pick<BeltData, 'trojan'>, time: number): number {
+  return belt.trojan ? time / belt.trojan.librationPeriod : 0;
+}
+
+/**
+ * Where a rock's centre is at `turns` of the belt's inner edge and
+ * `libTurns` of the libration (the view's vertex shader does the same).
+ * Writes into `out` and returns it.
+ */
+export function rockPosition<T extends { x: number; y: number; z: number }>(rock: RockData, turns: number, libTurns: number, out: T): T {
+  const along = rock.turn + turns * rock.rate + rock.libration * Math.sin(Math.PI * 2 * (libTurns + rock.libPhase));
+  // In its own plane from the line of nodes, so the longitude stays `along` whatever the node.
+  const a = Math.PI * 2 * along + rock.node;
+  const flat = rock.radius * Math.sin(a);
+  const x = rock.radius * Math.cos(a);
+  const y = flat * Math.sin(rock.inclination);
+  const z = flat * Math.cos(rock.inclination);
+  // Turned about +Y by the node, as keplerPosition does.
+  const cn = Math.cos(rock.node);
+  const sn = Math.sin(rock.node);
+  out.x = x * cn + z * sn;
+  out.y = y;
+  out.z = -x * sn + z * cn;
+  return out;
 }

@@ -24,3 +24,14 @@ export interface CelestialBody extends Sight {
   /** Velocity over the latest fixed step, units per second. */
   readonly velocity: THREE.Vector3;
 }
+
+/**
+ * Something hovered by its own ray test rather than as a sphere (an asteroid
+ * belt), and flown to by way of a body in it: clicking it sends the ship to
+ * `bodyNear` the point the ray met.
+ */
+export interface Region extends Sight {
+  /** Where `ray` meets it: the distance along the ray (the point in `out`), or null. */
+  hit(ray: THREE.Ray, out: THREE.Vector3): number | null;
+  bodyNear(point: THREE.Vector3): CelestialBody | null;
+}
