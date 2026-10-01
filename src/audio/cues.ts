@@ -1,4 +1,5 @@
 import type { Rng } from '../gen/rng';
+import type { AudioChannel } from './settings';
 
 /**
  * Sound cues played from audio files. Each has its own folder under
@@ -6,21 +7,50 @@ import type { Rng } from '../gen/rng';
  * a play picks one at random (never the same one twice in a row). A cue
  * whose folder is empty is silent.
  */
-export type SoundCue = 'select' | 'systemTravel' | 'interstellarTravel' | 'reentry' | 'leavePlanet';
+export type SoundCue =
+  | 'select'
+  | 'systemTravel'
+  | 'interstellarTravel'
+  | 'reentry'
+  | 'leavePlanet'
+  | 'starNear'
+  | 'starFar'
+  | 'shipHum';
 
-export const SOUND_CUES: readonly SoundCue[] = ['select', 'systemTravel', 'interstellarTravel', 'reentry', 'leavePlanet'];
+export const SOUND_CUES: readonly SoundCue[] = [
+  'select',
+  'systemTravel',
+  'interstellarTravel',
+  'reentry',
+  'leavePlanet',
+  'starNear',
+  'starFar',
+  'shipHum',
+];
 
 /** Cues that loop until stopped (`SoundEffects.start`); the rest play once (`SoundEffects.play`). */
 export type LoopCue = 'systemTravel' | 'interstellarTravel';
 
+/**
+ * Background loops on the Ambience channel whose loudness the game sets as
+ * it goes (`SoundEffects.ambient`): they sound whenever audio is running,
+ * even if asked for before it was unlocked.
+ */
+export type AmbientCue = 'starNear' | 'starFar' | 'shipHum';
+
+export const AMBIENT_CUES: readonly AmbientCue[] = ['starNear', 'starFar', 'shipHum'];
+
 export interface CueSpec {
-  /** Linear gain on the Effects channel (1 = the file as it is). */
+  /** Linear gain on its channel at full level (1 = the file as it is). */
   volume: number;
+  /** The mixer channel (volume slider) it plays on. */
+  channel: Extract<AudioChannel, 'sfx' | 'ambience'>;
   /**
    * Loops until stopped (the travel cues): faded in over `fadeIn` s,
    * faded out over `fadeOut` s when stopped, and its last `loopCrossfade` s
    * blended into its head so any clip loops without a seam. A clip longer
-   * than the trip never loops at all.
+   * than the trip never loops at all. Ambient cues loop too (`fadeIn` is
+   * then the time constant of their level changes).
    */
   loop: boolean;
   fadeIn: number;
@@ -30,6 +60,7 @@ export interface CueSpec {
 
 const oneShot = (): CueSpec => ({
   volume: 1,
+  channel: 'sfx',
   loop: false,
   fadeIn: 0,
   fadeOut: 0.15,
@@ -38,9 +69,20 @@ const oneShot = (): CueSpec => ({
 
 const travel = (): CueSpec => ({
   volume: 1,
+  channel: 'sfx',
   loop: true,
   fadeIn: 0.2,
   fadeOut: 1.2,
+  loopCrossfade: 0.5,
+});
+
+// The files sit at about the ambience track's loudness (mean −12…−14 dB), and add to it.
+const ambient = (volume: number): CueSpec => ({
+  volume,
+  channel: 'ambience',
+  loop: true,
+  fadeIn: 0.3,
+  fadeOut: 1.5,
   loopCrossfade: 0.5,
 });
 
@@ -56,6 +98,12 @@ export const cueParams: Record<SoundCue, CueSpec> = {
   reentry: oneShot(),
   // Climbing from low orbit back to the system.
   leavePlanet: oneShot(),
+  // A star close up, as the camera nears its surface (see StarSounds).
+  starNear: ambient(0.8),
+  // A star from across its system, giving way to starNear close up.
+  starFar: ambient(0.8),
+  // The UFO's own hum, always on.
+  shipHum: ambient(0.35),
 };
 
 /** File types picked up as variants. */

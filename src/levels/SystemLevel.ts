@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { SoundEffects } from '../audio/sfx';
+import { StarSounds } from '../audio/StarSounds';
 import { FIXED_DT } from '../core/Game';
 import type { Debug } from '../core/Debug';
 import type { Input } from '../core/Input';
@@ -61,6 +62,7 @@ export class SystemLevel extends Level {
   readonly map: SystemMap;
   private readonly starfield: Starfield;
   private readonly marker: TargetMarker;
+  private readonly starSounds: StarSounds;
   readonly trails: OrbitTrails;
   /** The star the camera is looking at, rather than the ship hovering over it (until the ship goes elsewhere). */
   private aimBody: CelestialBody | null = null;
@@ -117,6 +119,7 @@ export class SystemLevel extends Level {
     );
     if (!this.starless) this.aimAt(anchor, 1);
     this.eye = this.add(new EyeAdaptation(camera, this.world.stars, debug));
+    this.starSounds = this.add(new StarSounds(camera, this.world.stars, sfx, debug));
     const picker = this.add(new Picker(camera, input, this.ship, this.world.bodies, sfx, [], this.world.belts));
     this.trails = this.add(
       new OrbitTrails(
@@ -259,11 +262,13 @@ export class SystemLevel extends Level {
   override enter(): void {
     this.hud.activate();
     this.map.activate();
+    this.starSounds.mute(false);
   }
 
   override exit(): void {
     this.hud.deactivate();
     this.map.deactivate();
     this.ship.silence();
+    this.starSounds.mute(true);
   }
 }
