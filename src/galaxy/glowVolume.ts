@@ -39,6 +39,16 @@ export const GAUSSIAN_PATH_GLSL = /* glsl */ `
 `;
 
 /**
+ * The density of a glow volume (see createGlowVolume) whose y radius is `ry`:
+ * the path integral through the centre along y is ry·√(π/K), and this makes
+ * that column come out at `faceOnOpacity`.
+ */
+export function glowDensity(ry: number, faceOnOpacity: number, maxBrightness: number): number {
+  const faceOnColumn = ry * Math.sqrt(Math.PI / GAUSSIAN_K);
+  return -Math.log(1 - faceOnOpacity / maxBrightness) / faceOnColumn;
+}
+
+/**
  * A glowing, axis-aligned Gaussian "gas" ellipsoid centred at the origin.
  * Each pixel integrates the density along its view ray in closed form (with
  * erfc), so the glow looks right from any angle and from inside: round seen
@@ -60,10 +70,7 @@ export function createGlowVolume(
   maxBrightness: number,
   near: number,
 ): THREE.Mesh<THREE.SphereGeometry, THREE.ShaderMaterial> {
-  // Path integral through the centre along y is ry·√(π/K); pick the density
-  // that makes that column come out at `faceOnOpacity`.
-  const faceOnColumn = radii.y * Math.sqrt(Math.PI / GAUSSIAN_K);
-  const density = -Math.log(1 - faceOnOpacity / maxBrightness) / faceOnColumn;
+  const density = glowDensity(radii.y, faceOnOpacity, maxBrightness);
 
   const material = new THREE.ShaderMaterial({
     uniforms: {

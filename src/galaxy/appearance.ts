@@ -81,3 +81,31 @@ export function rogueColor(type: PlanetType): string {
       return '#9a9088';
   }
 }
+
+/**
+ * Glow closer to the camera than this is left out (see createGlowVolume), so
+ * the view from inside the disc isn't fogged; ~10 star spacings.
+ */
+export const GLOW_NEAR = 250;
+
+/** One of the galaxy map's glow volumes (see createGlowVolume): a Gaussian ellipsoid round the centre, axis-aligned in galaxy coordinates. */
+export interface GalaxyGlow {
+  radii: { x: number; y: number; z: number };
+  color: string;
+  faceOnOpacity: number;
+  maxBrightness: number;
+}
+
+/**
+ * The map's glows for a galaxy of radius `r`: faint light over the whole,
+ * thin disc and a warmer, brighter, flattened bulge (matching the star
+ * distributions in gen/galaxy.ts). Both are symmetric about +Y, so the
+ * root's spin doesn't change how their shader sees them. The nebulas use
+ * them too, to keep the glow in front of a dark nebula undimmed.
+ */
+export function galaxyGlows(r: number): GalaxyGlow[] {
+  return [
+    { radii: { x: r * 1.3, y: r * 0.06, z: r * 1.3 }, color: DISC_GLOW_COLOR, faceOnOpacity: 0.16, maxBrightness: 0.28 },
+    { radii: { x: r * 0.45, y: r * 0.2, z: r * 0.45 }, color: BULGE_GLOW_COLOR, faceOnOpacity: 0.45, maxBrightness: 0.8 },
+  ];
+}
