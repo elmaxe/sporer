@@ -65,5 +65,7 @@ describe('systemSummary', () => {
     expect(describeBodyCount({ planets: [one], moonCount: 0 })).toBe('1 planet');
     expect(describeBodyCount({ planets: [one, one], moonCount: 1 })).toBe('2 planets · 1 moon');
     expect(describeBodyCount({ planets: [one, one], moonCount: 5 })).toBe('2 planets · 5 moons');
+    expect(describeBodyCount({ planets: [one, one], moonCount: 5, beltCount: 1 })).toBe('2 planets · 5 moons · 1 belt');
+    expect(describeBodyCount({ planets: [one], moonCount: 0, beltCount: 3 })).toBe('1 planet · 3 belts');
   });
 });

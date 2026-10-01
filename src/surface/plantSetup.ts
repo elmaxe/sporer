@@ -18,7 +18,8 @@ export interface PlantSetup {
  * nothing grows (tier 0).
  */
 export function plantSetup(config: PlanetConfig): PlantSetup | null {
-  if (isGas(config) || !config.climate) return null;
+  // No starlight (a rogue planet), no photosynthesis: nothing grows.
+  if (isGas(config) || !config.climate || config.climate.insolation <= 0) return null;
   const R = globeRadius(config.radius);
   const { style, seed, climate } = config;
   const plan = planPlants({

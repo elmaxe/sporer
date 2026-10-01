@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { SoundEffects } from '../audio/sfx';
 import type { Entity } from '../core/Entity';
 import type { Input } from '../core/Input';
 import type { GalaxyData, StarRef } from '../gen/galaxy';
@@ -6,12 +7,12 @@ import type { NebulaData } from '../gen/nebulas';
 import type { GalaxyShip } from './GalaxyShip';
 import { pickNebula, pickPoint } from './pickPoint';
 
-/** How close (in CSS pixels) the pointer must be to a star's dot to pick it. */
+/** How close (in CSS pixels) the pointer must be to a star's dot (or a rogue planet's ring) to pick it. */
 const PICK_RADIUS_PX = 10;
 
 /**
- * Hover finds the star under the pointer, or else the nebula; a click sets
- * course for the star, or for the star at the nebula's heart.
+ * Hover finds the star (or rogue planet) under the pointer, or else the
+ * nebula; a click sets course for it, or for the star at the nebula's heart.
  */
 export class GalaxyPicker implements Entity {
   hovered: StarRef | null = null;
@@ -26,10 +27,14 @@ export class GalaxyPicker implements Entity {
     private readonly input: Input,
     private readonly canvas: HTMLElement,
     private readonly galaxy: GalaxyData,
+    /** Everything pickable: the stars and the rogue planets. */
+    private readonly refs: readonly StarRef[],
+    /** Their positions as xyz triples, indexed like `refs`. */
     private readonly positions: Float32Array,
     private readonly ship: GalaxyShip,
     /** The galaxy's rotating root, whose local frame `positions` are in. */
     private readonly root: THREE.Object3D,
+    private readonly sfx: SoundEffects,
   ) {}
 
   update(): void {
@@ -43,7 +48,9 @@ export class GalaxyPicker implements Entity {
     const star = this.pick(click.ndcX, click.ndcY);
     const nebula = star ? null : this.pickNebula(click.ndcX, click.ndcY);
     const destination = star ?? (nebula ? this.galaxy.stars[nebula.star] : null);
-    if (destination) this.ship.travelTo(destination);
+    if (!destination) return;
+    this.sfx.play('select');
+    this.ship.travelTo(destination);
   }
 
   dispose(): void {}
@@ -67,6 +74,6 @@ export class GalaxyPicker implements Entity {
     // Angle subtended by one CSS pixel at the centre of the view.
     const pixelAngle = (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2)) / this.canvas.clientHeight;
     const i = pickPoint(ray.origin, ray.direction, this.positions, PICK_RADIUS_PX * pixelAngle);
-    return i >= 0 ? this.galaxy.stars[i]! : null;
+    return i >= 0 ? this.refs[i]! : null;
   }
 }

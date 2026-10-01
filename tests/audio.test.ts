@@ -1,15 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { cueParams, groupCueFiles, SOUND_CUES, VariantPicker } from '../src/audio/cues';
+import { Rng } from '../src/gen/rng';
 import { crossfadeLoop } from '../src/audio/loop';
 import { channelGain, DEFAULT_AUDIO_SETTINGS, parseAudioSettings, sliderToGain } from '../src/audio/settings';
-import {
-  SFX_NAMES,
-  sfxParams,
-  whooshCurves,
-  whooshDuration,
-  whooshEnvelope,
-  whooshFrequency,
-  type WhooshSpec,
-} from '../src/audio/whoosh';
 
 describe('parseAudioSettings', () => {
   it('falls back to the defaults for missing or broken input', () => {
@@ -101,98 +94,57 @@ describe('crossfadeLoop', () => {
   });
 });
 
-describe('whoosh', () => {
-  const spec: WhooshSpec = {
-    duration: 1,
-    minDuration: 1.5,
-    maxDuration: 4,
-    from: 200,
-    peak: 1600,
-    to: 300,
-    peakAt: 0.25,
-    q: 1,
-    attack: 0.2,
-    release: 1.5,
-    level: 1,
-    bodyFrom: 80,
-    bodyTo: 40,
-    bodyLevel: 0.2,
-    panFrom: -0.5,
-    panTo: 0.5,
-  };
+describe('groupCueFiles', () => {
+  it('sorts audio files into cues by folder, ignoring anything else', () => {
+    const cues = groupCueFiles({
+      '../assets/audio/sfx/select/b.mp3': '/b.mp3',
+      '../assets/audio/sfx/select/a.OGG': '/a.ogg',
+      '../assets/audio/sfx/reentry/roar.wav': '/r.wav',
+      '../assets/audio/sfx/select/notes.txt': '/notes.txt',
+      '../assets/audio/sfx/unknown/x.mp3': '/x.mp3',
+    });
+    expect(cues.select).toEqual(['/a.ogg', '/b.mp3']);
+    expect(cues.reentry).toEqual(['/r.wav']);
+    expect(cues.leavePlanet).toEqual([]);
+    expect(Object.keys(cues).sort()).toEqual([...SOUND_CUES].sort());
+  });
+});
 
-  it('grows with the trip, within the limits', () => {
-    expect(whooshDuration(spec)).toBe(1.5);
-    expect(whooshDuration(spec, { seconds: 1.5 })).toBe(2.5);
-    expect(whooshDuration(spec, { seconds: 100 })).toBe(4);
-    expect(whooshDuration(spec, { seconds: -3 })).toBe(1.5);
-    // Transitions have a fixed length.
-    for (const name of ['transitionOut', 'transitionIn'] as const) {
-      const s = sfxParams[name];
-      expect(whooshDuration(s, { seconds: 10 })).toBe(s.duration);
+describe('VariantPicker', () => {
+  it('has nothing to pick without variants, and always the one with one', () => {
+    const picker = new VariantPicker(new Rng(1));
+    expect(picker.next('select', 0)).toBe(-1);
+    for (let i = 0; i < 5; i++) expect(picker.next('reentry', 1)).toBe(0);
+  });
+
+  it('never repeats a variant back to back, and uses them all', () => {
+    const picker = new VariantPicker(new Rng(7));
+    const seen = new Set<number>();
+    let last = -1;
+    for (let i = 0; i < 200; i++) {
+      const v = picker.next('select', 4);
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThan(4);
+      expect(v).not.toBe(last);
+      seen.add(v);
+      last = v;
     }
+    expect(seen.size).toBe(4);
   });
 
-  it('is silent at both ends and peaks at the attack', () => {
-    expect(whooshEnvelope(spec, 2, 0)).toBe(0);
-    expect(whooshEnvelope(spec, 2, 2)).toBe(0);
-    expect(whooshEnvelope(spec, 2, 0.2)).toBeCloseTo(1);
-    expect(whooshEnvelope(spec, 2, 0.1)).toBeLessThan(1);
-    // Rises monotonically, then falls monotonically.
-    let prev = -1;
-    for (let t = 0; t <= 0.2; t += 0.01) {
-      const v = whooshEnvelope(spec, 2, t);
-      expect(v).toBeGreaterThanOrEqual(prev - 1e-9);
-      prev = v;
-    }
-    for (let t = 0.21; t < 2; t += 0.01) {
-      const v = whooshEnvelope(spec, 2, t);
-      expect(v).toBeLessThanOrEqual(prev + 1e-9);
-      prev = v;
-    }
+  it('keeps each cue separate', () => {
+    const picker = new VariantPicker(new Rng(3));
+    const a = picker.next('select', 2);
+    picker.next('leavePlanet', 2);
+    expect(picker.next('select', 2)).toBe(1 - a);
   });
+});
 
-  it('keeps the attack inside short whooshes', () => {
-    expect(whooshEnvelope({ ...spec, attack: 5 }, 1, 0.4)).toBeCloseTo(1);
-  });
-
-  it('sweeps from → peak → to', () => {
-    expect(whooshFrequency(spec, 2, 0)).toBeCloseTo(200);
-    expect(whooshFrequency(spec, 2, 0.5)).toBeCloseTo(1600);
-    expect(whooshFrequency(spec, 2, 2)).toBeCloseTo(300);
-    expect(whooshFrequency({ ...spec, peakAt: 1 }, 2, 2)).toBeCloseTo(1600);
-    expect(whooshFrequency({ ...spec, peakAt: 0 }, 2, 0)).toBeCloseTo(1600);
-    for (let t = 0; t <= 2; t += 0.05) {
-      const f = whooshFrequency(spec, 2, t);
-      expect(f).toBeGreaterThanOrEqual(200 - 1e-6);
-      expect(f).toBeLessThanOrEqual(1600 + 1e-6);
-    }
-  });
-
-  it('zooming out sweeps up and zooming in sweeps down', () => {
-    const out = sfxParams.transitionOut;
-    const into = sfxParams.transitionIn;
-    expect(out.to).toBeGreaterThan(out.from);
-    expect(into.to).toBeLessThan(into.from);
-  });
-
-  it('builds curves that are valid automation for every effect', () => {
-    for (const name of SFX_NAMES) {
-      const c = whooshCurves(sfxParams[name], { seconds: 2 });
-      const n = c.gain.length;
-      expect(n).toBeGreaterThan(10);
-      for (const curve of [c.frequency, c.bodyGain, c.bodyFrequency, c.pan]) expect(curve.length).toBe(n);
-      expect(c.gain[0]).toBe(0);
-      expect(c.gain[n - 1]).toBe(0);
-      expect(c.bodyGain[n - 1]).toBe(0);
-      expect(Math.max(...c.gain)).toBeCloseTo(sfxParams[name].level, 1);
-      for (let i = 0; i < n; i++) {
-        for (const curve of [c.gain, c.frequency, c.bodyGain, c.bodyFrequency, c.pan]) {
-          expect(Number.isFinite(curve[i])).toBe(true);
-        }
-        expect(c.frequency[i]).toBeGreaterThan(20);
-        expect(Math.abs(c.pan[i])).toBeLessThanOrEqual(1);
-      }
+describe('cueParams', () => {
+  it('loops exactly the travel cues', () => {
+    for (const cue of SOUND_CUES) {
+      const spec = cueParams[cue];
+      expect(spec.loop).toBe(cue === 'systemTravel' || cue === 'interstellarTravel');
     }
   });
 });

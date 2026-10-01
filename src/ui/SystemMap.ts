@@ -9,7 +9,17 @@ import type { CelestialBody } from '../world/CelestialBody';
 import { isGas, type Planet } from '../world/Planet';
 import type { Star } from '../world/Star';
 import { gasPainter, terrainPainter } from '../world/planetGeometry';
-import { distanceToMapX, layoutSystemMap, mapLayoutParams, type MapDisc, type SystemMapLayout } from './systemMapLayout';
+import type { AsteroidBelt } from '../world/AsteroidBelt';
+import {
+  distanceToMapX,
+  layoutSystemMap,
+  mapBeltGroups,
+  mapBeltInputs,
+  mapLayoutParams,
+  type MapBeltGroup,
+  type MapDisc,
+  type SystemMapLayout,
+} from './systemMapLayout';
 
 /** The map's height at most, CSS px, for mouse players (the touch overlay gets what fits on screen). */
 const MAX_HEIGHT = 230;
@@ -90,6 +100,9 @@ export class SystemMap implements Entity {
   private readonly discs: BodyDisc[] = [];
   /** Planet discs, in orbit order, each followed in `discs` by its moons. */
   private readonly planetDiscs: BodyDisc[] = [];
+  /** Belt columns (a giant's Trojan swarms share one); their asteroids' discs come after the planets' in `discs`. */
+  private readonly beltGroups: MapBeltGroup[];
+  private readonly beltColors: string[];
   private readonly orbits: number[];
   private readonly starColors: StarColors[];
   private readonly titleText: string;
@@ -116,6 +129,8 @@ export class SystemMap implements Entity {
     private readonly ship: Ship,
     private readonly picker: Picker,
     private readonly input: Input,
+    /** Asteroid belts and Trojan swarms, with their named asteroids. */
+    private readonly belts: readonly AsteroidBelt[] = [],
   ) {
     const empty = { x: 0, y: 0, r: 0 };
     for (const planet of planets) {
@@ -124,6 +139,17 @@ export class SystemMap implements Entity {
       this.planetDiscs.push(disc);
       for (const moon of moons) if (moon.parent === planet) this.discs.push(this.createDisc(moon, null, empty));
     }
+    this.beltGroups = mapBeltGroups(
+      data.planets.map((p) => p.orbit.radius),
+      belts.map((b) => b.data),
+    );
+    for (const group of this.beltGroups) {
+      for (const m of group.members) for (const a of belts[m]!.asteroids) this.discs.push(this.createDisc(a, null, empty));
+    }
+    this.beltColors = this.beltGroups.map((g) => {
+      const belt = belts[g.members[0]!]!.data;
+      return belt.icy ? 'rgba(200, 220, 255, 0.55)' : belt.trojan ? 'rgba(220, 170, 140, 0.55)' : 'rgba(225, 205, 175, 0.55)';
+    });
     this.orbits = data.planets.map((p) => p.orbit.radius);
     this.starColors = data.stars.map((s) => ({
       glow: [withAlpha(s.color, 0.55), withAlpha(s.color, 0)],
@@ -136,6 +162,7 @@ export class SystemMap implements Entity {
       data.name,
       count(planets.length, 'planet', 'planets'),
       ...(moons.length > 0 ? [count(moons.length, 'moon', 'moons')] : []),
+      ...(belts.length > 0 ? [count(this.beltGroups.length, 'belt', 'belts')] : []),
     ].join(' · ');
   }
 
@@ -259,18 +286,30 @@ export class SystemMap implements Entity {
         ringOuter: p.rings?.outer ?? null,
         moons: p.moons.map((m) => ({ radius: m.radius })),
       })),
-      { width, maxHeight, stars: this.data.stars.map((s) => s.radius) },
+      {
+        width,
+        maxHeight,
+        stars: this.data.stars.map((s) => s.radius),
+        belts: mapBeltInputs(
+          this.beltGroups,
+          this.belts.map((b) => b.data),
+        ),
+      },
     );
     this.layout = layout;
     let k = 0;
-    for (const planet of layout.planets) {
-      for (const disc of [planet, ...planet.moons]) {
+    const columns = [
+      ...layout.planets.map((planet) => [planet, ...planet.moons] as MapDisc[]),
+      ...layout.belts.map((belt) => belt.asteroids),
+    ];
+    for (const column of columns) {
+      for (const disc of column) {
         const d = this.discs[k++]!;
         const r = d.disc.r;
         d.disc.x = disc.x;
         d.disc.y = disc.y;
         d.disc.r = disc.r;
-        d.ring = disc === planet ? planet.ring : 0;
+        d.ring = 'ring' in disc ? (disc as { ring: number }).ring : 0;
         // Repainted at the new size (the old sprite stands in meanwhile).
         if (Math.abs(r - disc.r) > 0.25) {
           d.image = null;
@@ -369,6 +408,7 @@ export class SystemMap implements Entity {
     }
 
     this.starColors.forEach((colors, i) => this.drawStar(ctx, layout.stars[i]!, colors));
+    layout.belts.forEach((belt, i) => this.drawBelt(ctx, belt.x, layout.axisY, belt.halfWidth, belt.halfHeight, i));
     for (const d of this.discs) this.drawBody(ctx, d);
 
     ctx.font = `600 ${this.input.touchMode ? 12 : 10}px system-ui, sans-serif`;
@@ -413,7 +453,10 @@ export class SystemMap implements Entity {
     // The ship: beside the body it's parked at, else between the orbits at its distance from the star.
     const x = parked
       ? parked.x + parked.r * 0.7 + 4
-      : distanceToMapX(layout, this.data.starZone, this.orbits, ship.object.position.length());
+      : this.data.stars.length === 0
+        ? // Round a rogue planet everything is in its one column.
+          (layout.planets[0]?.x ?? layout.sunEdge)
+        : distanceToMapX(layout, this.data.starZone, this.orbits, ship.object.position.length());
     const y = parked ? parked.y - parked.r * 0.7 - 4 : layout.axisY;
     const pulse = (performance.now() / 1000) % 1.4;
     ctx.beginPath();
@@ -422,6 +465,21 @@ export class SystemMap implements Entity {
     ctx.lineWidth = 1.5;
     ctx.stroke();
     drawShip(ctx, x, y);
+  }
+
+  /** A belt's strip: a scatter of specks across the axis, seeded per column so it doesn't flicker. */
+  private drawBelt(ctx: CanvasRenderingContext2D, x: number, y: number, halfWidth: number, halfHeight: number, index: number): void {
+    ctx.fillStyle = this.beltColors[index]!;
+    const specks = Math.round(10 + halfWidth * halfHeight * 0.6);
+    for (let i = 0; i < specks; i++) {
+      // A cheap hash of (column, speck): the same specks every frame.
+      const u = fract(Math.sin((index + 1) * 12.9898 + i * 78.233) * 43758.5453);
+      const v = fract(Math.sin((index + 1) * 39.3468 + i * 11.135) * 24634.6345);
+      const w = fract(Math.sin((index + 1) * 73.156 + i * 52.235) * 12345.6789);
+      ctx.beginPath();
+      ctx.arc(x + (u * 2 - 1) * halfWidth, y + (v * 2 - 1) * halfHeight, 0.5 + w, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
   private drawStar(ctx: CanvasRenderingContext2D, s: MapDisc, colors: StarColors): void {
@@ -583,7 +641,7 @@ export class SystemMap implements Entity {
     if (this.input.blocked) return;
     const rect = this.canvas.getBoundingClientRect();
     const body = this.bodyAt(e.clientX - rect.left, e.clientY - rect.top);
-    if (body) this.ship.moveTo(body);
+    if (body) this.picker.select(body);
   };
 }
 
@@ -627,6 +685,10 @@ function drawShip(ctx: CanvasRenderingContext2D, x: number, y: number): void {
   ctx.lineWidth = 1.5;
   ctx.stroke();
   ctx.fill();
+}
+
+function fract(v: number): number {
+  return v - Math.floor(v);
 }
 
 function withAlpha(hex: string, alpha: number): string {

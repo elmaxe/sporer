@@ -1,6 +1,7 @@
 import type { StarRef } from '../gen/galaxy';
 import { hashSeed } from '../gen/rng';
 import type { StarData } from '../gen/stars';
+import type { PlanetType } from '../gen/planets';
 
 /**
  * Diameter of one star's dot on the galaxy map, in galaxy units. Follows its
@@ -48,6 +49,7 @@ export function binaryLayout(ref: StarRef): BinaryLayout | null {
  * circle that holds both of a binary's dots wherever they are in their turn.
  */
 export function galaxyStarSize(ref: StarRef): number {
+  if (ref.stars.length === 0) return ROGUE_DOT_SIZE;
   const layout = binaryLayout(ref);
   if (!layout) return galaxyMemberSize(ref.stars[0]!);
   return (
@@ -62,3 +64,20 @@ export function galaxyStarSize(ref: StarRef): number {
 /** Glow of the galaxy's disc and of its bulge (the galaxy map's glows, and the band in each system's sky). */
 export const DISC_GLOW_COLOR = '#6f86c8';
 export const BULGE_GLOW_COLOR = '#ffd9a0';
+
+/** A rogue planet's ring on the galaxy map, galaxy units: about a small star's dot. */
+export const ROGUE_DOT_SIZE = 1.1;
+
+/** A rogue's ring colour by its surface: dull, so it reads as a cold world, not a star. */
+export function rogueColor(type: PlanetType): string {
+  switch (type) {
+    case 'lava':
+      return '#d8703c';
+    case 'ocean':
+      return '#5aa6b8';
+    case 'ice':
+      return '#8fb0d0';
+    default:
+      return '#9a9088';
+  }
+}
