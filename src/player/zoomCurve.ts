@@ -3,12 +3,12 @@
  * orbit camera's distance to how far the ship is from what it's at. Unit-tested
  * in tests/zoomCurve.test.ts.
  *
- * System level: parked at (or flying to) a body, the ship keeps a gap from its
- * surface that grows with the camera distance, gap ∝ view^exponent, so
- * scrolling in brings it down towards the body (and on into the planet level)
- * and scrolling out pulls it back until it leaves the system. Each parking
- * has its own gap at the reference view: a body's standoff, or the spot the
- * ship flew in to when it arrived from the galaxy.
+ * System level: hovering above (or flying to) a body, the ship keeps a gap
+ * from its surface that follows the camera distance, gap ∝ view^exponent:
+ * scrolling in brings it down towards the body (and on into the planet
+ * level), scrolling out lifts it only a little (a gentler exponent), so it
+ * stays over the body as the view takes in the system. At the reference view
+ * the gap is a share of the body's radius, capped for big ones (`hoverGap`).
  *
  * Planet level: the zoom sets the altitude above the highest terrain, from
  * just over the peaks up to high orbit, and tips the camera over to look down
@@ -16,10 +16,16 @@
  */
 
 export const zoomCurveParams = {
-  /** System camera distance at which the ship parks at a body's own standoff. */
+  /** System camera distance at which the ship hovers `hoverRadii` above a body. */
   referenceView: 45,
-  /** How closely the parking gap follows the camera distance (gap ∝ view^exponent). */
+  /** The hover's gap from the surface at the reference view, in the body's radii (at least `minGap`)... */
+  hoverRadii: 0.8,
+  /** ...but no more than this, so it hovers low over stars and giants too. */
+  maxHoverGap: 12,
+  /** How closely the gap follows the camera distance zooming in from the reference view (gap ∝ view^exponent)... */
   gapExponent: 0.6,
+  /** ...and zooming out from it: barely, so the ship doesn't climb away from the body. */
+  gapOutExponent: 0.1,
   /** Closest the ship parks to a surface (it dives into a body it comes within 3 of). */
   minGap: 4.5,
   /** Planet level: lowest altitude above the highest terrain, planet units (the UFO is ~4 wide). */
@@ -38,6 +44,15 @@ export const zoomCurveParams = {
 
 export type ZoomCurveParams = typeof zoomCurveParams;
 
+/**
+ * The gap between the ship hovering above a body of `radius` and its surface
+ * at the reference view. Straight above the body nothing orbits (moons stay
+ * near the ecliptic, rings in the equator), so it only depends on the size.
+ */
+export function hoverGap(radius: number, p: ZoomCurveParams = zoomCurveParams): number {
+  return Math.max(p.minGap, Math.min(p.maxHoverGap, p.hoverRadii * radius));
+}
+
 /** Where `distance` sits between `min` and `max` on a log scale: 0 at min, 1 at max (clamped). */
 export function zoomFraction(distance: number, min: number, max: number): number {
   if (max <= min) return 0;
@@ -46,16 +61,12 @@ export function zoomFraction(distance: number, min: number, max: number): number
 }
 
 /**
- * The gap between a parked ship and a body's surface with the camera `view`
- * from the ship, for a parking whose gap at the reference view is `gap`.
+ * The gap between a hovering ship and a body's surface with the camera `view`
+ * from the ship, for a hover whose gap at the reference view is `gap`.
  */
 export function parkGap(gap: number, view: number, p: ZoomCurveParams = zoomCurveParams): number {
-  return Math.max(p.minGap, gap * Math.pow(view / p.referenceView, p.gapExponent));
-}
-
-/** The reference-view gap of a parking that should be `gap` from the surface at camera distance `view`. */
-export function referenceGap(gap: number, view: number, p: ZoomCurveParams = zoomCurveParams): number {
-  return gap / Math.pow(view / p.referenceView, p.gapExponent);
+  const exponent = view < p.referenceView ? p.gapExponent : p.gapOutExponent;
+  return Math.max(p.minGap, gap * Math.pow(view / p.referenceView, exponent));
 }
 
 /** Highest flying altitude over a globe of `radius` (planet units). */

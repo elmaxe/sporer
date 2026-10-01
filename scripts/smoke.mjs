@@ -10,16 +10,16 @@
 //                      about 5x the frame rate under SwiftShader)
 // Each section prints its time and result on stderr as it finishes. A page that stops answering (SwiftShader can
 // block it for minutes) fails the run at once, naming the step, instead of hanging.
-// Checks: W moves the ship along -Z, the autopilot flies back to a point, hovering + clicking
-// the star targets it, the system map shows every planet and moon (hover, click to fly, N folds it), and the galaxy
-// loop works (scroll out to the galaxy, click the nearest star, travel, scroll in to its system, where the ship flies
-// in and parks a few star diameters out, just above the ecliptic with the camera over it; the galaxy shows distant
+// Checks: the ship starts hovering above the star and there's no manual flying (W and a click on empty space leave
+// it there), hovering + clicking the star targets it, the system map shows every planet and moon (hover, click to
+// fly, N folds it), and the galaxy loop works (scroll out to the galaxy, click the nearest star, travel, scroll in to
+// its system, where the ship flies in and hovers straight above the star with the camera over it; the galaxy shows distant
 // galaxies, twinkles, spins and draws binaries as two dots, and picking works while it's turned), a real click on the
 // menu button starts audio and opens the menu (the game pauses; volume sliders and a planet lab link; a real Esc
-// closes it); then the transitions and galaxy travel play their whooshes, and M mutes. Then the planet loop (park at
+// closes it); then the transitions and galaxy travel play their whooshes, and M mutes. Then the planet loop (hover at
 // a planet, scroll in to low orbit, click the globe and fly, the Equal Earth map is shown and a click on it sets the
-// autopilot there, scroll all the way in and out and check the ship's altitude follows, scroll back out beside it,
-// parked as far out as the zoom says), and again for every planet
+// autopilot there, scroll all the way in and out and check the ship's altitude follows, scroll back out to hover
+// above it, as high as the zoom says, with the camera zoomed out past the handover and the planet in view), and again for every planet
 // type, a ringed rocky/icy/lava world and a moon in other systems (skip those with --quick). The system sky has
 // the galaxy band (screenshot looking at the galactic centre) and a smoke trail per planet and moon. Living stars: the
 // surface clock advances and storms have particles under way (and keep animating in the planet level's sky); comets
@@ -32,7 +32,7 @@
 // volcanic lightning), a methane (Titan-like) and a dusty (Mars-like) world. The menu's Weather toggle switches it.
 // Seamless zooms: through the galaxy and planet loops, every frame of every level transition records the crossfade
 // weight and canvas brightness; each transition must crossfade and never go black (screenshots mid-handover).
-// Touch: on an emulated phone, hold/tap/drag/pinch and the on-screen stick and Boost work, down to a planet and out;
+// Touch: on an emulated phone, hold/tap/drag/pinch and Boost work (no stick in space, the stick in low orbit), down to a planet and out;
 // the full-screen button shows, and the Map button opens the system map (in space) and the planet map (in low
 // orbit), a tap on either flies there, × closes it; the menu button opens the menu. The planet lab works on the
 // phone too (stick, Map button, drag, tap to fly).
@@ -151,10 +151,7 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
   const r = await evaluate(`(() => {
     const body = ${bodyExpr};
     window.__body = body;
-    // Park on the day side, a little above the orbital plane.
-    const side = world.stars[0].position.clone().sub(body.position).normalize();
-    side.y += 0.5;
-    ship.parkAt(body, side);
+    ship.parkAt(body);
     return { name: body.name, type: body.config.type, moon: body.parent !== null };
   })()`);
   await sleep(300);
@@ -257,6 +254,16 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
     const V = game.camera.position.constructor;
     const want = planet.ship.direction.clone().applyAxisAngle(new V(0, 1, 0), 1).applyAxisAngle(new V(1, 0, 0), 0.2);
     const p = planet.map.mapPosition(want);
+    // Degrees per pixel of the map around that point, east-west and north-south (Equal Earth squeezes both away
+    // from the equator), for the coarser of the two.
+    const east = new V(0, 1, 0).cross(want).normalize();
+    const north = want.clone().cross(east);
+    const step = 0.01;
+    const pixels = (axis) => {
+      const q = planet.map.mapPosition(want.clone().applyAxisAngle(axis, step));
+      return Math.hypot(q.x - p.x, q.y - p.y);
+    };
+    const localDegrees = (step * 180) / Math.PI / Math.min(pixels(north), pixels(east));
     const at = { clientX: rect.left + p.x, clientY: rect.top + p.y, button: 0, bubbles: true };
     canvas.dispatchEvent(new MouseEvent('click', at));
     requestAnimationFrame(() => requestAnimationFrame(() => resolve({
@@ -265,7 +272,7 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
       enRoute: planet.ship.enRoute,
       targetDegrees: +(planet.ship.destination.angleTo(want) * 180 / Math.PI).toFixed(2),
       // Click coordinates are whole pixels, so the target is within a pixel or so of the point.
-      pixelDegrees: +(360 / rect.width).toFixed(2),
+      pixelDegrees: +Math.max(360 / rect.width, localDegrees).toFixed(2),
     })));
   })`);
   const shot = await send('Page.captureScreenshot', { format: 'png' });
@@ -280,8 +287,18 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
   r.modeAfter = await evaluate(`levels.mode`);
   r.soundOut = await evaluate(`audio.lastPlayed?.name ?? null`);
   r.parkedAt = await evaluate(`ship.targetBody?.name ?? null`);
-  // Parked as far from the body as the system camera's zoom puts it.
+  // Hovering above the body, as far out as the system camera's zoom puts it, with the camera zoomed out past the
+  // handover (the zoom never turned back in) and the planet in view.
   r.standoffs = await evaluate(`+(ship.object.position.distanceTo(__body.renderPosition) / ship.parkDistance(__body)).toFixed(2)`);
+  r.hover = await evaluate(`(() => {
+    const d = ship.object.position.clone().sub(__body.renderPosition);
+    const p = __body.renderPosition.clone().project(game.camera);
+    return {
+      degreesAbove: +(Math.atan2(d.y, Math.hypot(d.x, d.z)) * 180 / Math.PI).toFixed(1),
+      zoom: +levels.systemLevel.orbit.zoom.toFixed(1),
+      bodyInView: Math.abs(p.x) < 1 && Math.abs(p.y) < 1 && p.z < 1,
+    };
+  })()`);
   r.ok =
     r.mode === 'planet' &&
     r.sky.bodies === r.expectedSky.bodies &&
@@ -308,24 +325,49 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
         r.weather.cloudRadius > 1)) &&
     r.modeAfter === 'system' &&
     r.parkedAt === r.name &&
-    Math.abs(r.standoffs - 1) < 0.2;
+    Math.abs(r.standoffs - 1) < 0.2 &&
+    r.hover.degreesAbove > 80 &&
+    r.hover.zoom > 85 &&
+    r.hover.bodyInView;
   return r;
 }
 const measureFps = `new Promise((r) => { let n = 0; const t0 = performance.now();
   (function f() { if (++n === 120) r(Math.round(120000 / (performance.now() - t0))); else requestAnimationFrame(f); })(); })`;
 await section('core', async () => {
-  before = await evaluate(state);
+  // The ship starts out hovering above the star. There's no manual flying: holding W and clicking empty space
+  // leave it there.
+  const hovering = `({ ...${state}, target: ship.targetBody.name, enRoute: ship.enRoute,
+    offset: ship.object.position.clone().sub(ship.targetBody.position).toArray(),
+    degreesAbove: (() => { const d = ship.object.position.clone().sub(ship.targetBody.position);
+      return +(Math.atan2(d.y, Math.hypot(d.x, d.z)) * 180 / Math.PI).toFixed(1); })() })`;
+  before = await evaluate(hovering);
   await evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }))`);
-  await until(`ship.object.position.z < ${before?.pos[2]} - 12 && ship.speed > 5`, 6000);
-  after = await evaluate(state);
+  await sleep(1000);
   await evaluate(`window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }))`);
-
-  // Autopilot back to the start (a route known to be clear).
-  const home = `{ x: ${before.pos[0]}, y: ${before.pos[1]}, z: ${before.pos[2]} }`;
-  const distHome = `ship.object.position.distanceTo(${home})`;
-  const startDist = await evaluate(`ship.moveTo(${home}), ${distHome}`);
-  await until(`${distHome} < ${Math.max(2, startDist * 0.05)}`, 12000);
-  autopilot = { startDist: +startDist.toFixed(1), endDist: +(await evaluate(distHome)).toFixed(1) };
+  // A click on a spot where no body is (padded as the picker pads them).
+  await evaluate(`(() => {
+    const canvas = game.renderer.domElement;
+    const rect = canvas.getBoundingClientRect();
+    const V = game.camera.position.constructor;
+    const clear = (x, y) => {
+      const dir = new V(x, y, 0.5).unproject(game.camera).sub(game.camera.position).normalize();
+      return world.bodies.every((b) => {
+        const to = b.renderPosition.clone().sub(game.camera.position);
+        return dir.angleTo(to) > Math.max(Math.asin(Math.min(1, b.radius / to.length())), 0.02) + 0.05;
+      });
+    };
+    const spots = [[-0.8, 0.8], [0.8, 0.8], [-0.8, -0.8], [0.8, -0.8], [0, 0.85], [0, -0.85]];
+    const [x, y] = spots.find(([sx, sy]) => clear(sx, sy)) ?? spots[0];
+    const at = { clientX: rect.left + ((x + 1) / 2) * rect.width, clientY: rect.top + ((1 - y) / 2) * rect.height, bubbles: true };
+    canvas.dispatchEvent(new PointerEvent('pointerdown', { ...at, button: 0 }));
+    canvas.dispatchEvent(new PointerEvent('pointerup', { ...at, button: 0 }));
+  })()`);
+  await drawFrames(3);
+  after = await evaluate(hovering);
+  autopilot = {
+    star: await evaluate(`world.stars[0].name`),
+    offsetMoved: +Math.hypot(...after.offset.map((v, k) => v - before.offset[k])).toFixed(2),
+  };
 
   // Hover and click the (first) star at its on-screen position.
   pick = await evaluate(`new Promise((resolve) => {
@@ -343,7 +385,6 @@ await section('core', async () => {
       tooltip: document.getElementById('tooltip').hidden ? null : document.getElementById('tooltip-name').textContent,
     })));
   })`);
-  await evaluate(`ship.stop()`);
 
   // The system map: shown with every planet and moon, and the count in its title; hovering a planet's disc
   // shows its tooltip, clicking it sends the autopilot there, and N folds the panel away and back.
@@ -370,7 +411,8 @@ await section('core', async () => {
       target: ship.targetBody?.name ?? null,
     })));
   })`);
-  await evaluate(`document.getElementById('system-map-canvas').dispatchEvent(new PointerEvent('pointerleave')), ship.stop()`);
+  // Back to hovering above the star for the checks below.
+  await evaluate(`document.getElementById('system-map-canvas').dispatchEvent(new PointerEvent('pointerleave')), ship.parkAt(world.stars[0])`);
   const key = (type) => evaluate(`window.dispatchEvent(new KeyboardEvent('${type}', { code: 'KeyN' }))`);
   const mapOpen = `levels.systemLevel.map.visible && getComputedStyle(document.querySelector('#system-map .map-body')).display !== 'none'`;
   // Held for a few frames, so the map's per-frame poll sees the press (headless frame rates are low).
@@ -438,7 +480,7 @@ await section('core', async () => {
         const r = {
           name: c.name,
           tooltip: document.getElementById('tooltip').hidden ? null : document.getElementById('tooltip-name').textContent,
-          autopilot: ship.autopilotActive,
+          autopilot: ship.enRoute,
         };
         orbit.setFocus(null);
         orbit.setDistance(45);
@@ -451,7 +493,8 @@ await section('core', async () => {
   eye = { start: await evaluate(`+levels.systemLevel.eye.exposure.toFixed(2)`) };
   await evaluate(`(() => { const s = world.stars[0], o = levels.systemLevel.orbit;
     o.setFocus(s.renderPosition); o.setDistance(s.radius * 3); })()`);
-  await until(`levels.systemLevel.eye.exposure < ${eye.start} - 0.2`, 8000);
+  // (It already starts low: the view is centred on the star.)
+  await until(`levels.systemLevel.eye.exposure < ${eye.start} - 0.07`, 8000);
   eye.close = await evaluate(`+levels.systemLevel.eye.exposure.toFixed(2)`);
   await evaluate(`levels.systemLevel.orbit.setFocus(null), levels.systemLevel.orbit.setDistance(45)`);
 
@@ -474,8 +517,8 @@ await section('core', async () => {
   sky.screenshot = join(outDir, 'band.png');
   writeFileSync(sky.screenshot, Buffer.from(bandShot.result.data, 'base64'));
 
-  const moved = after.pos[2] < before.pos[2] - 10 && after.speed > 5;
-  const autopiloted = autopilot.endDist < Math.max(3, autopilot.startDist * 0.1);
+  const hovered = [before, after].every((s) => s.target === autopilot.star && !s.enRoute && s.degreesAbove > 80);
+  const noManual = autopilot.offsetMoved < 1;
   const picked = pick.target === pick.star && pick.tooltip === pick.star && systemMap.ok;
   const skyOk = sky.band && sky.trails === sky.expectedTrails && sky.visibleTrails >= 1;
   const alive =
@@ -485,9 +528,9 @@ await section('core', async () => {
     living.cometsMoved &&
     !living.pickable &&
     (comet.none || (comet.tooltip === comet.name && !comet.autopilot)) &&
-    eye.close < eye.start - 0.1;
-  Object.assign(sections.core, { moved, autopiloted, picked, skyOk, alive });
-  return moved && autopiloted && picked && skyOk && alive;
+    eye.close < eye.start - 0.05;
+  Object.assign(sections.core, { hovered, noManual, picked, skyOk, alive });
+  return hovered && noManual && picked && skyOk && alive;
 });
 
 if (started && (runs('galaxy') || runs('nebulas') || runs('audio') || runs('planet'))) {
@@ -514,7 +557,12 @@ if (started && (runs('galaxy') || runs('nebulas') || runs('audio') || runs('plan
         const i = 4 * (y * w + x); sum += s.px[i] + s.px[i + 1] + s.px[i + 2]; n++;
       }
       const weight = levels.crossfade;
-      s.current.frames.push({ weight, brightness: sum / (3 * n) });
+      // Planet zooms: how far the camera is from the body's centre, in radii (over the highest terrain in the planet level).
+      const pl = levels.planetLevel;
+      const clearance = !pl ? null : levels.mode === 'planet'
+        ? game.camera.position.length() / pl.top
+        : game.camera.position.distanceTo(pl.body.renderPosition) / pl.body.radius;
+      s.current.frames.push({ weight, brightness: sum / (3 * n), clearance });
       if (s.freezeWhen && weight !== null && weight > 0.35 && levels.mode === s.freezeWhen) {
         s.freezeWhen = null; s.frozen = true; game.stop();
       }
@@ -570,11 +618,16 @@ await section('galaxy', async () => {
     requestAnimationFrame(() => requestAnimationFrame(() =>
       resolve({ nearest: best.id, destination: levels.galaxyLevel.ship.destination?.id ?? null })));
   })`);
-  // Scroll in mid-jump: held until the ship docks, then it zooms into the destination.
+  // Scroll in mid-jump: the camera zooms in, but the level doesn't change until the ship docks and we scroll on.
   await evaluate(`__seamless.freezeWhen = 'system'`);
+  const zoomBeforeJump = await evaluate(`levels.galaxyLevel.orbit.zoom`);
   await wheel(-50000);
+  await sleep(600);
   galaxyLoop.heldWhileTravelling = await evaluate(`levels.galaxyLevel.ship.travelling && levels.mode === 'galaxy'`);
+  galaxyLoop.zoomedWhileTravelling = (await evaluate(`levels.galaxyLevel.orbit.zoom`)) < zoomBeforeJump * 0.9;
   for (let i = 0; i < 60 && (await evaluate(`levels.galaxyLevel.ship.travelling`)); i++) await sleep(250);
+  await sleep(1500);
+  await wheel(-50000);
   galaxyLoop.dockedAt = await evaluate(`levels.galaxyLevel.ship.travelling ? null : levels.galaxyLevel.ship.current.id`);
   galaxyLoop.handoverShot = await freezeShot('handover');
   for (let i = 0; i < 20 && (await evaluate(`levels.mode !== 'system' || levels.transitioning`)); i++) await sleep(250);
@@ -582,10 +635,10 @@ await section('galaxy', async () => {
   galaxyLoop.modeAfterZoomIn = await evaluate(`levels.mode`);
   galaxyLoop.to = await evaluate(`system.id`);
   galaxyLoop.shipSpeed = await evaluate(`ship.speed`);
-  // Arriving, the ship flies in from far out and brakes to park a few star diameters from the star.
+  // Arriving, the ship flies in from far out and brakes to hover straight above the star.
   const arrival = `({ target: ship.targetBody?.name ?? null, star: world.stars[0].name, enRoute: ship.enRoute,
     distance: +ship.object.position.distanceTo(world.stars[0].position).toFixed(0),
-    park: +ship.parkDistance(world.stars[0]).toFixed(0), zone: +system.starZone.toFixed(0),
+    park: +ship.parkDistance(world.stars[0]).toFixed(0),
     aboveEcliptic: +(ship.object.position.y - world.stars[0].position.y).toFixed(1),
     cameraAboveShip: +(game.camera.position.y - ship.object.position.y).toFixed(1) })`;
   galaxyLoop.arrival = { flying: await evaluate(arrival) };
@@ -603,6 +656,7 @@ await section('galaxy', async () => {
     galaxyLoop.polish.twinkleTime > 0 &&
     galaxyLoop.clicked.destination === galaxyLoop.clicked.nearest &&
     galaxyLoop.heldWhileTravelling &&
+    galaxyLoop.zoomedWhileTravelling &&
     galaxyLoop.dockedAt === galaxyLoop.clicked.nearest &&
     galaxyLoop.handoverShot !== null &&
     galaxyLoop.modeAfterZoomIn === 'system' &&
@@ -611,9 +665,8 @@ await section('galaxy', async () => {
     galaxyLoop.arrival.parked.target === galaxyLoop.arrival.parked.star &&
     !galaxyLoop.arrival.parked.enRoute &&
     Math.abs(galaxyLoop.arrival.parked.distance - galaxyLoop.arrival.parked.park) < 3 &&
-    galaxyLoop.arrival.parked.distance > 2 * galaxyLoop.arrival.parked.zone &&
-    // Always arrives just above the ecliptic, with the camera over the ship.
-    galaxyLoop.arrival.parked.aboveEcliptic > 0 &&
+    // Always hovers straight above the star, with the camera over the ship.
+    galaxyLoop.arrival.parked.aboveEcliptic > 0.98 * galaxyLoop.arrival.parked.distance &&
     galaxyLoop.arrival.parked.cameraAboveShip > 0 &&
     typeof galaxyLoop.shipSpeed === 'number'
   );
@@ -725,7 +778,7 @@ await section('nebulas', async () => {
     writeFileSync(k.screenshot, Buffer.from(shot.result.data, 'base64'));
     if (kind === 'emission') {
       // Low orbit inside it: the nebula is in the planet level's sky too.
-      await evaluate(`(() => { const p = world.planets[0]; ship.parkAt(p, world.stars[0].position.clone().sub(p.position)); levels.toPlanet(p); })()`);
+      await evaluate(`(() => { const p = world.planets[0]; ship.parkAt(p); levels.toPlanet(p); })()`);
       k.lowOrbit = await until(`levels.mode === 'planet' && !levels.transitioning`, 40000);
       if (k.lowOrbit) {
         k.lowOrbitEffect = await evaluate(nebulaEffect);
@@ -851,7 +904,7 @@ await section('planet', async () => {
     'planet-handover',
   );
 
-  // Scrolling in while the autopilot flies is held until it arrives, then descends to the destination.
+  // Scrolling in while the autopilot flies zooms the camera but doesn't descend; once it arrives, scrolling on does.
   heldZoom = await evaluate(`(() => {
     const here = ship.targetBody;
     // The nearest other body at least 150 units away, so the trip lasts a couple of seconds.
@@ -868,13 +921,16 @@ await section('planet', async () => {
   heldZoom.whileFlying = await evaluate(
     `({ enRoute: ship.enRoute, mode: levels.mode, zoom: +levels.systemLevel.orbit.zoom.toFixed(1) })`,
   );
+  for (let i = 0; i < 80 && (await evaluate(`ship.enRoute`)); i++) await sleep(250);
+  await sleep(1500);
+  await wheel(-50000);
   for (let i = 0; i < 80 && (await evaluate(`levels.mode !== 'planet' || levels.transitioning`)); i++) await sleep(250);
   heldZoom.mode = await evaluate(`levels.mode`);
   heldZoom.descendedTo = await evaluate(`planet?.body.name ?? null`);
   heldZoom.ok =
     heldZoom.whileFlying.enRoute &&
     heldZoom.whileFlying.mode === 'system' &&
-    Math.abs(heldZoom.whileFlying.zoom - heldZoom.zoomBefore) < 1 &&
+    heldZoom.whileFlying.zoom < heldZoom.zoomBefore * 0.9 &&
     heldZoom.mode === 'planet' &&
     heldZoom.descendedTo === heldZoom.target;
   await evaluate(`levels.leavePlanet()`);
@@ -890,6 +946,7 @@ await section('planet', async () => {
         frames: seg.frames.length,
         crossfadeFrames: blended.length,
         minBrightness: +Math.min(...seg.frames.map((x) => x.brightness)).toFixed(2),
+        minClearance: +Math.min(...seg.frames.map((x) => x.clearance ?? Infinity)).toFixed(3),
       };
     });
     const kinds = [...new Set(segments.map((x) => x.zoom))];
@@ -903,7 +960,7 @@ await section('planet', async () => {
     'planet → system',
   ];
   seamless.ok =
-    kinds.every((k) => seamless.kinds.includes(k)) && seamless.segments.every((x) => x.crossfadeFrames > 0 && x.minBrightness > 0.5);
+    kinds.every((k) => seamless.kinds.includes(k)) && seamless.segments.every((x) => x.crossfadeFrames > 0 && x.minBrightness > 0.5 && (x.minClearance ?? Infinity) >= 1);
   // Audio is only unlocked by the audio section's real click, so only then can the loop hear its whooshes.
   const heard = !sections.audio || (planetLoop.soundIn === 'transitionIn' && planetLoop.soundOut === 'transitionOut');
   return planetLoop.ok && heard && heldZoom.ok && planetLoop.handoverShot !== null && seamless.ok;
@@ -1020,7 +1077,7 @@ await section('lab', async () => (lab = await runLab()).ok);
 
 /**
  * Touch play on an emulated phone (390x844, real CDP touch events): hold a finger on the star (tooltip), lift
- * (autopilot to it), drag (rotates, no tap), pinch (zoom), the on-screen stick with a second finger on Boost, then
+ * (autopilot to it), drag (rotates, no tap), pinch (zoom), Boost (no stick in space), then
  * pinch in at a planet to descend, tap the globe, and pinch out to the system and on to the galaxy, checking which
  * on-screen controls each level shows.
  */
@@ -1053,7 +1110,7 @@ async function runTouch() {
   };
   const controls = `({ ship: document.documentElement.dataset.ship,
     shown: getComputedStyle(document.getElementById('touch-controls')).display !== 'none',
-    upDown: getComputedStyle(document.getElementById('touch-up')).display !== 'none' })`;
+    stick: getComputedStyle(document.getElementById('touch-stick')).display !== 'none' })`;
   const center = (id) =>
     evaluate(`(() => { const b = document.getElementById('${id}').getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; })()`);
   const r = {};
@@ -1067,30 +1124,22 @@ async function runTouch() {
   await touch('touchEnd', []);
   await frames();
   r.tap = await evaluate(`({ star: world.stars[0].name, target: ship.targetBody?.name ?? null, tooltipHidden: document.getElementById('tooltip').hidden })`);
-  await evaluate(`ship.stop()`);
 
   const yaw = await evaluate(`levels.systemLevel.orbit.targetYaw`);
   await swipe([[150, 500]], [[250, 500]]);
-  r.drag = { yaw: +((await evaluate(`levels.systemLevel.orbit.targetYaw`)) - yaw).toFixed(2), tapped: await evaluate(`ship.autopilotActive`) };
+  r.drag = { yaw: +((await evaluate(`levels.systemLevel.orbit.targetYaw`)) - yaw).toFixed(2), tapped: await evaluate(`ship.enRoute || ship.targetBody !== world.stars[0]`) };
 
   const distance = await evaluate(`levels.systemLevel.orbit.targetDistance`);
   await swipe([[195, 380], [195, 460]], [[195, 340], [195, 500]]); // spread to twice as far apart: half the distance
   r.pinch = +((await evaluate(`levels.systemLevel.orbit.targetDistance`)) / distance).toFixed(2);
 
-  const stick = await center('touch-stick');
-  const boost = await center('touch-boost');
-  const from = await evaluate(`ship.object.position.toArray()`);
-  await touch('touchStart', [stick]);
-  await touch('touchMove', [[stick[0], stick[1] - 60]]);
-  await sleep(800);
-  await touch('touchStart', [[stick[0], stick[1] - 60], boost]);
+  // Boost (it speeds the autopilot up; there's no stick in space).
+  await touch('touchStart', [await center('touch-boost')]);
   await sleep(200);
-  r.stick = await evaluate(`({ forward: game.input.axis('KeyS', 'KeyW'), boost: game.input.isDown('ShiftLeft'), speed: +ship.speed.toFixed(1) })`);
+  r.boost = { held: await evaluate(`game.input.isDown('ShiftLeft')`) };
   await touch('touchEnd', []);
   await frames();
-  r.stick.released = await evaluate(`game.input.axis('KeyS', 'KeyW') === 0 && !game.input.isDown('ShiftLeft')`);
-  const to = await evaluate(`ship.object.position.toArray()`);
-  r.stick.moved = +Math.hypot(to[0] - from[0], to[2] - from[2]).toFixed(1);
+  r.boost.released = await evaluate(`!game.input.isDown('ShiftLeft')`);
 
   // The menu: a tap on the menu button opens it (paused, with the planet lab link), a tap on Resume closes it.
   await touch('touchStart', [await center('menu-toggle')]);
@@ -1104,7 +1153,7 @@ async function runTouch() {
   await frames();
   r.menu.closed = await evaluate(`!menu.isOpen && !game.paused`);
 
-  // The system map: the Map button (above ▲ / ▼ in space) opens it over the screen, a tap on a planet flies
+  // The system map: the Map button (above Boost) opens it over the screen, a tap on a planet flies
   // there, and its × closes it.
   const systemMapShown = `getComputedStyle(document.getElementById('system-map')).display !== 'none' && levels.systemLevel.map.visible`;
   r.systemMap = { closed: !(await evaluate(systemMapShown)), button: await evaluate(`getComputedStyle(document.getElementById('touch-map')).display !== 'none'`) };
@@ -1128,10 +1177,9 @@ async function runTouch() {
   await touch('touchEnd', []);
   await frames();
   r.systemMap.closedAgain = !(await evaluate(systemMapShown));
-  await evaluate(`ship.stop()`);
 
   // Down to a planet and back.
-  await evaluate(`(() => { const body = world.planets[0]; const side = world.stars[0].position.clone().sub(body.position).normalize(); side.y += 0.5; ship.parkAt(body, side); })()`);
+  await evaluate(`ship.parkAt(world.planets[0])`);
   await sleep(300);
   r.planet = { mode: await pinchUntil('planet', true) };
   if (r.planet.mode === 'planet') {
@@ -1187,17 +1235,15 @@ async function runTouch() {
     r.system.fullscreenButton &&
     r.system.ship === 'space' &&
     r.system.shown &&
-    r.system.upDown &&
+    !r.system.stick &&
     r.holdTooltip === r.tap.star &&
     r.tap.target === r.tap.star &&
     r.tap.tooltipHidden &&
     Math.abs(r.drag.yaw) > 0.3 &&
     !r.drag.tapped &&
     Math.abs(r.pinch - 0.5) < 0.05 &&
-    r.stick.forward > 0.9 &&
-    r.stick.boost &&
-    r.stick.released &&
-    r.stick.moved > 5 &&
+    r.boost.held &&
+    r.boost.released &&
     r.menu.opened &&
     r.menu.lab &&
     r.menu.closed &&
@@ -1215,7 +1261,7 @@ async function runTouch() {
     r.planet.map.tapDegrees !== null &&
     r.planet.map.tapDegrees < 1.5 &&
     r.planet.map.closedAgain &&
-    !r.planet.upDown &&
+    r.planet.stick &&
     r.planet.tapEnRoute &&
     r.planet.back === 'system' &&
     r.galaxy.mode === 'galaxy' &&

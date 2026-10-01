@@ -29,6 +29,12 @@ export const galaxyCameraParams: OrbitParams = {
 
 /** Where the camera settles after zooming out of a system. */
 export const GALAXY_VIEW_DISTANCE = 60;
+/**
+ * ...no farther above or below the galactic plane than this (radians), so
+ * it looks along the disc, not down into the dark between its stars (the
+ * system camera looks down steeply on a ship hovering over a body).
+ */
+export const GALAXY_VIEW_ELEVATION = (35 * Math.PI) / 180;
 
 /**
  * The galaxy map in galaxy units. No physics: travel is scripted. The galaxy
@@ -85,8 +91,8 @@ export class GalaxyLevel extends Level {
         {
           distance: GALAXY_VIEW_DISTANCE,
           onZoomPastLimit: (dir) => dir < 0 && onZoomIn(),
-          // Scrolling in mid-jump zooms into the destination once there.
-          holdZoomIn: () => this.ship.travelling,
+          // Zoom freely mid-jump, but enter the system only once there.
+          zoomLimitsHold: () => this.ship.travelling,
         },
         debug,
         'Galaxy camera',

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { Entity } from '../core/Entity';
 import type { Physics } from '../physics/Physics';
 
-/** 'space': stick, up/down and boost; 'surface': stick and boost; 'none': just gestures. */
+/** 'space': boost and map (the ship only flies where you tap); 'surface': stick, boost and map; 'none': just gestures. */
 export type TouchShipControls = 'none' | 'surface' | 'space';
 
 /**

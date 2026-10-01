@@ -5,12 +5,11 @@ import type { Entity } from '../core/Entity';
 import type { Game } from '../core/Game';
 import type { GalaxyData, StarRef } from '../gen/galaxy';
 import type { NebulaData } from '../gen/nebulas';
-import { arrivalDistance } from '../gen/system';
-import { zoomCurveParams } from '../player/zoomCurve';
+import { hoverGap, parkGap, zoomCurveParams } from '../player/zoomCurve';
 import { Tooltip } from '../ui/Tooltip';
 import type { Planet } from '../world/Planet';
-import { arrivalParams, clampElevation } from './arrival';
-import { GALAXY_VIEW_DISTANCE, GalaxyLevel } from './GalaxyLevel';
+import { arrivalParams, clampElevation, descentParams, leaveParams } from './arrival';
+import { GALAXY_VIEW_DISTANCE, GALAXY_VIEW_ELEVATION, GalaxyLevel } from './GalaxyLevel';
 import { PLANET_VIEW_DISTANCE, PlanetLevel } from './PlanetLevel';
 import type { Level } from './Level';
 import {
@@ -34,6 +33,8 @@ import { ARRIVAL_DISTANCE, SystemLevel } from './SystemLevel';
 const ORIGIN = new THREE.Vector3();
 /** A camera looks along its local -Z, so +Z points from what it looks at back to it. */
 const BACK = new THREE.Vector3(0, 0, 1);
+/** The ecliptic's north: the ship hovers this way from a body. */
+const UP = new THREE.Vector3(0, 1, 0);
 
 export type LevelMode = 'system' | 'galaxy' | 'planet';
 
@@ -108,9 +109,16 @@ export class SceneManager implements Entity {
     f?.add(arrivalParams, 'start', 0.2, 0.8);
     f?.add(arrivalParams, 'minStart', 1, 4);
     f?.add(arrivalParams, 'flightTime', 1, 8);
+    f?.add(arrivalParams, 'bodyBelowCentre', 0, 0.5);
+    f?.add(leaveParams, 'pastHandover', 0.5, 3);
+    f?.add(leaveParams, 'reach', 1, 5);
+    f?.add(descentParams, 'maxLatitude', 0, 1.5);
     const z = debug.folder('Zoom moves the ship');
     z?.add(zoomCurveParams, 'referenceView', 12, 200);
+    z?.add(zoomCurveParams, 'hoverRadii', 0.1, 4);
     z?.add(zoomCurveParams, 'gapExponent', 0, 1.5);
+    z?.add(zoomCurveParams, 'gapOutExponent', 0, 1.5);
+    z?.add(zoomCurveParams, 'maxHoverGap', 4.5, 60);
     z?.add(zoomCurveParams, 'minGap', 3.5, 20);
     z?.add(zoomCurveParams, 'lowAltitude', 1, 20);
     z?.add(zoomCurveParams, 'highRadii', 0.5, 4);
@@ -166,6 +174,7 @@ export class SceneManager implements Entity {
         if (s.blend < 1) {
           from.setFocus(ORIGIN, s.lead);
           from.setDistance(s.distance);
+          system.aimFade(1 - s.lead);
           system.ship.setScale(1 - s.lead);
         }
         if (s.blend > 0) {
@@ -177,8 +186,9 @@ export class SceneManager implements Entity {
       },
       swap: () => {
         this.game.setLevel(galaxy);
-        // Settle on the orbit closest to the matched view.
-        to.lookFrom(this.direction.copy(BACK).applyQuaternion(matchView()));
+        // Settle on the orbit closest to the matched view that looks along the disc.
+        const dir = this.direction.copy(BACK).applyQuaternion(matchView());
+        to.lookFrom(clampElevation(dir, -GALAXY_VIEW_ELEVATION, GALAXY_VIEW_ELEVATION, dir));
       },
       finish: () => {
         galaxy.hideCloseUp();
@@ -237,12 +247,14 @@ export class SceneManager implements Entity {
       swap: () => {
         this.game.setLevel(system);
         system.eye.settleNext();
-        // Whichever side of the ecliptic the view came in from, the ship arrives along it, just above, and
-        // the camera settles over the ship on the orbit closest to the matched view that looks down on it.
+        // Whichever side of the ecliptic the view came in from, the ship arrives along it, just above, to
+        // hover over the star, and the camera settles behind it, low, turning to look at the star.
         const dir = this.direction.copy(BACK).applyQuaternion(matchView());
-        const [low, high] = arrivalParams.cameraElevation;
-        to.lookFrom(clampElevation(dir, low, high, this.settle));
+        this.settle.copy(dir);
         this.flyIn(system, clampElevation(dir, ...arrivalParams.shipElevation, dir), handover);
+        const elevation = system.hoverElevation(ARRIVAL_DISTANCE, 0);
+        to.lookFrom(clampElevation(this.settle, elevation, elevation, this.settle));
+        system.aimAt(system.world.stars[0]!, 0);
       },
       finish: () => {
         galaxy.hideCloseUp();
@@ -269,8 +281,15 @@ export class SceneManager implements Entity {
     const from = system.orbit;
     const camera = this.game.camera;
     const handover = planetHandoverIn(body.radius, camera.position.distanceTo(body.renderPosition));
-    // Arrive under the camera: its orbit keeps its direction while it flies at the body.
-    const side = this.side.copy(BACK).applyQuaternion(from.orientation(this.view));
+    // Arrive under the camera (its orbit keeps its direction while it flies at the body), but no nearer the pole
+    // than `descentParams.maxLatitude` (the camera looks down on the ship hovering above the body, high over it).
+    const latitude = descentParams.maxLatitude;
+    const side = clampElevation(
+      this.side.copy(BACK).applyQuaternion(from.orientation(this.view)),
+      -latitude,
+      latitude,
+      this.side,
+    );
     const level = this.createPlanet(body, side);
     const to = level.orbit;
     const { frame } = level;
@@ -286,11 +305,12 @@ export class SceneManager implements Entity {
         if (s.blend < 1) {
           from.setFocus(body.renderPosition, s.lead);
           from.setDistance(s.distance);
+          system.aimFade(1 - s.lead);
           system.ship.setScale(1 - s.lead);
         }
         if (s.blend > 0) {
           to.setFocus(ORIGIN, 1 - s.tail);
-          to.setDistance(s.distance * scale);
+          to.setDistance(this.descentDistance(s, handover * scale, level.ship.object.position.length(), scale));
           to.setView(matchView(), 1 - s.tail);
           level.ship.setScale(s.tail);
         }
@@ -320,8 +340,8 @@ export class SceneManager implements Entity {
    * Low orbit → back to the system, which catches up with the time spent at
    * the planet. The planet camera pulls back to take in the globe as the UFO
    * shrinks away, the system takes over framed identically, and its camera
-   * pulls on back and over to the ship, parked beside the body on the side it
-   * was flying over.
+   * pulls on back and over to the ship, which grows back hovering above the
+   * body, until it takes in the planet and its moons.
    */
   leavePlanet(): void {
     const planet = this._planetLevel;
@@ -333,7 +353,7 @@ export class SceneManager implements Entity {
     const scale = frame.scale;
     // Beyond the camera's distance from the ship and from the globe's centre (the ship may be high above it).
     const handover = planetHandoverOut(body.radius, Math.max(from.zoom, this.game.camera.position.length()) / scale);
-    const end = Math.max(ARRIVAL_DISTANCE / 2, body.radius * 3);
+    const end = this.leaveDistance(body, handover);
     // System space from the body frame.
     const matchView = () => from.orientation(this.view).premultiply(frame.quaternion);
     this.sfx.play('transitionOut');
@@ -358,13 +378,14 @@ export class SceneManager implements Entity {
       swap: () => {
         system.world.setTime(planet.time);
         body.spinAngle = frame.spinAngle;
-        planet.exitSide(this.side);
-        // Parked as far out as the zoom it ends at puts it.
-        system.ship.viewDistance = end;
-        system.ship.parkAt(body, this.side);
+        // Hovering as high as the zoom it ends at puts it.
+        system.ship.parkAt(body, end);
         this.game.setLevel(system);
         system.eye.settleNext();
-        to.lookFrom(this.direction.copy(BACK).applyQuaternion(matchView()));
+        // Settle round from the matched view, looking down far enough to keep the planet in view under the ship.
+        const dir = this.direction.copy(BACK).applyQuaternion(matchView());
+        const elevation = system.hoverElevation(end, Math.atan2(dir.y, Math.hypot(dir.x, dir.z)));
+        to.lookFrom(clampElevation(dir, elevation, elevation, dir));
       },
       finish: () => {
         body.spinAt = null;
@@ -390,6 +411,20 @@ export class SceneManager implements Entity {
     this.dropPlanet();
     this._systemLevel.dispose();
     this.galaxyLevel.dispose();
+  }
+
+  /**
+   * The planet camera's distance from its centre during the tail of the descent (planet units). The centre
+   * rises from the globe's middle to the ship as the camera closes in on it, so closing in as the timeline
+   * does, faster than that, would carry the camera through the globe. Instead the camera's height over the
+   * globe's centre follows a smooth descent, log-scaled from the handover's to the ship's own height plus the
+   * final distance, and it never comes in nearer than the timeline's distance.
+   */
+  private descentDistance(s: SeamlessSample, handover: number, shipRadius: number, scale: number): number {
+    const timeline = s.distance * scale;
+    if (s.blend < 1) return timeline;
+    const height = Math.exp(Math.log(handover) * (1 - s.tail) + Math.log(shipRadius + PLANET_VIEW_DISTANCE) * s.tail);
+    return Math.max(timeline, height - s.tail * shipRadius);
   }
 
   private seamlessZoom(start: number, handover: number, end: number): SeamlessZoom {
@@ -436,15 +471,30 @@ export class SceneManager implements Entity {
    * Starts the system ship's arrival: it appears `dir` from the barycentre
    * (the camera's side of the star, just above the ecliptic), `handover` out
    * being about where the camera is, already flying at the star, and brakes
-   * evenly to park a few star diameters out, clear of the planets' orbits,
-   * as the camera settles.
+   * evenly to hover above it as the camera settles.
    */
   private flyIn(system: SystemLevel, dir: THREE.Vector3, handover: number): void {
     const star = system.world.stars[0]!;
-    const park = arrivalDistance(system.data, dir);
+    const park = star.radius + parkGap(hoverGap(star.radius), ARRIVAL_DISTANCE);
     const start = Math.min(0.8 * handover, Math.max(arrivalParams.start * handover, arrivalParams.minStart * park));
-    const speed = (2 * (start - park)) / arrivalParams.flightTime;
-    system.ship.flyIn(star, this.side.copy(dir).multiplyScalar(start), speed, park - star.radius, ARRIVAL_DISTANCE);
+    const from = this.side.copy(dir).multiplyScalar(start);
+    // Braking evenly from `speed` to rest covers the way in at half that speed on average.
+    const way = from.distanceTo(this.direction.copy(UP).multiplyScalar(park).add(star.position));
+    system.ship.flyIn(star, from, (2 * way) / arrivalParams.flightTime, ARRIVAL_DISTANCE);
+  }
+
+  /**
+   * How far the camera ends from the ship coming back up from `body`: out
+   * past the handover, so the zoom keeps going out, far enough to take in
+   * the body and its moons, and never out to the galaxy.
+   */
+  private leaveDistance(body: Planet, handover: number): number {
+    let reach = body.standoff;
+    for (const moon of this._systemLevel.world.moons) {
+      if (moon.parent === body) reach = Math.max(reach, moon.position.distanceTo(body.position) + moon.radius);
+    }
+    const { pastHandover, maxDistance } = leaveParams;
+    return Math.min(maxDistance, Math.max(ARRIVAL_DISTANCE, pastHandover * handover, leaveParams.reach * reach));
   }
 
   private createPlanet(body: Planet, side: THREE.Vector3): PlanetLevel {

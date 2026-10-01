@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { GALAXY_RADIUS, generateGalaxy } from '../src/gen/galaxy';
 import { COMET_MIN_PERIHELION_RADII } from '../src/gen/comets';
 import { aphelion, perihelion } from '../src/gen/orbit';
-import { findHomeSystem, generateSystem, spawnDistance, type PlanetData, type SystemData } from '../src/gen/system';
+import { findHomeSystem, generateSystem, type PlanetData, type SystemData } from '../src/gen/system';
 import type { StarKind } from '../src/gen/stars';
 
 const galaxy = generateGalaxy(1337);
@@ -112,16 +112,6 @@ describe('generateSystem', () => {
       expect(p.rings.outer).toBeGreaterThan(p.rings.inner);
       expect(p.rings.outer).toBeLessThanOrEqual(p.radius * 2 + 1e-9);
       expect(p.rings.color).toMatch(/^#[0-9a-f]{6}$/);
-    }
-  });
-
-  it('spawns the player in empty space', () => {
-    for (const system of systems) {
-      const d = spawnDistance(system);
-      expect(d).toBeGreaterThan(system.starZone);
-      for (const p of system.planets) {
-        expect(Math.abs(d - p.orbit.radius)).toBeGreaterThan(p.extent);
-      }
     }
   });
 });

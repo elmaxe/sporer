@@ -5,7 +5,7 @@ import type { GalaxyData, StarRef } from './galaxy';
 import type { NebulaData } from './nebulas';
 import { hexToRgb, hslToHex, rgbToHex } from './color';
 import { romanNumeral } from './names';
-import type { Orbit, Vec3Like } from './orbit';
+import type { Orbit } from './orbit';
 import {
   EARTH_GAME_RADIUS,
   MOON_COUNT_WEIGHTS,
@@ -241,42 +241,6 @@ export function generateSystem(ref: StarRef): SystemData {
 function climateAtmosphere(prng: Rng, type: PlanetType, climate: ClimateData | null): string | null {
   atmosphereColor(prng, type);
   return climate ? atmosphereTint(prng.fork('climate', 'tint'), climate) : null;
-}
-
-/** Where to put the player when arriving: in the first gap between planets, clear of moons. */
-export function spawnDistance(system: SystemData): number {
-  const [a, b] = system.planets;
-  if (a && b) return (a.orbit.radius + a.extent + b.orbit.radius - b.extent) / 2;
-  if (a) return a.orbit.radius + a.extent + 40;
-  return system.starZone * 2 + 40;
-}
-
-/** Arriving from the galaxy, the ship parks about this many star-zone diameters from the barycentre. */
-export const ARRIVAL_DIAMETERS = 3;
-
-/**
- * How far from the barycentre the ship parks when it flies in from the galaxy
- * along unit direction `dir` (system space, from the barycentre towards where
- * it comes from): about `ARRIVAL_DIAMETERS` star-zone diameters, moved to the
- * nearest distance clear of every planet's orbit (its whole neighbourhood,
- * moons included, plus `margin`), so no planet ever runs into the parked ship.
- */
-export function arrivalDistance(system: SystemData, dir: Vec3Like, margin = 10): number {
-  const ideal = ARRIVAL_DIAMETERS * 2 * system.starZone;
-  const nearest = system.starZone + 25;
-  const clear = (d: number) =>
-    system.planets.every((p) => {
-      // Distance from the point to the orbit circle (in the plane tilted about X, normal (0, cos i, -sin i)).
-      const { radius, inclination } = p.orbit;
-      const h = d * (dir.y * Math.cos(inclination) - dir.z * Math.sin(inclination));
-      const rho = Math.sqrt(Math.max(0, d * d - h * h));
-      return Math.hypot(rho - radius, h) > p.extent + margin;
-    });
-  for (let step = 0; step <= 4 * ideal; step += 1) {
-    if (clear(ideal + step)) return ideal + step;
-    if (ideal - step >= nearest && clear(ideal - step)) return ideal - step;
-  }
-  return ideal;
 }
 
 /**
