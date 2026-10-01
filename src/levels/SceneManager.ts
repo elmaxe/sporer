@@ -14,10 +14,12 @@ import { GALAXY_VIEW_DISTANCE, GALAXY_VIEW_ELEVATION, GalaxyLevel } from './Gala
 import { PLANET_VIEW_DISTANCE, PlanetLevel } from './PlanetLevel';
 import type { Level } from './Level';
 import {
+  focusDistance,
   galaxyScale,
   handoverIn,
   handoverOut,
   planetHandoverIn,
+  heightAboveShip,
   planetHandoverOut,
   planetZoomParams,
   sampleSeamlessZoom,
@@ -301,7 +303,7 @@ export class SceneManager implements Entity {
     const matchView = () => from.orientation(this.view).premultiply(frame.inverse);
     this.sfx.play('transitionIn');
     this.beginSeamless({
-      zoom: this.planetZoom(from.zoom, handover, PLANET_VIEW_DISTANCE / scale),
+      zoom: this.planetZoom(from.zoom, handover, heightAboveShip(level.ship.object.position.length(), PLANET_VIEW_DISTANCE) / scale),
       outgoing: system,
       incoming: level,
       apply: (s) => {
@@ -313,7 +315,7 @@ export class SceneManager implements Entity {
         }
         if (s.blend > 0) {
           to.setFocus(ORIGIN, 1 - s.tail);
-          to.setDistance(this.descentDistance(s, handover * scale, level.ship.object.position.length(), scale));
+          to.setDistance(focusDistance(s.distance * scale, s.tail, level.ship.object.position.length()));
           to.setView(matchView(), 1 - s.tail);
           level.ship.setScale(s.tail);
         }
@@ -361,13 +363,13 @@ export class SceneManager implements Entity {
     const matchView = () => from.orientation(this.view).premultiply(frame.quaternion);
     this.sfx.play('transitionOut');
     this.beginSeamless({
-      zoom: this.planetZoom(from.zoom / scale, handover, end),
+      zoom: this.planetZoom(heightAboveShip(planet.ship.object.position.length(), from.zoom) / scale, handover, end),
       outgoing: planet,
       incoming: system,
       apply: (s) => {
         if (s.blend < 1) {
           from.setFocus(ORIGIN, s.lead);
-          from.setDistance(s.distance * scale);
+          from.setDistance(focusDistance(s.distance * scale, 1 - s.lead, planet.ship.object.position.length()));
           planet.ship.setScale(1 - s.lead);
         }
         if (s.blend > 0) {
@@ -414,20 +416,6 @@ export class SceneManager implements Entity {
     this.dropPlanet();
     this._systemLevel.dispose();
     this.galaxyLevel.dispose();
-  }
-
-  /**
-   * The planet camera's distance from its centre during the tail of the descent (planet units). The centre
-   * rises from the globe's middle to the ship as the camera closes in on it, so closing in as the timeline
-   * does, faster than that, would carry the camera through the globe. Instead the camera's height over the
-   * globe's centre follows a smooth descent, log-scaled from the handover's to the ship's own height plus the
-   * final distance, and it never comes in nearer than the timeline's distance.
-   */
-  private descentDistance(s: SeamlessSample, handover: number, shipRadius: number, scale: number): number {
-    const timeline = s.distance * scale;
-    if (s.blend < 1) return timeline;
-    const height = Math.exp(Math.log(handover) * (1 - s.tail) + Math.log(shipRadius + PLANET_VIEW_DISTANCE) * s.tail);
-    return Math.max(timeline, height - s.tail * shipRadius);
   }
 
   private seamlessZoom(start: number, handover: number, end: number): SeamlessZoom {

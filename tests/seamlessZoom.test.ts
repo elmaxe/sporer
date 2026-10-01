@@ -6,6 +6,8 @@ import {
   handoverOut,
   planetHandoverIn,
   planetHandoverOut,
+  focusDistance,
+  heightAboveShip,
   planetZoomParams,
   sampleSeamlessZoom,
   seamlessZoomParams as params,
@@ -126,6 +128,39 @@ describe('planet zoom', () => {
       expect(sampleSeamlessZoom(zoom, t + 1 / 240).distance).toBeLessThanOrEqual(sampleSeamlessZoom(zoom, t).distance + 1e-9);
     }
     expect(sampleSeamlessZoom(zoom, zoomDuration(zoom)).distance).toBeCloseTo(zoom.end);
+  });
+
+  it('going down, never comes nearer the centre than the ship, and ends the view distance above it', () => {
+    // An Earth-sized globe (system radius 8, planet units ×50), the ship 25 over its ground, the camera 45 above that.
+    const scale = 50;
+    const ship = 8 * scale + 25;
+    const end = heightAboveShip(ship, 45) / scale;
+    for (const start of [12, 40, 200]) {
+      const zoom = { ...planetTiming, start, handover: planetHandoverIn(8, start + 8), end };
+      for (let t = zoom.lead; t <= zoomDuration(zoom); t += 1 / 240) {
+        const s = sampleSeamlessZoom(zoom, t);
+        // From the overlap on, both cameras measure from the centre (the focus moves out to the ship in the tail).
+        expect(s.distance * scale).toBeGreaterThanOrEqual(ship + 45 - 1e-6);
+        expect(focusDistance(s.distance * scale, s.tail, ship)).toBeGreaterThan(0);
+      }
+      const last = sampleSeamlessZoom(zoom, zoomDuration(zoom));
+      expect(focusDistance(last.distance * scale, last.tail, ship)).toBeCloseTo(45);
+    }
+  });
+
+  it('coming up, never comes nearer the centre than it starts, starting at the camera\'s own distance', () => {
+    const scale = 50;
+    const ship = 8 * scale + 25;
+    for (const zoom of [8, 45, 300]) {
+      const start = heightAboveShip(ship, zoom) / scale;
+      const z = { ...planetTiming, start, handover: planetHandoverOut(8, start), end: 40 };
+      const first = sampleSeamlessZoom(z, 0);
+      // The focus starts at the ship: the camera's distance from it is the planet camera's zoom.
+      expect(focusDistance(first.distance * scale, 1 - first.lead, ship)).toBeCloseTo(zoom);
+      for (let t = 0; t <= z.lead + z.overlap; t += 1 / 240) {
+        expect(sampleSeamlessZoom(z, t).distance).toBeGreaterThanOrEqual(start - 1e-9);
+      }
+    }
   });
 });
 
