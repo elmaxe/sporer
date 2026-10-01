@@ -6,20 +6,25 @@ import {
   MAX_SYSTEM_ROCKS,
   MIN_BELT_WIDTH,
   NAMED_RADIUS_KM,
+  ROCK_SIZE,
   asteroidClass,
   asteroidRadius,
   beltFraction,
+  beltTurns,
   carbonShare,
   describeAsteroid,
   describeBelt,
   generateBelts,
+  generateRocks,
+  librationTurns,
+  rockPosition,
   type BeltContext,
   type BeltData,
 } from '../src/gen/belts';
 import { generateGalaxy } from '../src/gen/galaxy';
 import { isGiant } from '../src/gen/planets';
 import { Rng } from '../src/gen/rng';
-import { MIN_NECK, SHAPE_FLOOR, shapeRadius } from '../src/gen/shape';
+import { MIN_NECK, SHAPE_FLOOR, describeShape, shapeRadius } from '../src/gen/shape';
 import { findHomeSystem, generateSystem, type SystemData } from '../src/gen/system';
 
 const galaxy = generateGalaxy(1337);
@@ -208,5 +213,72 @@ describe('generateBelts', () => {
     expect(describeBelt({ kind: 'trojan', asteroids: [{}] as never })).toBe('Trojan swarm · 1 named asteroid');
     expect(describeAsteroid({ class: 'stony', binary: true }, { name: 'Kreu belt' })).toBe('Stony asteroid · contact binary · Kreu belt');
     expect(Object.keys(ASTEROID_CLASS_NAMES)).toHaveLength(4);
+    expect(describeShape({ binary: true, lobes: [{}, {}] as never })).toBe('Contact binary: two lobes joined by a neck');
+    expect(describeShape({ binary: false, lobes: [{}] as never })).toBe('Irregular rock');
+  });
+});
+
+describe('scenery rocks', () => {
+  const sample = belts.slice(0, 12).map(({ belt }) => ({ belt, rocks: generateRocks(belt, new Rng(belt.seed), 4) }));
+
+  it('are as many as the belt says (or nearly, after the gaps), inside it, and the same every time', () => {
+    for (const { belt, rocks } of sample) {
+      expect(rocks.length).toBeGreaterThan(belt.rocks * 0.95);
+      expect(rocks.length).toBeLessThanOrEqual(belt.rocks);
+      for (const r of rocks) {
+        expect(r.radius).toBeGreaterThanOrEqual(belt.inner);
+        expect(r.radius).toBeLessThanOrEqual(belt.outer);
+        expect(r.size).toBeGreaterThanOrEqual(ROCK_SIZE[0] - 1e-9);
+        expect(r.size).toBeLessThanOrEqual(ROCK_SIZE[1] + 1e-9);
+        expect(Math.hypot(...r.axis)).toBeCloseTo(1, 9);
+      }
+      expect(generateRocks(belt, new Rng(belt.seed), 4).slice(0, 100)).toEqual(rocks.slice(0, 100));
+    }
+  });
+
+  it('thin out in the Kirkwood gaps', () => {
+    const main = sample.filter(({ belt }) => belt.kind === 'main');
+    expect(main.length).toBeGreaterThan(0);
+    let inGap = 0;
+    let beside = 0;
+    for (const { belt, rocks } of main) {
+      for (const r of rocks) {
+        const d = Math.abs(beltFraction(belt, r.radius) - KIRKWOOD_GAPS[0].at);
+        if (d < 0.01) inGap++;
+        else if (d > 0.08 && d < 0.1) beside++;
+      }
+    }
+    // Two bins of 0.02 either side against one of 0.02 in the middle: the gap holds well under half as many.
+    expect(inGap).toBeLessThan(beside / 2 / 2);
+  });
+
+  it('keep half the real inclinations: the main belt median is about half of 7.15°', () => {
+    const incl = sample.filter(({ belt }) => belt.kind === 'main').flatMap(({ rocks }) => rocks.map((r) => (r.inclination * 180) / Math.PI));
+    incl.sort((a, b) => a - b);
+    const median = incl[Math.floor(incl.length / 2)]!;
+    expect(median).toBeGreaterThan(7.15 / 2 - 1);
+    expect(median).toBeLessThan(7.15 / 2 + 1);
+  });
+
+  it('move as the shader moves them: Kepler rates outwards, Trojans with their host at 60°', () => {
+    const p = { x: 0, y: 0, z: 0 };
+    for (const { belt, rocks } of sample) {
+      for (const r of rocks.slice(0, 50)) {
+        rockPosition(r, 0, 0, p);
+        expect(Math.hypot(p.x, p.y, p.z)).toBeCloseTo(r.radius, 6);
+        if (belt.trojan) {
+          // The rock's longitude against the host's, at a few times: within the libration of ±60°.
+          for (const time of [0, 37, 1234]) {
+            rockPosition(r, beltTurns(belt, time), librationTurns(belt, time), p);
+            const host = belt.trojan.orbit.phase + (2 * Math.PI * time) / belt.trojan.orbit.period;
+            const off = Math.atan2(p.z, p.x) - host - belt.trojan.lead;
+            const wrapped = Math.atan2(Math.sin(off), Math.cos(off));
+            expect(Math.abs(wrapped)).toBeLessThan(belt.trojan.libration + 0.25);
+          }
+        } else {
+          expect(r.rate).toBeCloseTo((belt.inner / r.radius) ** 1.5, 9);
+        }
+      }
+    }
   });
 });

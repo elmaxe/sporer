@@ -108,9 +108,10 @@ For anything about how a planet or moon looks (terrain, seas, gas bands, atmosph
 
 | Call | Does |
 |---|---|
-| `lab.generate(seed, { type, kind, insolation, moons })` | a new body from the game's generators (type: lava, barren, desert, terran, ocean, ice, gas; kind: dwarf, small, earth, superEarth, iceGiant, gasGiant, moon, comet) |
+| `lab.generate(seed, { type, kind, insolation, moons })` | a new body from the game's generators (type: lava, barren, desert, terran, ocean, ice, gas; kind: dwarf, small, earth, superEarth, iceGiant, gasGiant, moon, comet, asteroid) |
 | `lab.load(galaxySeed, star, planet, moon?)` | a planet (or moon) of the game |
 | `lab.loadComet(galaxySeed, star, comet)` | a comet of the game, as active as at its closest pass (`?seed=&star=&comet=` in the URL) |
+| `lab.loadAsteroid(galaxySeed, star, belt, asteroid)` | a named asteroid of the game (`?seed=&star=&belt=&asteroid=` in the URL) |
 | `lab.set({ radius: 9, style: { seaLevel: 0.3 }, rings: {...}, climate: { setting: { heatFlow: 0.1 } } })` | edit anything (merged two levels deep); `lab.planet` is the model (a comet's `zone`, its distance from the star in habitable radii, sets its activity) |
 | `lab.setType('ice')`, `lab.setKind('moon')`, `lab.terraform({ composition: 'oxygenNitrogen', pressure: 1 })` | the panel's type, size and climate edits |
 | `lab.setView({ view: 'system', camera: 'fly', star: 'redDwarf', sunAzimuth: 90, sunElevation: 10, paused: true, wireframe: true })` | view, camera (orbit the planet or follow the UFO), light, clock |
