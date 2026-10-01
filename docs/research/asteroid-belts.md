@@ -301,7 +301,7 @@ T_lib ≈ 147.8 yr (computed, linear theory) vs "about 145 years or longer" (S24
 What `gen/belts.ts` does with the numbers above, and where it departs from them on purpose. The game's orbits are compressed differently from real ones (planets are placed one after the other with gaps, not on a logarithmic ladder), so placement keeps ratios and orders, not distances.
 
 **Placement.**
-- *Main belt* (`mainBeltSpan`, `MAIN_BELT_SPAN`): real edges at the 4:1 (2.065 AU) and 2:1 (3.278 AU) resonances. Measured in log radius from Mars (1.524 AU) to Jupiter (5.204 AU), they sit 0.247 and 0.624 of the way. The game takes the orbit of the last planet inside the first giant (or the inner edge of the planets' space, if the giant is first) and the giant's orbit, puts the belt at those log fractions between them, and clips it to stay `BELT_MARGIN` (10 units) clear of both neighbourhoods. Narrower than 12 units, no belt. (Taking the resonances at face value, 0.397–0.630 of the giant's orbit, fits only 371 of 1008 systems with a giant: the game's planets are packed too closely for it.)
+- *Main belt* (`reserveMainBelt`, `MAIN_BELT_RATIO`, `MAIN_BELT_FROM_INNER_PLANET`): real edges at Jupiter's 4:1 (2.065 AU) and 2:1 (3.278 AU) resonances, so the outer edge is (4/2)^(2/3) = 1.587 times the inner one whatever the giant's distance, and the inner edge is 1.355 times Mars's orbit (1.524 AU). `generateSystem` makes room for the belt while placing the planets, just before the first giant: the inner edge sits 1.355 times the previous planet's orbit out (or just past its neighbourhood, or the stars' if the giant comes first), the outer edge 1.587 times further, and the giant and everything after it move out by the belt's width. So every main belt is as wide for its size as the real one (width / mid radius 0.454). The giant then follows at its usual gap rather than where the 2:1 would put it (1.59 times beyond the belt's outer edge), to keep systems compact. (Before this, belts squeezed into the gaps the planets left had a median width / radius of 0.14, and the resonances taken at face value, 0.397–0.630 of the giant's orbit, fit only 371 of 1008 systems with a giant.)
 - *Kirkwood gaps* (`KIRKWOOD_GAPS`): the 3:1, 5:2 and 7:3 at log fractions 0.415, 0.678 and 0.778 across the belt, computed from Jupiter's a (tested against Kepler's law). Rocks there are thinned by up to 90%, and the dust band dimmed.
 - *Outer icy belt* (`kuiperSpan`, `KUIPER_SPAN`): from the 3:2 resonance with the outermost planet (1.31× its orbit, the Plutinos) to the 50 AU edge (1.66× Neptune's), and clear of its neighbourhood.
 - *Trojans*: at ±60° from a giant, on its orbit, each swarm librating by up to 26–35° (`TROJAN_LIBRATION`, "a few degrees to about 35°") over 12.5 of the host's orbits (`TROJAN_LIBRATION_ORBITS`). L4 gets 60% of a pair's rocks (`TROJAN_L4_SHARE`; measured L4/L5 1.35–1.85, ~1.5). The swarm's radial spread, 4% of the orbit and clipped clear of the neighbours, is a gameplay value (room for named asteroids), not researched.
@@ -310,11 +310,11 @@ What `gen/belts.ts` does with the numbers above, and where it departs from them 
 
 **Thickness** (`BELT_INCLINATION`, `KUIPER_COLD`): each rock's inclination is a half-Gaussian with half the real spread, so the compressed belts read as bands and not clouds. Main belt: median 7.15° (σ ≈ 0.185 rad), the game uses σ 0.085–0.1. Trojans: median 12° (σ ≈ 0.31), the game uses 0.14–0.17. Outer belt: Brown's two populations, 19% cold (σ 2.2°) and 81% hot (σ 17°), both halved.
 
-**Density** (`ROCK_DENSITY`, `MAX_ROCKS`, `MAX_SYSTEM_ROCKS`): deliberately not real. A main-belt asteroid larger than 1 km is ~3–6 million km from its nearest neighbour (10⁵–10⁶ of its own diameters). The game's rocks are tens of their own sizes apart: 100 per 1000 square units of belt, at most 12 000 per belt and 24 000 per system.
+**Density** (`ROCK_DENSITY`, `MAX_ROCKS`, `MAX_SYSTEM_ROCKS`): deliberately not real. A main-belt asteroid larger than 1 km is ~3–6 million km from its nearest neighbour (10⁵–10⁶ of its own diameters). The game's rocks are tens of their own sizes apart: 200 per 1000 square units of belt, at most 60 000 per main belt, 30 000 per outer belt, 5000 per Trojan swarm and 80 000 per system.
 
 **Sizes.**
 - *Named asteroids* (`NAMED_RADIUS_KM`, `asteroidRadius`): real radii, log-uniform from 64 km (the moons' smallest, game radius 0.8) up to the largest non-dwarf member, mapped like the planets (game r = 8·√(R/R⊕)). Main belt up to Vesta's 261 km (game 1.62), Trojans up to Hektor's 125 km (1.12), outer belt up to Ixion's 349 km (1.87).
-- *Scenery rocks* (`ROCK_SIZE`, `ROCK_SIZE_SLOPE`): 0.15–1 units across their longest reach, smaller than the named ones. Cumulative slope 1.3, SDSS's for 0.4–5 km main-belt asteroids. A steeper real slope (2.5–3 for bigger bodies) would leave almost nothing but specks.
+- *Scenery rocks* (`ROCK_SIZE`, `ROCK_SIZE_SLOPE`): 0.2–1.2 units across their longest reach, smaller than the named ones. Cumulative slope 1.3, SDSS's for 0.4–5 km main-belt asteroids. A steeper real slope (2.5–3 for bigger bodies) would leave almost nothing but specks.
 
 **Shapes** (`CONTACT_BINARY_SHARE`, `ASTEROID_ELONGATION`): contact binaries make up 14% of the named main-belt asteroids (radar NEAs, which come from the main belt), 18% of Trojans (14–23% of candidates) and 25% of outer-belt bodies (the cold classicals' 10–25% is a lower limit; Plutinos reach ~40%). A single lobe's longest over shortest axis is drawn from 1.2–2.2, around the median of 1.6 for 15 imaged asteroids. 15% of the rest get a knob (a third, smaller lobe).
 
@@ -332,31 +332,35 @@ The game's own generator over the first 1500 systems of seed 1337, from a scratc
 
 | | Main belt | Outer belt | Trojans |
 |---|---|---|---|
-| Systems with one | 505 (33.7%) | 672 (44.8%) | 367 (24.5%) |
-| Named asteroids | 2153 | 2031 | 1800 |
-| Contact binaries | 13.5% | 24.0% | 17.7% |
-| Width / mid radius, p10–p50–p90 | 0.07–0.14–0.23 | 0.24 | 0.08 |
+| Systems with one | 584 (38.9%) | 672 (44.8%) | 373 (24.9%) |
+| Named asteroids | 2646 | 2031 | 1822 |
+| Contact binaries | 14.2% | 24.0% | 17.6% |
+| Width / mid radius | 0.454 (the real belt's) | 0.236 | 0.08 |
 
-- Systems with any belt: 1036 (69%).
-- Named asteroids by class: 2031 icy, 1800 D-type, 1538 carbonaceous, 615 stony.
-- Rocks per belt, p10/p50/p90: 919 / 3348 / 12 000. Per system with belts, median 12 000 and p90 21 086, capped at 24 000.
-- `generateSystem` takes 1.3 ms a system. Named asteroids' shapes are built on first read (a shape takes ~1 ms to measure); before that change it took 4.3 ms. `generateRocks` takes 38 ms for 11 164 rocks, once when the system is built.
+- Systems with any belt: 1067 (71%).
+- Named asteroids by class: 2031 icy, 1870 carbonaceous, 1822 D-type, 776 stony.
+- Making room for main belts moves the planets beyond them outwards, but the systems' outer edges stay about the same size (median 699, p90 1368, max 2501, against a camera that zooms out to 2500). Outer belts reach 1109 (median), 2103 (p90) and 3595 at most. The home system's giant moves from 559 to 966 to make room for its belt (502–797).
+- Rocks per belt, p10/p50/p90: 2905 / 22 155 / 53 333; per system with belts, median 34 567, capped at 80 000. Main belts hold 170 rocks per 1000 square units (median).
+- `generateSystem` takes 1.1 ms a system. Named asteroids' shapes are built on first read (a shape takes ~1 ms to measure); before that change it took 4.3 ms. `generateRocks` takes 69 ms for 60 000 rocks, once when the system is built.
 
-Rocks of one main belt: median inclination 3.8° (half the real 7.15°, as intended), 90th percentile 9.1°. Sizes p10/p50/p90 are 0.16 / 0.24 / 0.57. Outer belt: median 4.1°, 57% below 5° (cold plus halved hot). Trojans: median 5.6°, largest libration 26°.
+Rocks of one main belt: median inclination 3.75° (half the real 7.15°, as intended), 90th percentile 9.1°. Sizes p10/p50/p90 are 0.22 / 0.32 / 0.73. Outer belt: median 4.1°, 57% below 5° (cold plus halved hot). Trojans: median 5.6°, largest libration 26°.
 
 **The view and its cost** (`world/AsteroidBelt.ts`):
 - Every rock is a dot in one `Points`, a pure function of the clock in its vertex shader.
-- Rocks bigger than `meshPixels` (4 device px) on screen become tumbling meshes of 48 triangles: four rock shapes per belt, one draw call each. Which rocks qualify is chosen on the CPU with `rockPosition` (the shader's maths, tested) at most every 0.25 s or 4 units of camera motion, and they are packed into the instance buffers.
-- A dusty ring takes over beyond 150–900 units.
+- Rocks bigger than `meshPixels` (4 device px) on screen become tumbling meshes of 48 triangles: four rock shapes per belt, one draw call each. They are chosen on the CPU with `rockWithin` at most every 0.25 s or 4 units of camera motion, and packed into the instance buffers. `rockWithin` rejects most rocks without trigonometry, then checks the rest with `rockPosition` (the shader's maths). A test checks it against every rock's true distance. Choosing among 60 000 rocks takes 5.3 ms under headless Chrome; 10 ms before the shortcuts.
+- A dusty ring takes over beyond 150–900 units. Its colour is evened to one luminance, outer belts are dimmer, and it fades from inside the belt and edge-on.
 
 FPS with belts / without, headless SwiftShader, 1280×720:
 
 | View | With belts | Without |
 |---|---|---|
-| The densest system tested (star 84: four belts, 12 000 rocks), arrival view, `?quality=low` | 16 | 20 |
-| Inside the home belt (11 327 rocks, ~650 meshes near the ship), full quality | 9 | 13 |
+| Home system arrival view, full quality (one 60 000-rock belt) | 5 | 6 |
+| Next to a named asteroid inside it (~1270 meshes chosen near the ship) | 7 | 9 |
 
-Before the dot/mesh split, every rock was a mesh, and star 84 ran at 5 FPS against 16. Inside the home belt the remaining cost splits as dust about −2 FPS, meshes −2 and dots −1.
+Earlier measurements, before the main belts were widened, all with `?quality=low` unless noted:
+- With every rock a mesh, a system of 12 000 rocks ran at 5 FPS against 16 without.
+- After the dot/mesh split it ran at 16 against 20.
+- Inside the narrow home belt at full quality: 9 against 13.
 
 ## Open questions
 
@@ -371,7 +375,7 @@ Before the dot/mesh split, every rock was a mesh, and star 84 ran at 5 FPS again
 - **Tumbling fraction** (~7 % at 3–15 km) is my combination of two numbers (S34 fraction-of-excess × SBDB slow fraction), not a published value.
 - **Colour hints** use a 3-point sampling of class-mean spectra (no CIE matching, no solar spectrum); the B/R effective wavelengths for the KBO hues are unverified (from memory).
 - **Hektor diameter**: SBDB's 225 km is a 1990 value; Marchis et al. 2014 give 250 ± 26 km equivalent (the game uses 250).
-- **Belt rocks are dense on purpose** and their inclinations halved; the S/C colour contrast is reduced (see Game mapping).
+- **Belt rocks are dense on purpose** and their inclinations halved; the S/C colour contrast is reduced; the giant beyond a main belt sits at its usual gap, not at its 2:1 distance (see Game mapping).
 - **Uranus Trojans**: the MPC list is empty at the time of reading though two transient ones are published (S26); Earth's list shows only 2020 XL5 though 2010 TK7 is known.
 
 ## Scripts

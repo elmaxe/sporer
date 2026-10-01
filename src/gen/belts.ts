@@ -91,9 +91,9 @@ export interface BeltContext {
   systemName: string;
   /** Radius around the barycentre occupied by the star(s). */
   starZone: number;
-  /** Inner edge of where the first planet could be (as in generateSystem). */
-  firstEdge: number;
   planets: readonly BeltPlanet[];
+  /** The main belt's span, reserved by generateSystem while placing the planets (see reserveMainBelt), or null. */
+  mainBelt: readonly [number, number] | null;
   /** Seconds per orbit at a radius, from the system's Kepler law. */
   period: (radius: number) => number;
 }
@@ -111,12 +111,13 @@ export interface BeltPlanet {
 
 /**
  * The main belt runs from Jupiter's 4:1 resonance (2.065 AU) to its 2:1
- * (3.278 AU), Mars at 1.524 and Jupiter at 5.204: in log radius between the
- * last rocky planet's orbit and the first giant's, that's 0.247 to 0.624 of
- * the way. The game's orbits are compressed differently from real ones, so the
- * belt keeps these log fractions between whichever planets bracket it.
+ * (3.278 AU): its outer edge is (4/2)^(2/3) = 1.587 times its inner one,
+ * whatever the giant's distance. Its inner edge is 1.355 times Mars's orbit
+ * (1.524 AU). generateSystem makes room for it before the first giant (see
+ * reserveMainBelt), which moves the giant and everything beyond it outwards.
  */
-export const MAIN_BELT_SPAN = [0.247, 0.624] as const;
+export const MAIN_BELT_RATIO = 2 ** (2 / 3);
+export const MAIN_BELT_FROM_INNER_PLANET = 2.065 / 1.524;
 /**
  * The Kirkwood gaps inside the main belt (3:1 at 2.502 AU, 5:2 at 2.825, 7:3
  * at 2.956), as log fractions from its inner to outer edge, and their widths.
@@ -138,7 +139,7 @@ export const BELT_MARGIN = 10;
 export const MIN_BELT_WIDTH = 12;
 
 /**
- * Chances, of the systems where one fits. Herschel finds cold debris belts round
+ * Chances: of the systems with a giant (main belt), and with planets (outer belt). Herschel finds cold debris belts round
  * ~20% of FGK stars, but only ones ≳10× brighter than the Sun's (which has
  * two), so real belts are probably far more common: gameplay shares.
  */
@@ -178,11 +179,11 @@ export const TROJAN_WIDTH = 0.04;
  * a real main-belt asteroid is ~10⁵–10⁶ of its own diameters from the next;
  * these are tens.
  */
-export const ROCK_DENSITY = 100;
-export const MAX_ROCKS = { main: 12000, kuiper: 12000, trojan: 2500 } as const;
+export const ROCK_DENSITY = 200;
+export const MAX_ROCKS = { main: 60000, kuiper: 30000, trojan: 5000 } as const;
 export const MIN_ROCKS = 400;
 /** The most scenery rocks in one system, over all its belts (the view's budget; belts share it by size). */
-export const MAX_SYSTEM_ROCKS = 24000;
+export const MAX_SYSTEM_ROCKS = 80000;
 
 // --- Named asteroids ---
 
@@ -215,9 +216,8 @@ export function asteroidRadius(km: number): number {
 /** Every belt of a system: the main belt, an outer icy belt and the giants' Trojans. Uses its own `rng` stream. */
 export function generateBelts(rng: Rng, ctx: BeltContext): BeltData[] {
   const belts: BeltData[] = [];
-  const main = mainBeltSpan(ctx);
-  if (main && rng.fork('main').chance(BELT_CHANCE.main)) {
-    belts.push(makeBelt(rng.fork('main', 'belt'), 'main', `${ctx.systemName} belt`, main[0], main[1], ctx, null));
+  if (ctx.mainBelt) {
+    belts.push(makeBelt(rng.fork('main', 'belt'), 'main', `${ctx.systemName} belt`, ctx.mainBelt[0], ctx.mainBelt[1], ctx, null));
   }
   const outer = kuiperSpan(ctx);
   if (outer && rng.fork('kuiper').chance(BELT_CHANCE.kuiper)) {
@@ -253,20 +253,21 @@ export function generateBelts(rng: Rng, ctx: BeltContext): BeltData[] {
   return belts;
 }
 
-/** Where a main belt would go: between the last planet inside the first giant and the giant, or null if it doesn't fit. */
-export function mainBeltSpan(ctx: BeltContext): [number, number] | null {
-  const g = ctx.planets.findIndex((p) => isGiant(p.size));
-  if (g < 0) return null;
-  const giant = ctx.planets[g]!;
-  const prev = ctx.planets[g - 1];
-  const a0 = prev ? prev.orbit.radius : ctx.firstEdge;
-  const a1 = giant.orbit.radius;
-  const free0 = (prev ? prev.orbit.radius + prev.extent : ctx.firstEdge) + BELT_MARGIN;
-  const free1 = a1 - giant.extent - BELT_MARGIN;
-  const span = Math.log(a1 / a0);
-  const inner = Math.max(free0, a0 * Math.exp(MAIN_BELT_SPAN[0] * span));
-  const outer = Math.min(free1, a0 * Math.exp(MAIN_BELT_SPAN[1] * span));
-  return outer - inner >= MIN_BELT_WIDTH ? [inner, outer] : null;
+/** Whether a system gets a main belt (if it has a giant to hold one), from the belts' own stream. */
+export function wantsMainBelt(rng: Rng): boolean {
+  return rng.fork('main').chance(BELT_CHANCE.main);
+}
+
+/**
+ * Room for a main belt before the first giant: from 1.355 times the orbit of
+ * the planet inside it (Mars to the 4:1 resonance), or just past `edge` if
+ * that is further (the planet's neighbourhood, or the stars' when the giant
+ * is the first planet), out to MAIN_BELT_RATIO times that. The giant then
+ * starts its neighbourhood `BELT_MARGIN` beyond the outer edge.
+ */
+export function reserveMainBelt(innerPlanetOrbit: number | null, edge: number): [number, number] {
+  const inner = Math.max(edge + BELT_MARGIN, (innerPlanetOrbit ?? 0) * MAIN_BELT_FROM_INNER_PLANET);
+  return [inner, inner * MAIN_BELT_RATIO];
 }
 
 /** Where an outer, icy belt would go beyond the last planet, or null with no planets. */
@@ -490,7 +491,7 @@ export interface RockData {
 }
 
 /** Scenery rocks' sizes (longest reach, system units): smaller than the named asteroids (0.8 and up). */
-export const ROCK_SIZE = [0.15, 1] as const;
+export const ROCK_SIZE = [0.2, 1.2] as const;
 /**
  * The cumulative size slope the rocks are drawn with, N(>s) ∝ s^−q: SDSS's
  * 1.3 for main-belt asteroids of 0.4–5 km (steeper, 2.5–3, for bigger ones;
@@ -591,4 +592,54 @@ export function rockPosition<T extends { x: number; y: number; z: number }>(rock
   out.y = y;
   out.z = -x * sn + z * cn;
   return out;
+}
+
+/** A point rocks are measured from: its position, distance from the centre and from the belt's axis, and longitude in turns. */
+export interface RockEye {
+  x: number;
+  y: number;
+  z: number;
+  distance: number;
+  radius: number;
+  turn: number;
+}
+
+/** `point` as a RockEye (written into `out`). */
+export function rockEye(point: { x: number; y: number; z: number }, out: RockEye): RockEye {
+  out.x = point.x;
+  out.y = point.y;
+  out.z = point.z;
+  out.distance = Math.hypot(point.x, point.y, point.z);
+  out.radius = Math.hypot(point.x, point.z);
+  out.turn = Math.atan2(point.z, point.x) / (2 * Math.PI);
+  return out;
+}
+
+/**
+ * Whether a rock is within `reach` of `eye` (what the view's mesh choice asks
+ * of tens of thousands of rocks a few times a second). Most are rejected
+ * without trigonometry: too far nearer or further from the centre, or too far
+ * round (two points at distances ρ and e from the axis, Δ apart in longitude,
+ * are at least 2√(ρe)·sin(Δ/2) ≥ 4·(Δ in turns)·√(ρe) apart; a rock's
+ * longitude strays from its `along` by its libration and, on an inclined
+ * orbit, by under i²/8π turns, and its distance from the axis is at least
+ * r·cos i). The rest are placed with `rockPosition` (into `out`).
+ */
+export function rockWithin(
+  rock: RockData,
+  turns: number,
+  libTurns: number,
+  eye: RockEye,
+  reach: number,
+  out: { x: number; y: number; z: number },
+): boolean {
+  if (Math.abs(rock.radius - eye.distance) > reach) return false;
+  let apart = rock.turn + turns * rock.rate - eye.turn;
+  apart = Math.abs(apart - Math.round(apart)) - rock.libration - (rock.inclination * rock.inclination) / (8 * Math.PI);
+  if (apart > 0 && 4 * apart * Math.sqrt(rock.radius * Math.cos(rock.inclination) * eye.radius) > reach) return false;
+  rockPosition(rock, turns, libTurns, out);
+  const dx = out.x - eye.x;
+  const dy = out.y - eye.y;
+  const dz = out.z - eye.z;
+  return dx * dx + dy * dy + dz * dz <= reach * reach;
 }

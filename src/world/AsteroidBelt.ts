@@ -5,11 +5,13 @@ import {
   describeBelt,
   generateRocks,
   librationTurns,
-  rockPosition,
+  rockEye,
+  rockWithin,
   type AsteroidClass,
   type AsteroidData,
   type BeltData,
   type RockData,
+  type RockEye,
 } from '../gen/belts';
 import { terrainNoise } from '../gen/noise';
 import { Rng, hashSeed } from '../gen/rng';
@@ -25,12 +27,12 @@ export const beltParams = {
   /** ...and gone below this one; the dust band takes over. */
   minPixels: 0.6,
   /** The dots' brightness, to match the lit meshes. */
-  dotBrightness: 1.4,
+  dotBrightness: 3,
   /** The dust band fades in between these distances from the camera (system units)... */
   dustNear: 150,
   dustFar: 900,
   /** ...to this brightness. */
-  dustBrightness: 0.5,
+  dustBrightness: 0.3,
   /** Seconds between choosing which rocks are near enough for a mesh (sooner if the camera moves). */
   reselect: 0.25,
 };
@@ -41,6 +43,16 @@ const ROCK_MESHES = 4;
 const ROCK_SEGMENTS = 2;
 /** A Trojan swarm's dust spreads this many librations either side of the Lagrange point. */
 const TROJAN_DUST_SPREAD = 1.25;
+/**
+ * The dust's brightness by belt: the outer belts' further from the star and
+ * fainter (stylised; the dust's colour is evened to one luminance first).
+ */
+const DUST_LIGHT: Record<BeltData['kind'], number> = { main: 1, trojan: 0.8, kuiper: 0.45 };
+/** The dust's luminance before DUST_LIGHT and `dustBrightness`. */
+const DUST_LUMINANCE = 0.3;
+/** Seen from inside the belt (near its plane), the dust is this dim: from in there it would be all round. */
+const DUST_INSIDE = 0.25;
+
 /** The camera may move this far (system units) before the near rocks are chosen again. */
 const RESELECT_MOVE = 4;
 /** Chosen rocks reach this much further than they need, for the camera and rocks moving until the next choice. */
@@ -223,6 +235,8 @@ export class AsteroidBelt implements Region {
     uBrightness: { value: beltParams.dotBrightness },
   };
   private time = 0;
+  /** 1 outside the belt, DUST_INSIDE with the camera in it (see `prepare`). */
+  private dustInside = 1;
   /** When and where the near rocks were last chosen (NaN: never). */
   private selectedTime = Number.NaN;
   private readonly selectedFrom = new THREE.Vector3();
@@ -230,6 +244,7 @@ export class AsteroidBelt implements Region {
   private readonly plane = new THREE.Vector3();
   private readonly local = new THREE.Vector3();
   private readonly at = new THREE.Vector3();
+  private readonly eye: RockEye = { x: 0, y: 0, z: 0, distance: 0, radius: 0, turn: 0 };
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -277,7 +292,7 @@ export class AsteroidBelt implements Region {
     u.uMinPixels.value = beltParams.minPixels;
     u.uBrightness.value = beltParams.dotBrightness;
     const d = this.dust.material.uniforms;
-    d.uBrightness!.value = beltParams.dustBrightness;
+    d.uBrightness!.value = beltParams.dustBrightness * DUST_LIGHT[data.kind] * this.dustInside;
     (d.uFade!.value as THREE.Vector2).set(beltParams.dustNear, beltParams.dustFar);
     if (data.trojan) {
       // The swarm stays 60° from its host: the arc's centre in the ring's own angle (atan(z, x) in its plane).
@@ -297,6 +312,13 @@ export class AsteroidBelt implements Region {
     const pixels = this.size.y / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
     this.uniforms.uPixels.value = pixels;
     this.object.worldToLocal(camera.getWorldPosition(this.local));
+    // Inside the belt's ring and near its plane, the dust dims.
+    const { inner, outer } = this.data;
+    const r = Math.hypot(this.local.x, this.local.z);
+    const across = THREE.MathUtils.smoothstep(r, inner * 0.85, inner) * (1 - THREE.MathUtils.smoothstep(r, outer, outer * 1.15));
+    const level = 1 - THREE.MathUtils.smoothstep(Math.abs(this.local.y), 0.1 * r, 0.3 * r);
+    this.dustInside = 1 - (1 - DUST_INSIDE) * across * level;
+    this.dust.material.uniforms.uBrightness!.value = beltParams.dustBrightness * DUST_LIGHT[this.data.kind] * this.dustInside;
     const stale =
       !(Math.abs(this.time - this.selectedTime) < beltParams.reselect) ||
       this.local.distanceToSquared(this.selectedFrom) > RESELECT_MOVE * RESELECT_MOVE;
@@ -309,17 +331,14 @@ export class AsteroidBelt implements Region {
     this.selectedFrom.copy(eye);
     const turns = this.uniforms.uTurns.value;
     const libTurns = this.uniforms.uLibTurns.value;
-    const eyeRadius = Math.hypot(eye.x, eye.z);
+    const at = rockEye(eye, this.eye);
     const threshold = beltParams.meshPixels * 0.6;
     for (const batch of this.batches) {
       let n = 0;
       const { rocks } = batch;
       for (let i = 0; i < rocks.length; i++) {
         const rock = rocks[i]!;
-        const reach = (rock.size * pixels) / threshold + RESELECT_MARGIN;
-        // Cheap rejections first: too far across the belt, or above / below it.
-        if (Math.abs(rock.radius - eyeRadius) > reach || Math.abs(eye.y) > reach + rock.radius) continue;
-        if (rockPosition(rock, turns, libTurns, this.at).distanceToSquared(eye) > reach * reach) continue;
+        if (!rockWithin(rock, turns, libTurns, at, (rock.size * pixels) / threshold + RESELECT_MARGIN, this.at)) continue;
         this.pack(batch, i, n++);
       }
       const geometry = batch.mesh.geometry;
@@ -438,7 +457,7 @@ export class AsteroidBelt implements Region {
         uniforms: {
           uInner: { value: data.inner },
           uOuter: { value: data.outer },
-          uColor: { value: mixClasses(colors, data.classes) },
+          uColor: { value: evenLuminance(mixClasses(colors, data.classes), DUST_LUMINANCE) },
           uBrightness: { value: beltParams.dustBrightness },
           uFade: { value: new THREE.Vector2(beltParams.dustNear, beltParams.dustFar) },
           uArcCentre: { value: 0 },
@@ -454,6 +473,8 @@ export class AsteroidBelt implements Region {
       }),
     );
     dust.name = `${data.name} dust`;
+    // Whichever of the belt's objects is drawn first makes the choices for the frame.
+    dust.onBeforeRender = (renderer, _scene, camera) => this.prepare(renderer, camera);
     return dust;
   }
 
@@ -564,6 +585,12 @@ function classColors(seed: number): Record<AsteroidClass, THREE.Color> {
     out[kind] = new THREE.Color().setHSL(h, s, l, THREE.SRGBColorSpace);
   }
   return out;
+}
+
+/** `color` scaled to relative luminance `luminance` (linear). */
+function evenLuminance(color: THREE.Color, luminance: number): THREE.Color {
+  const y = 0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b;
+  return color.multiplyScalar(luminance / Math.max(y, 1e-4));
 }
 
 function mixClasses(colors: Record<AsteroidClass, THREE.Color>, classes: readonly AsteroidClass[]): THREE.Color {

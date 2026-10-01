@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   ASTEROID_CLASS_NAMES,
   KIRKWOOD_GAPS,
-  MAIN_BELT_SPAN,
+  MAIN_BELT_FROM_INNER_PLANET,
+  MAIN_BELT_RATIO,
   MAX_SYSTEM_ROCKS,
   MIN_BELT_WIDTH,
   NAMED_RADIUS_KM,
@@ -17,7 +18,9 @@ import {
   generateBelts,
   generateRocks,
   librationTurns,
+  rockEye,
   rockPosition,
+  rockWithin,
   type BeltContext,
   type BeltData,
 } from '../src/gen/belts';
@@ -38,10 +41,26 @@ const MARS_AU = 1.524;
 const resonance = (a: number, p: number, q: number) => a * (q / p) ** (2 / 3);
 
 describe('belt placement rules', () => {
-  it('put the main belt between the 4:1 and 2:1 resonances, in log radius from Mars to Jupiter', () => {
-    const span = Math.log(JUPITER_AU / MARS_AU);
-    expect(Math.log(resonance(JUPITER_AU, 4, 1) / MARS_AU) / span).toBeCloseTo(MAIN_BELT_SPAN[0], 2);
-    expect(Math.log(resonance(JUPITER_AU, 2, 1) / MARS_AU) / span).toBeCloseTo(MAIN_BELT_SPAN[1], 2);
+  it('span the main belt from the 4:1 to the 2:1 resonance, starting as far out from the inner planet as from Mars', () => {
+    expect(resonance(JUPITER_AU, 2, 1) / resonance(JUPITER_AU, 4, 1)).toBeCloseTo(MAIN_BELT_RATIO, 9);
+    expect(resonance(JUPITER_AU, 4, 1) / MARS_AU).toBeCloseTo(MAIN_BELT_FROM_INNER_PLANET, 2);
+    // So the game's main belts are as wide for their size as the real one: (3.278 − 2.065) / 2.67 ≈ 0.45.
+    for (const { belt } of belts.filter(({ belt }) => belt.kind === 'main')) {
+      expect(belt.outer / belt.inner).toBeCloseTo(MAIN_BELT_RATIO, 9);
+    }
+  });
+
+  it('make room for the main belt: just past the inner planet (by the Mars ratio) and clear of the giant', () => {
+    for (const { system, belt } of belts.filter(({ belt }) => belt.kind === 'main')) {
+      const g = system.planets.findIndex((p) => isGiant(p.size));
+      const inner = system.planets[g - 1];
+      if (inner) {
+        expect(belt.inner).toBeGreaterThanOrEqual(inner.orbit.radius * MAIN_BELT_FROM_INNER_PLANET - 1e-9);
+        expect(belt.inner).toBeGreaterThan(inner.orbit.radius + inner.extent);
+      }
+      const giant = system.planets[g]!;
+      expect(giant.orbit.radius - giant.extent).toBeGreaterThan(belt.outer);
+    }
   });
 
   it('put the Kirkwood gaps at the 3:1, 5:2 and 7:3 resonances', () => {
@@ -201,7 +220,7 @@ describe('generateBelts', () => {
     const ctx: BeltContext = {
       systemName: 'Test',
       starZone: 30,
-      firstEdge: 70,
+      mainBelt: null,
       planets: [],
       period: (r) => r,
     };
@@ -219,7 +238,11 @@ describe('generateBelts', () => {
 });
 
 describe('scenery rocks', () => {
-  const sample = belts.slice(0, 12).map(({ belt }) => ({ belt, rocks: generateRocks(belt, new Rng(belt.seed), 4) }));
+  // Belts with their rock counts capped, to keep the tests quick.
+  const sample = belts.slice(0, 12).map(({ belt }) => {
+    const capped = { ...belt, rocks: Math.min(belt.rocks, 3000) };
+    return { belt: capped, rocks: generateRocks(capped, new Rng(belt.seed), 4) };
+  });
 
   it('are as many as the belt says (or nearly, after the gaps), inside it, and the same every time', () => {
     for (const { belt, rocks } of sample) {
@@ -280,5 +303,31 @@ describe('scenery rocks', () => {
         }
       }
     }
+  });
+
+  it('are chosen for meshes exactly as their true distance says, the shortcuts never missing one', () => {
+    const rng = new Rng(5);
+    const p = { x: 0, y: 0, z: 0 };
+    const eye = { x: 0, y: 0, z: 0, distance: 0, radius: 0, turn: 0 };
+    let near = 0;
+    for (const { belt, rocks } of sample) {
+      for (let k = 0; k < 6; k++) {
+        const time = rng.range(0, 5000);
+        const turns = beltTurns(belt, time);
+        const lib = librationTurns(belt, time);
+        // An eye beside a random rock, a little off the plane.
+        const by = rocks[rng.int(0, rocks.length - 1)]!;
+        rockPosition(by, turns, lib, p);
+        rockEye({ x: p.x + rng.range(-20, 20), y: p.y + rng.range(-20, 20), z: p.z + rng.range(-20, 20) }, eye);
+        const reach = rng.range(20, 300);
+        for (const r of rocks) {
+          rockPosition(r, turns, lib, p);
+          const truth = Math.hypot(p.x - eye.x, p.y - eye.y, p.z - eye.z) <= reach;
+          expect(rockWithin(r, turns, lib, eye, reach, p)).toBe(truth);
+          if (truth) near++;
+        }
+      }
+    }
+    expect(near).toBeGreaterThan(100);
   });
 });

@@ -1,5 +1,5 @@
 import { flatTilt, type Quat } from './galactic';
-import { generateBelts, type BeltData } from './belts';
+import { BELT_MARGIN, generateBelts, reserveMainBelt, wantsMainBelt, type BeltData } from './belts';
 import { generateComets, type CometData } from './comets';
 import { atmosphereTint, generateClimate, type ClimateData } from './climate';
 import type { GalaxyData, StarRef } from './galaxy';
@@ -12,6 +12,7 @@ import {
   MOON_COUNT_WEIGHTS,
   atmosphereColor,
   chooseSizeClass,
+  isGiant,
   choosePlanetType,
   gasBands,
   gasStyle,
@@ -132,8 +133,11 @@ export function generateSystem(ref: StarRef): SystemData {
 
   const planets: PlanetData[] = [];
   // Inner edge of the free space where the next planet's neighbourhood can start.
-  const firstEdge = starZone * 1.5 + 25;
-  let edge = firstEdge;
+  let edge = starZone * 1.5 + 25;
+  // A main belt goes before the first giant, which moves out to make room (its own stream, so no planet draw changes).
+  const beltRng = rng.fork('belts');
+  const wantsBelt = wantsMainBelt(beltRng);
+  let mainBelt: [number, number] | null = null;
   for (let i = 0; i < planetCount; i++) {
     const prng = rng.fork('planet', i);
     const name = `${ref.name} ${romanNumeral(i + 1)}`;
@@ -146,6 +150,10 @@ export function generateSystem(ref: StarRef): SystemData {
     const zone = (edge + gap) / habitableRadius;
     const size = chooseSizeClass(prng.fork('size'), zone);
     const type = choosePlanetType(prng, zone, size);
+    if (wantsBelt && !mainBelt && isGiant(size)) {
+      mainBelt = reserveMainBelt(planets[i - 1]?.orbit.radius ?? null, edge);
+      edge = mainBelt[1] + BELT_MARGIN;
+    }
     const radius = planetRadius(prng, size);
     const rings =
       type === 'gas'
@@ -225,11 +233,11 @@ export function generateSystem(ref: StarRef): SystemData {
   });
 
   // Own stream too: belts sit in the gaps the planets left.
-  const belts = generateBelts(rng.fork('belts'), {
+  const belts = generateBelts(beltRng, {
     systemName: ref.name,
     starZone,
-    firstEdge,
     planets,
+    mainBelt,
     period: (r) => keplerPeriod(r, totalMass),
   });
 
