@@ -12,7 +12,8 @@ import {
   type ClimateState,
 } from '../gen/climate';
 import { hexToRgb, rgbToHex } from '../gen/color';
-import type { Orbit } from '../gen/orbit';
+import { NUCLEUS_RADIUS, cometNucleus } from '../gen/comets';
+import { perihelion, type Orbit } from '../gen/orbit';
 import {
   MOON_RADIUS,
   SIZE_CLASSES,
@@ -31,6 +32,7 @@ import {
   type SizeClass,
 } from '../gen/planets';
 import { Rng, hashSeed } from '../gen/rng';
+import type { ShapeData } from '../gen/shape';
 import type { StarKind, SpectralClass } from '../gen/stars';
 import {
   describePlanet,
@@ -43,6 +45,7 @@ import {
   type RingData,
   type SystemData,
 } from '../gen/system';
+import { cometConfig } from '../world/Comet';
 import type { PlanetConfig } from '../world/Planet';
 
 /*
@@ -52,8 +55,9 @@ import type { PlanetConfig } from '../world/Planet';
  * data, no THREE, unit-tested in tests/lab.test.ts.
  */
 
-export type LabKind = BodyKind;
-export const LAB_KINDS: readonly LabKind[] = [...SIZE_CLASSES, 'moon'];
+/** A size class, a moon, or an irregular small body (a comet's nucleus). */
+export type LabKind = BodyKind | 'comet';
+export const LAB_KINDS: readonly LabKind[] = [...SIZE_CLASSES, 'moon', 'comet'];
 export const LAB_TYPES: readonly PlanetType[] = ['lava', 'barren', 'desert', 'terran', 'ocean', 'ice', 'gas'];
 export const SOLID_KINDS: readonly SizeClass[] = ['dwarf', 'small', 'earth', 'superEarth'];
 
@@ -85,7 +89,14 @@ export interface LabPlanet {
   climate: LabClimate | null;
   /** Shown in the lab's system view. */
   moons: MoonData[];
+  /** Comets: the nucleus's irregular shape (gen/shape.ts); null for round bodies. */
+  shape: ShapeData | null;
+  /** Comets: how far from the star, in habitable radii (≈ AU), which sets how active it is. */
+  zone: number;
 }
+
+/** A comet's distance from the star in the lab by default (habitable radii): fully active, as at a close pass. */
+export const LAB_COMET_ZONE = 1.2;
 
 /** Stars the lab can light a planet with. */
 export type LabStar = SpectralClass | Exclude<StarKind, 'mainSequence'>;
@@ -131,12 +142,13 @@ export const DEFAULT_VIEW: LabView = {
   autoSetting: true,
 };
 
-/** Where a planet loaded from the game came from: planet `planet` (or its moon `moon`) of star `star` in galaxy `seed`. */
+/** Where a planet loaded from the game came from: planet `planet` (or its moon `moon`, or comet `comet`) of star `star` in galaxy `seed`. */
 export interface LabSource {
   seed: string;
   star: number;
   planet: number;
   moon?: number;
+  comet?: number;
 }
 
 /** Everything a lab link carries. */
@@ -168,6 +180,7 @@ export const LAB_MOON_HOST: NonNullable<ClimateBody['host']> = { radius: 25, siz
 
 /** Radius range (system units) the lab offers for a kind. */
 export function kindRadiusRange(kind: LabKind): readonly [number, number] {
+  if (kind === 'comet') return NUCLEUS_RADIUS;
   return kind === 'moon' ? [MOON_RADIUS.min, MOON_RADIUS.max] : SIZE_CLASS_RADIUS[kind];
 }
 
@@ -195,6 +208,7 @@ export interface GenerateOptions {
  */
 export function generateLabPlanet(seed: number, options: GenerateOptions = {}): LabPlanet {
   const rng = new Rng(seed >>> 0);
+  if (options.kind === 'comet' && options.type !== 'gas') return labComet(seed);
   const [type, kind] = resolveTypeAndKind(rng, options.type, options.kind);
   const radius = kind === 'moon' ? moonRadius(rng.fork('radius')) : planetRadius(rng.fork('radius'), kind);
   const { style, bands } = labStyle(seed, type, kind);
@@ -214,12 +228,43 @@ export function generateLabPlanet(seed: number, options: GenerateOptions = {}): 
     rings: kind === 'moon' ? null : labRings(seed, type, radius, style),
     climate: null,
     moons: [],
+    shape: null,
+    zone: Math.sqrt(1 / insolation),
   };
   const climated = withGeneratedClimate(planet, insolation);
   return kind === 'moon' ? climated : withMoons(climated, options.moons);
 }
 
-function resolveTypeAndKind(rng: Rng, type: PlanetType | undefined, kind: LabKind | undefined): [PlanetType, LabKind] {
+/** A comet's nucleus from `seed`, as the game makes them (gen/comets.ts), close to the star. */
+export function labComet(seed: number): LabPlanet {
+  const rng = new Rng(seed >>> 0);
+  const nucleus = cometNucleus(rng.fork('nucleus'));
+  return {
+    name: `Lab ${seed}`,
+    type: 'barren',
+    kind: 'comet',
+    radius: rng.fork('radius').range(...NUCLEUS_RADIUS),
+    seed: seed >>> 0,
+    spin: nucleus.spin,
+    tilt: nucleus.tilt,
+    style: nucleus.style,
+    bands: null,
+    atmosphere: null,
+    rings: null,
+    climate: null,
+    moons: [],
+    shape: nucleus.shape,
+    zone: LAB_COMET_ZONE,
+  };
+}
+
+/** True for the gas and ice giants' size classes. */
+export function giantKind(kind: LabKind): boolean {
+  return kind !== 'moon' && kind !== 'comet' && isGiant(kind);
+}
+
+function resolveTypeAndKind(rng: Rng, type: PlanetType | undefined, wanted: LabKind | undefined): [PlanetType, BodyKind] {
+  const kind = wanted === 'comet' ? undefined : wanted;
   const zone = rng.fork('zone').range(0.3, 4);
   if (type === 'gas') return ['gas', kind && kind !== 'moon' && isGiant(kind) ? kind : 'gasGiant'];
   if (kind && kind !== 'moon' && isGiant(kind)) return ['gas', kind];
@@ -265,7 +310,8 @@ export function labSetting(planet: Pick<LabPlanet, 'type' | 'kind' | 'radius' | 
 function climateBody(planet: Pick<LabPlanet, 'type' | 'kind' | 'radius'>, insolation: number): ClimateBody {
   return {
     type: planet.type as ClimateBody['type'],
-    kind: planet.kind,
+    // Comets have no climate, so never get here.
+    kind: planet.kind as BodyKind,
     radius: planet.radius,
     insolation,
     host: planet.kind === 'moon' ? LAB_MOON_HOST : undefined,
@@ -274,7 +320,7 @@ function climateBody(planet: Pick<LabPlanet, 'type' | 'kind' | 'radius'>, insola
 
 /** A fresh climate and atmosphere tint for the planet's type and size, as generation would draw them. */
 export function withGeneratedClimate(planet: LabPlanet, insolation: number): LabPlanet {
-  if (planet.type === 'gas') return { ...planet, climate: null, atmosphere: null };
+  if (planet.type === 'gas' || planet.kind === 'comet') return { ...planet, climate: null, atmosphere: null };
   const rng = new Rng(hashSeed(planet.seed, 'climate', planet.type));
   const climate = generateClimate(rng, climateBody(planet, insolation));
   return {
@@ -287,7 +333,7 @@ export function withGeneratedClimate(planet: LabPlanet, insolation: number): Lab
 /** Moons as the game would give this planet (`count` of them, or a drawn number); none for a moon. */
 export function withMoons(planet: LabPlanet, count?: number): LabPlanet {
   const { kind } = planet;
-  if (kind === 'moon') return { ...planet, moons: [] };
+  if (kind === 'moon' || kind === 'comet') return { ...planet, moons: [] };
   const rng = new Rng(hashSeed(planet.seed, 'moons'));
   const insolation = planet.climate?.setting.insolation ?? 1 / TYPICAL_ZONE[planet.type] ** 2;
   const moons = generateMoons(rng, planet.name, kind, planet.radius, planet.rings, count).map((moon, j): MoonData => {
@@ -310,7 +356,10 @@ export function withMoons(planet: LabPlanet, count?: number): LabPlanet {
  * colours, climate and atmosphere for the type, rings kept (recoloured).
  */
 export function withType(planet: LabPlanet, type: PlanetType): LabPlanet {
-  const giant = planet.kind !== 'moon' && isGiant(planet.kind);
+  // A comet keeps its shape and takes the type's colours (a gas comet is a gas giant).
+  if (planet.kind === 'comet' && type !== 'gas') return { ...planet, type, style: labStyle(planet.seed, type, 'comet').style };
+  if (planet.kind === 'comet') return withType({ ...planet, kind: 'gasGiant', shape: null }, type);
+  const giant = giantKind(planet.kind);
   let kind = planet.kind;
   if (type === 'gas' && !giant) kind = 'gasGiant';
   if (type !== 'gas' && giant) kind = 'superEarth';
@@ -323,7 +372,13 @@ export function withType(planet: LabPlanet, type: PlanetType): LabPlanet {
 
 /** The planet as another size class (or a moon), its radius moved into the class and its setting recomputed. */
 export function withKind(planet: LabPlanet, kind: LabKind): LabPlanet {
-  const giant = kind !== 'moon' && isGiant(kind);
+  if (kind === 'comet') return planet.kind === 'comet' ? planet : { ...labComet(planet.seed), name: planet.name };
+  if (planet.kind === 'comet') {
+    // Round again, with the climate a body of the class gets this far from the star.
+    const round: LabPlanet = { ...planet, kind, shape: null, radius: classMiddle(kind) };
+    return withKind(withGeneratedClimate(round, 1 / planet.zone ** 2), kind);
+  }
+  const giant = giantKind(kind);
   if (giant !== (planet.type === 'gas')) return withType({ ...planet, kind }, giant ? 'gas' : 'terran');
   const radius = inRange(planet.radius, kind) ? planet.radius : classMiddle(kind);
   const next: LabPlanet = { ...planet, kind, radius, moons: kind === 'moon' ? [] : planet.moons };
@@ -399,11 +454,14 @@ export function toPlanetConfig(planet: LabPlanet): PlanetConfig {
     rings: planet.rings,
     tilt: planet.tilt,
     climate: labClimateData(planet),
+    shape: planet.shape,
+    small: planet.kind === 'comet' ? 'comet' : null,
   };
 }
 
 /** The game's label, e.g. "Ice world · Earth-sized" or "Barren rock · moon". */
 export function describeLab(planet: LabPlanet): string {
+  if (planet.kind === 'comet') return planet.shape?.binary ? 'Comet nucleus · contact binary' : 'Comet nucleus';
   return planet.kind === 'moon' ? `${describePlanet(planet.type)} · moon` : describeSized(planet.type, planet.kind);
 }
 
@@ -415,12 +473,19 @@ export function labEarthRadii(planet: LabPlanet): number {
 // --- From the game ---
 
 /** A planet or moon of the game as a lab planet: its data plus, for a planet, its moons. */
-export function labFromBody(config: PlanetConfig & { size?: SizeClass }, moon: boolean, moons: readonly MoonData[] = []): LabPlanet {
+export function labFromBody(
+  config: PlanetConfig & { size?: SizeClass },
+  moon: boolean,
+  moons: readonly MoonData[] = [],
+  /** A comet's distance from the star, habitable radii (its activity in the lab). */
+  zone = LAB_COMET_ZONE,
+): LabPlanet {
   const climate = config.climate ?? null;
+  const comet = config.small === 'comet';
   return {
     name: config.name,
     type: config.type,
-    kind: moon ? 'moon' : (config.size ?? 'earth'),
+    kind: comet ? 'comet' : moon ? 'moon' : (config.size ?? 'earth'),
     radius: config.radius,
     seed: config.seed,
     spin: config.spin,
@@ -430,13 +495,22 @@ export function labFromBody(config: PlanetConfig & { size?: SizeClass }, moon: b
     atmosphere: config.atmosphere ?? null,
     rings: config.rings ? { ...config.rings } : null,
     climate: climate && config.type !== 'gas' ? { setting: settingOf(climate), state: climateState(climate) } : null,
-    moons: moon ? [] : moons.map((m) => ({ ...m })),
+    moons: moon || comet ? [] : moons.map((m) => ({ ...m })),
+    shape: config.shape ? structuredClone(config.shape) : null,
+    zone: comet ? zone : TYPICAL_ZONE[config.type],
   };
 }
 
 /** A link to the planet lab (lab.html next to `base`, the game's page) showing `planet`. */
 export function labLink(planet: LabPlanet, base: string, view: Partial<LabView> = {}): string {
   return new URL(`lab.html#${encodeLab({ planet, view: { ...DEFAULT_VIEW, ...view } })}`, base).href;
+}
+
+/** Comet `comet` of a generated system, as it is at its closest pass (most active), or null if there is none. */
+export function labFromComet(system: SystemData, comet: number): LabPlanet | null {
+  const c = system.comets[comet];
+  if (!c) return null;
+  return labFromBody(cometConfig(c), false, [], perihelion(c.orbit) / system.habitableRadius);
 }
 
 /** Planet `planet` of a generated system (or its moon `moon`), or null if there is none. */
@@ -483,6 +557,8 @@ export function decodeLab(text: string): LabState | null {
     if (typeof planet.radius !== 'number' || !Number.isFinite(planet.radius) || planet.radius <= 0) planet.radius = base.radius;
     planet.style = { ...base.style, ...p.style };
     if (planet.type !== 'gas' && !planet.climate) planet.climate = base.climate;
+    if (planet.kind === 'comet' && !planet.shape) planet.shape = base.shape;
+    if (typeof planet.zone !== 'number' || !Number.isFinite(planet.zone)) planet.zone = base.zone;
     const state: LabState = { planet, view: { ...DEFAULT_VIEW, ...raw.view } };
     if (raw.source && typeof raw.source.star === 'number') state.source = raw.source;
     return state;

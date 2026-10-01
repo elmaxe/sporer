@@ -2,6 +2,7 @@ import type { Entity } from '../core/Entity';
 import type { Input } from '../core/Input';
 import { celsius, describeAtmosphere } from '../gen/climate';
 import { EARTH_RADIUS_KM, atmosphereLook, scaleHeight } from '../gen/atmosphere';
+import { shapeExtents } from '../gen/shape';
 import { describeLab, labClimateData, labEarthRadii } from './labPlanet';
 import type { PlanetLab } from './PlanetLab';
 
@@ -46,9 +47,11 @@ export class LabInfo implements Entity {
   /** The name, source and help line (after each build; the table refreshes by itself). */
   rebuilt(): void {
     const { planet, source } = this.lab;
-    const from = source
-      ? `Star ${source.star}, planet ${source.planet}${source.moon !== undefined ? `, moon ${source.moon}` : ''} (seed ${source.seed})`
-      : '';
+    const from = !source
+      ? ''
+      : source.comet !== undefined
+        ? `Star ${source.star}, comet ${source.comet} (seed ${source.seed})`
+        : `Star ${source.star}, planet ${source.planet}${source.moon !== undefined ? `, moon ${source.moon}` : ''} (seed ${source.seed})`;
     // Back to the game: at this planet's system when it came from one.
     this.back.href = this.lab.gameLink ?? new URL('./', location.href).href;
     this.back.title = this.lab.gameLink ? 'The game, at this planet\'s system' : 'The game';
@@ -125,8 +128,18 @@ export class LabInfo implements Entity {
     if (geysers) {
       const a = geysers.activity;
       rows.push(['Geysers', `${a.kind} · ${a.vents.length} vents · heat ${fmt(a.heat)} · ${geysers.events.length} erupting`]);
-    } else if (view.view === 'globe' && planet.type !== 'gas') {
+    } else if (view.view === 'globe' && planet.type !== 'gas' && !planet.shape) {
       rows.push(['Geysers', 'none']);
+    }
+    const comet = level?.comet;
+    if (planet.shape) {
+      const e = shapeExtents(planet.shape);
+      const lobes = `${planet.shape.lobes.length} lobe${planet.shape.lobes.length > 1 ? 's' : ''}${planet.shape.binary ? ' (contact binary)' : ''}`;
+      rows.push(['Shape', `${lobes} · ${e.map((v) => fmt((v / e[0]) * 100) + '%').join(' × ')} · thinnest ${fmt(planet.shape.min * 100)}% of the longest reach`]);
+    }
+    if (comet) {
+      const sunlit = comet.vents.filter((v) => v.normal[0] * comet.sun.x + v.normal[1] * comet.sun.y + v.normal[2] * comet.sun.z > 0).length;
+      rows.push(['Activity', `${fmt(comet.strength)} at ${fmt(planet.zone)} hab. radii · ${comet.vents.length} vents, ${sunlit} in sunlight`]);
     }
     const eruptions = level?.eruptions;
     if (eruptions && level?.globe?.lava) {
@@ -143,7 +156,7 @@ export class LabInfo implements Entity {
       if (w.volcanic) parts.push('volcanic lightning');
       parts.push(`${weather.shown.length} storms · ${weather.flashCount} flashes`);
       rows.push(['Weather', parts.join(' · ')]);
-    } else if (planet.type !== 'gas') {
+    } else if (planet.type !== 'gas' && !planet.shape) {
       rows.push(['Weather', 'none']);
     }
     const plants = level?.plants;
@@ -153,11 +166,11 @@ export class LabInfo implements Entity {
         'Plants',
         `T${plants.plan.tier} · ${plants.plan.species.length} species · ${st.plants} in ${st.cells} cells · ${st.near} near, ${st.mid} mid · ${st.drawCalls} draws, ${Math.round(st.triangles / 1000)}k triangles`,
       ]);
-    } else if (view.view === 'globe' && planet.type !== 'gas') {
+    } else if (view.view === 'globe' && planet.type !== 'gas' && !planet.shape) {
       rows.push(['Plants', 'none']);
     }
     if (planet.rings) rows.push(['Rings', `${fmt(planet.rings.inner / planet.radius)}–${fmt(planet.rings.outer / planet.radius)} R`]);
-    if (planet.kind !== 'moon') rows.push(['Moons', `${planet.moons.length}${planet.moons.length ? ' (system view)' : ''}`]);
+    if (planet.kind !== 'moon' && planet.kind !== 'comet') rows.push(['Moons', `${planet.moons.length}${planet.moons.length ? ' (system view)' : ''}`]);
     if (level) rows.push(['Build', `${Math.round(level.triangles / 1000)}k triangles · ${Math.round(level.buildMs)} ms`]);
     const lod = level?.globe?.lodStats();
     if (lod) rows.push(['Detail', `${lod.chunks} chunks drawn · depth ${lod.minDepth}–${lod.maxDepth}`]);

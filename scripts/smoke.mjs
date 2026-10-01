@@ -23,7 +23,10 @@
 // type, a ringed rocky/icy/lava world and a moon in other systems (skip those with --quick). The system sky has
 // the galaxy band (screenshot looking at the galactic centre) and a smoke trail per planet and moon. Living stars: the
 // surface clock advances and storms have particles under way (and keep animating in the planet level's sky); comets
-// move, show their name on hover and ignore clicks. Looking at the star close up lowers the exposure (eye adaptation).
+// move, their nuclei are bodies, and hovering one shows its name and a click flies there. Looking at the star close up
+// lowers the exposure (eye adaptation). Comets: the planet section also visits the home system's first comet at its
+// closest pass (the planet loop over its irregular nucleus), with jets, coma and tails on, then jumps the clock to its
+// farthest point, where they're off.
 // Living lava: in low orbit over the lava world, the eruptions have vents, events and blobs in the air.
 // Geysers: every body in the planet loop has the geyser kind its climate says (or none), with vents, eruptions and
 // particles in the air while one erupts; the loop also visits a body with each kind (steam, cryo planet and moon, sulphur).
@@ -42,7 +45,7 @@
 // sets course for its star; then a system inside each kind (emission, reflection, dark, planetary, remnant) is entered
 // from the galaxy: its HUD names the nebula, its sky is baked (glowing kinds add light, a dark one blocks it) and
 // hiding that sky changes the picture, also in low orbit inside the emission nebula; FPS in each.
-// Planet lab (lab.html): every type and a moon build and draw in both views, a game planet loads, the panel works.
+// Planet lab (lab.html): every type, a moon and a comet build and draw in both views, a game planet and a game comet load, the panel works.
 // Prints JSON with FPS, console errors and screenshot paths. Exit 1 on failure.
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -102,7 +105,7 @@ const started = await page.goto(url, READY, 60000);
 if (started) await drawFrames(20);
 
 const state = `({ speed: +ship.speed.toFixed(1), pos: ship.object.position.toArray().map((n) => +n.toFixed(1)) })`;
-let before, after, autopilot, pick, systemMap, sky, living, comet, eye, galaxyLoop, fps, audio, planetLoop, heldZoom, seamless, nebulas;
+let before, after, autopilot, pick, systemMap, sky, living, comet, eye, galaxyLoop, fps, audio, planetLoop, heldZoom, cometLoop, seamless, nebulas;
 const planetTypes = [];
 let lab = null;
 let touch = null;
@@ -147,7 +150,7 @@ async function freezeShot(name) {
  * Parks the system ship beside the body `bodyExpr` evaluates to, scrolls in to its planet level, clicks the
  * globe a little way ahead of the ship, lets it fly, then scrolls back out. Returns what it saw.
  */
-async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
+async function runPlanetLoop(bodyExpr, shotName, handoverShot = null, during = null) {
   // Input is blocked during a level transition (slow under SwiftShader), which would swallow the wheel below.
   for (let i = 0; i < 40 && (await evaluate(`levels.transitioning`)); i++) await sleep(250);
   const r = await evaluate(`(() => {
@@ -173,7 +176,7 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
   // The sky star's clock and the planet level's own clock (its time is the system time down here).
   const skyTime = `[world.stars[0].storms.shownTime, planet.time]`;
   const skyBefore = await evaluate(skyTime);
-  r.expectedSky = await evaluate(`({ bodies: world.planets.length + world.moons.length - 1 - world.moons.filter((m) => m.parent === __body).length })`);
+  r.expectedSky = await evaluate(`({ bodies: world.planets.length + world.moons.length + world.nuclei.length - 1 - world.moons.filter((m) => m.parent === __body).length })`);
 
   // Click the globe ~20° ahead of the ship, towards the top of the screen.
   r.click = await evaluate(`new Promise((resolve) => {
@@ -181,7 +184,9 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
     const u = planet.ship.direction.clone();
     const up = new V(0, 1, 0).applyQuaternion(game.camera.quaternion);
     const t = up.sub(u.clone().multiplyScalar(up.dot(u))).normalize();
-    const point = u.clone().multiplyScalar(Math.cos(0.35)).add(t.multiplyScalar(Math.sin(0.35))).multiplyScalar(planet.radius);
+    const ahead = u.clone().multiplyScalar(Math.cos(0.35)).add(t.multiplyScalar(Math.sin(0.35)));
+    // On the ground as drawn (a comet's nucleus is lumpy, nowhere near its bounding sphere).
+    const point = ahead.multiplyScalar(planet.groundRadius(ahead));
     const p = point.clone().project(game.camera);
     const rect = game.renderer.domElement.getBoundingClientRect();
     const at = { clientX: rect.left + ((p.x + 1) / 2) * rect.width, clientY: rect.top + ((1 - p.y) / 2) * rect.height, bubbles: true };
@@ -340,6 +345,8 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
   const shot = await send('Page.captureScreenshot', { format: 'png' });
   r.screenshot = join(outDir, `${shotName}.png`);
   writeFileSync(r.screenshot, Buffer.from(shot.result.data, 'base64'));
+  // Checks of the caller's own while down there (e.g. a comet's jets).
+  if (during) r.during = await during();
 
   await wheel(50000); // to max zoom
   await settle('maxDistance');
@@ -519,7 +526,8 @@ await section('core', async () => {
     live: world.stars.reduce((n, s) => n + s.storms.liveParticles, 0),
     comets: world.comets.map((c) => c.position.toArray()),
     tails: world.comets.map((c) => +c.activity.toFixed(3)),
-    pickable: world.bodies.some((b) => world.comets.includes(b)),
+    // Each comet's nucleus is a body (picked and flown to like a moon), on the comet's orbit.
+    nuclei: world.comets.every((c) => world.bodies.includes(c.nucleus) && c.nucleus.position.distanceTo(c.position) < 1),
   })`;
   const first = await evaluate(sample);
   await until(`world.time - ${first.clock} > 1`, 6000);
@@ -532,10 +540,10 @@ await section('core', async () => {
     comets: second.comets.length,
     cometsMoved: second.comets.every((p, i) => Math.hypot(...p.map((v, k) => v - first.comets[i][k])) > 0.1),
     cometActivity: second.tails,
-    pickable: second.pickable,
+    nuclei: second.nuclei,
   };
 
-  // Comets (when this system has any): hovering one shows its name, clicking it doesn't fly there.
+  // Comets (when this system has any): hovering one shows its name, and clicking it flies there.
   comet = await evaluate(`new Promise((resolve) => {
     const c = world.comets[0];
     if (!c) return resolve({ none: true });
@@ -543,7 +551,7 @@ await section('core', async () => {
     orbit.setFocus(c.position);
     orbit.setDistance(120);
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      const p = c.renderPosition.clone().project(game.camera);
+      const p = c.nucleus.renderPosition.clone().project(game.camera);
       const rect = game.renderer.domElement.getBoundingClientRect();
       const at = { clientX: rect.left + ((p.x + 1) / 2) * rect.width, clientY: rect.top + ((1 - p.y) / 2) * rect.height, bubbles: true };
       const canvas = game.renderer.domElement;
@@ -552,12 +560,14 @@ await section('core', async () => {
       canvas.dispatchEvent(new PointerEvent('pointerup', { ...at, button: 0 }));
       requestAnimationFrame(() => requestAnimationFrame(() => {
         const r = {
-          name: c.name,
+          name: c.nucleus.name,
           tooltip: document.getElementById('tooltip').hidden ? null : document.getElementById('tooltip-name').textContent,
-          autopilot: ship.enRoute,
+          autopilot: ship.enRoute && ship.targetBody === c.nucleus,
         };
         orbit.setFocus(null);
         orbit.setDistance(45);
+        // Back above the star for the rest of the checks.
+        ship.parkAt(world.stars[0]);
         resolve(r);
       }));
     }));
@@ -600,8 +610,8 @@ await section('core', async () => {
     Math.abs(living.starSeconds - living.clockSeconds) < 0.25 &&
     living.liveParticles.some((n) => n > 0) &&
     living.cometsMoved &&
-    !living.pickable &&
-    (comet.none || (comet.tooltip === comet.name && !comet.autopilot)) &&
+    living.nuclei &&
+    (comet.none || (comet.tooltip === comet.name && comet.autopilot)) &&
     eye.close < eye.start - 0.05;
   Object.assign(sections.core, { hovered, noManual, picked, skyOk, alive });
   return hovered && noManual && picked && skyOk && alive;
@@ -1011,6 +1021,43 @@ await section('planet', async () => {
   for (let i = 0; i < 20 && (await evaluate(`levels.mode !== 'system' || levels.transitioning`)); i++) await sleep(250);
   await sleep(300);
 
+  // A comet: visited like a moon (the irregular nucleus in low orbit, zoom in and out), at its closest pass, where its
+  // jets, coma and tails are on; then, with the level's clock jumped to its farthest point, they're off.
+  const hasComet = await evaluate(`world.nuclei.length > 0`);
+  if (hasComet) {
+    await evaluate(`(() => {
+      const o = world.nuclei[0].config.path;
+      const t = (((-o.phase / (2 * Math.PI)) % 1) + 1) % 1 * o.period + Math.ceil(world.time / o.period) * o.period;
+      world.setTime(t);
+    })()`);
+    cometLoop = await runPlanetLoop(`world.nuclei[0]`, 'comet', null, async () => {
+      const read = `({ strength: +planet.comet.strength.toFixed(3), jets: planet.comet.jets.visible, coma: planet.comet.coma.visible,
+        vents: planet.comet.vents.length, lobes: planet.body.config.shape.lobes.length, hud: document.getElementById('hud-climate').textContent,
+        zone: +(planet.frame.center.length() / levels.systemLevel.data.habitableRadius).toFixed(2) })`;
+      const near = await evaluate(read);
+      await evaluate(`(() => {
+        const o = planet.body.config.path;
+        const turn = (Math.PI - o.phase) / (2 * Math.PI) - planet.time / o.period;
+        planet.frame.restart(planet.time + (((turn % 1) + 1) % 1) * o.period);
+      })()`);
+      await drawFrames(3);
+      const far = await evaluate(read);
+      return { near, far };
+    });
+    cometLoop.ok =
+      cometLoop.ok &&
+      cometLoop.type === 'barren' &&
+      cometLoop.during.near.strength > 0.5 &&
+      cometLoop.during.near.jets &&
+      cometLoop.during.near.coma &&
+      cometLoop.during.near.vents > 0 &&
+      /jets active/.test(cometLoop.during.near.hud) &&
+      cometLoop.during.far.zone > 3 &&
+      cometLoop.during.far.strength === 0 &&
+      !cometLoop.during.far.jets &&
+      !cometLoop.during.far.coma;
+  }
+
   seamless = await evaluate(`(() => {
     game.afterFrame = null;
     const segments = __seamless.segments.map((seg) => {
@@ -1037,7 +1084,7 @@ await section('planet', async () => {
     kinds.every((k) => seamless.kinds.includes(k)) && seamless.segments.every((x) => x.crossfadeFrames > 0 && x.minBrightness > 0.5 && (x.minClearance ?? Infinity) >= 1);
   // Audio is only unlocked by the audio section's real click, so only then can the loop hear its whooshes.
   const heard = !sections.audio || (planetLoop.soundIn === 'transitionIn' && planetLoop.soundOut === 'transitionOut');
-  return planetLoop.ok && heard && heldZoom.ok && planetLoop.handoverShot !== null && seamless.ok;
+  return planetLoop.ok && heard && heldZoom.ok && (!hasComet || cometLoop.ok) && planetLoop.handoverShot !== null && seamless.ok;
 });
 
 await section('types', async () => {
@@ -1104,7 +1151,7 @@ async function runLab() {
     }
     return +(sum / (3 * n)).toFixed(1);
   })()`;
-  const cases = [...['lava', 'barren', 'desert', 'terran', 'ocean', 'ice', 'gas'].map((type) => ({ type })), { kind: 'moon' }];
+  const cases = [...['lava', 'barren', 'desert', 'terran', 'ocean', 'ice', 'gas'].map((type) => ({ type })), { kind: 'moon' }, { kind: 'comet' }];
   for (const c of cases) {
     const result = { case: c.type ?? c.kind };
     for (const view of ['globe', 'system']) {
@@ -1112,22 +1159,32 @@ async function runLab() {
       await page.waitFor(`lab.ready`, 30000);
       result[view] = await evaluate(`({
         type: lab.planet.type, kind: lab.planet.kind, triangles: lab.level.triangles,
-        eruptions: !!lab.level.eruptions, brightness: ${brightness} })`);
+        eruptions: !!lab.level.eruptions, brightness: ${brightness},
+        comet: lab.level.comet && { vents: lab.level.comet.vents.length, strength: lab.level.comet.strength, shape: !!lab.planet.shape } })`);
     }
     result.ok =
       (!c.type || result.globe.type === c.type) &&
       (!c.kind || result.globe.kind === c.kind) &&
       result.globe.triangles > 5000 &&
       result.system.triangles > 500 &&
-      result.globe.brightness > 8 &&
-      result.system.brightness > 8 &&
-      result.globe.eruptions === (result.globe.type === 'lava');
+      // A comet's nucleus is nearly black (albedo ~4%), so less light comes back from it.
+      result.globe.brightness > (c.kind === 'comet' ? 3 : 8) &&
+      result.system.brightness > (c.kind === 'comet' ? 3 : 8) &&
+      result.globe.eruptions === (result.globe.type === 'lava') &&
+      // Comets (and only they) have jets in the globe view, on by default (close to the star).
+      !!result.globe.comet === (c.kind === 'comet') &&
+      (!result.globe.comet || (result.globe.comet.vents > 0 && result.globe.comet.strength > 0.5 && result.globe.comet.shape));
     r.cases.push(result);
   }
   await evaluate(`lab.setView({ view: 'globe' })`);
   r.loaded = await evaluate(`(async () => {
     await lab.load('1337', 5, 1);
     return { name: lab.planet.name, source: lab.source, hash: location.hash.length };
+  })()`);
+  // A comet of the game: the home system's first (seed 1337).
+  r.loadedComet = await evaluate(`(async () => {
+    await lab.loadComet('1337', 6, 0);
+    return { kind: lab.planet.kind, name: lab.planet.name, source: lab.source, jets: !!lab.level.comet };
   })()`);
   r.panelType = await evaluate(`(async () => {
     game.debug.panel.controllersRecursive().find((c) => c._name === 'type').setValue('ice');
@@ -1144,6 +1201,10 @@ async function runLab() {
     / II$/.test(r.loaded?.name ?? '') &&
     r.loaded.source?.star === 5 &&
     r.loaded.hash > 100 &&
+    r.loadedComet?.kind === 'comet' &&
+    /^Comet /.test(r.loadedComet.name) &&
+    r.loadedComet.source?.comet === 0 &&
+    r.loadedComet.jets &&
     r.panelType === 'ice';
   return r;
 }
@@ -1419,7 +1480,7 @@ const ok = started && !stalled && Object.keys(sections).length > 0 && Object.val
 console.error(`[smoke] ${ok ? 'ok' : 'FAILED'} in ${Math.round((Date.now() - T0) / 1000)} s${errors.length ? `, ${errors.length} console errors` : ''}`);
 console.log(
   JSON.stringify(
-    { ok, started, stalled, sections, before, after, autopilot, pick, systemMap, sky, living, comet, eye, galaxyLoop, nebulas, seamless, audio, planetLoop, heldZoom, planetTypes, touch, touchLab, lab, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
+    { ok, started, stalled, sections, before, after, autopilot, pick, systemMap, sky, living, comet, eye, galaxyLoop, nebulas, seamless, audio, planetLoop, heldZoom, cometLoop, planetTypes, touch, touchLab, lab, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
     null,
     2,
   ),

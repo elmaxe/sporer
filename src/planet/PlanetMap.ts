@@ -5,6 +5,7 @@ import type { Input } from '../core/Input';
 import { detailedTerrain } from '../gen/noise';
 import { LAVA_SEA_GLSL } from '../world/lavaMaterial';
 import { isGas, type PlanetConfig } from '../world/Planet';
+import { SHAPE_FLOOR, shapeRadius } from '../gen/shape';
 import { gasPainter, terrainPainter, type GasPainter, type TerrainPainter } from '../world/planetGeometry';
 import {
   EQUAL_EARTH_HEIGHT,
@@ -391,7 +392,7 @@ export class PlanetMap implements Entity {
    */
   private bake(): void {
     const { width, height, data, heights, color, lonLat, dir3 } = this;
-    const { seed } = this.config;
+    const { seed, shape } = this.config;
     const start = performance.now();
     // Relief shading: a slope's brightness from its height change per pixel against the angle a pixel spans.
     const shadeGain = planetMapParams.hillshade * this.relief * this.scale;
@@ -410,6 +411,15 @@ export class PlanetMap implements Entity {
         let alpha = 255;
         if (this.gas) {
           this.gas(dx, dy, dz, color);
+        } else if (shape) {
+          // A small body: the ground's radius in relief units (its shape plus the detail, read at the surface
+          // point as the globe does), never negative, so the whole of it is shaded as land.
+          const r = shapeRadius(shape, dx, dy, dz);
+          const h = (heights[p] = this.terrain!(detailedTerrain(dx * r, dy * r, dz * r, seed), color) + (r - SHAPE_FLOOR) / this.relief);
+          if (i > 0 && j > 0 && heights[p - 1]! >= 0 && heights[p - width]! >= 0) {
+            const slope = heights[p - 1]! + heights[p - width]! - 2 * h;
+            color.multiplyScalar(THREE.MathUtils.clamp(1 - slope * shadeGain, 0.55, 1.45));
+          }
         } else {
           const n = detailedTerrain(dx, dy, dz, seed);
           const h = (heights[p] = this.terrain!(n, color));

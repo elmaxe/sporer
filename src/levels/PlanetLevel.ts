@@ -2,10 +2,13 @@ import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
 import type { Input } from '../core/Input';
 import { describeClimateDetail } from '../gen/climate';
+import { cometActivity, describeNucleus } from '../gen/comets';
+import { keplerPosition, type KeplerOrbit } from '../gen/orbit';
 import { GLOBE_SIZE_FACTOR } from '../gen/planets';
 import { bodyLabLink } from '../lab/bodyLink';
 import { describeGeysers, geyserActivity } from '../gen/geysers';
 import { describeWeather } from '../gen/weather';
+import { CometActivity } from '../planet/CometActivity';
 import { Geysers } from '../planet/Geysers';
 import { Weather } from '../planet/Weather';
 import { LavaEruptions } from '../planet/LavaEruptions';
@@ -26,6 +29,7 @@ import { PlantTooltip } from '../surface/PlantTooltip';
 import { plantSetup } from '../surface/plantSetup';
 import { SurfaceEntities } from '../surface/SurfaceEntities';
 import type { Tooltip } from '../ui/Tooltip';
+import { cometParams } from '../world/Comet';
 import type { Planet } from '../world/Planet';
 import { Level } from './Level';
 import type { SystemLevel } from './SystemLevel';
@@ -47,6 +51,10 @@ export const planetCameraParams: OrbitParams = {
 export const PLANET_VIEW_DISTANCE = 45;
 /** The camera keeps this far above the terrain beneath it (planet units; the ship's lowest altitude is 3). */
 const CAMERA_CLEARANCE = 1.5;
+/** Over a small body the camera pulls back at most this many of its radii (its longest reach) from the ship. */
+export const SMALL_BODY_VIEW_RADII = 6;
+/** Seconds back along a comet's orbit to find the way it's going. */
+const COMET_MOTION_DT = 0.25;
 /** Bodies in the sky are drawn at least this many pixels in radius. */
 const SKY_MIN_PIXELS = 1.5;
 /** The sky camera's clipping range, in system units. */
@@ -78,6 +86,12 @@ export class PlanetLevel extends Level {
   readonly geysers: Geysers | null;
   /** Bodies with weather only: rain, lightning bolts and their light (the clouds are the globe's). */
   readonly weather: Weather | null;
+  /** Comets only: their jets, coma and tails, as active as the comet is close to the star. */
+  readonly comet: CometActivity | null;
+  /** A comet's orbit, which bends its dust tail back. */
+  private readonly cometOrbit: KeplerOrbit | null;
+  private readonly before = new THREE.Vector3();
+  private readonly now = new THREE.Vector3();
   /** Habitable bodies (T1 and up) only: plants standing on the ground (see gen/plants.ts). */
   readonly plants: SurfaceEntities | null;
   private readonly plantTooltip: PlantTooltip | null;
@@ -116,6 +130,29 @@ export class PlanetLevel extends Level {
       ? this.add(new LavaEruptions(this.scene, this.frame, globe.lava.activity, body.config.seed, body.config.style.sea!, debug))
       : null;
     const { config } = body;
+    // Its activity follows the same 1/r² from the star as the tails in the sky (and is off far out).
+    const activity = () => cometActivity(this.frame.center.length(), system.data.habitableRadius, cometParams.activeDistance);
+    const comet = config.small === 'comet' && config.shape ? system.world.comets.find((c) => c.nucleus === body) : undefined;
+    this.cometOrbit = comet?.data.orbit ?? null;
+    this.comet =
+      comet && config.shape
+        ? this.add(
+            new CometActivity(
+              this.scene,
+              this.frame,
+              config.seed,
+              config.shape,
+              globe.radius,
+              globe.groundHeight,
+              globe.sun,
+              globe.sunLight,
+              globe.ambientLight,
+              activity,
+              { ion: comet.data.ionColor, dust: comet.data.dustColor },
+              debug,
+            ),
+          )
+        : null;
     const geysers = geyserActivity({ ...config, moon: body.parent !== null }, globe.radius, RELIEF_SCALE);
     this.geysers = geysers
       ? this.add(new Geysers(this.scene, this.frame, geysers, config.seed, globe.sun, globe.sunLight, globe.ambientLight, debug))
@@ -134,7 +171,9 @@ export class PlanetLevel extends Level {
     this.frame.toLocalDirection(side, this.start);
     this.radius = globe.radius;
     this.top = globe.top;
-    this.cameraParams = { ...planetCameraParams, maxDistance: maxViewDistance(globe.radius, planetCameraParams.maxDistance) };
+    // A small body is framed by its own size (the usual minimum would leave a comet a speck).
+    const small = config.shape ? SMALL_BODY_VIEW_RADII * globe.radius : undefined;
+    this.cameraParams = { ...planetCameraParams, maxDistance: maxViewDistance(globe.radius, planetCameraParams.maxDistance, small) };
     this.ship = this.add(
       new PlanetShip(this.scene, input, camera, debug, this.flyingRadius(PLANET_VIEW_DISTANCE), this.start, travelScale(globe.radius), {
         height: globe.groundHeight,
@@ -179,13 +218,20 @@ export class PlanetLevel extends Level {
     const weatherLine = globe.weather ? describeWeather(globe.weather.data) : '';
     const detail = climate
       ? describeClimateDetail(climate) + (geysers ? ` · ${describeGeysers(geysers.kind)}` : '') + (weatherLine ? ` · ${weatherLine}` : '')
-      : null;
+      : config.shape
+        ? describeNucleus(config.shape, activity())
+        : null;
     this.hud = this.add(new PlanetHud(this.ship, `${body.name} · ${body.description}`, input, detail));
     this.map = this.add(new PlanetMap(config, body.name, this.ship, globe, input, debug));
     debug
       .folder('Planet lab')
       ?.add({ open: () => window.open(this.labLink(), '_blank') }, 'open')
       .name('Open this planet in the lab');
+  }
+
+  /** The ground's radius (terrain as drawn, or the sea) in unit direction `dir` of the body frame. */
+  groundRadius(dir: THREE.Vector3): number {
+    return this.globe.groundRadius(dir);
   }
 
   /** A link to this planet (or moon, or planet with its moons) in the planet lab (lab.html). */
@@ -217,6 +263,12 @@ export class PlanetLevel extends Level {
   }
 
   override update(frameDt: number, alpha: number): void {
+    if (this.comet && this.cometOrbit) {
+      // The dust tail lags behind the comet: opposite its motion, in the body frame.
+      const time = this.frame.renderTime;
+      keplerPosition(this.cometOrbit, time - COMET_MOTION_DT, this.before).sub(keplerPosition(this.cometOrbit, time, this.now));
+      this.frame.toLocalDirection(this.before.normalize(), this.comet.back);
+    }
     super.update(frameDt, alpha);
     if (this.zoomLocked) return;
     // Scrolling lifts or lowers the ship, and high up the camera tips over to look down on the globe.
@@ -235,7 +287,7 @@ export class PlanetLevel extends Level {
     const world = this.system.world;
     return {
       stars: world.stars.length,
-      bodies: world.planets.length + world.moons.length - this.hidden.length,
+      bodies: world.planets.length + world.moons.length + world.nuclei.length - this.hidden.length,
       localMoons: this.moons.moons.length,
     };
   }
