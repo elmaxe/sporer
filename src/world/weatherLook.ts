@@ -159,6 +159,7 @@ const fragmentShader = /* glsl */ `
   uniform vec3 uSun;
   uniform float uSunPoint;
   uniform vec3 uSunColor;
+  uniform float uSunStrength;
   uniform vec4 uStorms[${MAX_STORMS}];    // centre (unit, body frame), angular radius
   uniform vec4 uStormInfo[${MAX_STORMS}]; // strength, shape, spin (+1 north), cos(radius)
   uniform vec4 uFlashes[${MAX_FLASHES}];  // direction, brightness
@@ -257,7 +258,7 @@ const fragmentShader = /* glsl */ `
     bool below = length(cameraPosition - vCentre) < length(vWorld - vCentre);
     // From above, thin cloud is greyer than the thick cores; from below, thick cloud is dark.
     float shade = below ? mix(0.95, 0.4, density) : (0.72 + 0.28 * density) * (0.9 + 0.25 * (det - 0.5));
-    vec3 lit = col * shade * (uAmbient + day * uSunColor) + dusk * vec3(1.0, 0.5, 0.25) * 0.35 * col;
+    vec3 lit = (col * shade * (uAmbient + day * uSunColor) + dusk * vec3(1.0, 0.5, 0.25) * 0.35 * col) * uSunStrength;
 
     // Lightning lights the cloud from inside.
     float glow = 0.0;
@@ -397,6 +398,7 @@ export class WeatherLook {
         uSun: { value: sun.vector },
         uSunPoint: { value: sun.point ? 1 : 0 },
         uSunColor: { value: sunColor ?? new THREE.Color(1, 1, 1) },
+        uSunStrength: sun.strength ?? { value: 1 },
         // A little over a cell's angular size: a cube edge's quarter turn over `segments` cells, up to ~1.3× at the face centres.
         uNearMargin: { value: (1.5 * (Math.PI / 2)) / segments },
       },

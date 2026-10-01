@@ -257,7 +257,7 @@ export class SceneManager implements Entity {
         this.flyIn(system, clampElevation(dir, ...arrivalParams.shipElevation, dir), handover);
         const elevation = system.hoverElevation(ARRIVAL_DISTANCE, 0);
         to.lookFrom(clampElevation(this.settle, elevation, elevation, this.settle));
-        system.aimAt(system.world.stars[0]!, 0);
+        if (!system.starless) system.aimAt(system.world.anchor, 0);
       },
       finish: () => {
         galaxy.hideCloseUp();
@@ -477,7 +477,7 @@ export class SceneManager implements Entity {
    * evenly to hover above it as the camera settles.
    */
   private flyIn(system: SystemLevel, dir: THREE.Vector3, handover: number): void {
-    const star = system.world.stars[0]!;
+    const star = system.world.anchor;
     const park = star.radius + parkGap(hoverGap(star.radius), ARRIVAL_DISTANCE);
     const start = Math.min(0.8 * handover, Math.max(arrivalParams.start * handover, arrivalParams.minStart * park));
     const from = this.side.copy(dir).multiplyScalar(start);

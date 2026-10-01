@@ -9,7 +9,7 @@ import type { PlanetLab } from './PlanetLab';
 /** Seconds between refreshes of the live values. */
 const REFRESH = 0.2;
 const GEOTHERMAL = ['quiet', 'low', 'moderate', 'active', 'volcanic'] as const;
-const GAS: Record<string, string> = { oxygenNitrogen: 'N₂–O₂', nitrogen: 'N₂', carbonDioxide: 'CO₂' };
+const GAS: Record<string, string> = { oxygenNitrogen: 'N₂–O₂', nitrogen: 'N₂', carbonDioxide: 'CO₂', hydrogen: 'H₂' };
 
 /**
  * The lab's readout (#lab-info): what the planet is, every derived climate

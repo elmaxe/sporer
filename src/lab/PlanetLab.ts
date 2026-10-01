@@ -2,7 +2,7 @@ import { Vector3 } from 'three';
 import type { Debug } from '../core/Debug';
 import type { Game } from '../core/Game';
 import type { ClimateData, ClimateState } from '../gen/climate';
-import { generateGalaxy } from '../gen/galaxy';
+import { generateGalaxy, systemRef } from '../gen/galaxy';
 import { hashSeed, parseSeed } from '../gen/rng';
 import { generateSystem } from '../gen/system';
 import { offsetDirection, stormCentre } from '../gen/weather';
@@ -370,7 +370,7 @@ export class PlanetLab {
 
 function loadFromGalaxy(source: LabSource): LabPlanet | null {
   const galaxy = generateGalaxy(parseSeed(source.seed));
-  const ref = galaxy.stars[source.star];
+  const ref = systemRef(galaxy, source.star);
   if (!ref) return null;
   const system = generateSystem(ref);
   return source.comet !== undefined ? labFromComet(system, source.comet) : labFromSystem(system, source.planet, source.moon);

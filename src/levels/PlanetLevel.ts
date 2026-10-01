@@ -30,6 +30,7 @@ import { plantSetup } from '../surface/plantSetup';
 import { SurfaceEntities } from '../surface/SurfaceEntities';
 import type { Tooltip } from '../ui/Tooltip';
 import { cometParams } from '../world/Comet';
+import { galacticLightParams } from '../world/galacticLight';
 import type { Planet } from '../world/Planet';
 import { Level } from './Level';
 import type { SystemLevel } from './SystemLevel';
@@ -166,7 +167,17 @@ export class PlanetLevel extends Level {
       ),
     );
     this.hidden = [body, ...this.moons.moons];
-    this.add(new PlanetLights(this.scene, this.frame, system.world.stars, globe.sun, globe.sunLight, globe.ambientLight));
+    this.add(
+      new PlanetLights(
+        this.scene,
+        this.frame,
+        system.world.stars,
+        globe.sun,
+        globe.sunLight,
+        globe.ambientLight,
+        system.world.galacticCentre,
+      ),
+    );
 
     this.frame.toLocalDirection(side, this.start);
     this.radius = globe.radius;
@@ -263,6 +274,8 @@ export class PlanetLevel extends Level {
   }
 
   override update(frameDt: number, alpha: number): void {
+    // Round a rogue planet only the galaxy's dim glow lights the air.
+    if (this.system.starless) this.globe.sunStrength.value = galacticLightParams.air;
     if (this.comet && this.cometOrbit) {
       // The dust tail lags behind the comet: opposite its motion, in the body frame.
       const time = this.frame.renderTime;
@@ -305,6 +318,8 @@ export class PlanetLevel extends Level {
     sky.updateMatrixWorld();
     const pixelAngle = THREE.MathUtils.degToRad(camera.fov) / renderer.domElement.clientHeight;
 
+    // Round a rogue planet the eye has opened up to the dark (the sky and the globe alike).
+    if (this.system.starless) renderer.toneMappingExposure = galacticLightParams.exposure;
     renderer.autoClear = false;
     renderer.clear();
     this.system.renderSky(renderer, sky, this.frame.renderTime, this.hidden, SKY_MIN_PIXELS * pixelAngle);
@@ -312,6 +327,7 @@ export class PlanetLevel extends Level {
     renderer.clearDepth();
     this.globe.renderDepth(renderer, camera);
     renderer.render(this.scene, camera);
+    renderer.toneMappingExposure = 1;
     this.map.render(renderer);
     renderer.autoClear = true;
   }

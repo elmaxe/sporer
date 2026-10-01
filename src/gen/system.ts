@@ -23,6 +23,15 @@ import {
   type SizeClass,
 } from './planets';
 import { Rng } from './rng';
+import {
+  ROGUE_HEAT,
+  ROGUE_MOON_WEIGHTS,
+  ROGUE_SIZE_WEIGHTS,
+  ROGUE_TYPE_WEIGHTS,
+  isRogue,
+  rogueClimate,
+  rogueHydrogen,
+} from './rogues';
 import type { StarData } from './stars';
 
 /*
@@ -85,11 +94,13 @@ export interface SystemData {
   id: number;
   name: string;
   seed: number;
+  /** None for a rogue planet (see gen/rogues.ts). */
   stars: SystemStar[];
+  /** A rogue's one planet sits still at the centre (orbit radius 0). */
   planets: PlanetData[];
-  /** Radius around the barycentre occupied by the star(s). */
+  /** Radius around the barycentre occupied by the star(s); a rogue's planet's radius. */
   starZone: number;
-  /** Distance with Earth-like temperatures. Drives planet types. */
+  /** Distance with Earth-like temperatures. Drives planet types. 0 for a rogue (no starlight anywhere). */
   habitableRadius: number;
   /**
    * Rotation from system space into galaxy space: how the system's ecliptic
@@ -108,6 +119,7 @@ const REFERENCE_PERIOD = 50;
 
 /** Generates a star's full system. Pure and deterministic: same ref, same system. */
 export function generateSystem(ref: StarRef): SystemData {
+  if (isRogue(ref)) return generateRogueSystem(ref);
   const rng = new Rng(ref.seed);
   const stars = placeStars(rng.fork('stars'), ref.stars);
   const totalMass = ref.stars.reduce((m, s) => m + s.mass, 0);
@@ -230,6 +242,78 @@ export function generateSystem(ref: StarRef): SystemData {
     habitableRadius,
     galacticTilt: flatTilt(rng.fork('galactic')),
     comets,
+    nebula: ref.nebula ?? null,
+  };
+}
+
+/** An orbit that stays put at the centre: a rogue planet's. */
+const STILL: Orbit = { radius: 0, period: 1, phase: 0, inclination: 0 };
+
+/**
+ * A rogue planet's "system": no star, one planet still at the centre, maybe
+ * a moon or two. The planet is a frozen world lit only from inside: ice or
+ * bare rock, now and then a young one still molten in its cracks, and,
+ * under a thick hydrogen envelope warm enough for it, a hidden sea (an ice
+ * world whose water comes out liquid is an ocean world). See gen/rogues.ts.
+ */
+export function generateRogueSystem(ref: StarRef): SystemData {
+  const rng = new Rng(ref.seed);
+  const prng = rng.fork('planet', 0);
+  const size = prng.weighted(ROGUE_SIZE_WEIGHTS);
+  const draft = prng.weighted(ROGUE_TYPE_WEIGHTS);
+  const radius = planetRadius(prng, size);
+  const heat = prng.range(ROGUE_HEAT[0], ROGUE_HEAT[1]);
+  const hydrogen = draft === 'lava' ? 0 : rogueHydrogen(prng.fork('hydrogen'), size);
+  const climate = rogueClimate(prng.fork('climate'), { type: draft, kind: size, radius }, heat, hydrogen);
+  const type: PlanetType = draft === 'ice' && climate.waterState === 'liquid' ? 'ocean' : draft;
+  const style = planetStyle(prng, type);
+  if (type === 'lava') {
+    // Mostly a cold crust, molten only down in the cracks and basins.
+    style.seaLevel = prng.range(-0.75, -0.45);
+  } else if (type === 'ocean') {
+    // No light, no plants: the land is bare rock round a dark sea.
+    style.low = hslToHex(prng.range(20, 40), 0.1, prng.range(0.18, 0.26));
+    style.high = hslToHex(prng.range(20, 40), 0.08, prng.range(0.4, 0.5));
+  }
+  const moonCount = prng.weighted(ROGUE_MOON_WEIGHTS);
+  const moonOrbits = generateMoons(prng.fork('moons'), ref.name, size, radius, null, moonCount);
+  const moons = moonOrbits.map((moon, j): MoonData => {
+    const moonClimate = rogueClimate(
+      prng.fork('climate', 'moon', j),
+      { type: moon.type, kind: 'moon', radius: moon.radius, host: { radius, size, orbitRadius: moon.orbit.radius } },
+      heat,
+      0,
+    );
+    return { ...moon, atmosphere: null, climate: moonClimate };
+  });
+  const extent = Math.max(radius, ...moonOrbits.map((m) => m.orbit.radius + m.radius));
+  const planet: PlanetData = {
+    name: ref.name,
+    type,
+    size,
+    radius,
+    seed: prng.int(0, 1_000_000),
+    spin: prng.range(0.05, 0.35) * prng.sign(),
+    orbit: STILL,
+    style,
+    bands: null,
+    atmosphere: atmosphereTint(prng.fork('climate', 'tint'), climate),
+    climate,
+    rings: null,
+    moons,
+    extent,
+    tilt: prng.gaussian(0, 0.2),
+  };
+  return {
+    id: ref.id,
+    name: ref.name,
+    seed: ref.seed,
+    stars: [],
+    planets: [planet],
+    starZone: radius,
+    habitableRadius: 0,
+    galacticTilt: flatTilt(rng.fork('galactic')),
+    comets: [],
     nebula: ref.nebula ?? null,
   };
 }

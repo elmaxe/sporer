@@ -46,7 +46,8 @@ export class Hud implements Entity {
     const { system } = this;
     const planets = system.planets.length === 1 ? '1 planet' : `${system.planets.length} planets`;
     const nebula = system.nebula ? ` · in the ${system.nebula.name}` : '';
-    this.locationEl.textContent = `${system.name} · ${describeStars(system.stars)} · ${planets}${nebula}`;
+    const where = system.stars.length > 0 ? `${describeStars(system.stars)} · ${planets}` : 'Rogue planet · no star';
+    this.locationEl.textContent = `${system.name} · ${where}${nebula}`;
     this.help.refresh(true);
     this.sinceRefresh = REFRESH_SECONDS;
   }

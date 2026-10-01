@@ -1,7 +1,7 @@
 /*
  * Layout of the system map (see SystemMap): the star(s) cut off by the left
- * edge, the planets in a row to the right in order of distance, and each
- * planet's moons stacked above it, nearest first. Pure maths in CSS pixels,
+ * edge (none round a rogue planet), the planets in a row to the right in
+ * order of distance, and each planet's moons stacked above it, nearest first. Pure maths in CSS pixels,
  * no DOM, so it can be unit-tested.
  *
  * Sizes are not to scale: a disc's radius grows with the square root of the
@@ -86,7 +86,8 @@ export function discUnits(radius: number): number {
 export function layoutSystemMap(planets: readonly MapPlanetInput[], options: MapLayoutOptions): SystemMapLayout {
   const p = mapLayoutParams;
   const { width } = options;
-  const sunEdge = clamp(width * p.sunFraction, p.minSun, p.maxSun);
+  // A rogue planet's map has no star: the planets' row starts at the left padding.
+  const sunEdge = options.stars.length > 0 ? clamp(width * p.sunFraction, p.minSun, p.maxSun) : p.padding;
 
   // Column widths, and heights above and below the centre line, in disc units.
   const columns = planets.map((planet) => {
@@ -151,7 +152,8 @@ export function layoutSystemMap(planets: readonly MapPlanetInput[], options: Map
 
 /** The star cut off by the left edge; a binary pair one above the other, sized by their radii. */
 function layoutStars(radii: readonly number[], edge: number, height: number): MapDisc[] {
-  if (radii.length <= 1) {
+  if (radii.length === 0) return [];
+  if (radii.length === 1) {
     const r = Math.max(height * 1.15, edge * 2);
     return [{ x: edge - r, y: height / 2, r }];
   }
