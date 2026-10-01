@@ -396,6 +396,7 @@ Status: ⬜ todo · 🟨 in progress · ✅ done
   - `core`: the home belt's rocks (meshes near the ship), hovering the belt names it, a click flies to the nearest named asteroid, and the map shows every named asteroid and counts the belt.
   - `planet`: visits a single asteroid and a contact binary with the full planet loop (the HUD, the shape, belt rocks in the sky, every zoom crossfading).
   - `lab`: builds an asteroid in both views and loads a game one.
+  - The seamless zooms' camera clearance is now measured in low orbit against the ground beneath the camera, not the highest peak. Low over a valley, the old measure read 0.926 (below its limit of 1) with `audio,planet`, on the step 25 commit too: the step 24/25 notes' 0.94–0.95 flake. Against the ground it reads 1.005, the camera's 1.5 units over it.
 
 ### 27. ✅ Nebulas
 - Nebulas are places you can see on the galaxy map and fly into, but **only to look at**: no gameplay, just beauty.
