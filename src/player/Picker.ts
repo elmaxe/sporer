@@ -63,7 +63,7 @@ export class Picker implements Entity {
 
   /** The player picked `body` (in the view or on the map): a click sound, and the ship flies there. */
   select(body: CelestialBody): void {
-    this.sfx.play('select');
+    this.sfx.play('systemSelect');
     this.ship.moveTo(body);
   }
 
