@@ -12,6 +12,7 @@ import { LavaEruptions } from '../planet/LavaEruptions';
 import { LocalMoons } from '../planet/LocalMoons';
 import { PlanetFrame } from '../planet/PlanetFrame';
 import { PlanetGlobe, RELIEF_SCALE } from '../planet/PlanetGlobe';
+import { followWeight } from '../planet/ground';
 import { PlanetHud } from '../planet/PlanetHud';
 import { PlanetLights } from '../planet/PlanetLights';
 import { PlanetMap } from '../planet/PlanetMap';
@@ -44,7 +45,7 @@ export const planetCameraParams: OrbitParams = {
 
 /** Where the camera settles after descending. */
 export const PLANET_VIEW_DISTANCE = 45;
-/** The camera keeps this far above the highest terrain (planet units; the ship's lowest altitude is 3). */
+/** The camera keeps this far above the terrain beneath it (planet units; the ship's lowest altitude is 3). */
 const CAMERA_CLEARANCE = 1.5;
 /** Bodies in the sky are drawn at least this many pixels in radius. */
 const SKY_MIN_PIXELS = 1.5;
@@ -88,6 +89,7 @@ export class PlanetLevel extends Level {
   private readonly hidden: readonly Planet[];
   private readonly skyCamera = new THREE.PerspectiveCamera(65, 1, SKY_NEAR, SKY_FAR);
   private readonly start = new THREE.Vector3();
+  private readonly cameraDir = new THREE.Vector3();
   private readonly cameraParams: OrbitParams;
   /** Radius of the highest terrain: the ship's altitude is measured from it. */
   private readonly top: number;
@@ -134,8 +136,13 @@ export class PlanetLevel extends Level {
     this.top = globe.top;
     this.cameraParams = { ...planetCameraParams, maxDistance: maxViewDistance(globe.radius, planetCameraParams.maxDistance) };
     this.ship = this.add(
-      new PlanetShip(this.scene, input, camera, debug, this.flyingRadius(PLANET_VIEW_DISTANCE), this.start, travelScale(globe.radius)),
+      new PlanetShip(this.scene, input, camera, debug, this.flyingRadius(PLANET_VIEW_DISTANCE), this.start, travelScale(globe.radius), {
+        height: globe.groundHeight,
+        top: globe.top,
+      }),
     );
+    this.setFlight(PLANET_VIEW_DISTANCE);
+    this.ship.placeAt(this.start);
     this.orbit = this.add(
       new OrbitCamera(
         camera,
@@ -164,8 +171,10 @@ export class PlanetLevel extends Level {
       : null;
     const plantsSetup = plantSetup(config);
     this.plants = plantsSetup ? this.add(new SurfaceEntities(this.scene, plantsSetup.plan, plantsSetup.ground, camera, changes, debug)) : null;
-    this.plantTooltip = this.plants ? this.add(new PlantTooltip(camera, input, this.plants, tooltip)) : null;
-    this.add(new PlanetPicker(this.scene, camera, input, this.ship, globe.radius));
+    this.plantTooltip = this.plants
+      ? this.add(new PlantTooltip(camera, input, this.plants, tooltip, (ray, out) => globe.groundHit(ray, out)))
+      : null;
+    this.add(new PlanetPicker(this.scene, camera, input, this.ship, (ray, out) => globe.groundHit(ray, out), globe.groundHeight));
     const { climate } = config;
     const weatherLine = globe.weather ? describeWeather(globe.weather.data) : '';
     const detail = climate
@@ -190,13 +199,21 @@ export class PlanetLevel extends Level {
     return this.top + flightAltitude(zoomFraction(view, minDistance, maxDistance), this.radius);
   }
 
-  /** Lifts a camera position (the globe is centred on the origin) to just above the highest terrain if it's lower. */
+  /** Tells the ship how high to fly with the camera `view` from it: the zoom's altitude, following the ground when low. */
+  private setFlight(view: number): void {
+    const { minDistance, maxDistance } = this.cameraParams;
+    this.ship.setRadius(this.flyingRadius(view), followWeight(zoomFraction(view, minDistance, maxDistance)));
+  }
+
+  /** Lifts a camera position (the globe is centred on the origin) to just above the terrain beneath it if it's lower. */
   private keepAboveTerrain(position: THREE.Vector3): void {
-    const floor = this.top + CAMERA_CLEARANCE;
     const d = position.length();
-    if (d >= floor) return;
-    if (d < 1e-6) position.set(0, floor, 0);
-    else position.multiplyScalar(floor / d);
+    if (d < 1e-6) {
+      position.set(0, this.top + CAMERA_CLEARANCE, 0);
+      return;
+    }
+    const floor = this.globe.groundRadius(this.cameraDir.copy(position).divideScalar(d)) + CAMERA_CLEARANCE;
+    if (d < floor) position.multiplyScalar(floor / d);
   }
 
   override update(frameDt: number, alpha: number): void {
@@ -204,7 +221,7 @@ export class PlanetLevel extends Level {
     if (this.zoomLocked) return;
     // Scrolling lifts or lowers the ship, and high up the camera tips over to look down on the globe.
     const { minDistance, maxDistance } = this.cameraParams;
-    this.ship.setRadius(this.flyingRadius(this.orbit.zoom));
+    this.setFlight(this.orbit.zoom);
     this.orbit.setMinPitch(minPitchAt(zoomFraction(this.orbit.zoom, minDistance, maxDistance)));
   }
 

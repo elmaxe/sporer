@@ -213,12 +213,14 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
   const settle = async (limit) => {
     const settled = `planet.orbit.targetDistance === planet.orbit.params.${limit} &&
       Math.abs(planet.orbit.zoom - planet.orbit.targetDistance) < 0.5 &&
-      Math.abs(planet.ship.radius - planet.flyingRadius(planet.orbit.zoom)) < 0.5`;
+      Math.abs(planet.ship.radius - planet.ship.goalRadius) < 0.5`;
     for (let i = 0; i < 60 && !(await evaluate(settled)); i++) await sleep(250);
   };
   await wheel(-50000);
   await settle('minDistance');
   r.altitude = { low: await evaluate(altitude) };
+  // Zoomed in, the UFO keeps its clearance over the ground beneath it (about 3 units, a bit more when it climbs ahead of a slope).
+  r.clearance = await evaluate(`planet.ship.clearance`);
   r.lava = await evaluate(
     `planet.eruptions && { vents: planet.eruptions.activity.vents.length, events: planet.eruptions.events.length, blobs: planet.eruptions.liveBlobs }`,
   );
@@ -368,6 +370,8 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null) {
     r.skyClock > 0.3 &&
     Math.abs(r.skyStarTime - r.skyClock) < 0.25 &&
     r.altitudeOk &&
+    r.clearance >= 1 &&
+    r.clearance < 15 &&
     r.altitude.high > r.altitude.low + 20 &&
     r.map.visible &&
     r.map.baked &&

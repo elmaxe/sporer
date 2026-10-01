@@ -5,6 +5,9 @@ import { PLANT_KINDS } from '../gen/plants';
 import type { Tooltip } from '../ui/Tooltip';
 import type { SurfaceEntities } from './SurfaceEntities';
 
+/** How far past the ground's hit a plant can still be picked: its crown is wider than a point. */
+const GROUND_SLACK = 1;
+
 /**
  * Shows the plant under the pointer in the tooltip: it proves `pick` works
  * (see SurfaceEntities) and gives the ground something to read. Added after
@@ -14,6 +17,7 @@ import type { SurfaceEntities } from './SurfaceEntities';
 export class PlantTooltip implements Entity {
   private readonly raycaster = new THREE.Raycaster();
   private readonly ndc = new THREE.Vector2();
+  private readonly point = new THREE.Vector3();
   private active = false;
   private shown = false;
 
@@ -22,6 +26,8 @@ export class PlantTooltip implements Entity {
     private readonly input: Input,
     private readonly plants: SurfaceEntities,
     private readonly tooltip: Tooltip,
+    /** Where the ray meets the ground (written into the second argument; the distance, or null): plants behind a hill don't count. */
+    private readonly groundHit: (ray: THREE.Ray, out: THREE.Vector3) => number | null,
   ) {}
 
   activate(): void {
@@ -39,7 +45,10 @@ export class PlantTooltip implements Entity {
     const hovering = pointer.inside && !this.input.isDragging && !this.input.blocked;
     if (hovering) {
       this.raycaster.setFromCamera(this.ndc.set(pointer.ndcX, pointer.ndcY), this.camera);
-      const hit = this.plants.pick(this.raycaster.ray);
+      const { ray } = this.raycaster;
+      const ground = this.groundHit(ray, this.point);
+      // A plant stands on the ground, so it is hit just before the ray reaches it.
+      const hit = this.plants.pick(ray, ground === null ? Infinity : ground + GROUND_SLACK);
       if (hit) {
         const { species, plant } = hit;
         const height = species.height * plant.scale;
