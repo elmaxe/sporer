@@ -593,7 +593,8 @@ await section('core', async () => {
       const V = game.camera.position.constructor;
       const rect = game.renderer.domElement.getBoundingClientRect();
       // A point on the belt's mid-plane near the asteroid, on screen and clear of every body.
-      const mid = (b.data.inner + b.data.outer) / 2;
+      // At the asteroid's own distance from the star (the belt is wide), clamped inside the belt.
+      const mid = Math.min(b.data.outer, Math.max(b.data.inner, Math.hypot(a.renderPosition.x, a.renderPosition.z)));
       const base = Math.atan2(a.renderPosition.z, a.renderPosition.x);
       let at = null;
       let point = null;
