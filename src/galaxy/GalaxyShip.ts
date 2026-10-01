@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { SoundHandle } from '../audio/CuePlayer';
 import type { SoundEffects } from '../audio/sfx';
 import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
@@ -23,8 +24,8 @@ const ARRIVE_SPEED = 0.5;
 /**
  * The player's ship on the galaxy map. Movement is scripted (no physics):
  * `travelTo` flies it from its current star to another with the same arrive
- * steering as the system autopilot, and it docks there on arrival. Setting
- * off whooshes, longer for longer trips.
+ * steering as the system autopilot, and it docks there on arrival. The
+ * interstellar travel sound plays from setting off until it docks.
  */
 export class GalaxyShip implements Entity {
   /** Interpolated render transform (in the galaxy root); the galaxy camera orbits this. */
@@ -34,6 +35,8 @@ export class GalaxyShip implements Entity {
   private dive = 0;
   private _current: StarRef;
   private _destination: StarRef | null = null;
+  /** The travel loop while travelling, else null. */
+  private travelSound: SoundHandle | null = null;
 
   private readonly prev = new THREE.Vector3();
   private readonly curr = new THREE.Vector3();
@@ -99,13 +102,22 @@ export class GalaxyShip implements Entity {
     if (dest && dest !== this._destination) {
       const { x, y, z } = dest.position;
       const distance = Math.hypot(x - this.curr.x, y + HOVER - this.curr.y, z - this.curr.z);
-      this.sfx.play('travel', { seconds: distance / galaxyTravelParams.maxSpeed });
+      // Changing course mid-flight carries on the same sound. Without files, a whoosh as long as the trip plays.
+      this.travelSound ??= this.sfx.start('interstellarTravel', { seconds: distance / galaxyTravelParams.maxSpeed });
     }
     this._destination = dest;
+    if (!dest) this.silence();
+  }
+
+  /** Fades out the travel sound (docking, or the level being left). */
+  silence(): void {
+    this.travelSound?.stop();
+    this.travelSound = null;
   }
 
   /** Docks at `ref` at once, without flying there (automation and tests). */
   jumpTo(ref: StarRef): void {
+    this.silence();
     this._destination = null;
     this._current = ref;
     this.dockAt(ref);
@@ -124,6 +136,7 @@ export class GalaxyShip implements Entity {
       this._current = dest;
       this._destination = null;
       this.dockAt(dest);
+      this.silence();
     }
   }
 
@@ -139,6 +152,7 @@ export class GalaxyShip implements Entity {
   }
 
   dispose(): void {
+    this.silence();
     this.parent.remove(this.object);
     this.object.traverse((o) => {
       if (o instanceof THREE.Mesh) {

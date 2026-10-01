@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { SoundEffects } from '../audio/sfx';
 import type { Entity } from '../core/Entity';
 import type { Input } from '../core/Input';
 import type { GalaxyData, StarRef } from '../gen/galaxy';
@@ -30,6 +31,7 @@ export class GalaxyPicker implements Entity {
     private readonly ship: GalaxyShip,
     /** The galaxy's rotating root, whose local frame `positions` are in. */
     private readonly root: THREE.Object3D,
+    private readonly sfx: SoundEffects,
   ) {}
 
   update(): void {
@@ -43,7 +45,9 @@ export class GalaxyPicker implements Entity {
     const star = this.pick(click.ndcX, click.ndcY);
     const nebula = star ? null : this.pickNebula(click.ndcX, click.ndcY);
     const destination = star ?? (nebula ? this.galaxy.stars[nebula.star] : null);
-    if (destination) this.ship.travelTo(destination);
+    if (!destination) return;
+    this.sfx.play('select');
+    this.ship.travelTo(destination);
   }
 
   dispose(): void {}

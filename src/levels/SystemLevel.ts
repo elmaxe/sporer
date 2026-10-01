@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { SoundEffects } from '../audio/sfx';
 import { FIXED_DT } from '../core/Game';
 import type { Debug } from '../core/Debug';
 import type { Input } from '../core/Input';
@@ -70,6 +71,7 @@ export class SystemLevel extends Level {
     debug: Debug,
     /** The galaxy's nebulas: the ones nearby are in the sky. */
     nebulas: readonly NebulaData[],
+    sfx: SoundEffects,
     /** Called when the player scrolls out past the system (to the galaxy). */
     onZoomOut: () => void,
     /** Called when the player scrolls in past the closest zoom (to descend to a planet). */
@@ -87,7 +89,7 @@ export class SystemLevel extends Level {
     this.world = this.add(new StarSystem(this.scene, physics, this.data, debug));
     // Starting out here, the ship hovers above the star as if it had just flown in from the galaxy.
     const star = this.world.stars[0]!;
-    this.ship = this.add(new Ship(this.scene, physics, input, this.world.bodies, debug, star));
+    this.ship = this.add(new Ship(this.scene, physics, input, this.world.bodies, debug, sfx, star));
     this.ship.parkAt(star, ARRIVAL_DISTANCE);
     // Visual-only entities below run in this order each frame: camera first, then what reads it.
     this.orbit = this.add(
@@ -110,7 +112,7 @@ export class SystemLevel extends Level {
     );
     this.aimAt(star, 1);
     this.eye = this.add(new EyeAdaptation(camera, this.world.stars, debug));
-    const picker = this.add(new Picker(camera, input, this.ship, this.world.bodies));
+    const picker = this.add(new Picker(camera, input, this.ship, this.world.bodies, sfx));
     this.trails = this.add(
       new OrbitTrails(
         this.scene,
@@ -251,5 +253,6 @@ export class SystemLevel extends Level {
   override exit(): void {
     this.hud.deactivate();
     this.map.deactivate();
+    this.ship.silence();
   }
 }

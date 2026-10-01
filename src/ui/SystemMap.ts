@@ -583,7 +583,7 @@ export class SystemMap implements Entity {
     if (this.input.blocked) return;
     const rect = this.canvas.getBoundingClientRect();
     const body = this.bodyAt(e.clientX - rect.left, e.clientY - rect.top);
-    if (body) this.ship.moveTo(body);
+    if (body) this.picker.select(body);
   };
 }
 

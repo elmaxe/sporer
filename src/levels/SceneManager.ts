@@ -7,7 +7,7 @@ import type { GalaxyData, StarRef } from '../gen/galaxy';
 import type { NebulaData } from '../gen/nebulas';
 import { hoverGap, parkGap, zoomCurveParams } from '../player/zoomCurve';
 import { Tooltip } from '../ui/Tooltip';
-import type { Planet } from '../world/Planet';
+import { isGas, type Planet } from '../world/Planet';
 import { arrivalParams, clampElevation, descentParams, leaveParams } from './arrival';
 import { SurfaceChangeStore } from '../surface/changes';
 import { GALAXY_VIEW_DISTANCE, GALAXY_VIEW_ELEVATION, GalaxyLevel } from './GalaxyLevel';
@@ -299,7 +299,9 @@ export class SceneManager implements Entity {
     const scale = frame.scale;
     // Body frame from system space.
     const matchView = () => from.orientation(this.view).premultiply(frame.inverse);
-    this.sfx.play('transitionIn');
+    // Flown into mid-trip: the travel sound gives way to the descent's.
+    system.ship.silence();
+    this.sfx.play(hasAir(body) ? 'reentry' : 'transitionIn');
     this.beginSeamless({
       zoom: this.planetZoom(from.zoom, handover, PLANET_VIEW_DISTANCE / scale),
       outgoing: system,
@@ -359,7 +361,7 @@ export class SceneManager implements Entity {
     const end = this.leaveDistance(body, handover);
     // System space from the body frame.
     const matchView = () => from.orientation(this.view).premultiply(frame.quaternion);
-    this.sfx.play('transitionOut');
+    this.sfx.play('leavePlanet');
     this.beginSeamless({
       zoom: this.planetZoom(from.zoom / scale, handover, end),
       outgoing: planet,
@@ -530,6 +532,7 @@ export class SceneManager implements Entity {
       this.tooltip,
       this.debug,
       this.nebulas,
+      this.sfx,
       () => this.toGalaxy(),
       () => this.toPlanet(),
     );
@@ -539,4 +542,9 @@ export class SceneManager implements Entity {
     history.replaceState(null, '', url);
     return level;
   }
+}
+
+/** Descending to it means a reentry: it has an atmosphere, or is a gas giant (all atmosphere). */
+function hasAir(body: Planet): boolean {
+  return !!body.config.atmosphere || isGas(body.config);
 }

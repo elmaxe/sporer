@@ -972,7 +972,7 @@ await section('audio', async () => {
     audio.weatherToggle.back &&
     audio.closedByEsc &&
     audio.sfx.out?.name === 'transitionOut' &&
-    audio.sfx.travel?.name === 'travel' &&
+    audio.sfx.travel?.name === 'interstellarTravel' &&
     audio.sfx.in?.name === 'transitionIn' &&
     audio.sfx.in.count === 3 &&
     audio.sfx.modeAfter === 'system' &&
@@ -1083,7 +1083,7 @@ await section('planet', async () => {
   seamless.ok =
     kinds.every((k) => seamless.kinds.includes(k)) && seamless.segments.every((x) => x.crossfadeFrames > 0 && x.minBrightness > 0.5 && (x.minClearance ?? Infinity) >= 1);
   // Audio is only unlocked by the audio section's real click, so only then can the loop hear its whooshes.
-  const heard = !sections.audio || (planetLoop.soundIn === 'transitionIn' && planetLoop.soundOut === 'transitionOut');
+  const heard = !sections.audio || (['reentry', 'transitionIn'].includes(planetLoop.soundIn) && planetLoop.soundOut === 'leavePlanet');
   return planetLoop.ok && heard && heldZoom.ok && (!hasComet || cometLoop.ok) && planetLoop.handoverShot !== null && seamless.ok;
 });
 

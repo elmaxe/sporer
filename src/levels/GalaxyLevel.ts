@@ -98,7 +98,7 @@ export class GalaxyLevel extends Level {
         'Galaxy camera',
       ),
     );
-    const picker = this.add(new GalaxyPicker(camera, input, canvas, galaxy, this.map.positions, this.ship, this.root));
+    const picker = this.add(new GalaxyPicker(camera, input, canvas, galaxy, this.map.positions, this.ship, this.root, sfx));
     this.hud = this.add(
       new GalaxyHud(this.scene, camera, input, galaxy, this.ship, picker, tooltip, this.map, this.root),
     );
@@ -154,6 +154,7 @@ export class GalaxyLevel extends Level {
 
   override exit(): void {
     this.hud.deactivate();
+    this.ship.silence();
   }
 
   override dispose(): void {

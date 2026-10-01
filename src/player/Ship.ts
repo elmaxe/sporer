@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import type { SoundHandle } from '../audio/CuePlayer';
+import type { SoundEffects } from '../audio/sfx';
 import type { Entity } from '../core/Entity';
 import type { Input } from '../core/Input';
 import type { Debug } from '../core/Debug';
@@ -53,6 +55,7 @@ const UP = new THREE.Vector3(0, 1, 0);
  * collides and bounces off planets. There's no manual flying. How far above
  * the body it hovers follows the camera's zoom (`viewDistance`, see
  * zoomCurve.ts), and while it hovers the hull drifts gently (`hoverParams`).
+ * The travel sound plays from setting off until it arrives.
  */
 export class Ship implements Entity {
   /** Interpolated render transform; read this for cameras and UI. */
@@ -71,6 +74,8 @@ export class Ship implements Entity {
 
   private _targetBody!: CelestialBody;
   private arrived = true;
+  /** The travel loop while the autopilot is flying, else null. */
+  private travelSound: SoundHandle | null = null;
   /** Arrive steering for a fly-in (`flyIn`) until it arrives; null for the usual autopilot. */
   private approach: ArriveParams | null = null;
   /** Seconds of hover drift so far, and how much of it shows (0 flying, 1 hovering). */
@@ -99,6 +104,7 @@ export class Ship implements Entity {
     /** Bodies the autopilot steers around. */
     private readonly obstacles: readonly Obstacle[],
     debug: Debug,
+    private readonly sfx: SoundEffects,
     /** The body it starts out hovering above, at the reference zoom (see `parkAt` for another height). */
     home: CelestialBody,
   ) {
@@ -163,6 +169,14 @@ export class Ship implements Entity {
     this.arrived = false;
     this.approach = null;
     hoverPoint(target.position, this.parkDistance(target), this.destination);
+    // Changing course mid-flight carries on the same sound.
+    this.travelSound ??= this.sfx.start('systemTravel');
+  }
+
+  /** Fades out the travel sound (arriving, or the level being left mid-flight). */
+  silence(): void {
+    this.travelSound?.stop();
+    this.travelSound = null;
   }
 
   /** How far above `body`'s centre the ship hovers at the current zoom (see zoomCurve.ts). */
@@ -185,6 +199,7 @@ export class Ship implements Entity {
     this.arrived = true;
     this.approach = null;
     this.hover = 1;
+    this.silence();
   }
 
   /**
@@ -193,6 +208,8 @@ export class Ship implements Entity {
    * camera distance `view` (it follows the zoom from then on).
    */
   flyIn(body: CelestialBody, start: THREE.Vector3, speed: number, view: number): void {
+    // The zoom in from the galaxy has its own whoosh.
+    this.silence();
     this._targetBody = body;
     this.arrived = false;
     this.viewDistance = view;
@@ -249,6 +266,7 @@ export class Ship implements Entity {
   }
 
   dispose(): void {
+    this.silence();
     this.scene.remove(this.object);
     this.object.traverse((o) => {
       if (o instanceof THREE.Mesh) {
@@ -305,6 +323,7 @@ export class Ship implements Entity {
       // Hovering at the body: keep station there.
       this.arrived = true;
       this.approach = null;
+      this.silence();
     }
   }
 }

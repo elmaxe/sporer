@@ -1,4 +1,6 @@
 import { hashSeed, Rng } from '../gen/rng';
+import type { LoopCue, SoundCue } from './cues';
+import type { SoundHandle } from './CuePlayer';
 import { sfxParams, whooshCurves, type SfxName, type SfxOptions } from './whoosh';
 
 /** Seconds of noise in the shared buffer (each play starts at a random offset into it). */
@@ -6,9 +8,15 @@ const NOISE_SECONDS = 2;
 /** Scheduling lead, so the first automation point isn't already in the past. */
 const LEAD = 0.02;
 
+/** Cues that play once. */
+export type OneShotCue = Exclude<SoundCue, LoopCue>;
+
 /** Anything that can play a sound effect. Game code depends on this, not on the AudioManager. */
 export interface SoundEffects {
-  play(name: SfxName, opts?: SfxOptions): void;
+  /** A synthesised whoosh, or a one-shot cue (a variant of its files, or its fallback whoosh). */
+  play(name: SfxName | OneShotCue, opts?: SfxOptions): void;
+  /** Starts a looping cue (travel) and returns the handle that fades it out. */
+  start(cue: LoopCue, opts?: SfxOptions): SoundHandle;
 }
 
 /**

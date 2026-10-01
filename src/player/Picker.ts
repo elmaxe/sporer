@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { SoundEffects } from '../audio/sfx';
 import type { Entity } from '../core/Entity';
 import type { Input } from '../core/Input';
 import type { CelestialBody, Sight } from '../world/CelestialBody';
@@ -34,6 +35,7 @@ export class Picker implements Entity {
     private readonly input: Input,
     private readonly ship: Ship,
     private readonly bodies: readonly CelestialBody[],
+    private readonly sfx: SoundEffects,
     /** Hoverable only. */
     private readonly sights: readonly Sight[] = [],
   ) {}
@@ -46,7 +48,13 @@ export class Picker implements Entity {
     const click = this.input.consumeClick();
     if (!click) return;
     const hit = this.pick(click.ndcX, click.ndcY);
-    if (hit && this.isBody(hit)) this.ship.moveTo(hit);
+    if (hit && this.isBody(hit)) this.select(hit);
+  }
+
+  /** The player picked `body` (in the view or on the map): a click sound, and the ship flies there. */
+  select(body: CelestialBody): void {
+    this.sfx.play('select');
+    this.ship.moveTo(body);
   }
 
   /** The nearest body or sight whose (padded) sphere the ray through `ndc` hits. Leaves the ray set. */

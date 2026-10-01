@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { cueParams, groupCueFiles, SOUND_CUES, VariantPicker } from '../src/audio/cues';
+import { Rng } from '../src/gen/rng';
 import { crossfadeLoop } from '../src/audio/loop';
 import { channelGain, DEFAULT_AUDIO_SETTINGS, parseAudioSettings, sliderToGain } from '../src/audio/settings';
 import {
@@ -193,6 +195,62 @@ describe('whoosh', () => {
         expect(c.frequency[i]).toBeGreaterThan(20);
         expect(Math.abs(c.pan[i])).toBeLessThanOrEqual(1);
       }
+    }
+  });
+});
+
+describe('groupCueFiles', () => {
+  it('sorts audio files into cues by folder, ignoring anything else', () => {
+    const cues = groupCueFiles({
+      '../assets/audio/sfx/select/b.mp3': '/b.mp3',
+      '../assets/audio/sfx/select/a.OGG': '/a.ogg',
+      '../assets/audio/sfx/reentry/whoosh.wav': '/w.wav',
+      '../assets/audio/sfx/select/notes.txt': '/notes.txt',
+      '../assets/audio/sfx/unknown/x.mp3': '/x.mp3',
+    });
+    expect(cues.select).toEqual(['/a.ogg', '/b.mp3']);
+    expect(cues.reentry).toEqual(['/w.wav']);
+    expect(cues.leavePlanet).toEqual([]);
+    expect(Object.keys(cues).sort()).toEqual([...SOUND_CUES].sort());
+  });
+});
+
+describe('VariantPicker', () => {
+  it('has nothing to pick without variants, and always the one with one', () => {
+    const picker = new VariantPicker(new Rng(1));
+    expect(picker.next('select', 0)).toBe(-1);
+    for (let i = 0; i < 5; i++) expect(picker.next('reentry', 1)).toBe(0);
+  });
+
+  it('never repeats a variant back to back, and uses them all', () => {
+    const picker = new VariantPicker(new Rng(7));
+    const seen = new Set<number>();
+    let last = -1;
+    for (let i = 0; i < 200; i++) {
+      const v = picker.next('select', 4);
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThan(4);
+      expect(v).not.toBe(last);
+      seen.add(v);
+      last = v;
+    }
+    expect(seen.size).toBe(4);
+  });
+
+  it('keeps each cue separate', () => {
+    const picker = new VariantPicker(new Rng(3));
+    const a = picker.next('select', 2);
+    picker.next('leavePlanet', 2);
+    expect(picker.next('select', 2)).toBe(1 - a);
+  });
+});
+
+describe('cueParams', () => {
+  it('loops exactly the travel cues, and falls back only to whooshes that exist', () => {
+    for (const cue of SOUND_CUES) {
+      const spec = cueParams[cue];
+      expect(spec.loop).toBe(cue === 'systemTravel' || cue === 'interstellarTravel');
+      if (spec.fallback) expect(SFX_NAMES).toContain(spec.fallback);
     }
   });
 });
