@@ -118,6 +118,165 @@ html.touch #fps {
   color: #9fd8ff;
 }
 
+/* The galaxy map's star tooltip: the system's planets, one row each, with their moons. */
+#tooltip-extra {
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid rgba(102, 255, 204, 0.2);
+  font-size: 12px;
+}
+
+.sys-count {
+  opacity: 0.75;
+  margin-bottom: 2px;
+}
+
+.sys-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+}
+
+.sys-slot {
+  flex: none;
+  width: 30px;
+  display: flex;
+  justify-content: center;
+}
+
+.sys-tier {
+  min-width: 16px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.5;
+}
+
+.sys-tier-1,
+.sys-tier-2,
+.sys-tier-3 {
+  opacity: 1;
+  color: #7fe08f;
+}
+
+.sys-moons {
+  display: flex;
+  gap: 3px;
+  margin-left: 2px;
+}
+
+/* A dark body, outlined by warmth; the outline is stronger the more air the body has. */
+.sys-disc {
+  --warmth: #9aa4b8;
+  flex: none;
+  box-sizing: border-box;
+  border-radius: 50%;
+  background: #0b111c;
+  border: 1.5px solid var(--warmth);
+}
+
+.sys-planet {
+  position: relative;
+  width: var(--size);
+  height: var(--size);
+}
+
+/* Disc diameters by size class, dwarf to gas giant. */
+.sys-size-dwarf {
+  --size: 8px;
+}
+
+.sys-size-small {
+  --size: 10px;
+}
+
+.sys-size-earth {
+  --size: 12px;
+}
+
+.sys-size-superEarth {
+  --size: 14px;
+}
+
+.sys-size-iceGiant {
+  --size: 17px;
+}
+
+.sys-size-gasGiant {
+  --size: 20px;
+}
+
+/* Giants: faint bands of their warmth across the dark disc. */
+.sys-giant {
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0 2px,
+      color-mix(in srgb, var(--warmth) 35%, transparent) 2px 3.5px
+    ),
+    #0b111c;
+}
+
+/* Rings: a flat, tilted ellipse round the disc. */
+.sys-ringed::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: calc(var(--size) * 1.7);
+  height: calc(var(--size) * 0.45);
+  border: 1px solid rgba(220, 225, 235, 0.75);
+  border-radius: 50%;
+  transform: translate(-50%, -50%) rotate(-18deg);
+}
+
+.sys-moon {
+  width: 6px;
+  height: 6px;
+  border-width: 1.5px;
+}
+
+.sys-moon-big {
+  width: 8px;
+  height: 8px;
+}
+
+.sys-hot {
+  --warmth: #ff6b57;
+}
+
+.sys-habitable {
+  --warmth: #6be07c;
+}
+
+.sys-cold {
+  --warmth: #5fa8ff;
+}
+
+.sys-air-none {
+  border-width: 1px;
+  opacity: 0.7;
+}
+
+.sys-planet.sys-air-thin {
+  border-width: 1.5px;
+}
+
+.sys-planet.sys-air-normal {
+  border-width: 2px;
+  box-shadow: 0 0 3px var(--warmth);
+}
+
+.sys-planet.sys-air-thick {
+  border-width: 2.5px;
+  box-shadow: 0 0 5px var(--warmth);
+}
+
+.sys-moon.sys-air-normal,
+.sys-moon.sys-air-thick {
+  box-shadow: 0 0 3px var(--warmth);
+}
+
+#tooltip-extra[hidden],
 #tooltip-details[hidden],
 #hud-climate[hidden] {
   display: none;

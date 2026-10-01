@@ -11,6 +11,7 @@ export class Tooltip {
   private readonly nameEl = document.getElementById('tooltip-name')!;
   private readonly infoEl = document.getElementById('tooltip-info')!;
   private readonly detailsEl = document.getElementById('tooltip-details')!;
+  private readonly extraEl = document.getElementById('tooltip-extra')!;
   /** What is shown now; text is only rewritten (and measured) when this changes. */
   private subject: unknown = null;
   private width = 0;
@@ -19,7 +20,9 @@ export class Tooltip {
   /**
    * Shows `name`/`info` (and an optional `details` line) for `subject` next to
    * the pointer: below right of a mouse, centred above a finger (`above`) so
-   * the hand doesn't cover it. Kept inside the window.
+   * the hand doesn't cover it. Kept inside the window. `extra` fills a block
+   * under the text (e.g. the galaxy map's list of a system's bodies); like
+   * the text, it only runs when the subject changes.
    */
   show(
     subject: unknown,
@@ -29,6 +32,7 @@ export class Tooltip {
     clientY: number,
     details?: string,
     above = false,
+    extra?: (el: HTMLElement) => void,
   ): void {
     if (subject !== this.subject) {
       this.subject = subject;
@@ -36,6 +40,9 @@ export class Tooltip {
       this.infoEl.textContent = info;
       this.detailsEl.textContent = details ?? '';
       this.detailsEl.hidden = !details;
+      this.extraEl.replaceChildren();
+      extra?.(this.extraEl);
+      this.extraEl.hidden = !extra;
       this.el.hidden = false;
       this.width = this.el.offsetWidth;
       this.height = this.el.offsetHeight;

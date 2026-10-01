@@ -5,12 +5,13 @@ import { isGas, type PlanetConfig } from '../world/Planet';
 import { atmosphereLook } from '../gen/atmosphere';
 import { createAtmosphere } from '../world/atmosphereShell';
 import { SEA_RENDER_ORDER, createLavaLook, type LavaLook } from '../world/lavaMaterial';
-import { createRings, floorRadius, gasSampler, peakRadius, terrainSampler } from '../world/planetGeometry';
+import { createRings, floorRadius, gasSampler, peakRadius, terrainSampler, type SurfaceSampler } from '../world/planetGeometry';
 import { createCubeSphere } from '../world/cubeSphere';
 import { GROUND_LAYER, GroundDepth } from '../world/groundDepth';
 import { createWeatherLook, type WeatherLook } from '../world/weatherLook';
 import type { Debug } from '../core/Debug';
 import { PLANET_SCALE, RELIEF_SCALE, globeRadius } from './frame';
+import { groundHit } from './ground';
 import { LodSurface, addLodDebug } from './LodSurface';
 import type { RenderClock } from './PlanetFrame';
 
@@ -52,6 +53,11 @@ export class PlanetGlobe implements Entity {
   readonly weather: WeatherLook | null;
 
   private readonly surface: LodSurface;
+  /** The surface as drawn: radius (and colour) in a direction. */
+  private readonly sample: SurfaceSampler;
+  /** Worlds with a sea: the ground is never lower than its surface. */
+  private readonly sea: boolean;
+  private readonly groundColor = new THREE.Color();
   /** Bodies with an atmosphere: where the ground is, so the haze stops there (see renderDepth). */
   private readonly ground: GroundDepth | null;
   private readonly cameraPosition = new THREE.Vector3();
@@ -71,13 +77,15 @@ export class PlanetGlobe implements Entity {
     const seaFloor = !gas && style.sea !== null;
     this.lava = gas ? null : createLavaLook(config, VENT_RADIUS);
 
+    this.sea = seaFloor;
+    this.sample = gas
+      ? gasSampler(R, seed, config.bands, true)
+      : terrainSampler(R, seed, style, { noise: detailedTerrain, reliefScale: RELIEF_SCALE, seaFloor });
     this.surface = new LodSurface(
       R,
       gas ? R : floorRadius(R, style, RELIEF_SCALE, seaFloor),
       this.top,
-      gas
-        ? gasSampler(R, seed, config.bands, true)
-        : terrainSampler(R, seed, style, { noise: detailedTerrain, reliefScale: RELIEF_SCALE, seaFloor }),
+      this.sample,
       new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: !gas, roughness: 0.9 }),
     );
     this.object.add(this.surface.object);
@@ -93,6 +101,23 @@ export class PlanetGlobe implements Entity {
     scene.add(this.object);
     this.update(0);
   }
+
+  /**
+   * The radius of what the ship flies over in unit direction `dir`: the terrain
+   * as drawn, or the sea's surface where the terrain is under it. Allocation-free.
+   */
+  groundRadius(dir: THREE.Vector3): number {
+    const r = this.sample(dir, this.groundColor);
+    return this.sea ? Math.max(r, this.radius) : r;
+  }
+
+  /** Where `ray` (in the globe's frame) meets the ground, written into `out`; the distance along the ray, or null on a miss. */
+  groundHit(ray: THREE.Ray, out: THREE.Vector3): number | null {
+    return groundHit(ray, this.groundHeight, this.top, out);
+  }
+
+  /** `groundRadius` as a function to hand on. */
+  readonly groundHeight = (dir: THREE.Vector3): number => this.groundRadius(dir);
 
   /** True when the surface has every chunk the camera wants (for automation). */
   get settled(): boolean {

@@ -336,7 +336,8 @@ export class LabLevel extends Level {
       this.orbit.lookFrom(new THREE.Vector3().copy(this.sun.direction).setY(0).normalize().add(new THREE.Vector3(0.6, 0.45, 0)));
     }
     if (this.ship) {
-      this.add(new PlanetPicker(this.scene, camera, input, this.ship, this.radius));
+      const globe = this.globe!;
+      this.add(new PlanetPicker(this.scene, camera, input, this.ship, (ray, out) => globe.groundHit(ray, out), globe.groundHeight));
       if (view.map) this.map = this.add(new PlanetMap(config, planet.name, this.ship, this.globe!, input, debug));
     }
     this.axes = new THREE.AxesHelper(this.radius * 1.6);
