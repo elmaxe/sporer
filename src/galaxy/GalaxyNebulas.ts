@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
 import type { NebulaData } from '../gen/nebulas';
+import { GLOW_NEAR, galaxyGlows } from './appearance';
 import { addNebulaDebug, applyNebulaBlending, createNebulaMesh, placeNebula } from '../world/nebulaLook';
 
 export const galaxyNebulaParams = {
@@ -18,8 +19,9 @@ export const galaxyNebulaParams = {
  * world/nebulaLook.ts), drawn at reduced resolution into their own target
  * (`renderVolumes`, before the level's scene) and laid over the scene by a
  * full-screen quad in it: after the disc glow and dust, which dark nebulas
- * dim, and before the stars, which dim themselves behind dark nebulas (see
- * GalaxyMap). The volumes follow the galaxy's rotating root.
+ * dim (only the glow behind them: each volume adds back the glow between the
+ * camera and its dust), and before the stars, which dim themselves behind
+ * dark nebulas (see GalaxyMap). The volumes follow the galaxy's rotating root.
  */
 export class GalaxyNebulas implements Entity {
   private readonly meshes: THREE.Mesh<THREE.IcosahedronGeometry, THREE.ShaderMaterial>[];
@@ -38,12 +40,16 @@ export class GalaxyNebulas implements Entity {
     /** The galaxy's rotating root: the nebulas are in its (galaxy) coordinates. */
     private readonly root: THREE.Object3D,
     readonly nebulas: readonly NebulaData[],
+    /** The galaxy's radius (its glows' size). */
+    galaxyRadius: number,
     debug: Debug,
   ) {
     this.frame.matrixAutoUpdate = false;
     this.volumes.add(this.frame);
+    // The glow in front of a nebula isn't dimmed by it, only the glow behind.
+    const glows = { glows: galaxyGlows(galaxyRadius), near: GLOW_NEAR };
     this.meshes = nebulas.map((n) => {
-      const mesh = createNebulaMesh(n);
+      const mesh = createNebulaMesh(n, 'map', glows);
       placeNebula(mesh, n);
       this.frame.add(mesh);
       return mesh;
@@ -68,7 +74,7 @@ export class GalaxyNebulas implements Entity {
           gl_FragColor = 0.2 * (texture2D(map, vUv) +
             texture2D(map, vUv + vec2(o.x, o.y)) + texture2D(map, vUv + vec2(-o.x, o.y)) +
             texture2D(map, vUv + vec2(o.x, -o.y)) + texture2D(map, vUv + vec2(-o.x, -o.y)));
-          #include <colorspace_fragment>
+          // Already in the canvas's colour space (the volumes encode their own light).
         }`,
     });
     applyNebulaBlending(material);

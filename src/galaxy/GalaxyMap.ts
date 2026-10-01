@@ -3,17 +3,12 @@ import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
 import type { GalaxyData, StarRef } from '../gen/galaxy';
 import { STAR_DIMMING_GLSL, starDimmingUniforms } from '../world/nebulaLook';
-import { BULGE_GLOW_COLOR, DISC_GLOW_COLOR, binaryLayout, galaxyMemberSize } from './appearance';
+import { GLOW_NEAR, binaryLayout, galaxyGlows, galaxyMemberSize, type GalaxyGlow } from './appearance';
 import { createGlowVolume } from './glowVolume';
 
 /** Dots never get smaller or bigger than this on screen, in CSS pixels. */
 const MIN_DOT_PX = 2;
 const MAX_DOT_PX = 64;
-/**
- * Glow closer to the camera than this is left out (see createGlowVolume), so
- * the view from inside the disc isn't fogged; ~10 star spacings.
- */
-const GLOW_NEAR = 250;
 
 export const galaxyMapParams = {
   /** Twinkle depth: brightness swings by about ± this (a bit more for small, faint dots). */
@@ -180,12 +175,7 @@ export class GalaxyMap implements Entity {
     f?.add(galaxyMapParams, 'twinkle', 0, 0.6);
     f?.add(galaxyMapParams, 'twinkleSpeed', 0, 15);
 
-    // Faint light over the whole, thin disc and a warmer, brighter, flattened bulge
-    // (matching the star distributions in gen/galaxy.ts). Both are symmetric about
-    // +Y, so the root's spin doesn't change how their shader sees them.
-    const r = galaxy.radius;
-    this.addGlow(new THREE.Vector3(r * 1.3, r * 0.06, r * 1.3), DISC_GLOW_COLOR, 0.16, 0.28);
-    this.addGlow(new THREE.Vector3(r * 0.45, r * 0.2, r * 0.45), BULGE_GLOW_COLOR, 0.45, 0.8);
+    for (const g of galaxyGlows(galaxy.radius)) this.addGlow(g);
   }
 
   /** Dots drawn: one per star, two per binary. */
@@ -219,8 +209,9 @@ export class GalaxyMap implements Entity {
     }
   }
 
-  private addGlow(radii: THREE.Vector3, color: string, faceOnOpacity: number, maxBrightness: number): void {
-    const glow = createGlowVolume(radii, color, faceOnOpacity, maxBrightness, GLOW_NEAR);
+  private addGlow(g: GalaxyGlow): void {
+    const radii = new THREE.Vector3(g.radii.x, g.radii.y, g.radii.z);
+    const glow = createGlowVolume(radii, g.color, g.faceOnOpacity, g.maxBrightness, GLOW_NEAR);
     glow.renderOrder = -1;
     this.parent.add(glow);
     this.glows.push(glow);

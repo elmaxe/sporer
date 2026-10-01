@@ -79,7 +79,7 @@ export class GalaxyLevel extends Level {
     this.spin = this.add(new GalaxySpin(this.root, debug));
     this.distantGalaxies = this.add(new DistantGalaxies(this.scene, generateDistantGalaxies(galaxy.seed), debug));
     this.add(new GalaxyDust(this.root, generateDust(galaxy), galaxy.radius));
-    this.nebulas = this.add(new GalaxyNebulas(this.scene, this.root, galaxy.nebulas, debug));
+    this.nebulas = this.add(new GalaxyNebulas(this.scene, this.root, galaxy.nebulas, galaxy.radius, debug));
     this.map = this.add(new GalaxyMap(this.root, galaxy, debug));
     this.ship = this.add(new GalaxyShip(this.root, start, debug, sfx));
     this.orbit = this.add(

@@ -13,6 +13,8 @@ import {
   type NebulaKind,
   type NebulaShape,
 } from '../gen/nebulas';
+import { GAUSSIAN_K, GAUSSIAN_PATH_GLSL, glowDensity } from '../galaxy/glowVolume';
+import type { GalaxyGlow } from '../galaxy/appearance';
 import { cloudNoiseTexture } from './noiseTexture';
 
 export const nebulaParams = {
@@ -33,6 +35,20 @@ const CAVITY_DEPTH = 0.95;
 const CAVITY_SIZE = 0.02;
 /** The hull (an icosphere, whose faces cut inside the sphere through its vertices) is this much bigger, so it holds the unit sphere. */
 const HULL_SCALE = 1.06;
+
+/** Glow volumes a nebula can sit behind (the galaxy map's disc and bulge). */
+const MAX_GLOWS = 2;
+
+/**
+ * The galaxy's glow volumes round a nebula on the map (see createGlowVolume),
+ * so a nebula only dims the glow behind it: the glow between the camera and
+ * where its dust absorbs is added back in. Glow nearer the camera than
+ * `near` doesn't shine, as on the map.
+ */
+export interface NebulaGlows {
+  glows: readonly GalaxyGlow[];
+  near: number;
+}
 
 const KIND_IDS: Record<NebulaKind, number> = { emission: 0, reflection: 1, dark: 2, planetary: 3, remnant: 4 };
 const SHAPE_IDS: Record<NebulaShape, number> = { clouds: 0, shell: 1, ring: 2, bipolar: 3 };
@@ -67,6 +83,12 @@ export function createNebulaMesh(
   n: NebulaData,
   /** 'map': dithered, for every frame; 'bake': finer, drawn once into a sky. */
   quality: 'map' | 'bake' = 'map',
+  /**
+   * The galaxy glows the nebula is seen through (the map). Its output is then
+   * in the canvas's colour space (sRGB), like the glow it is blended over,
+   * and the glow in front of its dust is added to its light.
+   */
+  glows?: NebulaGlows,
 ): THREE.Mesh<THREE.IcosahedronGeometry, THREE.ShaderMaterial> {
   const blobs = Array.from({ length: MAX_BLOBS }, (_, i) => {
     const b = n.blobs[i];
@@ -80,6 +102,22 @@ export function createNebulaMesh(
     ? new THREE.Vector4(n.shell.axes.x, n.shell.axes.y, n.shell.axes.z, n.shell.width)
     : new THREE.Vector4(1, 1, 1, 1);
   const camera = new THREE.Vector3();
+  const glowList = glows?.glows.slice(0, MAX_GLOWS) ?? [];
+  const glowRadii = Array.from({ length: MAX_GLOWS }, (_, i) => {
+    const g = glowList[i];
+    return g ? new THREE.Vector3(g.radii.x, g.radii.y, g.radii.z) : new THREE.Vector3(1, 1, 1);
+  });
+  // Colour times the brightness it saturates at (linear), and the density.
+  const glowColors = Array.from({ length: MAX_GLOWS }, (_, i) => {
+    const g = glowList[i];
+    return g ? new THREE.Color(g.color).multiplyScalar(g.maxBrightness) : new THREE.Color(0);
+  });
+  const glowDensities = Array.from({ length: MAX_GLOWS }, (_, i) => {
+    const g = glowList[i];
+    return g ? glowDensity(g.radii.y, g.faceOnOpacity, g.maxBrightness) : 0;
+  });
+  const defines: Record<string, number> = quality === 'bake' ? { STEPS: BAKE_STEPS } : { STEPS: MAP_STEPS, DITHER: 1 };
+  if (glows) defines.FRONT_GLOW = 1;
   const material = new THREE.ShaderMaterial({
     uniforms: {
       uNoise: { value: cloudNoiseTexture() },
@@ -98,6 +136,21 @@ export function createNebulaMesh(
       uNoiseScale: { value: n.noiseScale },
       uNoiseOffset: { value: new THREE.Vector3(n.noiseOffset.x, n.noiseOffset.y, n.noiseOffset.z) },
       uBrightness: { value: nebulaParams.brightness },
+      // Nebula frame → galaxy coordinates: position, rotation and radius (the frame's unit).
+      uOrigin: { value: new THREE.Vector3(n.position.x, n.position.y, n.position.z) },
+      uRotation: {
+        value: new THREE.Matrix3().setFromMatrix4(
+          new THREE.Matrix4().makeRotationFromQuaternion(
+            new THREE.Quaternion(n.orientation.x, n.orientation.y, n.orientation.z, n.orientation.w),
+          ),
+        ),
+      },
+      uRadius: { value: n.radius },
+      uGlowCount: { value: glowList.length },
+      uGlowRadii: { value: glowRadii },
+      uGlowColors: { value: glowColors },
+      uGlowDensities: { value: glowDensities },
+      uGlowNear: { value: glows?.near ?? 0 },
     },
     vertexShader: /* glsl */ `
       varying vec3 vLocal;
@@ -105,7 +158,7 @@ export function createNebulaMesh(
         vLocal = position;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
       }`,
-    defines: quality === 'bake' ? { STEPS: BAKE_STEPS } : { STEPS: MAP_STEPS, DITHER: 1 },
+    defines,
     fragmentShader: NEBULA_FRAGMENT,
     // Back faces cover the nebula whether the camera is outside or inside it.
     side: THREE.BackSide,
@@ -160,6 +213,38 @@ const NEBULA_FRAGMENT = /* glsl */ `
   uniform float uBrightness;
   varying vec3 vLocal;
 
+  #ifdef FRONT_GLOW
+    #define MAX_GLOWS ${MAX_GLOWS}
+    uniform vec3 uOrigin;
+    uniform mat3 uRotation;
+    uniform float uRadius;
+    uniform int uGlowCount;
+    uniform vec3 uGlowRadii[MAX_GLOWS];
+    uniform vec3 uGlowColors[MAX_GLOWS];
+    uniform float uGlowDensities[MAX_GLOWS];
+    uniform float uGlowNear;
+    ${GAUSSIAN_PATH_GLSL}
+
+    // The galaxy's glows along the ray from the camera (o, d in the nebula's frame) to 't'
+    // (frame units), each as it appears on the canvas (galaxy/glowVolume.ts, sRGB-encoded).
+    vec3 frontGlow(vec3 o, vec3 d, float t) {
+      vec3 og = uOrigin + uRotation * (o * uRadius);
+      vec3 dg = uRotation * d;
+      float far = t * uRadius;
+      vec3 sum = vec3(0.0);
+      if (far <= uGlowNear) return sum;
+      for (int i = 0; i < MAX_GLOWS; i++) {
+        if (i >= uGlowCount) break;
+        vec3 oo = og / uGlowRadii[i];
+        vec3 dd = dg / uGlowRadii[i];
+        float path = gaussianPath(oo, dd, ${GAUSSIAN_K.toFixed(1)}, uGlowNear) - gaussianPath(oo, dd, ${GAUSSIAN_K.toFixed(1)}, far);
+        vec3 glow = uGlowColors[i] * (1.0 - exp(-uGlowDensities[i] * max(path, 0.0)));
+        sum += sRGBTransferOETF(vec4(glow, 1.0)).rgb;
+      }
+      return sum;
+    }
+  #endif
+
   // gen/nebulas.ts: shellRadius and bipolarReach.
   float shellRadius(vec3 p) {
     vec3 q = p / uShell.xyz;
@@ -212,6 +297,9 @@ const NEBULA_FRAGMENT = /* glsl */ `
 
     vec3 light = vec3(0.0);
     float transmit = 1.0;
+    // Where along the ray the dust absorbs, weighted by how much it takes out.
+    float absorbed = 0.0;
+    float absorbedT = 0.0;
     for (int i = 0; i < STEPS; i++) {
       float t = t0 + (float(i) + jitter) * dt;
       if (t > t1 || transmit < 0.01) break;
@@ -260,13 +348,24 @@ const NEBULA_FRAGMENT = /* glsl */ `
       light += transmit * color * (uGlow * lit * density * dt);
       // Dust: in emission nebulas lanes and pillars of its own, elsewhere it follows the gas.
       float dust = uKind == 0 ? smoothstep(0.45, 0.75, texture(uNoise, q * 1.7 + 0.53).r) * 2.5 : structure;
-      transmit *= exp(-uDust * base * dust * dt);
+      float taken = transmit * (1.0 - exp(-uDust * base * dust * dt));
+      absorbed += taken;
+      absorbedT += taken * t;
+      transmit -= taken;
     }
     // Soft saturation on the brightest channel, so the brightest parts level off in their own colour.
     float peak = max(max(light.r, light.g), light.b);
     light *= (1.0 - exp(-peak * uBrightness)) / max(peak, 1e-6);
-    gl_FragColor = vec4(light, transmit);
-    #include <colorspace_fragment>
+    #ifdef FRONT_GLOW
+      // Blended over the canvas's glow (dst · transmit), so the glow in front of the
+      // dust is put back: front + behind · transmit, all as the canvas holds it.
+      float depth = absorbed > 1e-4 ? absorbedT / absorbed : t0;
+      vec3 front = frontGlow(o, d, depth);
+      gl_FragColor = vec4(sRGBTransferOETF(vec4(light, 1.0)).rgb + front * (1.0 - transmit), transmit);
+    #else
+      gl_FragColor = vec4(light, transmit);
+      #include <colorspace_fragment>
+    #endif
   }`;
 
 /** Dark nebulas' blobs dimming the galaxy map's stars at most (the star shader's slots). */
