@@ -697,12 +697,16 @@ if (started && (runs('galaxy') || runs('nebulas') || runs('audio') || runs('plan
         const i = 4 * (y * w + x); sum += s.px[i] + s.px[i + 1] + s.px[i + 2]; n++;
       }
       const weight = levels.crossfade;
-      // Planet zooms: how far the camera is from the body's centre, in radii (over the highest terrain in the planet level).
+      // Planet zooms: how far the camera is from the body's centre, in radii: in the planet level, of the ground
+      // beneath it (the terrain as drawn, or the sea), so a camera low over a valley isn't taken for one inside the hills;
+      // in the system view, of the body's sphere. 'peaks' measures against the highest terrain, for the record.
       const pl = levels.planetLevel;
+      const p = game.camera.position;
       const clearance = !pl ? null : levels.mode === 'planet'
-        ? game.camera.position.length() / pl.top
-        : game.camera.position.distanceTo(pl.body.renderPosition) / pl.body.radius;
-      s.current.frames.push({ weight, brightness: sum / (3 * n), clearance });
+        ? p.length() / pl.groundRadius(p.clone().normalize())
+        : p.distanceTo(pl.body.renderPosition) / pl.body.radius;
+      const peaks = pl && levels.mode === 'planet' ? p.length() / pl.top : null;
+      s.current.frames.push({ weight, brightness: sum / (3 * n), clearance, peaks });
       if (s.freezeWhen && weight !== null && weight > 0.35 && levels.mode === s.freezeWhen) {
         s.freezeWhen = null; s.frozen = true; game.stop();
       }
@@ -1149,6 +1153,7 @@ await section('planet', async () => {
         crossfadeFrames: blended.length,
         minBrightness: +Math.min(...seg.frames.map((x) => x.brightness)).toFixed(2),
         minClearance: +Math.min(...seg.frames.map((x) => x.clearance ?? Infinity)).toFixed(3),
+        minOverPeaks: +Math.min(...seg.frames.map((x) => x.peaks ?? Infinity)).toFixed(3),
       };
     });
     const kinds = [...new Set(segments.map((x) => x.zoom))];
