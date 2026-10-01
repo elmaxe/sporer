@@ -294,7 +294,7 @@ export function generateRogueSystem(ref: StarRef): SystemData {
     radius,
     seed: prng.int(0, 1_000_000),
     spin: prng.range(0.05, 0.35) * prng.sign(),
-    orbit: STILL,
+    orbit: { ...STILL },
     style,
     bands: null,
     atmosphere: atmosphereTint(prng.fork('climate', 'tint'), climate),
