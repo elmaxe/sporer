@@ -1150,6 +1150,8 @@ await section('audio', async () => {
   // The zoom runs slower than real time at headless frame rates (each frame advances it by at most 0.25 s).
   await until(`levels.mode === 'system' && !levels.transitioning`, 20000);
   audio.sfx.modeAfter = await evaluate(`levels.mode`);
+  // Ambient loops: the ship's hum always on, the star's near and far loops sounding from the arrival view.
+  audio.ambient = await evaluate(`Object.fromEntries(audio.ambientLevels.map((a) => [a.cue, +a.level.toFixed(3)]))`);
   await send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'KeyM', key: 'm' });
   await send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'KeyM', key: 'm' });
   audio.mutedByKey = await evaluate(
@@ -1171,6 +1173,8 @@ await section('audio', async () => {
     audio.sfx.in?.name === 'interstellarTravel' &&
     audio.sfx.in.count === 1 &&
     audio.sfx.modeAfter === 'system' &&
+    audio.ambient.shipHum === 1 &&
+    Math.hypot(audio.ambient.starNear ?? 0, audio.ambient.starFar ?? 0) > 0.3 &&
     audio.mutedByKey
   );
 });

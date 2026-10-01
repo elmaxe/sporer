@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { cueParams, groupCueFiles, SOUND_CUES, VariantPicker } from '../src/audio/cues';
+import { AMBIENT_CUES, cueParams, groupCueFiles, SOUND_CUES, VariantPicker } from '../src/audio/cues';
+import { starMix, starsMix, starSoundParams, type StarMix } from '../src/audio/starMix';
 import { Rng } from '../src/gen/rng';
 import { crossfadeLoop } from '../src/audio/loop';
 import { channelGain, DEFAULT_AUDIO_SETTINGS, parseAudioSettings, sliderToGain } from '../src/audio/settings';
@@ -141,10 +142,53 @@ describe('VariantPicker', () => {
 });
 
 describe('cueParams', () => {
-  it('loops exactly the travel cues', () => {
+  it('loops exactly the travel and ambient cues', () => {
     for (const cue of SOUND_CUES) {
       const spec = cueParams[cue];
-      expect(spec.loop).toBe(cue === 'systemTravel' || cue === 'interstellarTravel');
+      const ambient = (AMBIENT_CUES as readonly string[]).includes(cue);
+      expect(spec.loop).toBe(ambient || cue === 'systemTravel' || cue === 'interstellarTravel');
+      expect(spec.channel).toBe(ambient ? 'ambience' : 'sfx');
     }
+  });
+});
+
+describe('starMix', () => {
+  const mix = (d: number, r: number): StarMix => starMix(d, r, { near: 0, far: 0 });
+  const unit = (r: number) => r + starSoundParams.scale;
+
+  it('is all near at the surface and all far well out', () => {
+    expect(mix(30, 30)).toEqual({ near: 1, far: 0 });
+    const out = mix(30 + unit(30) * (starSoundParams.nearTo + 1), 30);
+    expect(out.near).toBeCloseTo(0, 12);
+    expect(out.far).toBeGreaterThan(0);
+  });
+
+  it('crossfades at equal power and fades with distance', () => {
+    let last = Infinity;
+    for (let d = 30; d < 3000; d += 10) {
+      const { near, far } = mix(d, 30);
+      const power = near * near + far * far;
+      expect(power).toBeLessThanOrEqual(1 + 1e-12);
+      expect(power).toBeLessThanOrEqual(last + 1e-12);
+      last = power;
+    }
+    // Half strength at `reach` units up.
+    const half = mix(30 + unit(30) * starSoundParams.reach, 30);
+    expect(Math.hypot(half.near, half.far)).toBeCloseTo(0.5, 12);
+  });
+
+  it('sounds near from further out for a bigger star', () => {
+    expect(mix(200, 90).near).toBeGreaterThan(mix(200 - 90 + 7, 7).near);
+  });
+
+  it('adds stars by power, capped at 1', () => {
+    const out: StarMix = { near: 0, far: 0 };
+    starsMix([30, 30], [30, 30], out);
+    expect(out).toEqual({ near: 1, far: 0 });
+    const one = mix(400, 30);
+    starsMix([400, 400], [30, 30], out);
+    expect(out.far).toBeCloseTo(Math.min(1, one.far * Math.SQRT2), 12);
+    starsMix([], [], out);
+    expect(out).toEqual({ near: 0, far: 0 });
   });
 });

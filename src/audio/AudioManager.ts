@@ -3,10 +3,10 @@ import ambienceUrl from '../assets/audio/ambient_sound.mp3';
 import type { Debug } from '../core/Debug';
 import { channelGain, type AudioChannel, type AudioSettings } from './settings';
 import { cueUrls } from './cueFiles';
-import { cueParams, SOUND_CUES, type LoopCue, type SoundCue } from './cues';
+import { AMBIENT_CUES, cueParams, SOUND_CUES, type AmbientCue, type LoopCue, type SoundCue } from './cues';
 import { CuePlayer, fetchCueFiles, SILENT, type SoundHandle } from './CuePlayer';
 import { crossfadeLoop } from './loop';
-import type { OneShotCue, SoundEffects } from './sfx';
+import type { AmbientSound, OneShotCue, SoundEffects } from './sfx';
 
 /** Seconds of the ambience loop's tail blended into its head. */
 const AMBIENCE_CROSSFADE = 3;
@@ -34,8 +34,9 @@ export interface PlayedSfx {
 }
 
 /**
- * Background music and space ambience, both looping, plus sound effects
- * (`play`, `start`), through a Web Audio mixer (one gain per channel). The
+ * Background music and space ambience, both looping, the ship's hum and
+ * other ambient loops the game sets the level of (`ambient`, e.g. the
+ * stars), plus sound effects (`play`, `start`), through a Web Audio mixer (one gain per channel). The
  * effects are sound cues from audio files (each a folder of variants, see
  * `cues.ts`); a cue whose folder is empty is silent.
  *
@@ -56,6 +57,8 @@ export class AudioManager implements SoundEffects {
   private ambience: AudioBufferSourceNode | null = null;
   private disposed = false;
   private _lastPlayed: PlayedSfx | null = null;
+  /** Ambient loops asked for and not stopped; started when audio unlocks if asked for before. */
+  private readonly ambients = new Set<DeferredAmbient>();
 
   constructor(
     private settings: AudioSettings,
@@ -75,6 +78,14 @@ export class AudioManager implements SoundEffects {
       const spec = cueParams[cue];
       const files = cueUrls[cue].length;
       const sub = c?.addFolder(`${cue} (${files} file${files === 1 ? '' : 's'})`).close();
+      if ((AMBIENT_CUES as readonly string[]).includes(cue)) {
+        // Played by the game at the level it sets; a volume change applies at once.
+        const refresh = () => this.ambients.forEach((a) => a.refresh());
+        sub?.add(spec, 'volume', 0, 3).onChange(refresh);
+        sub?.add(spec, 'fadeIn', 0, 3);
+        sub?.add(spec, 'fadeOut', 0, 5);
+        continue;
+      }
       if (spec.loop) {
         let handle: SoundHandle | null = null;
         const toggle = {
@@ -91,6 +102,9 @@ export class AudioManager implements SoundEffects {
         sub?.add(spec, 'fadeOut', 0, 5);
       }
     }
+
+    // The UFO's hum, always on.
+    this.ambient('shipHum').setLevel(1);
   }
 
   /** 'locked' until a user gesture has unlocked audio, then the AudioContext's state. */
@@ -128,6 +142,23 @@ export class AudioManager implements SoundEffects {
     return heard ? mixer.cues.start(cue) : SILENT;
   }
 
+  /**
+   * A background loop on the Ambience channel at level 0 until set. Unlike
+   * `start`, it begins whenever audio is unlocked if asked for before, and
+   * runs (paused with the tab) until stopped.
+   */
+  ambient(cue: AmbientCue): AmbientSound {
+    const sound = new DeferredAmbient(cue, () => this.ambients.delete(sound));
+    this.ambients.add(sound);
+    if (this.mixer) sound.attach(this.mixer.cues);
+    return sound;
+  }
+
+  /** The ambient loops playing and the levels they're set to (for debugging and the smoke test). */
+  get ambientLevels(): { cue: AmbientCue; level: number; heard: boolean }[] {
+    return [...this.ambients].map((a) => ({ cue: a.cue, level: a.level, heard: cueUrls[a.cue].length > 0 }));
+  }
+
   /** Set the channel volumes (smoothed). */
   apply(settings: AudioSettings): void {
     this.settings = settings;
@@ -142,6 +173,7 @@ export class AudioManager implements SoundEffects {
     this.disposed = true;
     this.removeGestureListeners();
     document.removeEventListener('visibilitychange', this.onVisibility);
+    for (const a of [...this.ambients]) a.stop();
     this.ambience?.stop();
     this.music.pause();
     this.music.removeAttribute('src');
@@ -184,7 +216,9 @@ export class AudioManager implements SoundEffects {
       g.connect(master);
       gains[channel] = g;
     }
-    this.mixer = { ctx, master, gains, cues: new CuePlayer(ctx, gains.sfx, this.cueData) };
+    const cues = new CuePlayer(ctx, gains, this.cueData);
+    this.mixer = { ctx, master, gains, cues };
+    for (const a of this.ambients) a.attach(cues);
 
     ctx.createMediaElementSource(this.music).connect(gains.music);
     this.startAmbience(ctx, gains.ambience).catch((err: unknown) => console.error('Ambience failed to start', err));
@@ -232,5 +266,48 @@ export class AudioManager implements SoundEffects {
     window.removeEventListener('pointerdown', this.onGesture, true);
     window.removeEventListener('pointerup', this.onGesture, true);
     window.removeEventListener('keydown', this.onGesture, true);
+  }
+}
+
+/**
+ * An ambient loop that may be asked for before audio is unlocked: it keeps
+ * the level and rate it's set to, and starts playing at them once attached
+ * to the mixer's cue player.
+ */
+class DeferredAmbient implements AmbientSound {
+  level = 0;
+  private rate = 1;
+  private playing: AmbientSound | null = null;
+  private stopped = false;
+
+  constructor(
+    readonly cue: AmbientCue,
+    private readonly onStop: () => void,
+  ) {}
+
+  attach(cues: CuePlayer): void {
+    if (!this.stopped && !this.playing) this.playing = cues.ambient(this.cue, this.level, this.rate);
+  }
+
+  setLevel(level: number): void {
+    this.level = Math.min(1, Math.max(0, level));
+    this.playing?.setLevel(this.level);
+  }
+
+  setRate(rate: number): void {
+    this.rate = rate;
+    this.playing?.setRate(rate);
+  }
+
+  /** Re-applies the level (after the cue's volume changed). */
+  refresh(): void {
+    this.playing?.setLevel(this.level);
+  }
+
+  stop(): void {
+    if (this.stopped) return;
+    this.stopped = true;
+    this.playing?.stop();
+    this.onStop();
   }
 }
