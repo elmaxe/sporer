@@ -4,7 +4,7 @@ import type { Entity } from '../core/Entity';
 import { FIXED_DT } from '../core/Game';
 import type { Input } from '../core/Input';
 import { geyserActivity } from '../gen/geysers';
-import { nominalStar, type SpectralClass, type StarData, type StarKind } from '../gen/stars';
+import { nominalStar, starLightColor, type SpectralClass, type StarData, type StarKind } from '../gen/stars';
 import { Level, type TouchShipControls } from '../levels/Level';
 import { PLANET_VIEW_DISTANCE, planetCameraParams } from '../levels/PlanetLevel';
 import { Physics } from '../physics/Physics';
@@ -131,7 +131,7 @@ export class LabSun implements Entity {
     if (this.star !== this.view.star) {
       this.star = this.view.star;
       const data = labStar(this.star);
-      this.light.color.set(data.color);
+      this.light.color.set(starLightColor(data));
       this.light.intensity = starLightIntensity({ ...data, orbit: STILL_ORBIT });
       this.glow.material.color.set(data.color);
       this.sunLight.copy(this.light.color).multiplyScalar(this.light.intensity);
