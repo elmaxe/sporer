@@ -8,7 +8,7 @@ import type { CelestialBody } from './CelestialBody';
 import { atmosphereLook, gasHazeLook } from '../gen/atmosphere';
 import { createAtmosphere, type AtmosphereSun } from './atmosphereShell';
 import { createLavaLook, type LavaLook } from './lavaMaterial';
-import { createGasMaterial, gasHazeColor } from './gasMaterial';
+import { GAS_RENDER_ORDER, createGasMaterial, gasHazeColor } from './gasMaterial';
 import { createGasGeometry, createRings, createTerrainGeometry } from './planetGeometry';
 import { createWeatherLook, type WeatherLook } from './weatherLook';
 import { globeRadius } from '../planet/frame';
@@ -66,7 +66,7 @@ export class Planet implements Entity, CelestialBody {
    * level's slower spin while both show the same globe.
    */
   spinAt: ((time: number) => number) | null = null;
-  private readonly surface: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
+  private readonly surface: THREE.Mesh<THREE.BufferGeometry, THREE.Material>;
   /** Lava worlds and moons: the animated seas. */
   private readonly lava: LavaLook | null;
   /** Bodies with weather: the clouds, storms and lightning (see gen/weather.ts). */
@@ -95,9 +95,10 @@ export class Planet implements Entity, CelestialBody {
         ? createGasGeometry(radius, GAS_SEGMENTS)
         : createTerrainGeometry(radius, seed, style, { segments: TERRAIN_SEGMENTS, seaFloor: this.lava !== null }),
       gas
-        ? createGasMaterial(seed, config.bands)
+        ? createGasMaterial(seed, config.bands, radius, sun)
         : new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9 }),
     );
+    if (gas) this.surface.renderOrder = GAS_RENDER_ORDER;
     // Lava seas are a separate animated sphere over the sunken sea floor, turning with the surface.
     if (this.lava) this.surface.add(this.lava.createSeaSphere(radius));
     // Clouds turn with the ground; the same layer as low orbit's, in planet radii.

@@ -5,7 +5,7 @@ import { isGas, type PlanetConfig } from '../world/Planet';
 import { atmosphereLook, gasHazeLook } from '../gen/atmosphere';
 import { createAtmosphere } from '../world/atmosphereShell';
 import { SEA_RENDER_ORDER, createLavaLook, type LavaLook } from '../world/lavaMaterial';
-import { createGasMaterial, gasHazeColor } from '../world/gasMaterial';
+import { GAS_RENDER_ORDER, createGasMaterial, gasHazeColor } from '../world/gasMaterial';
 import { createRings, floorRadius, gasSampler, peakRadius, terrainSampler } from '../world/planetGeometry';
 import { createCubeSphere } from '../world/cubeSphere';
 import { GROUND_LAYER, GroundDepth } from '../world/groundDepth';
@@ -80,10 +80,12 @@ export class PlanetGlobe implements Entity {
         ? gasSampler(R)
         : terrainSampler(R, seed, style, { noise: detailedTerrain, reliefScale: RELIEF_SCALE, seaFloor }),
       gas
-        ? createGasMaterial(seed, config.bands)
+        ? createGasMaterial(seed, config.bands, R, { vector: this.sun, point: false })
         : new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9 }),
     );
     this.object.add(this.surface.object);
+    // A gas giant's volume blends, so it draws first among the blended things (its depth hides rings behind it).
+    if (gas) this.surface.object.renderOrder = GAS_RENDER_ORDER;
     addLodDebug(debug);
     if (seaFloor) this.object.add(createSea(config.type, style.sea!, R, this.lava ? this.lava.createSeaMaterial(this.sun, this.sunLight, this.ambientLight) : null));
     if (config.rings) this.object.add(createRings(config.rings, seed, PLANET_SCALE));
