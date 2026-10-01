@@ -8,7 +8,8 @@ import { describePlanet, describeSized, type PlanetData, type SystemData } from 
 import { skyScale } from '../planet/frame';
 import type { Physics } from '../physics/Physics';
 import type { CelestialBody } from './CelestialBody';
-import { Comet, cometParams } from './Comet';
+import { describeComet } from '../gen/comets';
+import { Comet, cometConfig, cometParams } from './Comet';
 import { Planet } from './Planet';
 import { Star } from './Star';
 import { addAtmosphereDebug, type AtmosphereSun } from './atmosphereShell';
@@ -23,7 +24,8 @@ const PLANET_STANDOFF_MARGIN = 10;
 const MOON_STANDOFF_MARGIN = 6;
 
 /**
- * Renders a generated SystemData: its star(s), planets, moons and comets. Units are
+ * Renders a generated SystemData: its star(s), planets, moons and comets (a
+ * visitable nucleus each, with its coma and tails). Units are
  * system-scene units (see gen/system.ts). One clock drives every orbit, so
  * the system can be fast-forwarded (`setTime`) or posed at any moment
  * (`pose`, for the planet level's sky) without stepping physics.
@@ -32,8 +34,10 @@ export class StarSystem implements Entity {
   readonly stars: Star[];
   readonly planets: Planet[];
   readonly moons: Planet[] = [];
-  /** Scenery: not in `bodies`, so they can't be picked or flown to. */
+  /** Their comae and tails; the nuclei are visitable bodies (`nuclei`, in `bodies`). */
   readonly comets: Comet[];
+  /** The comets' nuclei: irregular small bodies, picked and flown to like moons. */
+  readonly nuclei: Planet[];
   /** Everything the player can hover and fly to. */
   readonly bodies: CelestialBody[];
   private readonly ambient: THREE.HemisphereLight;
@@ -70,8 +74,12 @@ export class StarSystem implements Entity {
       }
       return planet;
     });
-    this.comets = data.comets.map((c) => new Comet(scene, c, data.habitableRadius, this.glowTexture));
-    this.bodies = [...this.stars, ...this.planets, ...this.moons];
+    this.comets = data.comets.map((c) => {
+      const nucleus = new Planet(scene, physics, cometConfig(c), describeComet(c), c.radius + MOON_STANDOFF_MARGIN, sun);
+      return new Comet(scene, c, nucleus, data.habitableRadius, this.glowTexture);
+    });
+    this.nuclei = this.comets.map((c) => c.nucleus);
+    this.bodies = [...this.stars, ...this.planets, ...this.moons, ...this.nuclei];
     this.ambient = new THREE.HemisphereLight('#9bb8ff', '#1a1020', 0.35);
     scene.add(this.ambient);
     this.animate(this._time);
@@ -95,6 +103,8 @@ export class StarSystem implements Entity {
     comets?.add(cometParams, 'tailLength', 0, 300);
     comets?.add(cometParams, 'maxTailLength', 0, 1000);
     comets?.add(cometParams, 'tailWidth', 0, 20);
+    comets?.add(cometParams.nearFade, '0', 0, 20).name('nearFade from');
+    comets?.add(cometParams.nearFade, '1', 0, 100).name('nearFade to');
     comets?.add(cometParams, 'dustCurve', 0, 1);
   }
 
@@ -108,6 +118,7 @@ export class StarSystem implements Entity {
     for (const s of this.stars) s.step(this._time, dt);
     for (const p of this.planets) p.step(this._time, dt);
     for (const m of this.moons) m.step(this._time, dt);
+    for (const n of this.nuclei) n.step(this._time, dt);
   }
 
   /** Fast-forwards (or rewinds) every body to `time`, e.g. after time passed in the planet level. */
@@ -116,6 +127,7 @@ export class StarSystem implements Entity {
     for (const s of this.stars) s.jumpTo(time, FIXED_DT);
     for (const p of this.planets) p.jumpTo(time, FIXED_DT);
     for (const m of this.moons) m.jumpTo(time, FIXED_DT);
+    for (const n of this.nuclei) n.jumpTo(time, FIXED_DT);
   }
 
   /**
@@ -137,6 +149,7 @@ export class StarSystem implements Entity {
     for (const s of this.stars) s.positionAt(time, s.object.position);
     for (const p of this.planets) this.posePlanet(p, time, observer, minAngle);
     for (const m of this.moons) this.posePlanet(m, time, observer, minAngle);
+    for (const n of this.nuclei) this.posePlanet(n, time, observer, minAngle);
     this.animate(time);
   }
 
@@ -144,16 +157,19 @@ export class StarSystem implements Entity {
   unpose(): void {
     for (const p of this.planets) p.object.scale.setScalar(1);
     for (const m of this.moons) m.object.scale.setScalar(1);
+    for (const n of this.nuclei) n.object.scale.setScalar(1);
   }
 
   update(frameDt: number, alpha: number): void {
     for (const s of this.stars) s.update(frameDt, alpha);
     for (const p of this.planets) p.update(frameDt, alpha);
     for (const m of this.moons) m.update(frameDt, alpha);
+    for (const n of this.nuclei) n.update(frameDt, alpha);
     // The clock between the last two fixed steps, as the bodies are interpolated.
     const time = this._time - FIXED_DT * (1 - alpha);
     for (const p of this.planets) if (p.spinAt) p.spinAngle = p.spinAt(time);
     for (const m of this.moons) if (m.spinAt) m.spinAngle = m.spinAt(time);
+    for (const n of this.nuclei) if (n.spinAt) n.spinAngle = n.spinAt(time);
     this.animate(time);
   }
 
@@ -170,6 +186,7 @@ export class StarSystem implements Entity {
     for (const p of this.planets) p.dispose();
     for (const m of this.moons) m.dispose();
     for (const c of this.comets) c.dispose();
+    for (const n of this.nuclei) n.dispose();
     this.scene.remove(this.ambient);
     this.ambient.dispose();
     this.glowTexture.dispose();

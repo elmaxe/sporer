@@ -38,7 +38,7 @@ const VENT_RADIUS = 0.05;
  */
 export class PlanetGlobe implements Entity {
   readonly object = new THREE.Group();
-  /** Sea-level (or cloud-top) radius. */
+  /** Sea-level (or cloud-top) radius; a small body's longest reach. */
   readonly radius: number;
   /** Radius of the highest terrain (or cloud tops): the ship hovers above this. */
   readonly top: number;
@@ -80,10 +80,10 @@ export class PlanetGlobe implements Entity {
     this.sea = seaFloor;
     this.sample = gas
       ? gasSampler(R, seed, config.bands, true)
-      : terrainSampler(R, seed, style, { noise: detailedTerrain, reliefScale: RELIEF_SCALE, seaFloor });
+      : terrainSampler(R, seed, style, { noise: detailedTerrain, reliefScale: RELIEF_SCALE, seaFloor, shape: config.shape });
     this.surface = new LodSurface(
       R,
-      gas ? R : floorRadius(R, style, RELIEF_SCALE, seaFloor),
+      gas ? R : floorRadius(R, style, RELIEF_SCALE, seaFloor, config.shape != null),
       this.top,
       this.sample,
       new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: !gas, roughness: 0.9 }),

@@ -21,7 +21,7 @@ A browser game inspired by the space stage of *Spore*. Fly a UFO through a proce
 - **Seamless zoom between scales.** Galaxy → system → low orbit and back with the scroll wheel, crossfading between levels without cutting to black.
 - **Spore-style controls.** Click a star, planet or point to autopilot there. Scroll to zoom, drag to orbit the camera, WASD to nudge. Touch controls on phones.
 - **Living stars.** Granulation, sunspots, prominences and flares. Main-sequence stars of every class, red and white dwarfs, giants and binaries.
-- **Varied worlds.** Lava, barren, desert, terran, ocean, ice and gas giants, from tiny moons to huge Jupiters, with rings, moons and comets on elliptical orbits.
+- **Varied worlds.** Lava, barren, desert, terran, ocean, ice and gas giants, from tiny moons to huge Jupiters, with rings, moons and comets on elliptical orbits; fly down to a comet's lumpy nucleus and watch its jets wake near the star.
 - **Climate from real physics.** Temperature, air pressure and composition, and geothermal heat follow the star, the orbit and the body's size. They drive atmospheres, lava, cryo and steam geysers, and weather (clouds, storms, rain, snow and lightning). Habitable worlds grow plants, more species and denser cover the more Earth-like they are. The numbers are checked against real references in [`docs/research/`](docs/research/).
 - **Nebulas.** Named emission, reflection and dark nebulas, planetary nebulas round white dwarfs and supernova remnants on the galaxy map. Fly into one and its gas fills the sky of the systems inside, down to low orbit.
 - **Maps.** A row-of-planets system map and an Equal Earth map of the planet you're orbiting.
@@ -80,4 +80,4 @@ Every push to `main` runs the typecheck, tests and build in GitHub Actions and d
 
 ## Roadmap
 
-The game is built in small, verified steps. See [`ROADMAP.md`](ROADMAP.md) for what's done and what's next: visitable comets, asteroid belts, nebulas and rogue planets.
+The game is built in small, verified steps. See [`ROADMAP.md`](ROADMAP.md) for what's done and what's next: asteroid belts, rogue planets and dust in systems.

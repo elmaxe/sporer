@@ -14,6 +14,7 @@ import {
   encodeLab,
   generateLabPlanet,
   labClimateData,
+  labFromComet,
   labFromSystem,
   toPlanetConfig,
   withAutoSetting,
@@ -79,7 +80,10 @@ export class PlanetLab {
     game.afterFrame = () => this.afterFrame();
   }
 
-  /** The state a page URL asks for: `#<lab link>`, `?seed&star&planet[&moon]` (a game planet) or `?gen=<seed>[&type&kind]`. */
+  /**
+   * The state a page URL asks for: `#<lab link>`, `?seed&star&planet[&moon]`
+   * (a game planet), `?seed&star&comet` (a game comet) or `?gen=<seed>[&type&kind]`.
+   */
   static stateFromUrl(url: URL): LabState {
     const params = url.searchParams;
     const view: LabView = { ...DEFAULT_VIEW };
@@ -92,12 +96,13 @@ export class PlanetLab {
       const state = decodeLab(hash);
       if (state) return state;
     }
-    if (params.has('star') && params.has('planet')) {
+    if (params.has('star') && (params.has('planet') || params.has('comet'))) {
       const source: LabSource = {
         seed: params.get('seed') ?? '1337',
         star: Number(params.get('star')),
-        planet: Number(params.get('planet')),
+        planet: Number(params.get('planet') ?? 0),
         moon: params.has('moon') ? Number(params.get('moon')) : undefined,
+        comet: params.has('comet') ? Number(params.get('comet')) : undefined,
       };
       const planet = loadFromGalaxy(source);
       if (planet) return { planet, view, source };
@@ -214,6 +219,14 @@ export class PlanetLab {
     return this.replace(loaded, source);
   }
 
+  /** Comet `comet` of star `star` in the galaxy of `seed`, as active as at its closest pass. */
+  loadComet(seed: string | number, star: number, comet: number): Promise<void> {
+    const source: LabSource = { seed: String(seed), star, planet: 0, comet };
+    const loaded = loadFromGalaxy(source);
+    if (!loaded) return Promise.reject(new Error(`No comet ${comet} at star ${star}`));
+    return this.replace(loaded, source);
+  }
+
   setType(type: LabPlanet['type']): Promise<void> {
     return this.replace(withType(this.planet, type));
   }
@@ -248,7 +261,11 @@ export class PlanetLab {
   lookAtVent(): Promise<void> {
     const level = this._level;
     if (!level) return Promise.resolve();
-    const vents = [...(level.geysers?.activity.vents.map((v) => v.dir) ?? []), ...(level.globe?.lava?.activity.vents ?? [])];
+    const vents = [
+      ...(level.geysers?.activity.vents.map((v) => v.dir) ?? []),
+      ...(level.globe?.lava?.activity.vents ?? []),
+      ...(level.comet?.vents.map((v) => v.dir) ?? []),
+    ];
     if (vents.length === 0) return Promise.resolve();
     const [x, y, z] = vents[++this.vent % vents.length]!;
     if (this.view.camera === 'fly' && level.ship) {
@@ -354,5 +371,7 @@ export class PlanetLab {
 function loadFromGalaxy(source: LabSource): LabPlanet | null {
   const galaxy = generateGalaxy(parseSeed(source.seed));
   const ref = galaxy.stars[source.star];
-  return ref ? labFromSystem(generateSystem(ref), source.planet, source.moon) : null;
+  if (!ref) return null;
+  const system = generateSystem(ref);
+  return source.comet !== undefined ? labFromComet(system, source.comet) : labFromSystem(system, source.planet, source.moon);
 }

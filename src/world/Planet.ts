@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import type { Entity } from '../core/Entity';
 import { RAPIER, type Physics } from '../physics/Physics';
-import { orbitPosition, type Orbit } from '../gen/orbit';
+import { keplerPosition, orbitPosition, type KeplerOrbit, type Orbit } from '../gen/orbit';
+import type { ShapeData } from '../gen/shape';
 import { describeClimate, type ClimateData } from '../gen/climate';
 import type { PlanetStyle, PlanetType, RingData } from '../gen/system';
 import type { CelestialBody } from './CelestialBody';
@@ -29,7 +30,16 @@ export interface PlanetConfig {
   tilt?: number;
   /** Solid bodies only (see gen/climate.ts). */
   climate?: ClimateData | null;
+  /** Irregular small bodies: the nucleus's shape (gen/shape.ts); `radius` is its longest reach. */
+  shape?: ShapeData | null;
+  /** A Kepler orbit round the star (comets), followed instead of `orbit`. */
+  path?: KeplerOrbit | null;
+  /** What kind of small body it is: comets have jets and a coma near the star. */
+  small?: SmallBodyKind | null;
 }
+
+/** Kinds of irregular small body (step 26 adds asteroids). */
+export type SmallBodyKind = 'comet';
 
 /**
  * Cube sphere segments of the system view's planets (gas giants need more for
@@ -59,6 +69,8 @@ export class Planet implements Entity, CelestialBody {
   readonly velocity = new THREE.Vector3();
   /** The climate line of the tooltip, e.g. "−140 °C · thin N₂ atmosphere". */
   readonly details: string | undefined;
+  /** Picked as a sphere this big when it's more than the body (a comet's coma); else its radius. */
+  pickRadius: number | undefined = undefined;
   /**
    * When set, the surface's spin is this function of the system (render)
    * time instead of turning at the body's own rate, e.g. to follow the planet
@@ -92,7 +104,7 @@ export class Planet implements Entity, CelestialBody {
     this.surface = new THREE.Mesh(
       gas
         ? createGasGeometry(radius, seed, config.bands, GAS_SEGMENTS)
-        : createTerrainGeometry(radius, seed, style, { segments: TERRAIN_SEGMENTS, seaFloor: this.lava !== null }),
+        : createTerrainGeometry(radius, seed, style, { segments: TERRAIN_SEGMENTS, seaFloor: this.lava !== null, shape: config.shape }),
       new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: !gas, roughness: 0.9 }),
     );
     // Lava seas are a separate animated sphere over the sunken sea floor, turning with the surface.
@@ -145,6 +157,7 @@ export class Planet implements Entity, CelestialBody {
 
   /** Where the body is at system time `time` (around its parent, for moons). */
   positionAt(time: number, out: THREE.Vector3): THREE.Vector3 {
+    if (this.config.path) return keplerPosition(this.config.path, time, out);
     orbitPosition(this.config.orbit, time, out);
     if (this.parent) out.add(this.parent.positionAt(time, this.parentPosition));
     return out;

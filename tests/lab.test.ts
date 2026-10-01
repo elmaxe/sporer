@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { generateGalaxy } from '../src/gen/galaxy';
-import { isGiant } from '../src/gen/planets';
 import { nominalStar } from '../src/gen/stars';
 import { generateSystem, type SystemData } from '../src/gen/system';
+import { perihelion } from '../src/gen/orbit';
+import { cometConfig } from '../src/world/Comet';
 import {
+  giantKind,
   LAB_TYPES,
   decodeLab,
   DEFAULT_VIEW,
@@ -11,6 +13,7 @@ import {
   generateLabPlanet,
   kindRadiusRange,
   labClimateData,
+  labFromComet,
   labFromSystem,
   labLink,
   labSetting,
@@ -34,7 +37,7 @@ describe('generateLabPlanet', () => {
       for (let seed = 0; seed < 20; seed++) {
         const p = generateLabPlanet(seed, { type });
         expect(p.type).toBe(type);
-        expect(p.kind !== 'moon' && isGiant(p.kind)).toBe(type === 'gas');
+        expect(giantKind(p.kind)).toBe(type === 'gas');
         const [min, max] = kindRadiusRange(p.kind);
         expect(p.radius).toBeGreaterThanOrEqual(min);
         expect(p.radius).toBeLessThanOrEqual(max);
@@ -103,6 +106,70 @@ describe('game planets in the lab', () => {
   it('returns null for planets and moons that are not there', () => {
     expect(labFromSystem(systems[0]!, 99)).toBeNull();
     expect(labFromSystem(systems[0]!, 0, 99)).toBeNull();
+    expect(labFromComet(systems[0]!, 99)).toBeNull();
+  });
+
+  it('draws comets as the game does, as active as at their closest pass', () => {
+    let checked = 0;
+    for (const system of systems) {
+      system.comets.forEach((c, k) => {
+        const lab = labFromComet(system, k)!;
+        expect(lab.kind).toBe('comet');
+        expect(lab.zone).toBeCloseTo(perihelion(c.orbit) / system.habitableRadius, 10);
+        const config = toPlanetConfig(lab);
+        const game = cometConfig(c);
+        expect(config.shape).toEqual(game.shape);
+        expect(config.style).toEqual(game.style);
+        expect(config.radius).toBe(game.radius);
+        expect(config.seed).toBe(game.seed);
+        expect(config.small).toBe('comet');
+        expect(config.climate).toBeNull();
+        checked++;
+      });
+    }
+    expect(checked).toBeGreaterThan(10);
+  });
+});
+
+describe('comets in the lab', () => {
+  it('are made like the game makes them: a shaped, airless nucleus with no moons or rings', () => {
+    for (let seed = 0; seed < 20; seed++) {
+      const p = generateLabPlanet(seed, { kind: 'comet' });
+      expect(p).toEqual(generateLabPlanet(seed, { kind: 'comet' }));
+      expect(p.kind).toBe('comet');
+      expect(p.shape).not.toBeNull();
+      expect(p.climate).toBeNull();
+      expect(p.atmosphere).toBeNull();
+      expect(p.rings).toBeNull();
+      expect(p.moons).toEqual([]);
+      const [min, max] = kindRadiusRange('comet');
+      expect(p.radius).toBeGreaterThanOrEqual(min);
+      expect(p.radius).toBeLessThanOrEqual(max);
+      expect(toPlanetConfig(p).small).toBe('comet');
+    }
+  });
+
+  it('become round bodies and back', () => {
+    const comet = generateLabPlanet(5, { kind: 'comet' });
+    const earth = withKind(comet, 'earth');
+    expect(earth.shape).toBeNull();
+    expect(earth.climate).not.toBeNull();
+    expect(toPlanetConfig(earth).small).toBeNull();
+    const back = withKind(earth, 'comet');
+    expect(back.kind).toBe('comet');
+    expect(back.shape).not.toBeNull();
+    expect(back.climate).toBeNull();
+    // Another type recolours a comet but keeps it a comet; a gas comet is a gas giant.
+    expect(withType(comet, 'ice').shape).toEqual(comet.shape);
+    expect(withType(comet, 'gas').kind).toBe('gasGiant');
+    expect(withType(comet, 'gas').shape).toBeNull();
+  });
+
+  it('round-trip through a link, shape and all', () => {
+    const planet = generateLabPlanet(9, { kind: 'comet' });
+    const state = decodeLab(encodeLab({ planet, view: DEFAULT_VIEW, source: { seed: '1337', star: 3, planet: 0, comet: 1 } }))!;
+    expect(state.planet).toEqual(planet);
+    expect(state.source?.comet).toBe(1);
   });
 });
 
