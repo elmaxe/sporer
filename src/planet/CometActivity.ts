@@ -180,9 +180,9 @@ const comaFragment = /* glsl */ `
 
 /**
  * A comet's activity in low orbit (gen/comets.ts): jets of gas and dust from
- * vents on the sunlit side, along the ground's normal, and the coma round the
- * nucleus, both as strong as the comet is active (`strength`, from its
- * distance to the star: 1/r², off far out). The jets are one static `Points`
+ * vents on the sunlit side, along the ground's normal, the coma round the
+ * nucleus and its tails seen from inside, all as strong as the comet is
+ * active (`strength`, from its distance to the star: 1/r², off far out). The jets are one static `Points`
  * whose particles loop in the vertex shader, re-thrown each cycle, so they
  * depend only on the clock and nothing is uploaded per frame.
  */
