@@ -9,12 +9,14 @@ import {
   beyondHorizon,
   cellAngle,
   cellDiagonal,
+  chunkBounds,
   childAt,
   edgeNeighbour,
   parentTarget,
   snapStep,
   snapTo,
   wantsSplit,
+  type ChunkBounds,
   type Edge,
 } from './quadtree';
 
@@ -62,6 +64,8 @@ interface LodNode {
   /** Unit direction of the node's centre, and how far (radians) its corners reach from it. */
   readonly centre: THREE.Vector3;
   readonly angle: number;
+  /** Where its vertices are, once built (see chunkBounds). */
+  readonly bounds: ChunkBounds;
   children: LodNode[] | null;
   /** The children are drawn instead of this node. */
   split: boolean;
@@ -122,8 +126,7 @@ export class LodSurface {
   private readonly edgeMorph = new Float32Array(4);
 
   constructor(
-    /** Sea-level radius, and the lowest and highest the surface goes. */
-    private readonly radius: number,
+    /** The lowest and highest the surface goes (for the horizon). */
     private readonly floor: number,
     private readonly top: number,
     private readonly sample: SurfaceSampler,
@@ -194,14 +197,12 @@ export class LodSurface {
   }
 
   private select(node: LodNode): void {
-    const R = this.radius;
     const angle = this.camera.angleTo(node.centre);
     const hidden = beyondHorizon(angle, node.angle, this.cameraDistance, this.floor, this.top);
-    // The node's centre on the sea-level sphere, and a sphere around it holding the whole chunk.
-    const c = node.centre;
-    const distance = Math.hypot(this.camera.x - c.x * R, this.camera.y - c.y * R, this.camera.z - c.z * R);
-    const bound = R * node.angle + Math.max(this.top - R, R - this.floor);
-    const cells = cellAngle(R, node.depth, distance, bound);
+    // Selected nodes are built, so their bounds are known.
+    const b = node.bounds;
+    const distance = Math.hypot(this.camera.x - b.x, this.camera.y - b.y, this.camera.z - b.z);
+    const cells = cellAngle(b.reach, node.depth, distance, b.radius);
     const wants = !hidden && node.depth < lodParams.maxDepth && wantsSplit(cells, lodParams.cellAngle, node.split);
 
     if (node.split) {
@@ -303,6 +304,7 @@ export class LodSurface {
       y,
       centre,
       angle: Math.acos(minDot),
+      bounds: { x: 0, y: 0, z: 0, radius: 0, reach: 0 },
       children: null,
       split: false,
       mesh: null,
@@ -364,6 +366,7 @@ export class LodSurface {
       node.target = node.base;
       node.targetColors = node.baseColors;
     }
+    chunkBounds([node.base, node.target], node.bounds);
     const geometry = new THREE.BufferGeometry();
     geometry.setIndex(new THREE.BufferAttribute(chunkIndices(diagonals), 1));
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
