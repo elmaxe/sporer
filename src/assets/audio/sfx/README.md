@@ -7,8 +7,7 @@ rebuild; no code changes needed. Volumes and fades are in `cueParams` (`src/audi
 
 | Folder | When it plays | Kind |
 |---|---|---|
-| `select/` | Clicking a star, rogue planet or nebula on the galaxy map | one-shot |
-| `systemSelect/` | Clicking a star, planet, moon, comet or asteroid belt in a system (in the view or on the system map) | one-shot |
+| `select/` | Clicking a star, planet, moon or comet (in the view, on the system map, or a star or nebula on the galaxy map) | one-shot |
 | `systemTravel/` | The autopilot flying between bodies in a system: starts as it sets off, fades out when it arrives | loop |
 | `interstellarTravel/` | Flying between stars on the galaxy map: starts as it sets off, fades out when it docks | loop |
 | `reentry/` | Descending to a planet or moon with an atmosphere, or a gas giant (airless bodies are silent) | one-shot |

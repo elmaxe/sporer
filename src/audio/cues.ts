@@ -6,16 +6,9 @@ import type { Rng } from '../gen/rng';
  * a play picks one at random (never the same one twice in a row). A cue
  * whose folder is empty is silent.
  */
-export type SoundCue = 'select' | 'systemSelect' | 'systemTravel' | 'interstellarTravel' | 'reentry' | 'leavePlanet';
+export type SoundCue = 'select' | 'systemTravel' | 'interstellarTravel' | 'reentry' | 'leavePlanet';
 
-export const SOUND_CUES: readonly SoundCue[] = [
-  'select',
-  'systemSelect',
-  'systemTravel',
-  'interstellarTravel',
-  'reentry',
-  'leavePlanet',
-];
+export const SOUND_CUES: readonly SoundCue[] = ['select', 'systemTravel', 'interstellarTravel', 'reentry', 'leavePlanet'];
 
 /** Cues that loop until stopped (`SoundEffects.start`); the rest play once (`SoundEffects.play`). */
 export type LoopCue = 'systemTravel' | 'interstellarTravel';
@@ -53,10 +46,8 @@ const travel = (): CueSpec => ({
 
 /** Tunables per cue (bound to the 'Sound cues' debug folder). */
 export const cueParams: Record<SoundCue, CueSpec> = {
-  // Clicking a star, rogue planet or nebula on the galaxy map.
+  // Clicking a star, planet, moon or comet (in the view, on the system map or on the galaxy map).
   select: oneShot(),
-  // Clicking a star, planet, moon, comet or belt in a system (in the view or on the system map).
-  systemSelect: oneShot(),
   // The autopilot flying between bodies in a system, from setting off until it arrives.
   systemTravel: travel(),
   // Flying between stars on the galaxy map, from setting off until it docks.
