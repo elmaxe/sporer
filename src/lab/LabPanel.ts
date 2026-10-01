@@ -1,7 +1,10 @@
 import type GUI from 'lil-gui';
 import type { Composition } from '../gen/climate';
 import { MOON_RADIUS, gasStyle, type MoonType, type PlanetType } from '../gen/planets';
-import { hashSeed } from '../gen/rng';
+import { cometActivity } from '../gen/comets';
+import { Rng, hashSeed } from '../gen/rng';
+import { generateShape, normaliseShape, shapeExtents } from '../gen/shape';
+import { cometParams } from '../world/Comet';
 import {
   LAB_STARS,
   LAB_TYPES,
@@ -33,6 +36,7 @@ const KIND_LABELS: Record<string, LabKind> = {
   'ice giant': 'iceGiant',
   'gas giant': 'gasGiant',
   moon: 'moon',
+  'comet (irregular)': 'comet',
 };
 /** Fallback sea colours when a sea is switched on for a type that has none. */
 const SEA_COLOR: Record<PlanetType, string> = {
@@ -58,7 +62,7 @@ export class LabPanel {
   private readonly planetRoot: GUI;
   /** Open/closed state of the planet folders across rebuilds. */
   private readonly closed = new Map<string, boolean>();
-  private readonly loader = { seed: '1337', star: 0, planet: 0, moon: -1 };
+  private readonly loader = { seed: '1337', star: 0, planet: 0, moon: -1, comet: -1 };
   private recolours = 0;
 
   constructor(
@@ -130,11 +134,13 @@ export class LabPanel {
     g.add(this.loader, 'star', 0, 5000, 1).name('star id');
     g.add(this.loader, 'planet', 0, 8, 1).name('planet #');
     g.add(this.loader, 'moon', -1, 4, 1).name('moon # (-1: planet)');
+    g.add(this.loader, 'comet', -1, 2, 1).name('comet # (-1: planet)');
     g.add(
       {
         load: () => {
-          const { seed, star, planet, moon } = this.loader;
-          lab.load(seed, star, planet, moon >= 0 ? moon : undefined).catch((err: unknown) => alert(String(err)));
+          const { seed, star, planet, moon, comet } = this.loader;
+          const loading = comet >= 0 ? lab.loadComet(seed, star, comet) : lab.load(seed, star, planet, moon >= 0 ? moon : undefined);
+          loading.catch((err: unknown) => alert(String(err)));
         },
       },
       'load',
@@ -171,6 +177,11 @@ export class LabPanel {
     this.buildBody();
     if (p.type === 'gas') this.buildBands();
     else this.buildSurface();
+    if (p.shape) {
+      this.buildShape();
+      this.buildActivity();
+      return;
+    }
     if (p.type !== 'gas') {
       this.buildAtmosphere();
       this.buildClimate();
@@ -242,10 +253,12 @@ export class LabPanel {
         style.sea = v ? lastSea : null;
       },
     };
-    f.add(sea, 'on').name('sea (water, lava or ice)').onChange(() => {
-      this.refresh();
-      changed();
-    });
+    // Small bodies have no seas.
+    if (!this.p.shape)
+      f.add(sea, 'on').name('sea (water, lava or ice)').onChange(() => {
+        this.refresh();
+        changed();
+      });
     if (style.sea !== null) {
       f.addColor(style, 'sea').name('sea colour').onChange(changed);
       f.add(style, 'seaLevel', -1, 1, 0.01).name('sea level (noise)').onChange(changed);
@@ -254,6 +267,59 @@ export class LabPanel {
     f.addColor(style, 'high').name('highland colour').onChange(changed);
     f.add(style, 'relief', 0, 0.2, 0.001).name('relief (× radius)').onChange(changed);
   }
+
+  /** A small body's shape (gen/shape.ts): new lobes, or the lumps and craters of this one. */
+  private buildShape(): void {
+    const lab = this.lab;
+    const shape = this.p.shape!;
+    const f = this.folder('Shape');
+    const renormalise = () => {
+      normaliseShape(shape);
+      lab.changed();
+    };
+    const form = this.shapeForm;
+    form.lobes = form.binary === shape.binary ? shape.lobes.length : form.lobes;
+    form.binary = shape.binary;
+    const regenerate = () => {
+      const rng = new Rng(hashSeed(lab.planet.seed, 'shape', ++form.rolls));
+      void lab.replace({ ...lab.planet, shape: generateShape(rng, { lobes: form.lobes, binary: form.lobes > 1 && form.binary }) });
+    };
+    f.add(form, 'lobes', 1, 3, 1).name('lobes').onFinishChange(regenerate);
+    f.add(form, 'binary').name('contact binary (2+ lobes)').onChange(regenerate);
+    f.add({ regenerate }, 'regenerate').name('🎲 New shape');
+    f.add(shape, 'blend', 0.02, 0.6, 0.01).name('neck fillet (smooth union)').onChange(renormalise);
+    f.add(shape.lumps, 'amplitude', 0, 0.3, 0.005).name('lumps').onChange(renormalise);
+    f.add(shape.lumps, 'frequency', 0.3, 3, 0.05).name('lump size (frequency)').onChange(renormalise);
+    const craters = {
+      get depth() {
+        return shape.craters.reduce((d, c) => Math.max(d, c.depth), 0);
+      },
+      set depth(v: number) {
+        const max = Math.max(1e-6, shape.craters.reduce((d, c) => Math.max(d, c.depth), 0));
+        for (const c of shape.craters) c.depth = (c.depth / max) * v;
+      },
+    };
+    f.add(craters, 'depth', 0, 0.2, 0.005).name(`craters (${shape.craters.length}): depth`).onChange(renormalise);
+    const extents = shapeExtents(shape);
+    f.add({ size: extents.map((e) => (e / extents[0]).toFixed(2)).join(' : ') }, 'size').name('proportions').disable();
+  }
+
+  /** How far a comet is from its star, which sets its jets, coma and tails. */
+  private buildActivity(): void {
+    const lab = this.lab;
+    const f = this.folder('Activity');
+    const info = {
+      get activity() {
+        return Math.round(cometActivity(lab.planet.zone, 1, cometParams.activeDistance) * 100) / 100;
+      },
+    };
+    // Read live each frame by the level, so no rebuild.
+    f.add(lab.planet, 'zone', 0.3, 5, 0.01).name('distance from star (hab. radii ≈ AU)');
+    f.add(info, 'activity').name('activity (1/r², off past 3)').listen().disable();
+  }
+
+  /** The Shape folder's choices for a new shape. */
+  private readonly shapeForm = { lobes: 1, binary: false, rolls: 0 };
 
   private buildBands(): void {
     const lab = this.lab;

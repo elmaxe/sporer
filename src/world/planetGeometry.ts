@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { terrainNoise } from '../gen/noise';
 import { hashSeed, Rng } from '../gen/rng';
+import { SHAPE_FLOOR, shapeRadius, type ShapeData } from '../gen/shape';
 import type { PlanetStyle, RingData } from '../gen/system';
 import { createCubeSphere } from './cubeSphere';
 import type { Vec3Like } from './cubeSphereMath';
@@ -26,9 +27,15 @@ export interface TerrainOptions {
    * sea surface) instead of flattening it into a sea-coloured shell.
    */
   seaFloor?: boolean;
+  /**
+   * An irregular small body's shape (gen/shape.ts): the ground is
+   * `radius · shapeRadius(dir)` plus the relief, and the noise is read at
+   * the surface point, so detail keeps its size over the whole body.
+   */
+  shape?: ShapeData | null;
 }
 
-/** Radius of the highest peak for a terrain planet built with `reliefScale`. */
+/** Radius of the highest peak for a terrain planet built with `reliefScale` (a shaped body's longest reach is its radius). */
 export function peakRadius(radius: number, style: PlanetStyle, reliefScale = 1): number {
   return radius * (1 + style.relief * reliefScale);
 }
@@ -69,10 +76,17 @@ export function terrainSampler(
   radius: number,
   seed: number,
   style: PlanetStyle,
-  { noise = terrainNoise, reliefScale = 1, seaFloor = false }: Omit<TerrainOptions, 'segments'>,
+  { noise = terrainNoise, reliefScale = 1, seaFloor = false, shape = null }: Omit<TerrainOptions, 'segments'>,
 ): SurfaceSampler {
   const paint = terrainPainter(style, seaFloor);
   const relief = style.relief * reliefScale;
+  if (shape) {
+    // No sea on small bodies: the relief is added on top of the shape.
+    return (dir, color) => {
+      const s = shapeRadius(shape, dir.x, dir.y, dir.z);
+      return radius * (s + relief * paint(noise(dir.x * s, dir.y * s, dir.z * s, seed), color));
+    };
+  }
   return (dir, color) => {
     const height = paint(noise(dir.x, dir.y, dir.z, seed), color);
     return radius * (1 + relief * (height < 0 ? SEA_FLOOR_DEPTH : 1) * height);
@@ -82,8 +96,13 @@ export function terrainSampler(
 /** How deep a `seaFloor` sinks, relative to the relief above sea level. */
 const SEA_FLOOR_DEPTH = 0.6;
 
-/** Radius of the lowest point of a terrain planet built with these options (the sea floor's deepest, else sea level). */
-export function floorRadius(radius: number, style: PlanetStyle, reliefScale = 1, seaFloor = false): number {
+/**
+ * Radius of the lowest point of a terrain planet built with these options
+ * (the sea floor's deepest, else sea level; a shaped body's never dips below
+ * SHAPE_FLOOR of its radius).
+ */
+export function floorRadius(radius: number, style: PlanetStyle, reliefScale = 1, seaFloor = false, shaped = false): number {
+  if (shaped) return radius * SHAPE_FLOOR;
   return seaFloor ? radius * (1 - style.relief * reliefScale * SEA_FLOOR_DEPTH) : radius;
 }
 

@@ -108,16 +108,17 @@ For anything about how a planet or moon looks (terrain, seas, gas bands, atmosph
 
 | Call | Does |
 |---|---|
-| `lab.generate(seed, { type, kind, insolation, moons })` | a new body from the game's generators (type: lava, barren, desert, terran, ocean, ice, gas; kind: dwarf, small, earth, superEarth, iceGiant, gasGiant, moon) |
+| `lab.generate(seed, { type, kind, insolation, moons })` | a new body from the game's generators (type: lava, barren, desert, terran, ocean, ice, gas; kind: dwarf, small, earth, superEarth, iceGiant, gasGiant, moon, comet) |
 | `lab.load(galaxySeed, star, planet, moon?)` | a planet (or moon) of the game |
-| `lab.set({ radius: 9, style: { seaLevel: 0.3 }, rings: {...}, climate: { setting: { heatFlow: 0.1 } } })` | edit anything (merged two levels deep); `lab.planet` is the model |
+| `lab.loadComet(galaxySeed, star, comet)` | a comet of the game, as active as at its closest pass (`?seed=&star=&comet=` in the URL) |
+| `lab.set({ radius: 9, style: { seaLevel: 0.3 }, rings: {...}, climate: { setting: { heatFlow: 0.1 } } })` | edit anything (merged two levels deep); `lab.planet` is the model (a comet's `zone`, its distance from the star in habitable radii, sets its activity) |
 | `lab.setType('ice')`, `lab.setKind('moon')`, `lab.terraform({ composition: 'oxygenNitrogen', pressure: 1 })` | the panel's type, size and climate edits |
 | `lab.setView({ view: 'system', camera: 'fly', star: 'redDwarf', sunAzimuth: 90, sunElevation: 10, paused: true, wireframe: true })` | view, camera (orbit the planet or follow the UFO), light, clock |
 | `lab.look(lon, lat, zoom)` | camera over longitude/latitude (degrees) at `zoom` planet radii |
-| `lab.lookAtVent()` | the next geyser or lava vent, from the side so plumes stand against the sky |
+| `lab.lookAtVent()` | the next geyser, lava or comet-jet vent, from the side so plumes stand against the sky |
 | `lab.lookAtStorm(kind?, zoom?)` | globe view: the camera over the biggest storm under way (`'cell'`, `'cyclone'`, `'dust'`, `'global'`, `'ash'`), or with the fly camera the UFO beside it; resolves false if none (step the clock with `setTime` until one is) |
 | `lab.setTime(t)` | jump the clock (eruptions, geysers, storms and lightning are pure functions of it) |
-| `lab.climate`, `lab.level.geysers`, `lab.level.eruptions`, `lab.level.globe`, `lab.level.globe.weather` (storms `shown`, `flashes`/`flashCount`), `lab.level.weather` (rain, bolts), `lab.level.triangles` | what got built |
+| `lab.climate`, `lab.level.geysers`, `lab.level.eruptions`, `lab.level.comet` (jets: `vents`, `strength`), `lab.level.globe`, `lab.level.globe.weather` (storms `shown`, `flashes`/`flashCount`), `lab.level.weather` (rain, bolts), `lab.level.triangles` | what got built |
 
 ```bash
 # A cryo-geyser moon: airless, some heat, look at a plume
