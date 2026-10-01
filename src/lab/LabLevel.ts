@@ -3,11 +3,13 @@ import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
 import { FIXED_DT } from '../core/Game';
 import type { Input } from '../core/Input';
+import { cometActivity } from '../gen/comets';
 import { geyserActivity } from '../gen/geysers';
 import { nominalStar, starLightColor, type SpectralClass, type StarData, type StarKind } from '../gen/stars';
 import { Level, type TouchShipControls } from '../levels/Level';
-import { PLANET_VIEW_DISTANCE, planetCameraParams } from '../levels/PlanetLevel';
+import { PLANET_VIEW_DISTANCE, SMALL_BODY_VIEW_RADII, planetCameraParams } from '../levels/PlanetLevel';
 import { Physics } from '../physics/Physics';
+import { CometActivity } from '../planet/CometActivity';
 import { Geysers } from '../planet/Geysers';
 import { Weather } from '../planet/Weather';
 import { LavaEruptions } from '../planet/LavaEruptions';
@@ -21,6 +23,7 @@ import { OrbitCamera } from '../player/OrbitCamera';
 import { SurfaceChanges } from '../surface/changes';
 import { plantSetup } from '../surface/plantSetup';
 import { SurfaceEntities } from '../surface/SurfaceEntities';
+import { cometParams } from '../world/Comet';
 import { Planet } from '../world/Planet';
 import { Starfield } from '../world/Starfield';
 import { starLightIntensity } from '../world/Star';
@@ -232,6 +235,8 @@ export class LabLevel extends Level {
   readonly globe: PlanetGlobe | null = null;
   readonly eruptions: LavaEruptions | null = null;
   readonly geysers: Geysers | null = null;
+  /** Comets (globe view): jets, coma and tails, as active as `planet.zone` makes it. */
+  readonly comet: CometActivity | null = null;
   /** Rain, lightning bolts and their light (globe view, bodies with weather). */
   readonly weather: Weather | null = null;
   /** Plants on habitable bodies (globe view; the lab's menu-free switch is plantParams.enabled). */
@@ -285,6 +290,14 @@ export class LabLevel extends Level {
       this.geysers = activity
         ? this.add(new Geysers(this.scene, clock, activity, config.seed, globe.sun, globe.sunLight, globe.ambientLight, debug))
         : null;
+      if (config.small === 'comet' && config.shape) {
+        // The lab's star is one habitable radius per `zone` away.
+        const activity = () => cometActivity(planet.zone, 1, cometParams.activeDistance);
+        const colors = { ion: '#7cc4ff', dust: '#ffe6b8' };
+        this.comet = this.add(
+          new CometActivity(this.scene, clock, config.seed, config.shape, R, globe.groundHeight, globe.sun, globe.sunLight, globe.ambientLight, activity, colors, debug),
+        );
+      }
       const shipStart = carry?.ship ?? new THREE.Vector3(0.3, 0.5, 1).normalize();
       const ship = (this.ship = this.add(
         new PlanetShip(this.scene, input, camera, debug, globe.top + ALTITUDE, shipStart, travelScale(R)),
@@ -293,7 +306,7 @@ export class LabLevel extends Level {
         target = ship.object;
         up = ship.up;
         min = planetCameraParams.minDistance;
-        max = maxViewDistance(R, planetCameraParams.maxDistance);
+        max = maxViewDistance(R, planetCameraParams.maxDistance, config.shape ? SMALL_BODY_VIEW_RADII * R : undefined);
         distance = PLANET_VIEW_DISTANCE;
       } else {
         min = globe.top * 1.04;

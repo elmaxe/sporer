@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { CometData } from '../gen/comets';
-import { keplerPosition, perihelion } from '../gen/orbit';
-import type { Sight } from './CelestialBody';
+import { keplerPosition } from '../gen/orbit';
+import type { Planet, PlanetConfig } from './Planet';
 
 export const cometParams = {
   /** Distance (in habitable radii) at which the tail is at `tailLength`; it scales with 1/r². */
@@ -11,6 +11,12 @@ export const cometParams = {
   tailWidth: 7,
   /** How far the dust tail curves back along the orbit, relative to its length. */
   dustCurve: 0.35,
+  /**
+   * The tails fade out closer than this to the camera (system units, from
+   * the first to the second), so a camera right by the nucleus sees them
+   * stream away instead of filling the view.
+   */
+  nearFade: [2, 24] as [number, number],
 };
 
 /** Segments along each tail ribbon. */
@@ -37,6 +43,7 @@ const tailVertex = /* glsl */ `
   uniform vec2 uCurve;
   uniform vec2 uWidth;
   uniform vec2 uBrightness;
+  uniform vec2 uNearFade;
   varying vec2 vUv;
   varying float vTail;
   varying float vBrightness;
@@ -51,7 +58,7 @@ const tailVertex = /* glsl */ `
     p += side * aSide * mix(uWidth.x, uWidth.y, aTail) * (0.25 + 1.5 * s);
     vUv = vec2(s, aSide);
     vTail = aTail;
-    vBrightness = mix(uBrightness.x, uBrightness.y, aTail);
+    vBrightness = mix(uBrightness.x, uBrightness.y, aTail) * smoothstep(uNearFade.x, uNearFade.y, distance(p, cameraPosition));
     gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.0);
   }
 `;
@@ -65,7 +72,7 @@ const tailFragment = /* glsl */ `
   varying float vBrightness;
   void main() {
     float across = 1.0 - vUv.y * vUv.y;
-    float along = pow(1.0 - vUv.x, 1.6) * smoothstep(0.0, 0.04, vUv.x + 0.02);
+    float along = pow(1.0 - vUv.x, 1.6) * smoothstep(0.0, 0.04, vUv.x);
     // Faint streaks drifting down the ion tail.
     float streak = 1.0 + 0.25 * (1.0 - vTail) * sin(vUv.y * 9.0 + sin(vUv.x * 7.0 - uTime * 1.3) * 1.5);
     float a = across * across * along * streak * vBrightness;
@@ -102,20 +109,43 @@ function tailGeometry(): THREE.BufferGeometry {
 }
 
 /**
- * A comet on its Kepler orbit. Scenery: a `Sight`, not a `CelestialBody`, so
- * hovering shows its name but it can't be flown to, and it has no physics. A small rocky nucleus in a glowing
- * coma, with a straight blue ion tail pointing away from the star and a
- * curved dust tail lagging along the orbit. Both grow and brighten with 1/r²
- * as it nears the star. Its pose is a pure function of the system clock.
+ * What the renderers take for a comet's nucleus: an airless, sealess barren
+ * body with the comet's shape, following its Kepler orbit.
  */
-export class Comet implements Sight {
+export function cometConfig(comet: CometData): PlanetConfig {
+  const { orbit } = comet;
+  return {
+    name: comet.name,
+    type: 'barren',
+    radius: comet.radius,
+    seed: comet.seed,
+    spin: comet.spin,
+    // Unused (`path` is followed instead), but a circle of the same size and period.
+    orbit: { radius: orbit.semiMajor, period: orbit.period, phase: orbit.phase, inclination: orbit.inclination },
+    path: orbit,
+    style: comet.style,
+    tilt: comet.tilt,
+    climate: null,
+    shape: comet.shape,
+    small: 'comet',
+  };
+}
+
+/**
+ * A comet's look in the system view around its nucleus: a glowing coma and
+ * both tails, a straight blue ion tail pointing away from the star and a
+ * curved dust tail lagging along the orbit. Both grow and brighten with 1/r²
+ * as it nears the star. The nucleus itself is a `Planet` (an irregular,
+ * visitable body on the same Kepler orbit, see StarSystem); this follows it.
+ * Its pose is a pure function of the system clock.
+ */
+export class Comet {
   readonly object = new THREE.Group();
   readonly position = new THREE.Vector3();
-  readonly name: string;
-  readonly description: string;
   /** 0 far out, 1 at `activeDistance` or closer: drives the tails and coma. */
   activity = 0;
-  private readonly nucleus: THREE.Mesh<THREE.IcosahedronGeometry, THREE.MeshStandardMaterial>;
+  /** The glow round the nucleus. */
+  private readonly head = new THREE.Group();
   private readonly coma: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
   private readonly tails: THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial>;
   private readonly before = new THREE.Vector3();
@@ -123,17 +153,12 @@ export class Comet implements Sight {
   constructor(
     private readonly scene: THREE.Scene,
     readonly data: CometData,
+    /** The visitable nucleus, on the same orbit. */
+    readonly nucleus: Planet,
     /** The system's habitable radius: where the sun is "Earth-strength". */
     private readonly habitableRadius: number,
     glowTexture: THREE.Texture,
   ) {
-    this.name = data.name;
-    const minutes = Math.max(1, Math.round(data.orbit.period / 60));
-    this.description = `Comet · returns every ${minutes} min · closest pass ${Math.round(perihelion(data.orbit))} u`;
-    this.nucleus = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(data.radius, 1),
-      new THREE.MeshStandardMaterial({ color: '#8a8f99', roughness: 1, flatShading: true }),
-    );
     this.coma = new THREE.Mesh(
       new THREE.PlaneGeometry(1, 1),
       new THREE.MeshBasicMaterial({
@@ -149,7 +174,7 @@ export class Comet implements Sight {
       this.coma.lookAt(camera.position);
       this.coma.updateMatrixWorld();
     };
-    this.nucleus.add(this.coma);
+    this.head.add(this.coma);
 
     this.tails = new THREE.Mesh(
       tailGeometry(),
@@ -164,6 +189,7 @@ export class Comet implements Sight {
           uCurve: { value: new THREE.Vector2() },
           uWidth: { value: new THREE.Vector2() },
           uBrightness: { value: new THREE.Vector2() },
+          uNearFade: { value: new THREE.Vector2() },
           uIonColor: { value: new THREE.Color(data.ionColor) },
           uDustColor: { value: new THREE.Color(data.dustColor) },
           uTime: { value: 0 },
@@ -177,26 +203,17 @@ export class Comet implements Sight {
     // Drawn in world space by the shader, so the bounds are unknown.
     this.tails.frustumCulled = false;
 
-    this.object.add(this.nucleus, this.tails);
+    this.object.add(this.head, this.tails);
     this.object.name = data.name;
     scene.add(this.object);
     this.poseAt(0);
   }
 
-  get renderPosition(): THREE.Vector3 {
-    return this.position;
-  }
-
-  /** Hover radius: the coma, which is what you see. */
-  get radius(): number {
-    return this.coma.scale.x / 2;
-  }
-
-  /** Places the comet and shapes its tails for system time `time`. The star is at the barycentre. */
+  /** Places the coma and shapes the tails for system time `time`. The star is at the barycentre. */
   poseAt(time: number): void {
     keplerPosition(this.data.orbit, time, this.position);
     keplerPosition(this.data.orbit, time - VELOCITY_DT, this.before);
-    this.nucleus.position.copy(this.position);
+    this.head.position.copy(this.position);
 
     const r = this.position.length();
     const ref = this.habitableRadius * cometParams.activeDistance;
@@ -217,18 +234,19 @@ export class Comet implements Sight {
       (0.35 + 0.65 * this.activity) * faint,
       (0.25 + 0.6 * this.activity) * faint,
     );
+    (u.uNearFade!.value as THREE.Vector2).fromArray(cometParams.nearFade);
     u.uTime!.value = time;
     this.tails.visible = length > 0.5;
 
     const comaSize = this.data.radius * 6 + 18 * this.activity;
     this.coma.scale.setScalar(comaSize);
     this.coma.material.opacity = 0.3 + 0.7 * this.activity;
+    // Hovering picks the coma, which is what you see, not just the small nucleus in it.
+    this.nucleus.pickRadius = comaSize / 2;
   }
 
   dispose(): void {
     this.scene.remove(this.object);
-    this.nucleus.geometry.dispose();
-    this.nucleus.material.dispose();
     this.coma.geometry.dispose();
     this.coma.material.dispose(); // the glow texture is shared; its owner disposes it
     this.tails.geometry.dispose();

@@ -11,11 +11,12 @@ import type { Ship } from './Ship';
 const MIN_PICK_ANGLE = 0.02;
 
 /**
- * Turns the pointer into targets: hovering finds the body (or sight, e.g. a
- * comet) under the cursor, and a click sends the ship to that body. Clicking
- * empty space or a sight does nothing: the ship only ever goes to bodies, and
- * sights can be looked at, not flown to.
- * Everything is tested as spheres, which is cheaper than raycasting meshes.
+ * Turns the pointer into targets: hovering finds the body (or sight) under the
+ * cursor, and a click sends the ship to that body. Clicking empty space or a
+ * sight does nothing: the ship only ever goes to bodies, and sights can be
+ * looked at, not flown to.
+ * Everything is tested as spheres (a comet's as big as its coma, `pickRadius`),
+ * which is cheaper than raycasting meshes.
  */
 export class Picker implements Entity {
   /** The body or sight under the pointer, if any. */
@@ -63,7 +64,7 @@ export class Picker implements Entity {
     const p = target.renderPosition;
     const depth = ray.direction.dot(this.point.subVectors(p, ray.origin));
     if (depth <= 0 || depth >= this.bestDepth) return;
-    const r = Math.max(target.radius, depth * MIN_PICK_ANGLE);
+    const r = Math.max(target.pickRadius ?? target.radius, depth * MIN_PICK_ANGLE);
     if (ray.distanceSqToPoint(p) <= r * r) {
       this.best = target;
       this.bestDepth = depth;

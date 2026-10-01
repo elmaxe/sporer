@@ -9,6 +9,8 @@ export interface Sight {
   readonly details?: string;
   /** Visual radius, used for picking. */
   readonly radius: number;
+  /** Picked as a sphere this big instead, when set (e.g. a comet's coma round its small nucleus). */
+  readonly pickRadius?: number;
   /** Interpolated position of the rendered object. */
   readonly renderPosition: THREE.Vector3;
 }
