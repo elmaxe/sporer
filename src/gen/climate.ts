@@ -18,8 +18,12 @@ import type { Rng } from './rng';
  * planet-temperatures.md for the equilibrium temperature).
  */
 
-/** Dominant atmospheric gas. 'oxygenNitrogen' is the only breathable one. */
-export type Composition = 'none' | 'oxygenNitrogen' | 'nitrogen' | 'carbonDioxide';
+/**
+ * Dominant atmospheric gas. 'oxygenNitrogen' is the only breathable one.
+ * 'hydrogen' is a rogue planet's primordial air: the only gas that stays a gas
+ * at a starless world's ~35 K (see gen/rogues.ts).
+ */
+export type Composition = 'none' | 'oxygenNitrogen' | 'nitrogen' | 'carbonDioxide' | 'hydrogen';
 
 /** What the body is and where it is. Terraforming can't change these. */
 export interface ClimateSetting {
@@ -136,14 +140,18 @@ function blackBody(irradiance: number, albedo: number, heatFlow = 0): number {
  * measured). n: 1 for a well-mixed absorber (Earth's trace gases scale with
  * the column), 2 for pressure broadening (Venus, as Robinson & Catling 2012
  * recommend), 4/3 for Titan (McKay et al. 1999, as cited there).
+ * `gravity`, where set: the pressure is taken as P / g^gravity (g in Earth's).
  */
-export const GREENHOUSE: Record<Exclude<Composition, 'none'>, { tau0: number; n: number }> = {
+export const GREENHOUSE: Record<Exclude<Composition, 'none'>, { tau0: number; n: number; gravity?: number }> = {
   // Earth: 1361 W/m², A 0.294, 288.15 K at 1.014 bar (NASA).
   oxygenNitrogen: { tau0: tauFor(288.15, blackBody(1361, 0.294)) / 1.014, n: 1 },
   // Venus: 2601.3 W/m², A 0.77, 737.15 K at 92 bar (NASA).
   carbonDioxide: { tau0: tauFor(737.15, blackBody(2601.3, 0.77)) / 92 ** 2, n: 2 },
   // Titan: 15.2 W/m², A 0.265 (Li et al. 2011), 93.65 K at 1.467 bar (Fulchignoni et al. 2005).
   nitrogen: { tau0: tauFor(93.65, blackBody(15.2, 0.265)) / 1.467 ** (4 / 3), n: 4 / 3 },
+  // No real body to calibrate on: fitted (rms 3 K over 150–450 K) to Mol Lous et al. 2022's 153 model rogues,
+  // whose H₂ collision-induced absorption depends on P²/g (Pierrehumbert & Gaidos 2011). See rogue-planets.md.
+  hydrogen: { tau0: 6.38, n: 1.161, gravity: 0.5 },
 };
 
 /** Cloud and haze albedos that replace the surface's under a thick atmosphere. */
@@ -288,10 +296,11 @@ export function planetAlbedo(state: Pick<ClimateState, 'composition' | 'pressure
   return state.surfaceAlbedo;
 }
 
-export function opticalDepth(state: Pick<ClimateState, 'composition' | 'pressure' | 'greenhouse'>): number {
+/** The atmosphere's grey optical depth; `gravity` (in g) matters only for hydrogen. */
+export function opticalDepth(state: Pick<ClimateState, 'composition' | 'pressure' | 'greenhouse'>, gravity = 1): number {
   if (state.composition === 'none' || state.pressure <= 0) return 0;
-  const { tau0, n } = GREENHOUSE[state.composition];
-  return tau0 * state.greenhouse * state.pressure ** n;
+  const { tau0, n, gravity: k = 0 } = GREENHOUSE[state.composition];
+  return tau0 * state.greenhouse * (state.pressure / gravity ** k) ** n;
 }
 
 export function waterStateOf(water: number, temperature: number, pressure: number): WaterState {
@@ -327,7 +336,7 @@ export function evaluateClimate(setting: ClimateSetting, state: ClimateState): C
   const s: ClimateState = { ...state, pressure, composition: pressure > 0 ? state.composition : 'none' };
   const albedo = planetAlbedo(s);
   const equilibriumTemperature = blackBody(SOLAR_CONSTANT * setting.insolation, albedo, setting.heatFlow);
-  const tau = opticalDepth(s);
+  const tau = opticalDepth(s, setting.gravity);
   const temperature = equilibriumTemperature * greenhouseFactor(tau);
   const retention = atmosphereRetention(setting.escapeVelocity, setting.insolation);
   const waterState = waterStateOf(s.water, temperature, pressure);
@@ -384,7 +393,7 @@ export interface ClimateBody {
 }
 
 /** Bare-surface Bond albedo by type (docs/research/climate.md). */
-const SURFACE_ALBEDO: Record<ClimateBody['type'], readonly [number, number]> = {
+export const SURFACE_ALBEDO: Record<ClimateBody['type'], readonly [number, number]> = {
   // Mercury 0.068, the Moon 0.11 (NASA).
   barren: [0.07, 0.15],
   // Dark basalt, like Mercury and the Moon.
@@ -399,7 +408,7 @@ const SURFACE_ALBEDO: Record<ClimateBody['type'], readonly [number, number]> = {
 };
 
 /** Surface water by type: ocean worlds are nearly all water, ice worlds have a frozen shell. */
-const WATER: Record<ClimateBody['type'], readonly [number, number]> = {
+export const WATER: Record<ClimateBody['type'], readonly [number, number]> = {
   ocean: [0.8, 0.95],
   terran: [0.4, 0.7],
   ice: [0.5, 0.8],
@@ -513,6 +522,9 @@ export function atmosphereTint(rng: Rng, c: Pick<ClimateState, 'pressure' | 'com
     case 'nitrogen':
       // Titan's orange haze when thick, pale blue-white when thin.
       return c.pressure >= 0.5 ? hslToHex(rng.range(28, 40), 0.75, 0.55) : hslToHex(200, 0.5, 0.85);
+    case 'hydrogen':
+      // Clear gas that only scatters (Rayleigh): a pale blue-white, like the blue of air without its haze.
+      return hslToHex(rng.range(205, 225), 0.45, 0.8);
   }
 }
 
@@ -522,6 +534,7 @@ const GAS_LABEL: Record<Exclude<Composition, 'none'>, string> = {
   oxygenNitrogen: 'N₂–O₂',
   nitrogen: 'N₂',
   carbonDioxide: 'CO₂',
+  hydrogen: 'H₂',
 };
 
 export function celsius(kelvin: number): string {

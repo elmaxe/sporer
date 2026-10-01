@@ -43,6 +43,11 @@ export const AFTER_ATMOSPHERE_RENDER_ORDER = 2;
 export interface AtmosphereSun {
   vector: THREE.Vector3;
   point: boolean;
+  /**
+   * How bright its light is, 1 for a star (shared, so it can change live):
+   * the galaxy's dim glow round a rogue planet is much less (world/galacticLight.ts).
+   */
+  strength?: { value: number };
 }
 
 const MESH_MARGIN = 1.02;
@@ -89,6 +94,7 @@ export function createAtmosphere(
       density: { value: groundDensity(look) / radius },
       sun: { value: sun.vector },
       sunIsPoint: { value: sun.point ? 1 : 0 },
+      sunStrength: sun.strength ?? { value: 1 },
       ...atmosphereUniforms,
       ...ground?.uniforms,
     },
@@ -116,6 +122,7 @@ export function createAtmosphere(
       uniform float density;
       uniform vec3 sun;
       uniform float sunIsPoint;
+      uniform float sunStrength;
       uniform float intensity;
       uniform float night;
       uniform float dusk;
@@ -191,7 +198,7 @@ export function createAtmosphere(
         float alpha = 1.0 - exp(-tau);
         float day = mix(night, 1.0, lit / column);
         float fwd = 1.0 + forward * pow(max(dot(d, L), 0.0), 8.0) * day;
-        vec3 light = (color * day + duskColor * dusk * warm / column) * fwd * intensity;
+        vec3 light = (color * day + duskColor * dusk * warm / column) * fwd * intensity * sunStrength;
         // Premultiplied: the blend dims what's behind by e^(-tau) and adds the air's light.
         gl_FragColor = vec4(light * alpha, alpha);
         #include <tonemapping_fragment>

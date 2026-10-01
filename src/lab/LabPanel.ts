@@ -27,6 +27,7 @@ const COMPOSITIONS: Record<string, Composition> = {
   'N₂–O₂ (Earth)': 'oxygenNitrogen',
   'N₂ (Titan)': 'nitrogen',
   'CO₂ (Venus, Mars)': 'carbonDioxide',
+  'H₂ (rogue planets)': 'hydrogen',
 };
 const KIND_LABELS: Record<string, LabKind> = {
   dwarf: 'dwarf',
@@ -405,7 +406,7 @@ export class LabPanel {
         state.pressure = v <= -7 ? 0 : 10 ** v;
       },
       get insolation() {
-        return Math.round(Math.log10(setting.insolation) * 100) / 100;
+        return Math.round(Math.log10(Math.max(setting.insolation, 1e-3)) * 100) / 100;
       },
       set insolation(v: number) {
         setting.insolation = 10 ** v;
@@ -417,8 +418,8 @@ export class LabPanel {
         setting.heatFlow = 10 ** v;
       },
     };
-    f.add(log, 'pressure', -7, 2.5, 0.01).name('log₁₀ pressure (bar)').onChange(changed).listen();
-    f.add(state, 'pressure', 0, 300).name('pressure (bar)').onChange(changed).listen();
+    f.add(log, 'pressure', -7, 3.5, 0.01).name('log₁₀ pressure (bar)').onChange(changed).listen();
+    f.add(state, 'pressure', 0, 3000).name('pressure (bar)').onChange(changed).listen();
     f.add(state, 'greenhouse', 0, 10, 0.01).name('greenhouse (× ref)').onChange(changed);
     f.add(state, 'water', 0, 1, 0.01).onChange(changed);
     f.add(state, 'surfaceAlbedo', 0, 1, 0.01).name('surface albedo').onChange(changed);
