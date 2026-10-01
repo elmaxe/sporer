@@ -4,6 +4,7 @@ import type { Input } from '../core/Input';
 import type { GalaxyData, StarRef } from '../gen/galaxy';
 import { describeNebula } from '../gen/nebulas';
 import { describeStars } from '../gen/stars';
+import { generateSystem } from '../gen/system';
 import { MarkerRing } from '../player/MarkerRing';
 import { HelpText } from '../ui/HelpText';
 import type { Tooltip } from '../ui/Tooltip';
@@ -11,8 +12,12 @@ import { galaxyStarSize } from './appearance';
 import type { GalaxyMap } from './GalaxyMap';
 import type { GalaxyPicker } from './GalaxyPicker';
 import type { GalaxyShip } from './GalaxyShip';
+import { summarizeSystem, type SystemSummary } from './systemSummary';
+import { renderSystemSummary } from './systemSummaryView';
 
 const REFRESH_SECONDS = 0.1;
+/** Systems whose body list is kept for the tooltip (generating one takes under a millisecond). */
+const SUMMARY_CACHE = 64;
 const HELP = 'Click a star or nebula: travel there · Scroll in at a star: enter its system · Scroll: zoom · Drag: rotate view · M: mute · Esc: menu';
 const TOUCH_HELP = 'Tap a star or nebula: travel there · Pinch in at a star: enter its system · Pinch: zoom · Drag: rotate view · Hold: identify';
 
@@ -30,6 +35,7 @@ export class GalaxyHud implements Entity {
   private readonly hoverRing: MarkerRing;
   private readonly at = new THREE.Vector3();
   private sinceRefresh = REFRESH_SECONDS;
+  private readonly summaries = new Map<number, SystemSummary>();
   private active = false;
   /** Hides the rings (e.g. while diving into a star). */
   hideMarkers = false;
@@ -81,7 +87,16 @@ export class GalaxyHud implements Entity {
     if (hovered) {
       const here = hovered === ship.current && !ship.travelling ? ' · you are here' : '';
       const inside = hovered.nebula ? ` · in the ${hovered.nebula.name}` : '';
-      this.tooltip.show(hovered, hovered.name, describeStars(hovered.stars) + inside + here, clientX, clientY, undefined, this.input.touchMode);
+      this.tooltip.show(
+        hovered,
+        hovered.name,
+        describeStars(hovered.stars) + inside + here,
+        clientX,
+        clientY,
+        undefined,
+        this.input.touchMode,
+        (el) => renderSystemSummary(el, this.summary(hovered)),
+      );
     } else if (nebula) {
       this.tooltip.show(nebula, nebula.name, describeNebula(nebula.kind), clientX, clientY, undefined, this.input.touchMode);
     } else {
@@ -104,6 +119,17 @@ export class GalaxyHud implements Entity {
     this.destinationRing.dispose();
     this.hoverRing.dispose();
     this.tooltip.hide();
+  }
+
+  /** The hovered system's bodies, generated on first hover and kept for the next few. */
+  private summary(star: StarRef): SystemSummary {
+    let summary = this.summaries.get(star.id);
+    if (!summary) {
+      summary = summarizeSystem(generateSystem(star));
+      if (this.summaries.size >= SUMMARY_CACHE) this.summaries.delete(this.summaries.keys().next().value!);
+      this.summaries.set(star.id, summary);
+    }
+    return summary;
   }
 
   private mark(ring: MarkerRing, star: StarRef | null, opacity: number, frameDt: number): void {
