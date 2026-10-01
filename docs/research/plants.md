@@ -69,6 +69,8 @@ The median error is zero and the spread grows with distance (the cells are ~0.05
 - **Sizes** (planet-level units, the UFO is ~4 wide): trees 6–11, large bushes 2.2–3.6, small bushes 0.8–1.5, placeholders built from a few primitives. Stylised.
 - **View distances** are in plant heights (tree 22 near / 46 far, large bush 30 / 60, small bush 36 / 70), so trees show further than bushes: up to ~360 units for a 8-unit tree.
 
+**Haze over the plants.** The atmosphere shader integrates the haze along each view ray down to the ground depth (`world/groundDepth.ts`). Plants weren't in that depth, so a tree on the horizon got the haze of the whole ray to the ground behind it painted over it, and looked transparent. The plant meshes are now also drawn into the ground-depth texture (`GROUND_DETAIL_LAYER`, a second pass with their own materials, which end the fragment right after the fade's discard), so the haze stops at the plant and a fading-out plant leaves no hole.
+
 ## Open questions
 
 - Per-hectare means per biome were not read from the paper (only totals and sample counts); the density trend is used, not its numbers. Extended Data Fig. 1 and Fig. 4 have them.

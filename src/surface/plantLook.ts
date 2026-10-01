@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { PlantKind, PlantSpecies } from '../gen/plants';
+import { groundDepthPass } from '../world/groundDepth';
 
 /*
  * How placeholder plants look: a few primitives per species (a cone, ball or
@@ -111,6 +112,9 @@ export type PlantLevel = 'near' | 'mid';
  * exchange pixels without a pop. The near level keeps pixels where the dither
  * is below its weight (1 up to the near fade, then falling to 0), the mid level the complement
  * of that, also under the far weight, which fades the plant out entirely.
+ * The meshes are also drawn into the atmosphere's ground-depth texture
+ * (GROUND_DETAIL_LAYER, see SurfaceEntities), so the haze stops at a tree
+ * and doesn't wash it over with the haze of the ground behind it.
  */
 export function createPlantMaterial(
   level: PlantLevel,
@@ -128,6 +132,7 @@ export function createPlantMaterial(
   material.customProgramCacheKey = () => `plant-${level}`;
   material.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
+    shader.uniforms.uDepthPass = groundDepthPass;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying float vPlantDistance;\nuniform float uHeight;\nuniform float uRange;')
       .replace(
@@ -141,7 +146,7 @@ export function createPlantMaterial(
         }`,
       );
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying float vPlantDistance;\nuniform vec2 uNear;\nuniform vec2 uFar;')
+      .replace('#include <common>', '#include <common>\nvarying float vPlantDistance;\nuniform vec2 uNear;\nuniform vec2 uFar;\nuniform bool uDepthPass;')
       .replace(
         '#include <clipping_planes_fragment>',
         `#include <clipping_planes_fragment>
@@ -154,6 +159,11 @@ export function createPlantMaterial(
           float wFar = 1.0 - smoothstep(uFar.x, uFar.y, vPlantDistance);
           if (dither < wNear || dither >= wFar) discard;
           #endif
+          // The atmosphere's ground-depth pass only needs what is left after the discard.
+          if (uDepthPass) {
+            gl_FragColor = vec4(0.0);
+            return;
+          }
         }`,
       );
   };
