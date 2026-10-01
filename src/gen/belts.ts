@@ -643,3 +643,35 @@ export function rockWithin(
   const dz = out.z - eye.z;
   return dx * dx + dy * dy + dz * dz <= reach * reach;
 }
+
+/** The space a belt's rocks keep to: an annular slab round the star's axis, plus their biggest size. */
+export interface RockBounds {
+  /** Nearest and furthest any rock comes to the axis (r·cos i and r). */
+  minAxis: number;
+  maxAxis: number;
+  /** Furthest any rock gets from the belt's plane (r·sin i). */
+  maxHeight: number;
+  maxSize: number;
+}
+
+export function rockBounds(rocks: readonly RockData[]): RockBounds {
+  const b: RockBounds = { minAxis: Infinity, maxAxis: 0, maxHeight: 0, maxSize: 0 };
+  for (const r of rocks) {
+    b.minAxis = Math.min(b.minAxis, r.radius * Math.cos(r.inclination));
+    b.maxAxis = Math.max(b.maxAxis, r.radius);
+    b.maxHeight = Math.max(b.maxHeight, r.radius * Math.abs(Math.sin(r.inclination)));
+    b.maxSize = Math.max(b.maxSize, r.size);
+  }
+  return b;
+}
+
+/**
+ * Whether no rock can be within `reach` of `eye`: the gap from the eye to the
+ * bounds' slab, across (axis distances) and up (heights), is a lower bound on
+ * the distance to every rock in it. Lets the view skip a whole belt's rocks.
+ */
+export function rocksOutOfReach(bounds: RockBounds, eye: RockEye, reach: number): boolean {
+  const across = Math.max(0, bounds.minAxis - eye.radius, eye.radius - bounds.maxAxis);
+  const up = Math.max(0, Math.abs(eye.y) - bounds.maxHeight);
+  return across * across + up * up > reach * reach;
+}

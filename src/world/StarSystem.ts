@@ -3,7 +3,6 @@ import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
 import { FIXED_DT } from '../core/Game';
 import { hashSeed } from '../gen/rng';
-import { exposureParams } from '../player/exposure';
 import { describePlanet, describeSized, type PlanetData, type SystemData } from '../gen/system';
 import { skyScale } from '../planet/frame';
 import type { Physics } from '../physics/Physics';
@@ -81,7 +80,6 @@ export class StarSystem implements Entity {
           binary ? `${data.name} ${'AB'[i]}` : data.name,
           s,
           hashSeed(data.seed, 'star', i),
-          this.glowTexture,
         ),
     );
     // Atmospheres are lit from the main star, wherever it is drawn; with none, from the galactic centre.
@@ -123,7 +121,6 @@ export class StarSystem implements Entity {
     this.ambient = new THREE.HemisphereLight('#9bb8ff', '#1a1020', 0.35);
     scene.add(this.ambient);
     this.animate(this._time);
-    this.setExposure(1);
 
     if (debug) {
       if (this.galacticLight) addGalacticLightDebug(debug);
@@ -137,6 +134,10 @@ export class StarSystem implements Entity {
     stars?.add(starParams, 'spots', 0, 3);
     stars?.add(starParams, 'limbDarkening', 0, 1);
     stars?.add(starParams, 'corona', 0, 3);
+    stars?.add(starParams, 'intensity', 0.5, 5);
+    stars?.add(starParams, 'rim', 0, 3);
+    stars?.add(starParams, 'rimWidth', 0.02, 1);
+    stars?.add(starParams, 'glare', 0, 2);
     stars?.add(stormParams, 'particleSize', 0.005, 0.1);
     stars?.add(stormParams, 'brightness', 0, 3);
     const comets = debug?.folder('Comets');
@@ -155,6 +156,7 @@ export class StarSystem implements Entity {
     belts?.add(beltParams, 'dustFar', 0, 3000);
     belts?.add(beltParams, 'dustBrightness', 0, 1);
     belts?.add(beltParams, 'reselect', 0, 2);
+    belts?.add(beltParams, 'maxMeshes', 0, 5000, 50);
   }
 
   /** System time in seconds: where every body is on its orbit. */
@@ -180,21 +182,11 @@ export class StarSystem implements Entity {
   }
 
   /**
-   * How the eye sees the star(s): 1 = dark-adapted (blazing), lower once
-   * adapted to a star filling the view (see player/exposure.ts).
-   */
-  setExposure(adaptation: number): void {
-    for (const s of this.stars) s.setExposure(exposureParams.starIntensity * adaptation);
-  }
-
-  /**
    * Places the rendered bodies where they are at `time` (render state only;
    * `setTime` restores the rest), enlarging planets and moons that would look
-   * smaller than `minAngle` from `observer` so they still show as dots. The
-   * star(s) blaze, as seen from a planet's sky.
+   * smaller than `minAngle` from `observer` so they still show as dots.
    */
   pose(time: number, observer: THREE.Vector3, minAngle: number): void {
-    this.setExposure(1);
     for (const s of this.stars) s.positionAt(time, s.object.position);
     for (const p of this.planets) this.posePlanet(p, time, observer, minAngle);
     for (const m of this.moons) this.posePlanet(m, time, observer, minAngle);

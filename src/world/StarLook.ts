@@ -6,7 +6,6 @@ import {
   createCoronaGeometry,
   createCoronaMaterial,
   createStarSurfaceMaterial,
-  setStarExposure,
 } from './starMaterials';
 
 /**
@@ -28,15 +27,15 @@ export class StarLook {
     private readonly activity: StarActivity,
     /** Seeds the surface pattern. */
     seed: number,
-    glowTexture: THREE.Texture,
   ) {
     const giant = data.kind === 'redGiant' || data.kind === 'blueGiant';
     // Not tone mapped (the shaders skip it): ACES would wash the colour out towards beige.
     this.mesh = new THREE.Mesh(new THREE.SphereGeometry(data.radius, 64, 32), createStarSurfaceMaterial(data.color, activity, seed));
-    // Giants get a wider but fainter, softer halo.
-    this.glow = new THREE.Mesh(createCoronaGeometry(), createCoronaMaterial(data.color, giant ? 0.6 : 1, seed, glowTexture));
-    // Dim stars get a relatively larger halo so white dwarfs still read as stars.
-    this.glow.scale.setScalar(data.radius * (data.radius < 12 ? 9 : giant ? 8 : 6));
+    // The glare reaches this many star radii: further round small stars, so white dwarfs still read as
+    // stars, less far round giants (already big), whose glare is fainter too.
+    const extent = data.radius < 12 ? 5 : giant ? 3.5 : 4;
+    this.glow = new THREE.Mesh(createCoronaGeometry(), createCoronaMaterial(data.color, giant ? 0.6 : 1, seed, extent));
+    this.glow.scale.setScalar(data.radius * 2 * extent);
     // Face the camera's position (a Sprite faces its view plane, which lets the glow
     // poke out in front of the star when it's off-centre). Runs after the scene's
     // matrix update, so refresh the matrix here.
@@ -48,18 +47,13 @@ export class StarLook {
     this.object.add(this.spin, this.glow);
   }
 
-  /** Surface brightness multiplier (see setStarExposure): intensity × eye adaptation. */
-  setExposure(exposure: number): void {
-    setStarExposure(this.mesh.material, this.glow.material, exposure);
-  }
-
   /** Shows the surface and corona as they are at system time `time`. */
   animate(time: number): void {
     this.spin.rotation.y = ((2 * Math.PI * time) / this.activity.rotationPeriod) % (2 * Math.PI);
     animateStarMaterials(this.mesh.material, this.glow.material, this.activity, time);
   }
 
-  /** Disposes the meshes; the glow texture is shared, and its owner disposes it. */
+  /** Disposes the meshes. */
   dispose(): void {
     this.object.removeFromParent();
     this.mesh.geometry.dispose();

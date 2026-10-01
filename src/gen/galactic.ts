@@ -215,3 +215,45 @@ function smoothstep(a: number, b: number, x: number): number {
 function clamp(v: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, v));
 }
+
+/** One of the galaxy's other systems as a point in a system's sky. */
+export interface SkyStar {
+  /** Unit direction in system space. */
+  dir: Vec3Like;
+  /** Apparent brightness, luminosity / distance² (Sun-like luminosity 1, galaxy units). */
+  flux: number;
+  /** The brighter member's colour. */
+  color: string;
+}
+
+/**
+ * The galaxy's other stars as seen from `from` (a system at galaxy position
+ * `from.position` whose `galacticTilt` turns system space into galaxy space):
+ * each where it really lies, as bright as its luminosity over its distance
+ * squared (binaries add up), brightest first. Rogue planets have no stars and
+ * are left out.
+ */
+export function skyStars(
+  stars: readonly { id: number; position: Vec3Like; stars: readonly { luminosity: number; color: string }[] }[],
+  from: { id: number; position: Vec3Like },
+  galacticTilt: Quat,
+): SkyStar[] {
+  const toSystem = conjugate(galacticTilt);
+  const p = from.position;
+  const out: SkyStar[] = [];
+  for (const s of stars) {
+    if (s.id === from.id || s.stars.length === 0) continue;
+    const d = { x: s.position.x - p.x, y: s.position.y - p.y, z: s.position.z - p.z };
+    const d2 = d.x * d.x + d.y * d.y + d.z * d.z;
+    if (d2 < 1e-9) continue;
+    const r = Math.sqrt(d2);
+    const luminosity = s.stars.reduce((sum, m) => sum + m.luminosity, 0);
+    const brightest = s.stars.reduce((a, b) => (b.luminosity > a.luminosity ? b : a));
+    out.push({
+      dir: rotate(toSystem, { x: d.x / r, y: d.y / r, z: d.z / r }, { x: 0, y: 0, z: 0 }),
+      flux: luminosity / d2,
+      color: brightest.color,
+    });
+  }
+  return out.sort((a, b) => b.flux - a.flux);
+}

@@ -47,14 +47,13 @@ export class Star implements Entity, CelestialBody {
     readonly data: SystemStar,
     /** Seeds the surface pattern and storm events. */
     readonly seed: number,
-    glowTexture: THREE.Texture,
   ) {
     this.orbiting = data.orbit.radius > 0;
     this.description = describeStar(data);
     this.radius = data.radius;
     this.standoff = data.radius + STANDOFF_MARGIN;
     this.activity = starActivity(data);
-    this.look = new StarLook(data, this.activity, seed, glowTexture);
+    this.look = new StarLook(data, this.activity, seed);
     this.storms = new StarStorms(this.activity, seed, data.radius, data.color);
 
     // decay 0 keeps intensity constant with distance, so outer planets stay lit.
@@ -102,11 +101,6 @@ export class Star implements Entity, CelestialBody {
     return this.object.position;
   }
 
-  /** Surface brightness multiplier (see setStarExposure): intensity × eye adaptation. */
-  setExposure(exposure: number): void {
-    this.look.setExposure(exposure);
-  }
-
   /** Shows the surface, corona and storms as they are at system time `time`. */
   animate(time: number): void {
     this.look.animate(time);
@@ -119,7 +113,7 @@ export class Star implements Entity, CelestialBody {
 
   dispose(): void {
     this.scene.remove(this.object);
-    this.look.dispose(); // the glow texture is shared; its owner disposes it
+    this.look.dispose();
     this.storms.dispose();
     this.light.dispose();
     this.physics.world.removeRigidBody(this.body);

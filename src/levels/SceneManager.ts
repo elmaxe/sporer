@@ -95,6 +95,8 @@ export class SceneManager implements Entity {
   private readonly planetSpin = (time: number) => this._planetLevel?.frame.spinAt(time) ?? 0;
   /** The galaxy's nebulas, for the skies of the systems near them. */
   private readonly nebulas: readonly NebulaData[];
+  /** The galaxy's stars, for the systems' skies. */
+  private readonly stars: readonly StarRef[];
 
   constructor(
     private readonly game: Game,
@@ -105,6 +107,7 @@ export class SceneManager implements Entity {
   ) {
     const { camera, input, renderer } = game;
     this.nebulas = galaxy.nebulas;
+    this.stars = galaxy.stars;
     this.galaxyLevel = new GalaxyLevel(galaxy, start, camera, input, renderer.domElement, this.tooltip, debug, sfx, () =>
       this.toSystem(),
     );
@@ -166,8 +169,7 @@ export class SceneManager implements Entity {
     // Beyond the camera's distance from the ship and from the star(s) (the ship may be far out from them).
     const handover = handoverOut(system.data.starZone, Math.max(from.zoom, this.game.camera.position.length()));
     const scale = galaxyScale(handover);
-    // As the system's eye sees it (it may still be adapted to a star close up).
-    galaxy.showCloseUp(system.data, scale, () => system.world.time, () => system.eye.exposure);
+    galaxy.showCloseUp(system.data, scale, () => system.world.time);
     // Galaxy space from system space: the system's tilt, turned with the galaxy.
     const matchView = () => from.orientation(this.view).premultiply(galaxy.systemRotation(system.data, this.rotation));
     this.beginSeamless({
@@ -225,8 +227,7 @@ export class SceneManager implements Entity {
     const to = system.orbit;
     const handover = handoverIn(system.data.starZone);
     const scale = galaxyScale(handover);
-    // Dark-adapted, as the system's eye will be (it settles at the handover, with the star small).
-    galaxy.showCloseUp(system.data, scale, () => system.world.time, () => 1);
+    galaxy.showCloseUp(system.data, scale, () => system.world.time);
     // System space from galaxy space: undo the galaxy's turn and the system's tilt.
     const matchView = () =>
       from.orientation(this.view).premultiply(galaxy.systemRotation(system.data, this.rotation).invert());
@@ -249,7 +250,6 @@ export class SceneManager implements Entity {
       },
       swap: () => {
         this.game.setLevel(system);
-        system.eye.settleNext();
         // Whichever side of the ecliptic the view came in from, the ship arrives along it, just above, to
         // hover over the star, and the camera settles behind it, low, turning to look at the star.
         const dir = this.direction.copy(BACK).applyQuaternion(matchView());
@@ -386,7 +386,6 @@ export class SceneManager implements Entity {
         // Hovering as high as the zoom it ends at puts it.
         system.ship.parkAt(body, end);
         this.game.setLevel(system);
-        system.eye.settleNext();
         // Settle round from the matched view, looking down far enough to keep the planet in view under the ship.
         const dir = this.direction.copy(BACK).applyQuaternion(matchView());
         const elevation = system.hoverElevation(end, Math.atan2(dir.y, Math.hypot(dir.x, dir.z)));
@@ -517,6 +516,7 @@ export class SceneManager implements Entity {
       input,
       this.tooltip,
       this.debug,
+      this.stars,
       this.nebulas,
       this.sfx,
       () => this.toGalaxy(),

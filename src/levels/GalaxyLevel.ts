@@ -116,12 +116,11 @@ export class GalaxyLevel extends Level {
 
   /**
    * Shows the star(s) of `system` (the ship's current star) up close, `scale`
-   * galaxy units per system unit, animated by the system's `clock` and
-   * seen at its eye `adaptation`.
+   * galaxy units per system unit, animated by the system's `clock`.
    */
-  showCloseUp(system: SystemData, scale: number, clock: () => number, adaptation: () => number): void {
+  showCloseUp(system: SystemData, scale: number, clock: () => number): void {
     this.hideCloseUp();
-    this.closeUp = new StarCloseUp(this.root, this.ship.current, system, scale, clock, adaptation);
+    this.closeUp = new StarCloseUp(this.root, this.ship.current, system, scale, clock);
   }
 
   hideCloseUp(): void {

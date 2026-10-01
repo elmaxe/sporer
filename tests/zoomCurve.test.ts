@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
+import { generateGalaxy } from '../src/gen/galaxy';
+import { generateSystem, systemExtent } from '../src/gen/system';
 import {
+  SYSTEM_VIEW_EXTENTS,
   flightAltitude,
   highAltitude,
   hoverGap,
   minPitchAt,
+  systemMaxView,
   parkGap,
   zoomCurveParams as params,
   zoomFraction,
@@ -82,5 +86,23 @@ describe('hoverGap', () => {
     // A star or a giant: capped, so the ship hovers low over it too.
     expect(hoverGap(31)).toBe(params.maxHoverGap);
     expect(hoverGap(300)).toBe(params.maxHoverGap);
+  });
+});
+
+describe('systemMaxView', () => {
+  const galaxy = generateGalaxy(1337);
+
+  it('never zooms out less than the base', () => {
+    expect(systemMaxView(100, 2500)).toBe(2500);
+  });
+
+  it('takes in every system whole, with room round it (star 2470 reaches 2328 out)', () => {
+    for (const id of [2470, 3309, 0, 42]) {
+      const extent = systemExtent(generateSystem(galaxy.stars[id]!));
+      expect(systemMaxView(extent, 2500)).toBeGreaterThanOrEqual(SYSTEM_VIEW_EXTENTS * extent);
+      // The edge of the system is within 25° of the view's centre (half the vertical field of view is 32.5°).
+      expect(Math.atan(extent / systemMaxView(extent, 2500))).toBeLessThan((25 * Math.PI) / 180);
+    }
+    expect(systemExtent(generateSystem(galaxy.stars[2470]!))).toBeGreaterThan(2000);
   });
 });

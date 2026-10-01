@@ -45,6 +45,20 @@ export const zoomCurveParams = {
 export type ZoomCurveParams = typeof zoomCurveParams;
 
 /**
+ * The system camera may zoom out to this many times the system's extent
+ * (`systemExtent`) before scrolling on leaves for the galaxy: the whole
+ * system fits with room round it, even in a portrait view (half the
+ * vertical field of view is 32.5°, so the edge of the system is ~23° off
+ * the view's centre from 2.4 extents away).
+ */
+export const SYSTEM_VIEW_EXTENTS = 2.4;
+
+/** The system camera's farthest zoom for a system reaching `extent` out: room to see it whole, and never under `base`. */
+export function systemMaxView(extent: number, base: number): number {
+  return Math.max(base, SYSTEM_VIEW_EXTENTS * extent);
+}
+
+/**
  * The gap between the ship hovering above a body of `radius` and its surface
  * at the reference view. Straight above the body nothing orbits (moons stay
  * near the ecliptic, rings in the equator), so it only depends on the size.

@@ -35,7 +35,7 @@ export const leaveParams = {
   pastHandover: 1.3,
   /** ...and far enough to take in the planet's moons: this many times the farthest one's distance (or its standoff). */
   reach: 2.2,
-  /** Never farther than this (the system camera's max is 2500, past which is the galaxy). */
+  /** Never farther than this (the system camera's max is at least 2500, past which is the galaxy). */
   maxDistance: 1200,
 };
 

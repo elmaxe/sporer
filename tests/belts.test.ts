@@ -20,6 +20,8 @@ import {
   librationTurns,
   rockEye,
   rockPosition,
+  rockBounds,
+  rocksOutOfReach,
   rockWithin,
   type BeltContext,
   type BeltData,
@@ -329,5 +331,29 @@ describe('scenery rocks', () => {
       }
     }
     expect(near).toBeGreaterThan(100);
+  });
+
+  it('are never all out of reach while one is in reach (the whole-belt shortcut is safe)', () => {
+    const rng = new Rng(9);
+    const p = { x: 0, y: 0, z: 0 };
+    const eye = { x: 0, y: 0, z: 0, distance: 0, radius: 0, turn: 0 };
+    let skipped = 0;
+    for (const { belt, rocks } of sample) {
+      const bounds = rockBounds(rocks);
+      for (let k = 0; k < 20; k++) {
+        const time = rng.range(0, 5000);
+        const turns = beltTurns(belt, time);
+        const lib = librationTurns(belt, time);
+        // Anywhere from inside the belt to far beyond it, above or below the plane.
+        const angle = rng.range(0, 2 * Math.PI);
+        const out = rng.range(0, 2.5) * belt.outer;
+        rockEye({ x: Math.cos(angle) * out, y: rng.range(-1, 1) * belt.outer, z: Math.sin(angle) * out }, eye);
+        const reach = rng.range(20, 600);
+        if (!rocksOutOfReach(bounds, eye, reach)) continue;
+        skipped++;
+        for (const r of rocks) expect(rockWithin(r, turns, lib, eye, reach, p)).toBe(false);
+      }
+    }
+    expect(skipped).toBeGreaterThan(20);
   });
 });
