@@ -7,17 +7,19 @@ import type { GalaxyData, StarRef } from '../gen/galaxy';
 import type { NebulaData } from '../gen/nebulas';
 import { hoverGap, parkGap, zoomCurveParams } from '../player/zoomCurve';
 import { Tooltip } from '../ui/Tooltip';
-import type { Planet } from '../world/Planet';
+import { isGas, type Planet } from '../world/Planet';
 import { arrivalParams, clampElevation, descentParams, leaveParams } from './arrival';
 import { SurfaceChangeStore } from '../surface/changes';
 import { GALAXY_VIEW_DISTANCE, GALAXY_VIEW_ELEVATION, GalaxyLevel } from './GalaxyLevel';
 import { PLANET_VIEW_DISTANCE, PlanetLevel } from './PlanetLevel';
 import type { Level } from './Level';
 import {
+  focusDistance,
   galaxyScale,
   handoverIn,
   handoverOut,
   planetHandoverIn,
+  heightAboveShip,
   planetHandoverOut,
   planetZoomParams,
   sampleSeamlessZoom,
@@ -59,8 +61,8 @@ interface SeamlessTransition {
  * the galaxy, framed on the current star; zooming in at a star enters its
  * system (generated on demand). Zooming in while parked at a planet or moon
  * descends to its low orbit (a planet level, built on demand and dropped on
- * the way back up). Each transition is one continuous zoom with no cut, under
- * a whoosh, with input blocked meanwhile: the outgoing level plays alone, then
+ * the way back up). Each transition is one continuous zoom with no cut, with
+ * input blocked meanwhile: the outgoing level plays alone, then
  * both are drawn and crossfaded, framed identically, then the incoming one
  * plays alone.
  *
@@ -168,7 +170,6 @@ export class SceneManager implements Entity {
     galaxy.showCloseUp(system.data, scale, () => system.world.time, () => system.eye.exposure);
     // Galaxy space from system space: the system's tilt, turned with the galaxy.
     const matchView = () => from.orientation(this.view).premultiply(galaxy.systemRotation(system.data, this.rotation));
-    this.sfx.play('transitionOut');
     this.beginSeamless({
       zoom: this.seamlessZoom(from.zoom, handover, GALAXY_VIEW_DISTANCE / scale),
       outgoing: system,
@@ -229,7 +230,6 @@ export class SceneManager implements Entity {
     // System space from galaxy space: undo the galaxy's turn and the system's tilt.
     const matchView = () =>
       from.orientation(this.view).premultiply(galaxy.systemRotation(system.data, this.rotation).invert());
-    this.sfx.play('transitionIn');
     this.beginSeamless({
       zoom: this.seamlessZoom(from.zoom / scale, handover, ARRIVAL_DISTANCE),
       outgoing: galaxy,
@@ -257,7 +257,7 @@ export class SceneManager implements Entity {
         this.flyIn(system, clampElevation(dir, ...arrivalParams.shipElevation, dir), handover);
         const elevation = system.hoverElevation(ARRIVAL_DISTANCE, 0);
         to.lookFrom(clampElevation(this.settle, elevation, elevation, this.settle));
-        system.aimAt(system.world.stars[0]!, 0);
+        if (!system.starless) system.aimAt(system.world.anchor, 0);
       },
       finish: () => {
         galaxy.hideCloseUp();
@@ -299,9 +299,11 @@ export class SceneManager implements Entity {
     const scale = frame.scale;
     // Body frame from system space.
     const matchView = () => from.orientation(this.view).premultiply(frame.inverse);
-    this.sfx.play('transitionIn');
+    // Flown into mid-trip: the travel sound gives way to the descent's.
+    system.ship.silence();
+    if (hasAir(body)) this.sfx.play('reentry');
     this.beginSeamless({
-      zoom: this.planetZoom(from.zoom, handover, PLANET_VIEW_DISTANCE / scale),
+      zoom: this.planetZoom(from.zoom, handover, heightAboveShip(level.ship.object.position.length(), PLANET_VIEW_DISTANCE) / scale),
       outgoing: system,
       incoming: level,
       apply: (s) => {
@@ -313,7 +315,7 @@ export class SceneManager implements Entity {
         }
         if (s.blend > 0) {
           to.setFocus(ORIGIN, 1 - s.tail);
-          to.setDistance(this.descentDistance(s, handover * scale, level.ship.object.position.length(), scale));
+          to.setDistance(focusDistance(s.distance * scale, s.tail, level.ship.object.position.length()));
           to.setView(matchView(), 1 - s.tail);
           level.ship.setScale(s.tail);
         }
@@ -359,15 +361,15 @@ export class SceneManager implements Entity {
     const end = this.leaveDistance(body, handover);
     // System space from the body frame.
     const matchView = () => from.orientation(this.view).premultiply(frame.quaternion);
-    this.sfx.play('transitionOut');
+    this.sfx.play('leavePlanet');
     this.beginSeamless({
-      zoom: this.planetZoom(from.zoom / scale, handover, end),
+      zoom: this.planetZoom(heightAboveShip(planet.ship.object.position.length(), from.zoom) / scale, handover, end),
       outgoing: planet,
       incoming: system,
       apply: (s) => {
         if (s.blend < 1) {
           from.setFocus(ORIGIN, s.lead);
-          from.setDistance(s.distance * scale);
+          from.setDistance(focusDistance(s.distance * scale, 1 - s.lead, planet.ship.object.position.length()));
           planet.ship.setScale(1 - s.lead);
         }
         if (s.blend > 0) {
@@ -414,20 +416,6 @@ export class SceneManager implements Entity {
     this.dropPlanet();
     this._systemLevel.dispose();
     this.galaxyLevel.dispose();
-  }
-
-  /**
-   * The planet camera's distance from its centre during the tail of the descent (planet units). The centre
-   * rises from the globe's middle to the ship as the camera closes in on it, so closing in as the timeline
-   * does, faster than that, would carry the camera through the globe. Instead the camera's height over the
-   * globe's centre follows a smooth descent, log-scaled from the handover's to the ship's own height plus the
-   * final distance, and it never comes in nearer than the timeline's distance.
-   */
-  private descentDistance(s: SeamlessSample, handover: number, shipRadius: number, scale: number): number {
-    const timeline = s.distance * scale;
-    if (s.blend < 1) return timeline;
-    const height = Math.exp(Math.log(handover) * (1 - s.tail) + Math.log(shipRadius + PLANET_VIEW_DISTANCE) * s.tail);
-    return Math.max(timeline, height - s.tail * shipRadius);
   }
 
   private seamlessZoom(start: number, handover: number, end: number): SeamlessZoom {
@@ -477,7 +465,7 @@ export class SceneManager implements Entity {
    * evenly to hover above it as the camera settles.
    */
   private flyIn(system: SystemLevel, dir: THREE.Vector3, handover: number): void {
-    const star = system.world.stars[0]!;
+    const star = system.world.anchor;
     const park = star.radius + parkGap(hoverGap(star.radius), ARRIVAL_DISTANCE);
     const start = Math.min(0.8 * handover, Math.max(arrivalParams.start * handover, arrivalParams.minStart * park));
     const from = this.side.copy(dir).multiplyScalar(start);
@@ -530,6 +518,7 @@ export class SceneManager implements Entity {
       this.tooltip,
       this.debug,
       this.nebulas,
+      this.sfx,
       () => this.toGalaxy(),
       () => this.toPlanet(),
     );
@@ -539,4 +528,9 @@ export class SceneManager implements Entity {
     history.replaceState(null, '', url);
     return level;
   }
+}
+
+/** Descending to it means a reentry: it has an atmosphere, or is a gas giant (all atmosphere). */
+function hasAir(body: Planet): boolean {
+  return !!body.config.atmosphere || isGas(body.config);
 }

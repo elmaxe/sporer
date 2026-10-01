@@ -453,7 +453,10 @@ export class SystemMap implements Entity {
     // The ship: beside the body it's parked at, else between the orbits at its distance from the star.
     const x = parked
       ? parked.x + parked.r * 0.7 + 4
-      : distanceToMapX(layout, this.data.starZone, this.orbits, ship.object.position.length());
+      : this.data.stars.length === 0
+        ? // Round a rogue planet everything is in its one column.
+          (layout.planets[0]?.x ?? layout.sunEdge)
+        : distanceToMapX(layout, this.data.starZone, this.orbits, ship.object.position.length());
     const y = parked ? parked.y - parked.r * 0.7 - 4 : layout.axisY;
     const pulse = (performance.now() / 1000) % 1.4;
     ctx.beginPath();
@@ -638,7 +641,7 @@ export class SystemMap implements Entity {
     if (this.input.blocked) return;
     const rect = this.canvas.getBoundingClientRect();
     const body = this.bodyAt(e.clientX - rect.left, e.clientY - rect.top);
-    if (body) this.ship.moveTo(body);
+    if (body) this.picker.select(body);
   };
 }
 

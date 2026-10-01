@@ -2,7 +2,7 @@
 // Usage: npm run smoke [-- [options] [http://localhost:5173/]]   (dev server must be running)
 //   --only <sections>  run just these, comma-separated, in the usual order: core (flying, picking, system map,
 //                      living stars, comets, eye, sky), galaxy (the galaxy loop), nebulas (every kind on the map
-//                      and from inside), audio, planet (the home planet
+//                      and from inside), rogues (fly to a rogue planet and down to it), audio, planet (the home planet
 //                      loop, held zoom, seamless zooms), types (every planet type and geyser kind), lab, touch
 //   --quick            everything but types
 //   --timeout <s>      give up after this long (default 900), reporting the section it was in
@@ -16,7 +16,7 @@
 // its system, where the ship flies in and hovers straight above the star with the camera over it; the galaxy shows distant
 // galaxies, twinkles, spins and draws binaries as two dots, and picking works while it's turned), a real click on the
 // menu button starts audio and opens the menu (the game pauses; volume sliders and a planet lab link; a real Esc
-// closes it); then the transitions and galaxy travel play their whooshes, and M mutes. Then the planet loop (hover at
+// closes it); then galaxy travel asks for its sound (and the zooms between levels for none), and M mutes. Then the planet loop (hover at
 // a planet, scroll in to low orbit, click the globe and fly, the Equal Earth map is shown and a click on it sets the
 // autopilot there, scroll all the way in and out and check the ship's altitude follows, scroll back out to hover
 // above it, as high as the zoom says, with the camera zoomed out past the handover and the planet in view), and again for every planet
@@ -47,6 +47,10 @@
 // sets course for its star; then a system inside each kind (emission, reflection, dark, planetary, remnant) is entered
 // from the galaxy: its HUD names the nebula, its sky is baked (glowing kinds add light, a dark one blocks it) and
 // hiding that sky changes the picture, also in low orbit inside the emission nebula; FPS in each.
+// Rogue planets: the galaxy map draws every rogue; hovering one names it as a rogue planet and clicking it flies
+// there; scrolled into, its "system" has no star but the galactic light, the HUD and URL say where it is, the ship
+// hovers above it and it isn't pitch black (system view and low orbit); the planet loop runs over it (no plants, no
+// star in the sky) and every zoom on the way crossfades and never goes black; FPS in its system.
 // Planet lab (lab.html): every type, a moon, a comet and an asteroid build and draw in both views, a game planet, a game comet
 // and a game asteroid load, the panel works.
 // Prints JSON with FPS, console errors and screenshot paths. Exit 1 on failure.
@@ -57,7 +61,7 @@ import { launch, sleep, StallError } from './lib/browser.mjs';
 
 const args = process.argv.slice(2);
 const option = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
-const SECTIONS = ['core', 'galaxy', 'nebulas', 'audio', 'planet', 'types', 'lab', 'touch'];
+const SECTIONS = ['core', 'galaxy', 'nebulas', 'rogues', 'audio', 'planet', 'types', 'lab', 'touch'];
 const only = option('--only')?.split(',');
 if (only?.some((name) => !SECTIONS.includes(name))) {
   console.error(`--only takes some of: ${SECTIONS.join(', ')}`);
@@ -108,7 +112,7 @@ const started = await page.goto(url, READY, 60000);
 if (started) await drawFrames(20);
 
 const state = `({ speed: +ship.speed.toFixed(1), pos: ship.object.position.toArray().map((n) => +n.toFixed(1)) })`;
-let before, after, autopilot, pick, systemMap, sky, living, comet, belt, eye, galaxyLoop, fps, audio, planetLoop, heldZoom, cometLoop, asteroidLoops, seamless, nebulas;
+let before, after, autopilot, pick, systemMap, sky, living, comet, belt, eye, galaxyLoop, fps, audio, planetLoop, heldZoom, cometLoop, asteroidLoops, seamless, nebulas, rogues;
 const planetTypes = [];
 let lab = null;
 let touch = null;
@@ -168,16 +172,20 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null, during = n
   await until(`(() => { const o = levels.systemLevel.orbit;
     return o.targetDistance <= o.params.minDistance && o.zoom < o.params.minDistance * 1.2; })()`, 10000);
   if (handoverShot) await evaluate(`__seamless.freezeWhen = 'planet'`);
+  const soundBefore = await evaluate(`audio.lastPlayed?.name ?? null`);
   await wheel(-300); // keep scrolling in
   if (handoverShot) r.handoverShot = await freezeShot(handoverShot);
   // Right after a page load the headless frame rate can be ~2 FPS, and a click while the zoom still runs is ignored.
   for (let i = 0; i < 40 && (await evaluate(`levels.mode !== 'planet' || levels.transitioning`)); i++) await sleep(250);
   r.mode = await evaluate(`levels.mode`);
   r.soundIn = await evaluate(`audio.lastPlayed?.name ?? null`);
+  // An airless body's descent asks for nothing, leaving the cue from before it.
+  r.soundBefore = soundBefore;
   if (r.mode !== 'planet') return r;
   r.sky = await evaluate(`planet.skyStats`);
   // The sky star's clock and the planet level's own clock (its time is the system time down here).
-  const skyTime = `[world.stars[0].storms.shownTime, planet.time]`;
+  // (A rogue planet has no star: its sky's clock is the level's own.)
+  const skyTime = `[world.stars[0]?.storms.shownTime ?? planet.time, planet.time]`;
   const skyBefore = await evaluate(skyTime);
   r.expectedSky = await evaluate(`({ bodies: world.planets.length + world.moons.length + world.nuclei.length + world.asteroids.length - 1 - world.moons.filter((m) => m.parent === __body).length })`);
 
@@ -673,7 +681,7 @@ await section('core', async () => {
   return hovered && noManual && picked && skyOk && alive;
 });
 
-if (started && (runs('galaxy') || runs('nebulas') || runs('audio') || runs('planet'))) {
+if (started && (runs('galaxy') || runs('nebulas') || runs('rogues') || runs('audio') || runs('planet'))) {
   // Seamless zooms: while a level transition runs, sample every drawn frame (after drawing, before it's shown):
   // the crossfade weight and the canvas brightness (mean over a sparse grid). Each transition is one segment,
   // from the level it left to the one it reached. Setting __seamless.freezeWhen to a mode stops the game once
@@ -957,6 +965,133 @@ await section('nebulas', async () => {
   return r.ok;
 });
 
+/** Mean brightness (0–255) of the middle of a body's disc as drawn now (the inner half of its radius on screen). */
+const discBrightness = (bodyExpr) => `(() => {
+  game.redraw();
+  const body = ${bodyExpr};
+  const cam = game.camera;
+  const c = body.renderPosition.clone().project(cam);
+  const edge = body.renderPosition.clone().add(cam.up.clone().applyQuaternion(cam.quaternion).multiplyScalar(body.radius)).project(cam);
+  const gl = game.renderer.getContext();
+  const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
+  const cx = (c.x + 1) / 2 * w, cy = (c.y + 1) / 2 * h;
+  const r = 0.5 * Math.hypot((edge.x - c.x) / 2 * w, (edge.y - c.y) / 2 * h);
+  const px = new Uint8Array(4);
+  let sum = 0, n = 0;
+  for (let y = -r; y <= r; y += Math.max(1, r / 6)) for (let x = -r; x <= r; x += Math.max(1, r / 6)) {
+    if (x * x + y * y > r * r) continue;
+    gl.readPixels(Math.round(cx + x), Math.round(cy + y), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    sum += px[0] + px[1] + px[2]; n++;
+  }
+  return n ? +(sum / (3 * n)).toFixed(2) : null;
+})()`;
+
+await section('rogues', async () => {
+  const r = (rogues = {});
+  const home = await evaluate(`system.id`);
+  const segmentsBefore = await evaluate(`window.__seamless ? __seamless.segments.length : 0`);
+  await until(`!levels.transitioning`, 20000);
+  await evaluate(`levels.toGalaxy()`);
+  await until(`levels.mode === 'galaxy' && !levels.transitioning`, 40000);
+  r.map = await evaluate(`({
+    rogues: galaxy.rogues.length,
+    drawn: levels.galaxyLevel.rogues.positions.length / 3,
+    idsFollowStars: galaxy.rogues.every((x, i) => x.id === galaxy.stars.length + i),
+  })`);
+  // Hover and click a rogue, looking at it across its nearest star (where the ship docks), a little from one side.
+  r.pick = await evaluate(`new Promise((resolve) => {
+    const level = levels.galaxyLevel;
+    const target = galaxy.rogues.find((x) => !x.nebula) ?? galaxy.rogues[0];
+    const d = (s) => Math.hypot(s.position.x - target.position.x, s.position.y - target.position.y, s.position.z - target.position.z);
+    const from = galaxy.stars.slice().sort((a, b) => d(a) - d(b))[0];
+    level.ship.jumpTo(from);
+    const V = game.camera.position.constructor;
+    const at = (s) => new V(s.position.x, s.position.y, s.position.z).applyMatrix4(level.root.matrixWorld);
+    level.orbit.setDistance(d(from) * 1.2);
+    level.orbit.lookFrom(at(from).sub(at(target)).normalize().applyAxisAngle(new V(0, 1, 0), 0.4));
+    const canvas = game.renderer.domElement;
+    const rect = canvas.getBoundingClientRect();
+    const frames = (k) => new Promise((r) => { let i = 0; (function f() { if (++i > k) r(); else requestAnimationFrame(f); })(); });
+    setTimeout(async () => {
+      const p = at(target).project(game.camera);
+      const here = { clientX: rect.left + ((p.x + 1) / 2) * rect.width, clientY: rect.top + ((1 - p.y) / 2) * rect.height, bubbles: true };
+      canvas.dispatchEvent(new PointerEvent('pointermove', here));
+      await frames(3);
+      const tip = document.getElementById('tooltip');
+      const tooltip = tip.hidden ? null : { name: document.getElementById('tooltip-name').textContent, text: tip.textContent };
+      canvas.dispatchEvent(new PointerEvent('pointerdown', { ...here, button: 0 }));
+      canvas.dispatchEvent(new PointerEvent('pointerup', { ...here, button: 0 }));
+      await frames(2);
+      resolve({ rogue: target.id, name: target.name, onScreen: Math.abs(p.x) < 1 && Math.abs(p.y) < 1, tooltip, destination: level.ship.destination?.id ?? null });
+    }, 1500);
+  })`);
+  r.arrived = (await until(`!levels.galaxyLevel.ship.travelling`, 40000)) && (await evaluate(`levels.galaxyLevel.ship.current.id`)) === r.pick.rogue;
+  r.galaxyFps = await evaluate(measureFps);
+  // Scroll in: the zoom crossfades into the rogue's system (screenshot mid-handover).
+  if (await evaluate(`!!window.__seamless`)) await evaluate(`__seamless.freezeWhen = 'system'`);
+  await evaluate(`levels.toSystem()`);
+  r.handoverShot = await freezeShot('rogue-handover');
+  r.entered = await until(`levels.mode === 'system' && !levels.transitioning && system.id === ${r.pick.rogue}`, 40000);
+  r.flewIn = await until(`!ship.enRoute`, 40000);
+  r.system = await evaluate(`({
+    stars: world.stars.length,
+    planets: world.planets.length,
+    galacticLight: !!world.galacticLight,
+    hud: document.getElementById('hud-location').textContent,
+    url: location.search,
+    hovering: ship.targetBody === world.planets[0],
+    centred: world.planets[0].renderPosition.length() < 1e-6,
+    trails: levels.systemLevel.trails.planetTrails?.length ?? null,
+  })`);
+  r.disc = await evaluate(discBrightness('world.planets[0]'));
+  r.fps = await evaluate(measureFps);
+  const shot = await send('Page.captureScreenshot', { format: 'png' });
+  r.screenshot = join(outDir, 'rogue-system.png');
+  writeFileSync(r.screenshot, Buffer.from(shot.result.data, 'base64'));
+  // Down to low orbit and back, as for any planet; down there it's lit (not black), with no star in the sky.
+  r.loop = await runPlanetLoop('world.planets[0]', 'rogue-low-orbit', null, async () => ({
+    brightness: await evaluate(canvasBrightness),
+    sunLight: await evaluate(`planet.globe.sunLight.r + planet.globe.sunLight.g + planet.globe.sunLight.b`),
+  }));
+  r.segments = await evaluate(`window.__seamless ? __seamless.segments.slice(${segmentsBefore}).map((seg) => ({
+    zoom: seg.from + ' → ' + seg.to,
+    crossfadeFrames: seg.frames.filter((x) => x.weight !== null && x.weight > 0 && x.weight < 1).length,
+    minBrightness: +Math.min(...seg.frames.map((x) => x.brightness)).toFixed(2),
+  })) : null`);
+  // Back home, for the sections after this one.
+  await evaluate(`levels.toGalaxy()`);
+  await until(`levels.mode === 'galaxy' && !levels.transitioning`, 40000);
+  await evaluate(`levels.galaxyLevel.ship.jumpTo(galaxy.stars[${home}]), levels.toSystem()`);
+  r.back = await until(`levels.mode === 'system' && !levels.transitioning && system.id === ${home}`, 40000);
+
+  r.ok =
+    r.map.rogues >= 5 &&
+    r.map.drawn === r.map.rogues &&
+    r.map.idsFollowStars &&
+    r.pick.onScreen &&
+    r.pick.tooltip?.name === r.pick.name &&
+    r.pick.tooltip.text.includes('Rogue planet') &&
+    r.pick.destination === r.pick.rogue &&
+    r.arrived &&
+    r.entered &&
+    r.flewIn &&
+    r.system.stars === 0 &&
+    r.system.planets === 1 &&
+    r.system.galacticLight &&
+    r.system.hud.includes('Rogue planet') &&
+    r.system.url.includes(`star=${r.pick.rogue}`) &&
+    r.system.hovering &&
+    r.system.centred &&
+    r.disc > 6 &&
+    r.loop.ok &&
+    r.loop.sky.stars === 0 &&
+    r.loop.during.brightness > 3 &&
+    r.loop.during.sunLight > 0 &&
+    (r.segments === null || (r.segments.length >= 3 && r.segments.every((x) => x.crossfadeFrames > 0 && x.minBrightness > 0.5))) &&
+    r.back;
+  return r.ok;
+});
+
 await section('audio', async () => {
   // Audio: a real (trusted) click on the menu button unlocks audio and opens the menu, which pauses the game and
   // holds the volume sliders and a link to the planet lab (for the first planet here); a real Esc closes it.
@@ -992,7 +1127,7 @@ await section('audio', async () => {
   await until(`!menu.isOpen && ${clock} > ${pausedAt}`, 5000);
   audio.closedByEsc = await evaluate(`!menu.isOpen && !game.paused && ${clock} > ${pausedAt}`);
 
-  // Whooshes: zoom out (transition), travel to a neighbour, zoom back in.
+  // Sound cues: zoom out (silent), travel to a neighbour (the travel loop), zoom back in (silent).
   const played = `(audio.lastPlayed && { name: audio.lastPlayed.name, seconds: +audio.lastPlayed.seconds.toFixed(2), count: audio.lastPlayed.count })`;
   audio.sfx = {};
   await evaluate(`levels.toGalaxy()`);
@@ -1031,10 +1166,10 @@ await section('audio', async () => {
     audio.weatherToggle.offHidden &&
     audio.weatherToggle.back &&
     audio.closedByEsc &&
-    audio.sfx.out?.name === 'transitionOut' &&
-    audio.sfx.travel?.name === 'travel' &&
-    audio.sfx.in?.name === 'transitionIn' &&
-    audio.sfx.in.count === 3 &&
+    audio.sfx.out === null &&
+    audio.sfx.travel?.name === 'interstellarTravel' &&
+    audio.sfx.in?.name === 'interstellarTravel' &&
+    audio.sfx.in.count === 1 &&
     audio.sfx.modeAfter === 'system' &&
     audio.mutedByKey
   );
@@ -1168,8 +1303,8 @@ await section('planet', async () => {
   ];
   seamless.ok =
     kinds.every((k) => seamless.kinds.includes(k)) && seamless.segments.every((x) => x.crossfadeFrames > 0 && x.minBrightness > 0.5 && (x.minClearance ?? Infinity) >= 1);
-  // Audio is only unlocked by the audio section's real click, so only then can the loop hear its whooshes.
-  const heard = !sections.audio || (planetLoop.soundIn === 'transitionIn' && planetLoop.soundOut === 'transitionOut');
+  // Audio is only unlocked by the audio section's real click, so only then does the loop ask for its sounds.
+  const heard = !sections.audio || (['reentry', planetLoop.soundBefore].includes(planetLoop.soundIn) && planetLoop.soundOut === 'leavePlanet');
   const asteroidsOk = !hasBelt || (asteroidLoops.length === 2 && asteroidLoops.every((l) => l.ok));
   return planetLoop.ok && heard && heldZoom.ok && (!hasComet || cometLoop.ok) && asteroidsOk && planetLoop.handoverShot !== null && seamless.ok;
 });
@@ -1257,7 +1392,8 @@ async function runLab() {
     result.ok =
       (!c.type || result.globe.type === c.type) &&
       (!c.kind || result.globe.kind === c.kind) &&
-      result.globe.triangles > 5000 &&
+      // Comet nuclei and asteroids are small: from the lab's default view their six root chunks (3072 triangles) are fine enough.
+      result.globe.triangles > (c.kind === 'comet' || c.kind === 'asteroid' ? 3000 : 5000) &&
       result.system.triangles > 500 &&
       // A comet's nucleus is nearly black (albedo ~4%), as are carbonaceous asteroids, so less light comes back from them.
       result.globe.brightness > (c.kind === 'comet' || c.kind === 'asteroid' ? 3 : 8) &&
@@ -1580,7 +1716,7 @@ const ok = started && !stalled && Object.keys(sections).length > 0 && Object.val
 console.error(`[smoke] ${ok ? 'ok' : 'FAILED'} in ${Math.round((Date.now() - T0) / 1000)} s${errors.length ? `, ${errors.length} console errors` : ''}`);
 console.log(
   JSON.stringify(
-    { ok, started, stalled, sections, before, after, autopilot, pick, systemMap, sky, living, comet, belt, eye, galaxyLoop, nebulas, seamless, audio, planetLoop, heldZoom, cometLoop, asteroidLoops, planetTypes, touch, touchLab, lab, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
+    { ok, started, stalled, sections, before, after, autopilot, pick, systemMap, sky, living, comet, belt, eye, galaxyLoop, nebulas, rogues, seamless, audio, planetLoop, heldZoom, cometLoop, asteroidLoops, planetTypes, touch, touchLab, lab, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
     null,
     2,
   ),

@@ -256,7 +256,7 @@ describe('graphics settings: plants', () => {
     expect(parseGraphicsSettings(null, true).plants).toBe(false);
     expect(parseGraphicsSettings('{"plants":true}', true).plants).toBe(true);
     expect(parseGraphicsSettings('{"plants":false}', false).plants).toBe(false);
-    expect(parseGraphicsSettings('{"weather":false}', true)).toEqual({ weather: false, plants: false });
+    expect(parseGraphicsSettings('{"weather":false}', true)).toEqual({ weather: false, plants: false, wireframe: false });
     expect(parseGraphicsSettings('{"plants":"yes"}', false).plants).toBe(true);
   });
 });

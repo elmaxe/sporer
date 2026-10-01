@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Entity } from '../core/Entity';
 import type { Physics } from '../physics/Physics';
+import { renderScene } from '../world/wireframe';
 
 /** 'space': boost and map (the ship only flies where you tap); 'surface': stick, boost and map; 'none': just gestures. */
 export type TouchShipControls = 'none' | 'surface' | 'space';
@@ -40,9 +41,9 @@ export class Level {
     for (const e of this.entities) e.update?.(frameDt, alpha);
   }
 
-  /** Draws the level; the default renders its scene. */
+  /** Draws the level; the default renders its scene (as a wireframe with the menu's switch, see renderScene). */
   render(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera): void {
-    renderer.render(this.scene, camera);
+    renderScene(renderer, this.scene, camera);
   }
 
   /** Called when the level becomes active (e.g. to write its HUD text). */

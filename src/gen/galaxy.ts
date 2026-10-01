@@ -2,6 +2,7 @@ import { hslToHex } from './color';
 import { generateName } from './names';
 import { generateNebulas, nebulaAt, type NebulaData } from './nebulas';
 import { hashSeed, Rng } from './rng';
+import { generateRogues } from './rogues';
 import { generateCompanion, generateStar, type StarData } from './stars';
 
 /** Galaxy-scene units. Unrelated to system units; each level has its own scale. */
@@ -36,6 +37,12 @@ export interface GalaxyData {
   stars: StarRef[];
   /** Named nebulas, from their own stream (see gen/nebulas.ts). */
   nebulas: NebulaData[];
+  /**
+   * Rogue planets drifting between the stars: entries with no stars, ids
+   * following on from the stars' (see gen/rogues.ts). Look one up by id with
+   * `systemRef`.
+   */
+  rogues: StarRef[];
 }
 
 /**
@@ -80,7 +87,14 @@ export function generateGalaxy(seed: number, count = DEFAULT_STAR_COUNT): Galaxy
 
   const nebulas = generateNebulas(seed, stars, GALAXY_RADIUS);
   for (const star of stars) star.nebula = nebulaAt(nebulas, star.position)?.nebula ?? null;
-  return { seed, radius: GALAXY_RADIUS, arms, twist, armOffset, stars, nebulas };
+  const rogues = generateRogues(seed, stars, nebulas, (r) => armPosition(r, arms, twist, armOffset));
+  return { seed, radius: GALAXY_RADIUS, arms, twist, armOffset, stars, nebulas, rogues };
+}
+
+/** The star system or rogue planet with this id (as in `?star=`), or undefined. */
+export function systemRef(galaxy: Pick<GalaxyData, 'stars' | 'rogues'>, id: number): StarRef | undefined {
+  if (!Number.isInteger(id) || id < 0) return undefined;
+  return galaxy.stars[id] ?? galaxy.rogues[id - galaxy.stars.length];
 }
 
 /**

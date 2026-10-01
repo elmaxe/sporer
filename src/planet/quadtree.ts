@@ -35,13 +35,65 @@ export function beyondHorizon(angle: number, nodeAngle: number, cameraDistance: 
 
 /**
  * About how large (radians) one grid cell of a node looks from the camera:
- * the cell's width over the distance to the nearest point of the node's
- * bounding sphere (`distance` to its centre point on the sea-level sphere,
- * minus `bound`).
+ * the cell's width (on a sphere of `radius`) over the distance to the nearest
+ * point of the node's bounding sphere (`distance` to its centre, minus `bound`,
+ * its radius).
  */
 export function cellAngle(radius: number, depth: number, distance: number, bound: number): number {
   const cell = (radius * nodeArc(depth)) / CHUNK_CELLS;
   return cell / Math.max(distance - bound, radius * 1e-4);
+}
+
+/** Where a chunk's surface is (see chunkBounds). */
+export interface ChunkBounds {
+  /** A sphere holding every vertex: its centre and radius. */
+  x: number;
+  y: number;
+  z: number;
+  radius: number;
+  /** The vertices' mean distance from the planet's centre (how wide the chunk's cells are, with nodeArc). */
+  reach: number;
+}
+
+/**
+ * The bounds of a chunk's vertices (3 floats each) in all of `sets` (its own
+ * shape and its parent's, which it blends between), written into `out`; the
+ * reach from the first set. Measured rather than assumed from the planet's
+ * lowest and highest ground: on a lumpy small body those are a whole radius
+ * apart, and every chunk near the camera would look as close as can be.
+ */
+export function chunkBounds(sets: readonly Float32Array[], out: ChunkBounds): ChunkBounds {
+  let minX = Infinity;
+  let minY = Infinity;
+  let minZ = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let maxZ = -Infinity;
+  for (const p of sets) {
+    for (let v = 0; v < p.length; v += 3) {
+      minX = Math.min(minX, p[v]!);
+      maxX = Math.max(maxX, p[v]!);
+      minY = Math.min(minY, p[v + 1]!);
+      maxY = Math.max(maxY, p[v + 1]!);
+      minZ = Math.min(minZ, p[v + 2]!);
+      maxZ = Math.max(maxZ, p[v + 2]!);
+    }
+  }
+  out.x = (minX + maxX) / 2;
+  out.y = (minY + maxY) / 2;
+  out.z = (minZ + maxZ) / 2;
+  let radiusSq = 0;
+  for (const p of sets) {
+    for (let v = 0; v < p.length; v += 3) {
+      radiusSq = Math.max(radiusSq, (p[v]! - out.x) ** 2 + (p[v + 1]! - out.y) ** 2 + (p[v + 2]! - out.z) ** 2);
+    }
+  }
+  out.radius = Math.sqrt(radiusSq);
+  const own = sets[0]!;
+  let reach = 0;
+  for (let v = 0; v < own.length; v += 3) reach += Math.hypot(own[v]!, own[v + 1]!, own[v + 2]!);
+  out.reach = reach / (own.length / 3);
+  return out;
 }
 
 /**

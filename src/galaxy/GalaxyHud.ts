@@ -4,7 +4,8 @@ import type { Input } from '../core/Input';
 import type { GalaxyData, StarRef } from '../gen/galaxy';
 import { describeNebula } from '../gen/nebulas';
 import { describeStars } from '../gen/stars';
-import { generateSystem } from '../gen/system';
+import { describeRogue, isRogue } from '../gen/rogues';
+import { describeSized, generateSystem } from '../gen/system';
 import { MarkerRing } from '../player/MarkerRing';
 import { HelpText } from '../ui/HelpText';
 import type { Tooltip } from '../ui/Tooltip';
@@ -18,8 +19,10 @@ import { renderSystemSummary } from './systemSummaryView';
 const REFRESH_SECONDS = 0.1;
 /** Systems whose body list is kept for the tooltip (generating one takes under a millisecond). */
 const SUMMARY_CACHE = 64;
-const HELP = 'Click a star or nebula: travel there · Scroll in at a star: enter its system · Scroll: zoom · Drag: rotate view · M: mute · Esc: menu';
-const TOUCH_HELP = 'Tap a star or nebula: travel there · Pinch in at a star: enter its system · Pinch: zoom · Drag: rotate view · Hold: identify';
+const HELP =
+  'Click a star, rogue planet or nebula: travel there · Scroll in at a star or rogue: enter it · Scroll: zoom · Drag: rotate view · M: mute · Esc: menu';
+const TOUCH_HELP =
+  'Tap a star, rogue planet or nebula: travel there · Pinch in at a star or rogue: enter it · Pinch: zoom · Drag: rotate view · Hold: identify';
 
 /**
  * The galaxy level's overlay: HUD text, star tooltip, and rings marking the
@@ -36,6 +39,8 @@ export class GalaxyHud implements Entity {
   private readonly at = new THREE.Vector3();
   private sinceRefresh = REFRESH_SECONDS;
   private readonly summaries = new Map<number, SystemSummary>();
+  /** Rogue planets' tooltip lines, by id. */
+  private readonly rogueLines = new Map<number, string>();
   private active = false;
   /** Hides the rings (e.g. while diving into a star). */
   hideMarkers = false;
@@ -90,7 +95,7 @@ export class GalaxyHud implements Entity {
       this.tooltip.show(
         hovered,
         hovered.name,
-        describeStars(hovered.stars) + inside + here,
+        this.describe(hovered) + inside + here,
         clientX,
         clientY,
         undefined,
@@ -110,6 +115,7 @@ export class GalaxyHud implements Entity {
     this.locationEl.textContent = ship.travelling
       ? `Galaxy · ${this.galaxy.stars.length} stars · in deep space`
       : `Galaxy · ${this.galaxy.stars.length} stars · at ${ship.current.name}` +
+        (isRogue(ship.current) ? ' (rogue planet)' : '') +
         (ship.current.nebula ? ` · in the ${ship.current.nebula.name}` : '');
     this.targetEl.textContent = ship.destination ? `Travelling → ${ship.destination.name}` : '';
   }
@@ -119,6 +125,18 @@ export class GalaxyHud implements Entity {
     this.destinationRing.dispose();
     this.hoverRing.dispose();
     this.tooltip.hide();
+  }
+
+  /** "G main sequence star", or for a rogue planet "Rogue planet · ice world · Earth-sized · …". */
+  private describe(ref: StarRef): string {
+    if (!isRogue(ref)) return describeStars(ref.stars);
+    let line = this.rogueLines.get(ref.id);
+    if (!line) {
+      const planet = generateSystem(ref).planets[0]!;
+      line = describeRogue(describeSized(planet.type, planet.size));
+      this.rogueLines.set(ref.id, line);
+    }
+    return line;
   }
 
   /** The hovered system's bodies, generated on first hover and kept for the next few. */

@@ -1,7 +1,7 @@
 import { Game } from './core/Game';
 import { Debug } from './core/Debug';
 import { Physics } from './physics/Physics';
-import { generateGalaxy } from './gen/galaxy';
+import { generateGalaxy, systemRef } from './gen/galaxy';
 import { geyserKind } from './gen/geysers';
 import { volcanicLightning, weatherKind } from './gen/weather';
 import { parseSeed } from './gen/rng';
@@ -18,11 +18,11 @@ import { GraphicsSettingsControl, loadGraphicsSettings } from './ui/GraphicsSett
 const DEFAULT_SEED = '1337';
 
 async function main(): Promise<void> {
-  // ?seed=<number or any text> picks the galaxy, ?star=<id> jumps to a system.
+  // ?seed=<number or any text> picks the galaxy, ?star=<id> jumps to a system (or a rogue planet).
   const params = new URLSearchParams(location.search);
   const galaxy = generateGalaxy(parseSeed(params.get('seed') ?? DEFAULT_SEED));
   const starId = Number(params.get('star'));
-  const start = (params.has('star') && galaxy.stars[starId]) || findHomeSystem(galaxy);
+  const start = (params.has('star') && systemRef(galaxy, starId)) || findHomeSystem(galaxy);
 
   const [debug] = await Promise.all([Debug.create(), Physics.init()]);
   const game = new Game(document.getElementById('app')!, debug);

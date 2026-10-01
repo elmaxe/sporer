@@ -11,6 +11,7 @@ import { GalaxyNebulas } from '../galaxy/GalaxyNebulas';
 import { GalaxyHud } from '../galaxy/GalaxyHud';
 import { GalaxyMap } from '../galaxy/GalaxyMap';
 import { GalaxyPicker } from '../galaxy/GalaxyPicker';
+import { GalaxyRogues } from '../galaxy/GalaxyRogues';
 import { GalaxyShip } from '../galaxy/GalaxyShip';
 import { GalaxySpin } from '../galaxy/GalaxySpin';
 import { StarCloseUp } from '../galaxy/StarCloseUp';
@@ -49,6 +50,8 @@ export class GalaxyLevel extends Level {
   readonly ship: GalaxyShip;
   readonly orbit: OrbitCamera;
   readonly map: GalaxyMap;
+  /** The rogue planets' rings. */
+  readonly rogues: GalaxyRogues;
   readonly spin: GalaxySpin;
   readonly distantGalaxies: DistantGalaxies;
   readonly nebulas: GalaxyNebulas;
@@ -81,6 +84,7 @@ export class GalaxyLevel extends Level {
     this.add(new GalaxyDust(this.root, generateDust(galaxy), galaxy.radius));
     this.nebulas = this.add(new GalaxyNebulas(this.scene, this.root, galaxy.nebulas, galaxy.radius, debug));
     this.map = this.add(new GalaxyMap(this.root, galaxy, debug));
+    this.rogues = this.add(new GalaxyRogues(this.root, galaxy, debug));
     this.ship = this.add(new GalaxyShip(this.root, start, debug, sfx));
     this.orbit = this.add(
       new OrbitCamera(
@@ -98,7 +102,13 @@ export class GalaxyLevel extends Level {
         'Galaxy camera',
       ),
     );
-    const picker = this.add(new GalaxyPicker(camera, input, canvas, galaxy, this.map.positions, this.ship, this.root));
+    // Stars and rogue planets are picked alike: one list, stars first (rogues' ids follow on from theirs).
+    const positions = new Float32Array(this.map.positions.length + this.rogues.positions.length);
+    positions.set(this.map.positions);
+    positions.set(this.rogues.positions, this.map.positions.length);
+    const picker = this.add(
+      new GalaxyPicker(camera, input, canvas, galaxy, [...galaxy.stars, ...galaxy.rogues], positions, this.ship, this.root, sfx),
+    );
     this.hud = this.add(
       new GalaxyHud(this.scene, camera, input, galaxy, this.ship, picker, tooltip, this.map, this.root),
     );
@@ -128,6 +138,7 @@ export class GalaxyLevel extends Level {
   setDive(u: number): void {
     this.ship.setDive(u);
     this.map.fade(this.ship.current, u);
+    this.rogues.fade(this.ship.current, u);
     this.hud.hideMarkers = u > 0;
   }
 
@@ -154,6 +165,7 @@ export class GalaxyLevel extends Level {
 
   override exit(): void {
     this.hud.deactivate();
+    this.ship.silence();
   }
 
   override dispose(): void {

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { SoundEffects } from '../audio/sfx';
 import { FIXED_DT } from '../core/Game';
 import type { Debug } from '../core/Debug';
 import type { Input } from '../core/Input';
@@ -17,6 +18,8 @@ import { SystemMap } from '../ui/SystemMap';
 import type { Tooltip } from '../ui/Tooltip';
 import { GalaxyBand } from '../world/GalaxyBand';
 import { NebulaSky, skyStarDimming } from '../world/NebulaSky';
+import { galacticLightParams } from '../world/galacticLight';
+import { galacticSky } from '../gen/galactic';
 import { OrbitTrails } from '../world/OrbitTrails';
 import type { CelestialBody } from '../world/CelestialBody';
 import { Planet } from '../world/Planet';
@@ -24,6 +27,7 @@ import { Starfield } from '../world/Starfield';
 import { StarSystem } from '../world/StarSystem';
 import { arrivalParams, hoverViewElevation } from './arrival';
 import { Level } from './Level';
+import { renderScene } from '../world/wireframe';
 
 /** Where the camera settles after flying in from the galaxy (or starting out in a system). */
 export const ARRIVAL_DISTANCE = 90;
@@ -70,6 +74,7 @@ export class SystemLevel extends Level {
     debug: Debug,
     /** The galaxy's nebulas: the ones nearby are in the sky. */
     nebulas: readonly NebulaData[],
+    sfx: SoundEffects,
     /** Called when the player scrolls out past the system (to the galaxy). */
     onZoomOut: () => void,
     /** Called when the player scrolls in past the closest zoom (to descend to a planet). */
@@ -84,11 +89,13 @@ export class SystemLevel extends Level {
     this.band = this.add(new GalaxyBand(this.scene, ref, this.data, debug, dim));
     this.nebulaSky = near.length > 0 ? this.add(new NebulaSky(this.scene, ref, this.data, near, debug)) : null;
     this.starfield = this.add(new Starfield(this.scene, camera, dim));
-    this.world = this.add(new StarSystem(this.scene, physics, this.data, debug));
-    // Starting out here, the ship hovers above the star as if it had just flown in from the galaxy.
-    const star = this.world.stars[0]!;
-    this.ship = this.add(new Ship(this.scene, physics, input, this.world.bodies, debug, star));
-    this.ship.parkAt(star, ARRIVAL_DISTANCE);
+    // With no star (a rogue planet), the galaxy's glow from its centre lights the system.
+    const centre = this.data.stars.length > 0 ? undefined : galacticSky(ref.position, this.data.galacticTilt).bulge;
+    this.world = this.add(new StarSystem(this.scene, physics, this.data, debug, centre));
+    // Starting out here, the ship hovers above the star (or the rogue planet) as if it had just flown in from the galaxy.
+    const anchor = this.world.anchor;
+    this.ship = this.add(new Ship(this.scene, physics, input, this.world.bodies, debug, sfx, anchor));
+    this.ship.parkAt(anchor, ARRIVAL_DISTANCE);
     // Visual-only entities below run in this order each frame: camera first, then what reads it.
     this.orbit = this.add(
       new OrbitCamera(
@@ -108,14 +115,15 @@ export class SystemLevel extends Level {
         'System camera',
       ),
     );
-    this.aimAt(star, 1);
+    if (!this.starless) this.aimAt(anchor, 1);
     this.eye = this.add(new EyeAdaptation(camera, this.world.stars, debug));
-    const picker = this.add(new Picker(camera, input, this.ship, this.world.bodies, [], this.world.belts));
+    const picker = this.add(new Picker(camera, input, this.ship, this.world.bodies, sfx, [], this.world.belts));
     this.trails = this.add(
       new OrbitTrails(
         this.scene,
         camera,
-        this.world.planets,
+        // A rogue planet sits still at the centre: no orbit to trail.
+        this.world.planets.filter((p) => p.config.orbit.radius > 0),
         this.world.moons,
         (body) => body === picker.hovered || body === this.ship.targetBody,
         debug,
@@ -126,6 +134,11 @@ export class SystemLevel extends Level {
       new SystemMap(this.data, this.world.stars, this.world.planets, this.world.moons, this.ship, picker, input, this.world.belts),
     );
     this.hud = this.add(new Hud(this.ship, picker, this.map, input, this.data, tooltip));
+  }
+
+  /** True for a rogue planet's system: no star, lit by the galaxy's glow. */
+  get starless(): boolean {
+    return this.world.stars.length === 0;
   }
 
   /**
@@ -195,7 +208,7 @@ export class SystemLevel extends Level {
     for (const body of hidden) body.object.visible = false;
     // A visited comet's coma and tails are all round the camera: low orbit draws them as seen from inside.
     for (const comet of this.world.comets) comet.object.visible = !hidden.includes(comet.nucleus);
-    renderer.render(this.scene, camera);
+    renderScene(renderer, this.scene, camera);
     for (const body of hidden) body.object.visible = true;
     for (const comet of this.world.comets) comet.object.visible = true;
     this.trails.visible = trails;
@@ -234,8 +247,8 @@ export class SystemLevel extends Level {
    */
   override render(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera): void {
     this.world.setExposure(this.eye.exposure);
-    renderer.toneMappingExposure = sceneExposure(this.eye.exposure);
-    renderer.render(this.scene, camera);
+    renderer.toneMappingExposure = sceneExposure(this.eye.exposure) * (this.starless ? galacticLightParams.exposure : 1);
+    renderScene(renderer, this.scene, camera);
     renderer.toneMappingExposure = 1;
   }
 
@@ -251,5 +264,6 @@ export class SystemLevel extends Level {
   override exit(): void {
     this.hud.deactivate();
     this.map.deactivate();
+    this.ship.silence();
   }
 }

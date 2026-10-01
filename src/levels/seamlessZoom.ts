@@ -101,6 +101,29 @@ export function planetHandoverOut(radius: number, start: number, params = planet
   return Math.max(radius / Math.sin(params.handoverAngle), params.outFactor * start, params.minRadii * radius);
 }
 
+/**
+ * Between a body and its low orbit the zoom's distances run from the body's
+ * centre all the way: going down, to the camera's final height over it (the
+ * ship's distance from the centre plus the view distance); coming up, from
+ * its height at the start. Through the crossfade both cameras circle the
+ * centre (framed identically), while the planet camera's focus is at the
+ * ship at the low end; measured from the focus instead, the timeline would
+ * carry the camera close to the centre, through the ground, while the focus
+ * moves between the ship and the centre.
+ */
+export function heightAboveShip(shipRadius: number, viewDistance: number): number {
+  return shipRadius + viewDistance;
+}
+
+/**
+ * The planet camera's distance from its focus, from the timeline's distance
+ * from the centre, with the focus `atShip` of the way from the centre to the
+ * ship (the camera above the ship coming with it).
+ */
+export function focusDistance(centreDistance: number, atShip: number, shipRadius: number): number {
+  return centreDistance - atShip * shipRadius;
+}
+
 /** Where the timeline is `t` seconds in. */
 export function sampleSeamlessZoom(z: SeamlessZoom, t: number): SeamlessSample {
   const total = zoomDuration(z);
