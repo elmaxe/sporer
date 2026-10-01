@@ -44,6 +44,7 @@ Steps run in order. With no steps, you get `shot:view`.
 | `resume` | restart the loop after a freeze |
 | `solo:<outgoing\|incoming>:<name>` | while frozen mid-crossfade: redraw with only that level showing and shoot it; compare the two sides of a handover (same place, same size?) |
 | `tap:<element id>` | tap (with `--phone`) or click the middle of that element, e.g. `tap:menu-toggle`, `tap:touch-map` |
+| `hover:<x>,<y>` / `hover:<expression>` | move the mouse to that point (CSS px, or an expression giving `{x, y}`) and wait a few frames: tooltips |
 | `fps` | frames per second over 120 frames (headless SwiftShader: expect ~5–25) |
 | `goto:<url or ?params>` | load another page, e.g. `goto:?star=2`, and wait for the game |
 

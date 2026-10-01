@@ -34,6 +34,8 @@
 //                                while frozen mid-crossfade: redraw showing only that level, screenshot → <name>.png,
 //                                then redraw the blend (compare the two sides of a handover)
 //   tap:<element id>             tap (--phone) or click the middle of that element, then wait two frames
+//   hover:<x>,<y> | hover:<expression>
+//                                move the mouse there (CSS px; or an expression giving {x, y}), wait a few frames
 //   fps                          measure frames per second over 120 frames
 //   goto:<url or ?params>        load another page (e.g. goto:?star=2) and wait for the game
 //
@@ -240,6 +242,14 @@ async function run(step) {
         }
       }
       await page.evaluate(`new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))`);
+      return;
+    }
+    case 'hover': {
+      const xy = /^\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*$/.exec(rest);
+      const at = xy ? { x: Number(xy[1]), y: Number(xy[2]) } : await page.evaluate(rest);
+      if (!at || !Number.isFinite(at.x) || !Number.isFinite(at.y)) throw new Error(`no point to hover: ${JSON.stringify(at)}`);
+      await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at.x, y: at.y });
+      await page.evaluate(`new Promise((r) => { let n = 0; (function f() { if (++n === 4) r(); else requestAnimationFrame(f); })(); })`);
       return;
     }
     case 'fps':
