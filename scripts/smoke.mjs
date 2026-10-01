@@ -16,7 +16,7 @@
 // its system, where the ship flies in and hovers straight above the star with the camera over it; the galaxy shows distant
 // galaxies, twinkles, spins and draws binaries as two dots, and picking works while it's turned), a real click on the
 // menu button starts audio and opens the menu (the game pauses; volume sliders and a planet lab link; a real Esc
-// closes it); then the transitions and galaxy travel play their whooshes, and M mutes. Then the planet loop (hover at
+// closes it); then galaxy travel asks for its sound (and the zooms between levels for none), and M mutes. Then the planet loop (hover at
 // a planet, scroll in to low orbit, click the globe and fly, the Equal Earth map is shown and a click on it sets the
 // autopilot there, scroll all the way in and out and check the ship's altitude follows, scroll back out to hover
 // above it, as high as the zoom says, with the camera zoomed out past the handover and the planet in view), and again for every planet
@@ -172,12 +172,15 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null, during = n
   await until(`(() => { const o = levels.systemLevel.orbit;
     return o.targetDistance <= o.params.minDistance && o.zoom < o.params.minDistance * 1.2; })()`, 10000);
   if (handoverShot) await evaluate(`__seamless.freezeWhen = 'planet'`);
+  const soundBefore = await evaluate(`audio.lastPlayed?.name ?? null`);
   await wheel(-300); // keep scrolling in
   if (handoverShot) r.handoverShot = await freezeShot(handoverShot);
   // Right after a page load the headless frame rate can be ~2 FPS, and a click while the zoom still runs is ignored.
   for (let i = 0; i < 40 && (await evaluate(`levels.mode !== 'planet' || levels.transitioning`)); i++) await sleep(250);
   r.mode = await evaluate(`levels.mode`);
   r.soundIn = await evaluate(`audio.lastPlayed?.name ?? null`);
+  // An airless body's descent asks for nothing, leaving the cue from before it.
+  r.soundBefore = soundBefore;
   if (r.mode !== 'planet') return r;
   r.sky = await evaluate(`planet.skyStats`);
   // The sky star's clock and the planet level's own clock (its time is the system time down here).
@@ -1124,7 +1127,7 @@ await section('audio', async () => {
   await until(`!menu.isOpen && ${clock} > ${pausedAt}`, 5000);
   audio.closedByEsc = await evaluate(`!menu.isOpen && !game.paused && ${clock} > ${pausedAt}`);
 
-  // Whooshes: zoom out (transition), travel to a neighbour, zoom back in.
+  // Sound cues: zoom out (silent), travel to a neighbour (the travel loop), zoom back in (silent).
   const played = `(audio.lastPlayed && { name: audio.lastPlayed.name, seconds: +audio.lastPlayed.seconds.toFixed(2), count: audio.lastPlayed.count })`;
   audio.sfx = {};
   await evaluate(`levels.toGalaxy()`);
@@ -1163,10 +1166,10 @@ await section('audio', async () => {
     audio.weatherToggle.offHidden &&
     audio.weatherToggle.back &&
     audio.closedByEsc &&
-    audio.sfx.out?.name === 'transitionOut' &&
-    audio.sfx.travel?.name === 'travel' &&
-    audio.sfx.in?.name === 'transitionIn' &&
-    audio.sfx.in.count === 3 &&
+    audio.sfx.out === null &&
+    audio.sfx.travel?.name === 'interstellarTravel' &&
+    audio.sfx.in?.name === 'interstellarTravel' &&
+    audio.sfx.in.count === 1 &&
     audio.sfx.modeAfter === 'system' &&
     audio.mutedByKey
   );
@@ -1300,8 +1303,8 @@ await section('planet', async () => {
   ];
   seamless.ok =
     kinds.every((k) => seamless.kinds.includes(k)) && seamless.segments.every((x) => x.crossfadeFrames > 0 && x.minBrightness > 0.5 && (x.minClearance ?? Infinity) >= 1);
-  // Audio is only unlocked by the audio section's real click, so only then can the loop hear its whooshes.
-  const heard = !sections.audio || (planetLoop.soundIn === 'transitionIn' && planetLoop.soundOut === 'transitionOut');
+  // Audio is only unlocked by the audio section's real click, so only then does the loop ask for its sounds.
+  const heard = !sections.audio || (['reentry', planetLoop.soundBefore].includes(planetLoop.soundIn) && planetLoop.soundOut === 'leavePlanet');
   const asteroidsOk = !hasBelt || (asteroidLoops.length === 2 && asteroidLoops.every((l) => l.ok));
   return planetLoop.ok && heard && heldZoom.ok && (!hasComet || cometLoop.ok) && asteroidsOk && planetLoop.handoverShot !== null && seamless.ok;
 });

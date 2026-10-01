@@ -27,7 +27,7 @@ A browser game inspired by the space stage of *Spore*. Fly a UFO through a proce
 - **Nebulas.** Named emission, reflection and dark nebulas, planetary nebulas round white dwarfs and supernova remnants on the galaxy map. Fly into one and its gas fills the sky of the systems inside, down to low orbit.
 - **Rogue planets.** A handful of planets drift between the stars with no sun, faint rings on the galaxy map. Fly to one and it's a dark, frozen world lit only by the galaxy's glow and its own heat: glowing lava cracks, ice geysers, and under a thick hydrogen sky, sometimes a warm hidden sea.
 - **Maps.** A row-of-planets system map and an Equal Earth map of the planet you're orbiting.
-- **Sound.** Music, ambience and synthesised whooshes for travel and transitions.
+- **Sound.** Music, ambience and sound effects from audio files (variants per cue in `src/assets/audio/sfx/`): selecting a body, travel loops, reentry and leaving a planet.
 
 ## Controls
 

@@ -107,7 +107,7 @@ export class GalaxyLevel extends Level {
     positions.set(this.map.positions);
     positions.set(this.rogues.positions, this.map.positions.length);
     const picker = this.add(
-      new GalaxyPicker(camera, input, canvas, galaxy, [...galaxy.stars, ...galaxy.rogues], positions, this.ship, this.root),
+      new GalaxyPicker(camera, input, canvas, galaxy, [...galaxy.stars, ...galaxy.rogues], positions, this.ship, this.root, sfx),
     );
     this.hud = this.add(
       new GalaxyHud(this.scene, camera, input, galaxy, this.ship, picker, tooltip, this.map, this.root),
@@ -165,6 +165,7 @@ export class GalaxyLevel extends Level {
 
   override exit(): void {
     this.hud.deactivate();
+    this.ship.silence();
   }
 
   override dispose(): void {

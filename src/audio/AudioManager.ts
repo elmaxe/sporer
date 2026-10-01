@@ -2,9 +2,11 @@ import musicUrl from '../assets/audio/ambient_music.mp3';
 import ambienceUrl from '../assets/audio/ambient_sound.mp3';
 import type { Debug } from '../core/Debug';
 import { channelGain, type AudioChannel, type AudioSettings } from './settings';
+import { cueUrls } from './cueFiles';
+import { cueParams, SOUND_CUES, type LoopCue, type SoundCue } from './cues';
+import { CuePlayer, fetchCueFiles, SILENT, type SoundHandle } from './CuePlayer';
 import { crossfadeLoop } from './loop';
-import { SfxSynth, type SoundEffects } from './sfx';
-import { SFX_NAMES, sfxParams, type SfxName, type SfxOptions } from './whoosh';
+import type { OneShotCue, SoundEffects } from './sfx';
 
 /** Seconds of the ambience loop's tail blended into its head. */
 const AMBIENCE_CROSSFADE = 3;
@@ -17,20 +19,25 @@ interface Mixer {
   ctx: AudioContext;
   master: GainNode;
   gains: Record<AudioChannel, GainNode>;
-  sfx: SfxSynth;
+  cues: CuePlayer;
 }
 
-/** The most recent sound effect (for the debug panel and the smoke test). */
+/** The most recent sound cue the game asked for (for the smoke test). */
 export interface PlayedSfx {
-  name: SfxName;
+  name: SoundCue;
+  /** False when the cue's folder has no files, so nothing sounded. */
+  heard: boolean;
+  /** The variant's length (Infinity for a loop, 0 if unheard or still loading). */
   seconds: number;
-  /** How many effects have played since audio was unlocked. */
+  /** How many cues have been asked for since audio was unlocked. */
   count: number;
 }
 
 /**
- * Background music and space ambience, both looping, plus synthesised sound
- * effects (`play`), through a Web Audio mixer (one gain per channel).
+ * Background music and space ambience, both looping, plus sound effects
+ * (`play`, `start`), through a Web Audio mixer (one gain per channel). The
+ * effects are sound cues from audio files (each a folder of variants, see
+ * `cues.ts`); a cue whose folder is empty is silent.
  *
  * Browsers only allow audio after a user gesture, so the AudioContext is
  * created on the first pointer or key press (a touch counts as it lifts;
@@ -44,6 +51,7 @@ export interface PlayedSfx {
 export class AudioManager implements SoundEffects {
   private readonly music = new Audio(musicUrl);
   private readonly ambienceData = fetch(ambienceUrl).then((r) => r.arrayBuffer());
+  private readonly cueData = fetchCueFiles(cueUrls);
   private mixer: Mixer | null = null;
   private ambience: AudioBufferSourceNode | null = null;
   private disposed = false;
@@ -62,29 +70,26 @@ export class AudioManager implements SoundEffects {
     window.addEventListener('keydown', this.onGesture, true);
     document.addEventListener('visibilitychange', this.onVisibility);
 
-    const f = debug.folder('Sound FX');
-    const preview = { tripSeconds: 1 };
-    f?.add(preview, 'tripSeconds', 0, 10).name('travel: trip s');
-    for (const name of SFX_NAMES) {
-      const sub = f?.addFolder(name).close();
-      const spec = sfxParams[name];
-      sub?.add({ play: () => this.play(name, { seconds: preview.tripSeconds }) }, 'play');
-      sub?.add(spec, 'duration', 0.2, 5);
-      if (name === 'travel') {
-        sub?.add(spec, 'minDuration', 0.2, 5);
-        sub?.add(spec, 'maxDuration', 0.2, 10);
+    const c = debug.folder('Sound cues');
+    for (const cue of SOUND_CUES) {
+      const spec = cueParams[cue];
+      const files = cueUrls[cue].length;
+      const sub = c?.addFolder(`${cue} (${files} file${files === 1 ? '' : 's'})`).close();
+      if (spec.loop) {
+        let handle: SoundHandle | null = null;
+        const toggle = {
+          'start / stop': () => {
+            if (handle) handle.stop();
+            handle = handle ? null : this.start(cue as LoopCue);
+          },
+        };
+        sub?.add(toggle, 'start / stop');
+      } else sub?.add({ play: () => this.play(cue as OneShotCue) }, 'play');
+      sub?.add(spec, 'volume', 0, 3);
+      if (spec.loop) {
+        sub?.add(spec, 'fadeIn', 0, 3);
+        sub?.add(spec, 'fadeOut', 0, 5);
       }
-      for (const key of ['from', 'peak', 'to'] as const) sub?.add(spec, key, 40, 8000);
-      sub?.add(spec, 'peakAt', 0, 1);
-      sub?.add(spec, 'q', 0.1, 10);
-      sub?.add(spec, 'attack', 0.01, 2);
-      sub?.add(spec, 'release', 0.2, 5);
-      sub?.add(spec, 'level', 0, 5);
-      sub?.add(spec, 'bodyFrom', 20, 300);
-      sub?.add(spec, 'bodyTo', 20, 300);
-      sub?.add(spec, 'bodyLevel', 0, 1);
-      sub?.add(spec, 'panFrom', -1, 1);
-      sub?.add(spec, 'panTo', -1, 1);
     }
   }
 
@@ -93,20 +98,34 @@ export class AudioManager implements SoundEffects {
     return this.mixer?.ctx.state ?? 'locked';
   }
 
-  /** The last sound effect played, or null before any. */
+  /** The last sound cue asked for while audio was running, or null before any. */
   get lastPlayed(): Readonly<PlayedSfx> | null {
     return this._lastPlayed;
   }
 
   /**
-   * Plays a sound effect on the Effects channel. Does nothing until audio is
-   * unlocked, or while it's suspended (tab hidden): a whoosh is only
-   * meaningful right when it happens.
+   * Plays a variant of a one-shot cue's files on the Effects channel. Does
+   * nothing until audio is unlocked, or while it's suspended (tab hidden):
+   * an effect is only meaningful right when it happens.
    */
-  play(name: SfxName, opts?: SfxOptions): void {
-    if (!this.mixer || this.mixer.ctx.state !== 'running') return;
-    const seconds = this.mixer.sfx.play(name, opts);
-    this._lastPlayed = { name, seconds, count: (this._lastPlayed?.count ?? 0) + 1 };
+  play(cue: OneShotCue): void {
+    const mixer = this.running();
+    if (!mixer) return;
+    const heard = cueUrls[cue].length > 0;
+    this.played(cue, heard, heard ? mixer.cues.play(cue) : 0);
+  }
+
+  /**
+   * Starts a looping cue, faded out when the handle is stopped. Silent (and
+   * the handle does nothing) while the cue has no files, or while audio is
+   * locked or suspended, like `play`.
+   */
+  start(cue: LoopCue): SoundHandle {
+    const mixer = this.running();
+    if (!mixer) return SILENT;
+    const heard = cueUrls[cue].length > 0;
+    this.played(cue, heard, heard ? Infinity : 0);
+    return heard ? mixer.cues.start(cue) : SILENT;
   }
 
   /** Set the channel volumes (smoothed). */
@@ -127,6 +146,14 @@ export class AudioManager implements SoundEffects {
     this.music.pause();
     this.music.removeAttribute('src');
     void this.mixer?.ctx.close();
+  }
+
+  private running(): Mixer | null {
+    return this.mixer?.ctx.state === 'running' ? this.mixer : null;
+  }
+
+  private played(name: SoundCue, heard: boolean, seconds: number): void {
+    this._lastPlayed = { name, heard, seconds, count: (this._lastPlayed?.count ?? 0) + 1 };
   }
 
   private onGesture = (e: Event) => {
@@ -157,7 +184,7 @@ export class AudioManager implements SoundEffects {
       g.connect(master);
       gains[channel] = g;
     }
-    this.mixer = { ctx, master, gains, sfx: new SfxSynth(ctx, gains.sfx) };
+    this.mixer = { ctx, master, gains, cues: new CuePlayer(ctx, gains.sfx, this.cueData) };
 
     ctx.createMediaElementSource(this.music).connect(gains.music);
     this.startAmbience(ctx, gains.ambience).catch((err: unknown) => console.error('Ambience failed to start', err));
