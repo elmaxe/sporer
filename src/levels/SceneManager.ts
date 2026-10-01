@@ -4,6 +4,7 @@ import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
 import type { Game } from '../core/Game';
 import type { GalaxyData, StarRef } from '../gen/galaxy';
+import type { NebulaData } from '../gen/nebulas';
 import { hoverGap, parkGap, zoomCurveParams } from '../player/zoomCurve';
 import { Tooltip } from '../ui/Tooltip';
 import type { Planet } from '../world/Planet';
@@ -87,6 +88,8 @@ export class SceneManager implements Entity {
   private readonly settle = new THREE.Vector3();
   /** The visited body's spin, from the planet level's frame (see Planet.spinAt). */
   private readonly planetSpin = (time: number) => this._planetLevel?.frame.spinAt(time) ?? 0;
+  /** The galaxy's nebulas, for the skies of the systems near them. */
+  private readonly nebulas: readonly NebulaData[];
 
   constructor(
     private readonly game: Game,
@@ -96,6 +99,7 @@ export class SceneManager implements Entity {
     private readonly sfx: SoundEffects,
   ) {
     const { camera, input, renderer } = game;
+    this.nebulas = galaxy.nebulas;
     this.galaxyLevel = new GalaxyLevel(galaxy, start, camera, input, renderer.domElement, this.tooltip, debug, sfx, () =>
       this.toSystem(),
     );
@@ -514,6 +518,7 @@ export class SceneManager implements Entity {
       input,
       this.tooltip,
       this.debug,
+      this.nebulas,
       () => this.toGalaxy(),
       () => this.toPlanet(),
     );

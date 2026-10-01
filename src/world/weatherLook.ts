@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
-import { tileableCloudNoise } from '../gen/cloudNoise';
 import type { LavaActivity } from '../gen/lavaActivity';
 import {
   MAX_STORMS,
@@ -20,6 +19,7 @@ import type { Vec3Tuple } from '../gen/starActivity';
 import { RELIEF_SCALE, globeRadius } from '../planet/frame';
 import type { AtmosphereSun } from './atmosphereShell';
 import { createCubeSphere } from './cubeSphere';
+import { cloudNoiseTexture } from './noiseTexture';
 import type { PlanetConfig } from './Planet';
 
 /**
@@ -64,24 +64,9 @@ export const MAX_FLASHES = 8;
 /** A flash lights the cloud this far round (radians, the glow's 1/e width). */
 const FLASH_WIDTH = 0.03;
 
-let noiseTexture: THREE.Data3DTexture | null = null;
 const scratchCentre = new THREE.Vector3();
 const scratchScale = new THREE.Vector3();
 const scratchCamera = new THREE.Vector3();
-
-/** The clouds' tileable noise, made once and shared by every cloud layer (never disposed). */
-function cloudNoiseTexture(): THREE.Data3DTexture {
-  if (noiseTexture) return noiseTexture;
-  const size = 64;
-  const texture = new THREE.Data3DTexture(tileableCloudNoise(size, 20260930), size, size, size);
-  texture.format = THREE.RGBAFormat;
-  texture.type = THREE.UnsignedByteType;
-  texture.minFilter = texture.magFilter = THREE.LinearFilter;
-  texture.wrapS = texture.wrapT = texture.wrapR = THREE.RepeatWrapping;
-  texture.unpackAlignment = 1;
-  texture.needsUpdate = true;
-  return (noiseTexture = texture);
-}
 
 const vertexShader = /* glsl */ `
   precision highp sampler3D;

@@ -2,6 +2,7 @@ import { flatTilt, type Quat } from './galactic';
 import { generateComets, type CometData } from './comets';
 import { atmosphereTint, generateClimate, type ClimateData } from './climate';
 import type { GalaxyData, StarRef } from './galaxy';
+import type { NebulaData } from './nebulas';
 import { hexToRgb, hslToHex, rgbToHex } from './color';
 import { romanNumeral } from './names';
 import type { Orbit } from './orbit';
@@ -97,6 +98,8 @@ export interface SystemData {
   galacticTilt: Quat;
   /** On long elliptical orbits; scenery only (not visitable). */
   comets: CometData[];
+  /** The nebula the system sits in, if any (from its StarRef). */
+  nebula: NebulaData | null;
 }
 
 /** G-class period at the reference distance; other orbits follow Kepler's third law. */
@@ -227,6 +230,7 @@ export function generateSystem(ref: StarRef): SystemData {
     habitableRadius,
     galacticTilt: flatTilt(rng.fork('galactic')),
     comets,
+    nebula: ref.nebula ?? null,
   };
 }
 

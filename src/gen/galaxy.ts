@@ -1,5 +1,6 @@
 import { hslToHex } from './color';
 import { generateName } from './names';
+import { generateNebulas, nebulaAt, type NebulaData } from './nebulas';
 import { hashSeed, Rng } from './rng';
 import { generateCompanion, generateStar, type StarData } from './stars';
 
@@ -20,6 +21,8 @@ export interface StarRef {
   seed: number;
   /** One star, or two for a binary system (larger first). */
   stars: StarData[];
+  /** The nebula the system sits in, if any (see gen/nebulas.ts). */
+  nebula: NebulaData | null;
 }
 
 export interface GalaxyData {
@@ -31,6 +34,8 @@ export interface GalaxyData {
   /** Angle of the first arm's inner end. */
   armOffset: number;
   stars: StarRef[];
+  /** Named nebulas, from their own stream (see gen/nebulas.ts). */
+  nebulas: NebulaData[];
 }
 
 /**
@@ -69,10 +74,13 @@ export function generateGalaxy(seed: number, count = DEFAULT_STAR_COUNT): Galaxy
       position,
       seed: hashSeed(seed, 'system', id),
       stars: members,
+      nebula: null,
     });
   }
 
-  return { seed, radius: GALAXY_RADIUS, arms, twist, armOffset, stars };
+  const nebulas = generateNebulas(seed, stars, GALAXY_RADIUS);
+  for (const star of stars) star.nebula = nebulaAt(nebulas, star.position)?.nebula ?? null;
+  return { seed, radius: GALAXY_RADIUS, arms, twist, armOffset, stars, nebulas };
 }
 
 /**

@@ -55,6 +55,8 @@ export class GalaxyBand implements Entity {
     ref: StarRef,
     system: SystemData,
     debug: Debug,
+    /** Share of a star's light that reaches the system from direction `dir` (dark nebulas), if any are in the way. */
+    dim?: ((dir: THREE.Vector3) => number) | null,
   ) {
     const sky = (this.sky = galacticSky(ref.position, system.galacticTilt));
     const vec = (v: { x: number; y: number; z: number }) => new THREE.Vector3(v.x, v.y, v.z);
@@ -123,8 +125,10 @@ export class GalaxyBand implements Entity {
     const colors = new Float32Array(BAND_STAR_COUNT * 3);
     const sizes = new Float32Array(BAND_STAR_COUNT);
     const c = new THREE.Color();
+    const dir = new THREE.Vector3();
     for (let i = 0; i < BAND_STAR_COUNT; i++) {
       c.setHSL(rng.chance(0.6) ? 0.1 : 0.6, rng.range(0, 0.4), 1).multiplyScalar(rng.range(0.05, 0.3));
+      if (dim) c.multiplyScalar(dim(dir.fromArray(positions, i * 3)));
       c.toArray(colors, i * 3);
       sizes[i] = rng.range(1, 2.2);
     }

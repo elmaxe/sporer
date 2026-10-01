@@ -12,6 +12,8 @@ export class Starfield implements Entity {
   constructor(
     private readonly scene: THREE.Scene,
     private readonly camera: THREE.Camera,
+    /** Share of a star's light that reaches the system from direction `dir` (dark nebulas), if any are in the way. */
+    dim?: ((dir: THREE.Vector3) => number) | null,
   ) {
     const positions = new Float32Array(STAR_COUNT * 3);
     const colors = new Float32Array(STAR_COUNT * 3);
@@ -19,10 +21,12 @@ export class Starfield implements Entity {
     const c = new THREE.Color();
     const rng = new Rng(hashSeed('starfield'));
     for (let i = 0; i < STAR_COUNT; i++) {
-      randomDirection(rng, v).multiplyScalar(SKY_RADIUS);
-      v.toArray(positions, i * 3);
+      randomDirection(rng, v);
       // Mostly white, with some warm and some cool stars of varying brightness.
       c.setHSL(rng.next() < 0.5 ? 0.6 : 0.08, rng.next() * 0.5, 0.5 + rng.next() * 0.5);
+      if (dim) c.multiplyScalar(dim(v));
+      v.multiplyScalar(SKY_RADIUS);
+      v.toArray(positions, i * 3);
       c.toArray(colors, i * 3);
     }
 

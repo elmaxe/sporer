@@ -45,7 +45,8 @@ export class Hud implements Entity {
     this.active = true;
     const { system } = this;
     const planets = system.planets.length === 1 ? '1 planet' : `${system.planets.length} planets`;
-    this.locationEl.textContent = `${system.name} · ${describeStars(system.stars)} · ${planets}`;
+    const nebula = system.nebula ? ` · in the ${system.nebula.name}` : '';
+    this.locationEl.textContent = `${system.name} · ${describeStars(system.stars)} · ${planets}${nebula}`;
     this.help.refresh(true);
     this.sinceRefresh = REFRESH_SECONDS;
   }
