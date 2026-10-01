@@ -5,11 +5,14 @@ import {
   describeBelt,
   generateRocks,
   librationTurns,
+  rockBounds,
   rockEye,
+  rocksOutOfReach,
   rockWithin,
   type AsteroidClass,
   type AsteroidData,
   type BeltData,
+  type RockBounds,
   type RockData,
   type RockEye,
 } from '../gen/belts';
@@ -18,7 +21,7 @@ import { Rng, hashSeed } from '../gen/rng';
 import { generateShape, shapeRadius } from '../gen/shape';
 import type { CelestialBody, Region } from './CelestialBody';
 import { createCubeSphere } from './cubeSphere';
-import { VALUE_NOISE_GLSL } from './noiseGlsl';
+import { bakeDustPattern, dustArcHalfWidth, DUST_PATTERN_SCALE, TROJAN_DUST_SPREAD } from './beltDust';
 import type { Planet, PlanetConfig } from './Planet';
 
 export const beltParams = {
@@ -31,18 +34,26 @@ export const beltParams = {
   /** The dust band fades in between these distances from the camera (system units)... */
   dustNear: 150,
   dustFar: 900,
-  /** ...to this brightness. */
-  dustBrightness: 0.3,
+  /** ...to this brightness: faint, a haze where the rocks are too small to see rather than a glow. */
+  dustBrightness: 0.05,
   /** Seconds between choosing which rocks are near enough for a mesh (sooner if the camera moves). */
   reselect: 0.25,
+  /**
+   * Most rocks drawn as meshes per belt. When more are near enough, only the
+   * biggest on screen get one, and the size a rock needs for a mesh rises
+   * for the belt (the rest stay dots), so the triangle count is bounded
+   * however close the camera is and however many pixels the screen has.
+   */
+  maxMeshes: 800,
 };
 
 /** Rock meshes per belt (one draw call each): two single rocks, an elongated one and a contact binary. */
 const ROCK_MESHES = 4;
 /** Cube sphere segments of a rock: 12·2² = 48 triangles. */
 const ROCK_SEGMENTS = 2;
-/** A Trojan swarm's dust spreads this many librations either side of the Lagrange point. */
-const TROJAN_DUST_SPREAD = 1.25;
+/** Texels of the dust's baked pattern round a full ring (an arc gets its share) and across it. */
+const DUST_TEXELS_AROUND = 1024;
+const DUST_TEXELS_ACROSS = 64;
 /**
  * The dust's brightness by belt: the outer belts' further from the star and
  * fainter (stylised; the dust's colour is evened to one luminance first).
@@ -154,42 +165,24 @@ const DUST_VERTEX = /* glsl */ `
 `;
 
 const DUST_FRAGMENT = /* glsl */ `
-  ${VALUE_NOISE_GLSL}
+  uniform sampler2D uPattern; // see beltDust.ts
   uniform float uInner;
   uniform float uOuter;
   uniform vec3 uColor;
   uniform float uBrightness;
   uniform vec2 uFade;
-  uniform float uArcCentre;  // radians; the arc's half-width below, 0 for a full ring
-  uniform float uArcWidth;
-  uniform vec3 uGaps;        // log fractions of up to three gaps (negative: none)
-  uniform float uGapWidth;
-  uniform float uSeed;
+  uniform vec2 uArc;          // local angle at u = 0, and the angle u spans
   varying vec3 vWorld;
   varying vec2 vLocal;
   void main() {
-    // Cheapest first: near the camera, and seen edge-on, the sheet isn't drawn at all.
+    // Near the camera, and seen edge-on, the sheet isn't drawn at all.
     vec3 toEye = cameraPosition - vWorld;
     float d = length(toEye);
     float fade = smoothstep(uFade.x, uFade.y, d) * smoothstep(0.02, 0.2, abs(toEye.y) / d);
     if (fade <= 0.0) discard;
-    float r = length(vLocal);
-    float t = log(r / uInner) / log(uOuter / uInner);
-    float edge = smoothstep(0.0, 0.18, t) * (1.0 - smoothstep(0.82, 1.0, t));
-    float angle = atan(vLocal.y, vLocal.x);
-    float arc = 1.0;
-    if (uArcWidth > 0.0) {
-      float off = atan(sin(angle - uArcCentre), cos(angle - uArcCentre)) / uArcWidth;
-      arc = exp(-off * off * 2.0);
-    }
-    float a = edge * arc * fade * uBrightness;
-    if (a < 0.002) discard;
-    for (int i = 0; i < 3; i++) {
-      float g = uGaps[i];
-      if (g >= 0.0) a *= 1.0 - 0.55 * exp(-pow((t - g) / uGapWidth, 2.0) * 2.0);
-    }
-    // Clumps drawn out along the orbit: noise round a circle (so it wraps) and across the belt.
-    a *= 0.35 + 1.1 * fbm(vec3(cos(angle) * 9.0, sin(angle) * 9.0, t * 6.0 + uSeed), 3);
+    float t = log(length(vLocal) / uInner) / log(uOuter / uInner);
+    float u = (atan(vLocal.y, vLocal.x) - uArc.x) / uArc.y;
+    float a = texture2D(uPattern, vec2(u, t)).r * ${DUST_PATTERN_SCALE.toFixed(2)} * fade * uBrightness;
     gl_FragColor = vec4(uColor * a, 1.0);
     #include <colorspace_fragment>
   }
@@ -203,6 +196,8 @@ interface RockBatch {
   tilt: THREE.InstancedBufferAttribute;
   spin: THREE.InstancedBufferAttribute;
   color: THREE.InstancedBufferAttribute;
+  /** The four above, to upload together. */
+  attributes: readonly THREE.InstancedBufferAttribute[];
   /** Each rock's colour, in `rocks` order. */
   colors: Float32Array;
 }
@@ -225,6 +220,9 @@ export class AsteroidBelt implements Region {
   private readonly batches: RockBatch[] = [];
   private readonly dots: THREE.Points<THREE.BufferGeometry, THREE.ShaderMaterial>;
   private readonly dust: THREE.Mesh<THREE.RingGeometry, THREE.ShaderMaterial>;
+  private readonly dustPattern: THREE.DataTexture;
+  /** A Trojan swarm's Lagrange point now: the angle (atan(z, x) in the belt's plane) its dust arc centres on. */
+  private arcCentre = 0;
   private readonly uniforms = {
     uTurns: { value: 0 },
     uLibTurns: { value: 0 },
@@ -245,6 +243,16 @@ export class AsteroidBelt implements Region {
   private readonly local = new THREE.Vector3();
   private readonly at = new THREE.Vector3();
   private readonly eye: RockEye = { x: 0, y: 0, z: 0, distance: 0, radius: 0, turn: 0 };
+  /** The size on screen (device px) a rock needs to be a mesh now: `meshPixels`, or more over the budget. */
+  private meshPixels = beltParams.meshPixels;
+  /** Scratch for `select`: the rocks near enough for a mesh (batch, index in it, px), and a sort buffer. */
+  private readonly candidatePixels: Float32Array;
+  private readonly candidateBatch: Uint8Array;
+  private readonly candidateRock: Uint32Array;
+  private readonly sortScratch: Float32Array;
+  private readonly batchCounts = new Uint32Array(ROCK_MESHES);
+  /** Where the rocks keep to: a belt far from the camera is skipped whole. */
+  private readonly bounds: RockBounds;
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -258,13 +266,21 @@ export class AsteroidBelt implements Region {
     const colors = classColors(data.seed);
     const tint = new Rng(hashSeed(data.seed, 'tint'));
     const rockColors = rocks.map((r) => colors[r.class].clone().multiplyScalar(tint.range(0.8, 1.15)));
+    this.bounds = rockBounds(rocks);
+    this.candidatePixels = new Float32Array(rocks.length);
+    this.candidateBatch = new Uint8Array(rocks.length);
+    this.candidateRock = new Uint32Array(rocks.length);
+    this.sortScratch = new Float32Array(rocks.length);
 
     for (let m = 0; m < ROCK_MESHES; m++) {
-      const mine = rocks.filter((r) => r.mesh === m);
-      if (mine.length > 0) this.batches.push(this.createBatch(m, mine, rockColors.filter((_, i) => rocks[i]!.mesh === m)));
+      // By orbit radius, so `select` only looks at the ones near the camera's distance from the star.
+      const mine = rocks.map((_, i) => i).filter((i) => rocks[i]!.mesh === m);
+      mine.sort((a, b) => rocks[a]!.radius - rocks[b]!.radius);
+      if (mine.length > 0) this.batches.push(this.createBatch(m, mine.map((i) => rocks[i]!), mine.map((i) => rockColors[i]!)));
     }
     this.dots = this.createDots(rocks, rockColors);
-    this.dust = this.createDust(colors);
+    this.dustPattern = createDustTexture(data);
+    this.dust = this.createDust(colors, this.dustPattern);
     this.object.add(this.dots, this.dust, ...this.batches.map((b) => b.mesh));
     this.object.name = data.name;
     scene.add(this.object);
@@ -288,7 +304,7 @@ export class AsteroidBelt implements Region {
     u.uTurns.value = beltTurns(data, time);
     u.uLibTurns.value = librationTurns(data, time);
     u.uSpinTime.value = time % 3600;
-    u.uMeshPixels.value = beltParams.meshPixels;
+    u.uMeshPixels.value = this.meshPixels;
     u.uMinPixels.value = beltParams.minPixels;
     u.uBrightness.value = beltParams.dotBrightness;
     const d = this.dust.material.uniforms;
@@ -296,8 +312,10 @@ export class AsteroidBelt implements Region {
     (d.uFade!.value as THREE.Vector2).set(beltParams.dustNear, beltParams.dustFar);
     if (data.trojan) {
       // The swarm stays 60° from its host: the arc's centre in the ring's own angle (atan(z, x) in its plane).
+      // The arc is drawn round 0, so turn it there (a turn of φ about y takes angle α to α − φ).
       const { orbit, lead } = data.trojan;
-      d.uArcCentre!.value = orbit.phase + lead + (2 * Math.PI * time) / orbit.period;
+      this.arcCentre = orbit.phase + lead + (2 * Math.PI * time) / orbit.period;
+      this.dust.rotation.y = -this.arcCentre;
     }
   }
 
@@ -325,7 +343,11 @@ export class AsteroidBelt implements Region {
     if (stale) this.select(this.local, pixels);
   }
 
-  /** Packs the rocks that would be `meshPixels` or bigger seen from `eye` (belt-local) first in each batch. */
+  /**
+   * Packs the rocks that would be `meshPixels` or bigger seen from `eye`
+   * (belt-local) first in each batch: at most `maxMeshes` of them, the
+   * biggest on screen (raising the belt's mesh size to match, see `beltParams`).
+   */
   private select(eye: THREE.Vector3, pixels: number): void {
     this.selectedTime = this.time;
     this.selectedFrom.copy(eye);
@@ -333,20 +355,52 @@ export class AsteroidBelt implements Region {
     const libTurns = this.uniforms.uLibTurns.value;
     const at = rockEye(eye, this.eye);
     const threshold = beltParams.meshPixels * 0.6;
-    for (const batch of this.batches) {
-      let n = 0;
-      const { rocks } = batch;
-      for (let i = 0; i < rocks.length; i++) {
+    // Every rock near enough for a mesh, with its size on screen (none if the whole belt is too far).
+    let n = 0;
+    const maxReach = (this.bounds.maxSize * pixels) / threshold + RESELECT_MARGIN;
+    const far = rocksOutOfReach(this.bounds, at, maxReach);
+    for (let b = 0; b < this.batches.length && !far; b++) {
+      const { rocks } = this.batches[b]!;
+      // A rock is at its orbit radius from the star, so only those within reach of the eye's distance can be near.
+      const top = at.distance + maxReach;
+      for (let i = firstAtLeast(rocks, at.distance - maxReach); i < rocks.length && rocks[i]!.radius <= top; i++) {
         const rock = rocks[i]!;
         if (!rockWithin(rock, turns, libTurns, at, (rock.size * pixels) / threshold + RESELECT_MARGIN, this.at)) continue;
-        this.pack(batch, i, n++);
+        const d = Math.max(Math.hypot(this.at.x - eye.x, this.at.y - eye.y, this.at.z - eye.z), 1e-3);
+        this.candidatePixels[n] = (rock.size * pixels) / d;
+        this.candidateBatch[n] = b;
+        this.candidateRock[n] = i;
+        n++;
       }
+    }
+    // Too many: only the biggest on screen, and the dots (whose shader follows uMeshPixels too) stay below them.
+    let cutoff = 0;
+    let meshPixels = beltParams.meshPixels;
+    const budget = Math.max(1, Math.round(beltParams.maxMeshes));
+    if (n > budget) {
+      const sorted = this.sortScratch.subarray(0, n);
+      sorted.set(this.candidatePixels.subarray(0, n));
+      sorted.sort();
+      cutoff = sorted[n - budget]!;
+      meshPixels = Math.max(meshPixels, cutoff / 0.6);
+    }
+    this.meshPixels = meshPixels;
+    this.uniforms.uMeshPixels.value = meshPixels;
+    const counts = this.batchCounts.fill(0);
+    for (let k = 0; k < n; k++) {
+      if (this.candidatePixels[k]! < cutoff) continue;
+      const b = this.candidateBatch[k]!;
+      this.pack(this.batches[b]!, this.candidateRock[k]!, counts[b]!++);
+    }
+    for (let b = 0; b < this.batches.length; b++) {
+      const batch = this.batches[b]!;
+      const count = counts[b]!;
       const geometry = batch.mesh.geometry;
-      geometry.instanceCount = n;
-      for (const attribute of [batch.orbit, batch.tilt, batch.spin, batch.color]) {
+      geometry.instanceCount = count;
+      for (const attribute of batch.attributes) {
         attribute.clearUpdateRanges();
-        if (n > 0) {
-          attribute.addUpdateRange(0, n * attribute.itemSize);
+        if (count > 0) {
+          attribute.addUpdateRange(0, count * attribute.itemSize);
           attribute.needsUpdate = true;
         }
       }
@@ -393,8 +447,10 @@ export class AsteroidBelt implements Region {
       tilt: attribute(4),
       spin: attribute(4),
       color: attribute(3),
+      attributes: [],
       colors: new Float32Array(colors.flatMap((c) => [c.r, c.g, c.b])),
     };
+    batch.attributes = [batch.orbit, batch.tilt, batch.spin, batch.color];
     geometry.setAttribute('aOrbit', batch.orbit);
     geometry.setAttribute('aTilt', batch.tilt);
     geometry.setAttribute('aSpin', batch.spin);
@@ -443,28 +499,36 @@ export class AsteroidBelt implements Region {
     return dots;
   }
 
-  /** The dust: a flat ring a little wider than the rocks' orbits. */
-  private createDust(colors: Record<AsteroidClass, THREE.Color>): THREE.Mesh<THREE.RingGeometry, THREE.ShaderMaterial> {
+  /**
+   * The dust: a flat ring a little wider than the rocks' orbits, or just a
+   * Trojan swarm's arc (centred on angle 0, turned to its Lagrange point).
+   */
+  private createDust(
+    colors: Record<AsteroidClass, THREE.Color>,
+    pattern: THREE.DataTexture,
+  ): THREE.Mesh<THREE.RingGeometry, THREE.ShaderMaterial> {
     const { data } = this;
-    const ring = new THREE.RingGeometry(data.inner * 0.97, data.outer * 1.03, 192, 6);
+    const half = dustArcHalfWidth(data);
+    const ring =
+      half === null
+        ? new THREE.RingGeometry(data.inner * 0.97, data.outer * 1.03, 192, 6)
+        : new THREE.RingGeometry(data.inner * 0.97, data.outer * 1.03, Math.max(12, Math.ceil((192 * half) / Math.PI)), 6, -half, 2 * half);
+    // (x, y) to (x, 0, −y): the geometry's angle θ becomes −θ in atan(z, x), so the arc stays centred on 0.
     ring.rotateX(-Math.PI / 2);
-    const gaps = [-1, -1, -1].map((v, i) => data.gaps[i]?.at ?? v);
+    const { start, span } = pattern.userData as { start: number; span: number };
     const dust = new THREE.Mesh(
       ring,
       new THREE.ShaderMaterial({
         vertexShader: DUST_VERTEX,
         fragmentShader: DUST_FRAGMENT,
         uniforms: {
+          uPattern: { value: pattern },
           uInner: { value: data.inner },
           uOuter: { value: data.outer },
           uColor: { value: evenLuminance(mixClasses(colors, data.classes), DUST_LUMINANCE) },
           uBrightness: { value: beltParams.dustBrightness },
           uFade: { value: new THREE.Vector2(beltParams.dustNear, beltParams.dustFar) },
-          uArcCentre: { value: 0 },
-          uArcWidth: { value: data.trojan ? data.trojan.libration * TROJAN_DUST_SPREAD : 0 },
-          uGaps: { value: new THREE.Vector3(...gaps) },
-          uGapWidth: { value: data.gaps[0]?.width ?? 0.05 },
-          uSeed: { value: (data.seed % 1000) / 100 },
+          uArc: { value: new THREE.Vector2(start, span) },
         },
         blending: THREE.AdditiveBlending,
         depthWrite: false,
@@ -492,9 +556,8 @@ export class AsteroidBelt implements Region {
     if (r < this.data.inner || r > this.data.outer) return null;
     const trojan = this.data.trojan;
     if (trojan) {
-      const centre = this.dust.material.uniforms.uArcCentre!.value as number;
       const angle = Math.atan2(p.z, p.x);
-      const off = Math.atan2(Math.sin(angle - centre), Math.cos(angle - centre));
+      const off = Math.atan2(Math.sin(angle - this.arcCentre), Math.cos(angle - this.arcCentre));
       if (Math.abs(off) > trojan.libration * TROJAN_DUST_SPREAD) return null;
     }
     out.copy(p);
@@ -530,6 +593,7 @@ export class AsteroidBelt implements Region {
     this.dots.material.dispose();
     this.dust.geometry.dispose();
     this.dust.material.dispose();
+    this.dustPattern.dispose();
   }
 }
 
@@ -548,6 +612,34 @@ export function asteroidConfig(asteroid: AsteroidData): PlanetConfig {
     shape: asteroid.shape,
     small: 'asteroid',
   };
+}
+
+/** The first of `rocks` (sorted by orbit radius) at `radius` or further out. */
+function firstAtLeast(rocks: readonly RockData[], radius: number): number {
+  let lo = 0;
+  let hi = rocks.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (rocks[mid]!.radius < radius) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/** The belt's baked dust pattern (see beltDust.ts), its angles in `userData`. */
+function createDustTexture(data: BeltData): THREE.DataTexture {
+  const half = dustArcHalfWidth(data);
+  const around = half === null ? DUST_TEXELS_AROUND : Math.max(32, 2 ** Math.ceil(Math.log2((DUST_TEXELS_AROUND * half) / Math.PI)));
+  const pattern = bakeDustPattern(data, around, DUST_TEXELS_ACROSS);
+  const texture = new THREE.DataTexture(pattern.data, pattern.width, pattern.height, THREE.RedFormat, THREE.UnsignedByteType);
+  texture.wrapS = pattern.wraps ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.magFilter = THREE.LinearFilter;
+  texture.minFilter = THREE.LinearFilter;
+  texture.generateMipmaps = false;
+  texture.userData = { start: pattern.start, span: pattern.span };
+  texture.needsUpdate = true;
+  return texture;
 }
 
 /** A rock mesh: a small cube sphere pushed out to an irregular shape (the last one a contact binary), lumpy, unit size. */

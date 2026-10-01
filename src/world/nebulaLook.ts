@@ -459,7 +459,7 @@ export const STAR_DIMMING_GLSL = /* glsl */ `
  * light in rgb, their transmittance in alpha) and drawn over the galaxy band
  * each frame with the same blending as on the galaxy map (the band behind a
  * dark nebula is dimmed). Stars drawn after it (the band's stars and the
- * Starfield) are dimmed on the CPU instead (gen/nebulas.ts starTransmittance).
+ * SkyStars) are dimmed on the CPU instead (gen/nebulas.ts starTransmittance).
  */
 export class NebulaSkyBake {
   readonly texture: THREE.CubeTexture;
@@ -492,6 +492,11 @@ export class NebulaSkyBake {
       return mesh;
     });
     this.scene.updateMatrixWorld(true);
+  }
+
+  /** Face size of the cube map. */
+  get size(): number {
+    return this.target.width;
   }
 
   /** Renders the cube map (a nested render; call it from an onBeforeRender). */

@@ -10,6 +10,18 @@ export const starParams = {
   spots: 1,
   limbDarkening: 0.65,
   corona: 1,
+  /**
+   * Surface brightness (1 = its plain colours). Over 1 the light bleeds into
+   * white, as a bright light does on film: a white-hot disc with a coloured
+   * limb, at any distance.
+   */
+  intensity: 2.1,
+  /** Brightness of the bright inner corona hugging the disc... */
+  rim: 0.9,
+  /** ...which fades over this many star radii... */
+  rimWidth: 0.22,
+  /** ...and of the glare round it, falling off as r^-2.6 (r in star radii). */
+  glare: 0.25,
 };
 
 
@@ -51,7 +63,7 @@ const surfaceVertex = /* glsl */ `
 
 const surfaceFragment = /* glsl */ `
   uniform vec3 uColor;
-  uniform float uExposure;    // star intensity × eye adaptation
+  uniform float uExposure;    // surface brightness, starParams.intensity
   uniform float uTime;
   uniform float uGranulation;
   uniform float uContrast;
@@ -87,9 +99,8 @@ const surfaceFragment = /* glsl */ `
     float limb = mix(1.0, 0.35 + 0.65 * pow(mu, 0.55), uLimb);
     vec3 col = uColor * bright * limb;
     col *= mix(vec3(1.0, 0.72, 0.55), vec3(1.0), smoothstep(0.0, 0.6, mu) * 0.6 + 0.4);
-    // Overexposed light bleeds into white, like a bright light on film: before
-    // the eye adapts the disc is white-hot with a coloured limb; adapted, the
-    // surface shows at its plain colours.
+    // Overexposed light bleeds into white, like a bright light on film: the
+    // disc is white-hot with a coloured limb.
     col *= uExposure;
     float over = max(max(col.r, col.g), col.b);
     col = mix(min(col, vec3(1.0)), vec3(1.0), smoothstep(1.0, 2.4, over));
@@ -99,41 +110,55 @@ const surfaceFragment = /* glsl */ `
 `;
 
 /*
- * The corona covers a large billboard, so the fragment shader is just the soft
- * glow texture. The streamers are worked out per vertex on a fine ring mesh
- * (see createCoronaGeometry) and interpolated.
+ * The corona and glare cover a large billboard, so the fragment shader only
+ * does the radial falloff. The streamers are worked out per vertex on a fine
+ * ring mesh (see createCoronaGeometry) and interpolated. Distances are in
+ * star radii: `uExtent` is the billboard's radius in them.
  */
 const coronaVertex = /* glsl */ `
   uniform float uTime;
   uniform float uPulse;       // 1 ± amplitude, from the CPU
   uniform float uStreamers;
+  uniform float uExtent;
   uniform vec3 uOffset;
   varying vec2 vUv;
   varying float vGain;
   void main() {
     vUv = uv;
     vec2 c = uv * 2.0 - 1.0;
-    float r = length(c);
+    float rs = length(c) * uExtent;
     float a = atan(c.y, c.x);
-    // Radial rays from a few drifting sines of the angle.
+    // Radial rays from a few drifting sines of the angle, just outside the disc.
     float rays = 0.45 * sin(a * 7.0 + uOffset.x + uTime * 0.11)
                + 0.3 * sin(a * 12.0 + uOffset.y - uTime * 0.07 + 1.3 * sin(uTime * 0.05))
                + 0.25 * sin(a * 19.0 + uOffset.z + uTime * 0.17);
-    float band = smoothstep(0.12, 0.25, r) * (1.0 - smoothstep(0.35, 1.0, r));
+    float band = smoothstep(0.95, 1.25, rs) * (1.0 - smoothstep(1.5, 3.5, rs));
     vGain = uPulse * max(0.0, 1.0 + uStreamers * rays * band * 2.5);
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
 `;
 
 const coronaFragment = /* glsl */ `
-  uniform sampler2D uMap;
   uniform vec3 uColor;
   uniform float uOpacity;
-  uniform float uGlare;       // from the exposure: a blazing star has a stronger halo
+  uniform float uExtent;
+  uniform float uRim;
+  uniform float uRimWidth;
+  uniform float uGlare;
   varying vec2 vUv;
   varying float vGain;
   void main() {
-    gl_FragColor = vec4(uColor * texture2D(uMap, vUv).a * vGain * uOpacity * uGlare, 1.0);
+    float r = length(vUv * 2.0 - 1.0);
+    // In star radii, from the limb out (over the disc it stays at the limb's).
+    float rs = max(r * uExtent, 1.0);
+    // A bright inner corona with streamers, and the glare a bright light makes
+    // in an eye or lens (falling off a little faster than 1/r²), faded
+    // smoothly to nothing well before the edge.
+    float rim = uRim * exp(-(rs - 1.0) / uRimWidth) * vGain;
+    float glare = uGlare * pow(rs, -2.6) * mix(1.0, vGain, 0.5);
+    float light = (rim + glare) * (1.0 - smoothstep(0.3, 1.0, r)) * uOpacity;
+    // Bright near the disc, it bleeds into white.
+    gl_FragColor = vec4(mix(uColor, vec3(1.0), clamp(light * 0.7, 0.0, 0.85)) * light, 1.0);
     #include <colorspace_fragment>
   }
 `;
@@ -164,30 +189,27 @@ export function createStarSurfaceMaterial(color: string, activity: StarActivity,
       uSpots: { value: activity.spots },
       uLimb: { value: starParams.limbDarkening },
       uOffset: { value: noiseOffset(seed) },
-      uExposure: { value: 1 },
+      uExposure: { value: starParams.intensity },
     },
   });
 }
 
-/** Additive corona billboard: the soft glow texture plus drifting streamers, pulsing. */
-export function createCoronaMaterial(
-  color: string,
-  opacity: number,
-  seed: number,
-  glowTexture: THREE.Texture,
-): THREE.ShaderMaterial {
+/** Additive corona and glare billboard, `extent` star radii in radius: drifting streamers, pulsing. */
+export function createCoronaMaterial(color: string, opacity: number, seed: number, extent: number): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     vertexShader: coronaVertex,
     fragmentShader: coronaFragment,
     uniforms: {
-      uMap: { value: glowTexture },
       uColor: { value: new THREE.Color(color) },
       uTime: { value: 0 },
       uOpacity: { value: opacity },
       uPulse: { value: 1 },
       uStreamers: { value: 0.35 },
       uOffset: { value: noiseOffset(seed ^ 0x5bd1e995) },
-      uGlare: { value: 1 },
+      uExtent: { value: extent },
+      uRim: { value: starParams.rim },
+      uRimWidth: { value: starParams.rimWidth },
+      uGlare: { value: starParams.glare },
     },
     blending: THREE.AdditiveBlending,
     depthWrite: false,
@@ -209,18 +231,12 @@ export function animateStarMaterials(
   s.uGranulation!.value = activity.granulation * starParams.granulation;
   s.uSpots!.value = Math.min(1, activity.spots * starParams.spots);
   s.uLimb!.value = starParams.limbDarkening;
+  s.uExposure!.value = starParams.intensity;
   const c = corona.uniforms;
   c.uTime!.value = t;
   c.uPulse!.value = 1 + activity.pulse * starParams.corona * Math.sin((2 * Math.PI * time) / activity.pulsePeriod);
   c.uStreamers!.value = 0.35 * starParams.corona;
-}
-
-/**
- * Sets how bright the star looks: `exposure` is the surface brightness
- * multiplier (star intensity × eye adaptation; 1 = plain colours). The halo
- * grows with its square root.
- */
-export function setStarExposure(surface: THREE.ShaderMaterial, corona: THREE.ShaderMaterial, exposure: number): void {
-  surface.uniforms.uExposure!.value = exposure;
-  corona.uniforms.uGlare!.value = Math.sqrt(exposure);
+  c.uRim!.value = starParams.rim;
+  c.uRimWidth!.value = starParams.rimWidth;
+  c.uGlare!.value = starParams.glare;
 }

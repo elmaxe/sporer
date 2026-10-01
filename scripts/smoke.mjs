@@ -1,7 +1,7 @@
 // Headless browser smoke test over the Chrome DevTools Protocol.
 // Usage: npm run smoke [-- [options] [http://localhost:5173/]]   (dev server must be running)
 //   --only <sections>  run just these, comma-separated, in the usual order: core (flying, picking, system map,
-//                      living stars, comets, eye, sky), galaxy (the galaxy loop), nebulas (every kind on the map
+//                      living stars, comets, sky), galaxy (the galaxy loop), nebulas (every kind on the map
 //                      and from inside), rogues (fly to a rogue planet and down to it), audio, planet (the home planet
 //                      loop, held zoom, seamless zooms), types (every planet type and geyser kind), lab, touch
 //   --quick            everything but types
@@ -23,8 +23,8 @@
 // type, a ringed rocky/icy/lava world and a moon in other systems (skip those with --quick). The system sky has
 // the galaxy band (screenshot looking at the galactic centre) and a smoke trail per planet and moon. Living stars: the
 // surface clock advances and storms have particles under way (and keep animating in the planet level's sky); comets
-// move, their nuclei are bodies, and hovering one shows its name and a click flies there. Looking at the star close up
-// lowers the exposure (eye adaptation). Comets: the planet section also visits the home system's first comet at its
+// move, their nuclei are bodies, and hovering one shows its name and a click flies there. The sky's stars are the
+// galaxy's own (hundreds of them, none of the old random starfield). Comets: the planet section also visits the home system's first comet at its
 // closest pass (the planet loop over its irregular nucleus), with jets, coma and tails on, then jumps the clock to its
 // farthest point, where they're off. Asteroid belts: the core section checks the home belt's rocks (meshes near the ship),
 // that hovering the belt names it and a click flies to its nearest named asteroid, and the system map shows its asteroids;
@@ -112,7 +112,7 @@ const started = await page.goto(url, READY, 60000);
 if (started) await drawFrames(20);
 
 const state = `({ speed: +ship.speed.toFixed(1), pos: ship.object.position.toArray().map((n) => +n.toFixed(1)) })`;
-let before, after, autopilot, pick, systemMap, sky, living, comet, belt, eye, galaxyLoop, fps, audio, planetLoop, heldZoom, cometLoop, asteroidLoops, seamless, nebulas, rogues;
+let before, after, autopilot, pick, systemMap, sky, living, comet, belt, galaxyLoop, fps, audio, planetLoop, heldZoom, cometLoop, asteroidLoops, seamless, nebulas, rogues;
 const planetTypes = [];
 let lab = null;
 let touch = null;
@@ -636,15 +636,6 @@ await section('core', async () => {
     });
   })`);
 
-  // Eye adaptation: the exposure drops while the star fills the view, and recovers after.
-  eye = { start: await evaluate(`+levels.systemLevel.eye.exposure.toFixed(2)`) };
-  await evaluate(`(() => { const s = world.stars[0], o = levels.systemLevel.orbit;
-    o.setFocus(s.renderPosition); o.setDistance(s.radius * 3); })()`);
-  // (It already starts low: the view is centred on the star.)
-  await until(`levels.systemLevel.eye.exposure < ${eye.start} - 0.07`, 8000);
-  eye.close = await evaluate(`+levels.systemLevel.eye.exposure.toFixed(2)`);
-  await evaluate(`levels.systemLevel.orbit.setFocus(null), levels.systemLevel.orbit.setDistance(45)`);
-
   // System sky: the galaxy band and the orbit trails. Look at the galactic centre for a screenshot.
   sky = await evaluate(`(() => {
     const scene = levels.systemLevel.scene;
@@ -653,6 +644,7 @@ await section('core', async () => {
     levels.systemLevel.orbit.lookFrom(new game.camera.position.constructor(-c.x, -c.y, -c.z));
     return {
       band: !!band && !!scene.getObjectByName('Galaxy band stars'),
+      skyStars: levels.systemLevel.skyStars.count,
       trails: levels.systemLevel.trails.count,
       expectedTrails: world.planets.length + world.moons.length,
     };
@@ -667,7 +659,7 @@ await section('core', async () => {
   const hovered = [before, after].every((s) => s.target === autopilot.star && !s.enRoute && s.degreesAbove > 80);
   const noManual = autopilot.offsetMoved < 1;
   const picked = pick.target === pick.star && pick.tooltip === pick.star && systemMap.ok;
-  const skyOk = sky.band && sky.trails === sky.expectedTrails && sky.visibleTrails >= 1;
+  const skyOk = sky.band && sky.skyStars > 300 && sky.trails === sky.expectedTrails && sky.visibleTrails >= 1;
   const alive =
     living.clockSeconds > 0.3 &&
     Math.abs(living.starSeconds - living.clockSeconds) < 0.25 &&
@@ -675,8 +667,7 @@ await section('core', async () => {
     living.cometsMoved &&
     living.nuclei &&
     (comet.none || (comet.tooltip === comet.name && comet.autopilot)) &&
-    (belt.none || (belt.rocks > 1000 && belt.meshRocks > 0 && belt.tooltip === belt.name && belt.toAsteroid && belt.target === belt.nearest)) &&
-    eye.close < eye.start - 0.05;
+    (belt.none || (belt.rocks > 1000 && belt.meshRocks > 0 && belt.tooltip === belt.name && belt.toAsteroid && belt.target === belt.nearest));
   Object.assign(sections.core, { hovered, noManual, picked, skyOk, alive });
   return hovered && noManual && picked && skyOk && alive;
 });
@@ -1720,7 +1711,7 @@ const ok = started && !stalled && Object.keys(sections).length > 0 && Object.val
 console.error(`[smoke] ${ok ? 'ok' : 'FAILED'} in ${Math.round((Date.now() - T0) / 1000)} s${errors.length ? `, ${errors.length} console errors` : ''}`);
 console.log(
   JSON.stringify(
-    { ok, started, stalled, sections, before, after, autopilot, pick, systemMap, sky, living, comet, belt, eye, galaxyLoop, nebulas, rogues, seamless, audio, planetLoop, heldZoom, cometLoop, asteroidLoops, planetTypes, touch, touchLab, lab, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
+    { ok, started, stalled, sections, before, after, autopilot, pick, systemMap, sky, living, comet, belt, galaxyLoop, nebulas, rogues, seamless, audio, planetLoop, heldZoom, cometLoop, asteroidLoops, planetTypes, touch, touchLab, lab, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
     null,
     2,
   ),

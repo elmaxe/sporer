@@ -33,7 +33,7 @@ const BAKE_SIZE = 512;
  * bulge, broader and fainter towards the rim, with dark dust lanes along the
  * midline, plus a crowd of faint stars along it. Drawn at infinity (the view
  * rotation only, so it never needs recentring) before everything else,
- * including the Starfield.
+ * including the sky stars.
  *
  * The band never changes within a system, so its (costly) shader runs once,
  * baked into a cube map the first time the sky is drawn; each frame then

@@ -278,6 +278,18 @@ const STILL: Orbit = { radius: 0, period: 1, phase: 0, inclination: 0 };
  * under a thick hydrogen envelope warm enough for it, a hidden sea (an ice
  * world whose water comes out liquid is an ocean world). See gen/rogues.ts.
  */
+/**
+ * How far out a system reaches from its barycentre (system units): its
+ * outermost planet's neighbourhood (moons, rings) or belt edge, whichever is
+ * further. Comets on their long orbits are left out.
+ */
+export function systemExtent(system: SystemData): number {
+  let extent = system.starZone;
+  for (const p of system.planets) extent = Math.max(extent, p.orbit.radius + p.extent);
+  for (const b of system.belts) extent = Math.max(extent, b.outer);
+  return extent;
+}
+
 export function generateRogueSystem(ref: StarRef): SystemData {
   const rng = new Rng(ref.seed);
   const prng = rng.fork('planet', 0);

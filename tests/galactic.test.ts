@@ -9,6 +9,7 @@ import {
   MAX_GALACTIC_TILT,
   randomRotation,
   rotate,
+  skyStars,
   type Quat,
 } from '../src/gen/galactic';
 import { GALAXY_RADIUS, generateGalaxy } from '../src/gen/galaxy';
@@ -173,3 +174,38 @@ describe('bandStarDirections', () => {
     expect(towardsCenter / stars.length).toBeGreaterThan(0.6);
   });
 });
+
+describe('skyStars', () => {
+  const galaxy = generateGalaxy(1337);
+  const from = galaxy.stars[42]!;
+  const system = generateSystem(from);
+
+  it('shows every other star once, brightest first, as unit directions', () => {
+    const sky = skyStars(galaxy.stars, from, system.galacticTilt);
+    expect(sky.length).toBe(galaxy.stars.length - 1);
+    for (let i = 1; i < sky.length; i++) expect(sky[i]!.flux).toBeLessThanOrEqual(sky[i - 1]!.flux);
+    for (const s of sky) expect(len(s.dir)).toBeCloseTo(1, 9);
+  });
+
+  it('points at the real stars: back in galaxy space, the direction is towards the star', () => {
+    const sky = skyStars(galaxy.stars, from, system.galacticTilt);
+    const nearest = galaxy.stars
+      .filter((s) => s !== from)
+      .map((s) => ({ s, f: s.stars.reduce((a, m) => a + m.luminosity, 0) / distanceSq(s.position, from.position) }))
+      .sort((a, b) => b.f - a.f)[0]!.s;
+    const toStar = { x: nearest.position.x - from.position.x, y: nearest.position.y - from.position.y, z: nearest.position.z - from.position.z };
+    const back = rotate(system.galacticTilt, sky[0]!.dir, { x: 0, y: 0, z: 0 });
+    expect(dot(back, toStar) / len(toStar)).toBeCloseTo(1, 9);
+  });
+
+  it('dims with distance squared', () => {
+    const near = { id: 1, position: { x: 10, y: 0, z: 0 }, stars: [{ luminosity: 1, color: '#fff' }] };
+    const far = { id: 2, position: { x: 0, y: 0, z: 20 }, stars: [{ luminosity: 1, color: '#fff' }] };
+    const sky = skyStars([near, far], { id: 0, position: { x: 0, y: 0, z: 0 } }, identity);
+    expect(sky[0]!.flux / sky[1]!.flux).toBeCloseTo(4, 9);
+  });
+});
+
+function distanceSq(a: V, b: V): number {
+  return (a.x - b.x) ** 2 + (a.y - b.y) ** 2 + (a.z - b.z) ** 2;
+}

@@ -6,14 +6,13 @@ import type { Debug } from '../core/Debug';
 import type { Input } from '../core/Input';
 import type { StarRef } from '../gen/galaxy';
 import type { NebulaData } from '../gen/nebulas';
-import { generateSystem, type SystemData } from '../gen/system';
+import { generateSystem, systemExtent, type SystemData } from '../gen/system';
 import { Physics } from '../physics/Physics';
-import { EyeAdaptation } from '../player/EyeAdaptation';
-import { sceneExposure } from '../player/exposure';
 import { OrbitCamera, cameraParams } from '../player/OrbitCamera';
 import { Picker } from '../player/Picker';
 import { Ship } from '../player/Ship';
 import { TargetMarker } from '../player/TargetMarker';
+import { systemMaxView } from '../player/zoomCurve';
 import { Hud } from '../ui/Hud';
 import { SystemMap } from '../ui/SystemMap';
 import type { Tooltip } from '../ui/Tooltip';
@@ -24,7 +23,7 @@ import { galacticSky } from '../gen/galactic';
 import { OrbitTrails } from '../world/OrbitTrails';
 import type { CelestialBody } from '../world/CelestialBody';
 import { Planet } from '../world/Planet';
-import { Starfield } from '../world/Starfield';
+import { SkyStars } from '../world/SkyStars';
 import { StarSystem } from '../world/StarSystem';
 import { arrivalParams, hoverViewElevation } from './arrival';
 import { Level } from './Level';
@@ -56,11 +55,11 @@ export class SystemLevel extends Level {
   readonly band: GalaxyBand;
   /** Nebulas close enough to show in the sky, or null. */
   readonly nebulaSky: NebulaSky | null;
-  readonly eye: EyeAdaptation;
   private readonly hud: Hud;
   /** The star, planets and moons in a row, in the corner (mouse players) or from the Map button (touch). */
   readonly map: SystemMap;
-  private readonly starfield: Starfield;
+  /** The galaxy's other stars, where they really are. */
+  readonly skyStars: SkyStars;
   private readonly marker: TargetMarker;
   private readonly starSounds: StarSounds;
   readonly trails: OrbitTrails;
@@ -74,6 +73,8 @@ export class SystemLevel extends Level {
     input: Input,
     tooltip: Tooltip,
     debug: Debug,
+    /** The galaxy's stars, in this system's sky. */
+    stars: readonly StarRef[],
     /** The galaxy's nebulas: the ones nearby are in the sky. */
     nebulas: readonly NebulaData[],
     sfx: SoundEffects,
@@ -90,7 +91,7 @@ export class SystemLevel extends Level {
     const dim = skyStarDimming(near, ref.position, this.data);
     this.band = this.add(new GalaxyBand(this.scene, ref, this.data, debug, dim));
     this.nebulaSky = near.length > 0 ? this.add(new NebulaSky(this.scene, ref, this.data, near, debug)) : null;
-    this.starfield = this.add(new Starfield(this.scene, camera, dim));
+    this.skyStars = this.add(new SkyStars(this.scene, stars, ref, this.data, debug, dim));
     // With no star (a rogue planet), the galaxy's glow from its centre lights the system.
     const centre = this.data.stars.length > 0 ? undefined : galacticSky(ref.position, this.data.galacticTilt).bulge;
     this.world = this.add(new StarSystem(this.scene, physics, this.data, debug, centre));
@@ -104,7 +105,8 @@ export class SystemLevel extends Level {
         camera,
         this.ship.object,
         input,
-        cameraParams,
+        // Big systems may zoom out further, to see them whole before leaving for the galaxy.
+        { ...cameraParams, maxDistance: systemMaxView(systemExtent(this.data), cameraParams.maxDistance) },
         {
           distance: ARRIVAL_DISTANCE,
           pitch: this.hoverElevation(ARRIVAL_DISTANCE, 0),
@@ -118,7 +120,6 @@ export class SystemLevel extends Level {
       ),
     );
     if (!this.starless) this.aimAt(anchor, 1);
-    this.eye = this.add(new EyeAdaptation(camera, this.world.stars, debug));
     this.starSounds = this.add(new StarSounds(camera, this.world.stars, sfx, debug));
     const picker = this.add(new Picker(camera, input, this.ship, this.world.bodies, sfx, [], this.world.belts));
     this.trails = this.add(
@@ -202,7 +203,6 @@ export class SystemLevel extends Level {
     minAngle: number,
   ): void {
     this.world.pose(time, camera.position, minAngle);
-    this.starfield.centerOn(camera.position);
     const shipVisible = this.ship.object.visible;
     this.ship.object.visible = false;
     this.marker.hide();
@@ -244,13 +244,9 @@ export class SystemLevel extends Level {
     }
   }
 
-  /**
-   * Draws the scene at the eye's exposure: the star's own brightness, and
-   * the rest (tone mapped) dimmed part of the way along.
-   */
+  /** Draws the scene; round a rogue planet the eye has opened up to the dark. */
   override render(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera): void {
-    this.world.setExposure(this.eye.exposure);
-    renderer.toneMappingExposure = sceneExposure(this.eye.exposure) * (this.starless ? galacticLightParams.exposure : 1);
+    renderer.toneMappingExposure = this.starless ? galacticLightParams.exposure : 1;
     renderScene(renderer, this.scene, camera);
     renderer.toneMappingExposure = 1;
   }
