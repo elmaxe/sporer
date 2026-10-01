@@ -38,8 +38,8 @@ export interface PlanetConfig {
   small?: SmallBodyKind | null;
 }
 
-/** Kinds of irregular small body (step 26 adds asteroids). */
-export type SmallBodyKind = 'comet';
+/** Kinds of irregular small body: comet nuclei (step 25) and named asteroids (step 26). */
+export type SmallBodyKind = 'comet' | 'asteroid';
 
 /**
  * Cube sphere segments of the system view's planets (gas giants need more for

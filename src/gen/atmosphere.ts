@@ -17,11 +17,12 @@ export const GAS_CONSTANT = 8.314462618;
 export const EARTH_GRAVITY = 9.82;
 /** Earth's volumetric mean radius, km (NASA). */
 export const EARTH_RADIUS_KM = 6371;
-/** Mean molar mass per composition, kg/mol: Earth's air 28.97 (NASA), N₂ 28.0134 and CO₂ 44.0095 (NIST Webbook). */
+/** Mean molar mass per composition, kg/mol: Earth's air 28.97 (NASA), N₂ 28.0134, CO₂ 44.0095 and H₂ 2.01588 (NIST Webbook). */
 export const MOLAR_MASS: Record<Exclude<Composition, 'none'>, number> = {
   oxygenNitrogen: 0.02897,
   nitrogen: 0.0280134,
   carbonDioxide: 0.0440095,
+  hydrogen: 0.00201588,
 };
 
 /** Isothermal scale height H = RT / (μg) in km (Earth 8.4, Venus 15.9, Mars 11.0). */

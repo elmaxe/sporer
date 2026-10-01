@@ -47,6 +47,8 @@ export class PlanetGlobe implements Entity {
   /** The sun's light (colour × intensity) and the ambient light, for the lava's crust (set by PlanetLights). */
   readonly sunLight = new THREE.Color(1, 1, 1);
   readonly ambientLight = new THREE.Color(0, 0, 0);
+  /** How bright the sun's light is on the air and clouds (1 for a star; the galaxy's glow round a rogue is less). */
+  readonly sunStrength = { value: 1 };
   /** Lava worlds and moons: the animated sea and its eruptions' schedule. */
   readonly lava: LavaLook | null;
   /** Bodies with weather: the cloud layer's look, its storms and lightning (planet/Weather.ts draws the rain and bolts). */
@@ -95,9 +97,9 @@ export class PlanetGlobe implements Entity {
     // The same look as in the system view (in planet radii), so the two match across the zoom.
     const look = config.atmosphere && config.climate ? atmosphereLook(config.climate, config.radius) : null;
     this.ground = look ? new GroundDepth() : null;
-    if (look) this.object.add(createAtmosphere(R, config.atmosphere!, look, { vector: this.sun, point: false }, ATMOSPHERE_SEGMENTS, this.ground));
+    if (look) this.object.add(createAtmosphere(R, config.atmosphere!, look, { vector: this.sun, point: false, strength: this.sunStrength }, ATMOSPHERE_SEGMENTS, this.ground));
     this.weather = gas ? null : createWeatherLook(config, this.lava?.activity ?? null);
-    if (this.weather) this.object.add(this.weather.createCloudLayer(1, CLOUD_SEGMENTS, { vector: this.sun, point: false }));
+    if (this.weather) this.object.add(this.weather.createCloudLayer(1, CLOUD_SEGMENTS, { vector: this.sun, point: false, strength: this.sunStrength }));
     scene.add(this.object);
     this.update(0);
   }

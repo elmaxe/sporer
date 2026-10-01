@@ -10,10 +10,10 @@ import type { Tooltip } from './Tooltip';
 
 const REFRESH_SECONDS = 0.1;
 const HELP =
-  'Click: fly to a planet, moon or star · Scroll: move in or out (in at a planet to descend, out past the system for the galaxy) · ' +
+  'Click: fly to a planet, moon, star or asteroid belt · Scroll: move in or out (in at a planet to descend, out past the system for the galaxy) · ' +
   'Drag: rotate view · Shift: boost · N: map · M: mute · Esc: menu';
 const TOUCH_HELP =
-  'Tap: fly to a planet, moon or star · Pinch: move in or out (in at a planet to descend, out past the system for the galaxy) · ' +
+  'Tap: fly to a planet, moon, star or asteroid belt · Pinch: move in or out (in at a planet to descend, out past the system for the galaxy) · ' +
   'Drag: rotate view · Hold: identify · Boost · Map';
 
 /**
@@ -46,7 +46,8 @@ export class Hud implements Entity {
     const { system } = this;
     const planets = system.planets.length === 1 ? '1 planet' : `${system.planets.length} planets`;
     const nebula = system.nebula ? ` · in the ${system.nebula.name}` : '';
-    this.locationEl.textContent = `${system.name} · ${describeStars(system.stars)} · ${planets}${nebula}`;
+    const where = system.stars.length > 0 ? `${describeStars(system.stars)} · ${planets}` : 'Rogue planet · no star';
+    this.locationEl.textContent = `${system.name} · ${where}${nebula}`;
     this.help.refresh(true);
     this.sinceRefresh = REFRESH_SECONDS;
   }

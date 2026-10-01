@@ -99,12 +99,8 @@ export class GalaxyShip implements Entity {
   /** Sets course for `ref` (also mid-flight). Asking for the star it's docked at does nothing. */
   travelTo(ref: StarRef): void {
     const dest = !this.travelling && ref === this._current ? null : ref;
-    if (dest && dest !== this._destination) {
-      const { x, y, z } = dest.position;
-      const distance = Math.hypot(x - this.curr.x, y + HOVER - this.curr.y, z - this.curr.z);
-      // Changing course mid-flight carries on the same sound. Without files, a whoosh as long as the trip plays.
-      this.travelSound ??= this.sfx.start('interstellarTravel', { seconds: distance / galaxyTravelParams.maxSpeed });
-    }
+    // Changing course mid-flight carries on the same sound.
+    if (dest && dest !== this._destination) this.travelSound ??= this.sfx.start('interstellarTravel');
     this._destination = dest;
     if (!dest) this.silence();
   }

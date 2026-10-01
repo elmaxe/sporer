@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { generateGalaxy } from '../src/gen/galaxy';
 import { generateSystem, type SystemData } from '../src/gen/system';
-import { distanceToMapX, layoutSystemMap, mapLayoutParams, type SystemMapLayout } from '../src/ui/systemMapLayout';
+import {
+  distanceToMapX,
+  layoutSystemMap,
+  mapBeltGroups,
+  mapBeltInputs,
+  mapLayoutParams,
+  type SystemMapLayout,
+} from '../src/ui/systemMapLayout';
 
 const systems: SystemData[] = generateGalaxy(1337).stars.slice(0, 300).map(generateSystem);
 
@@ -98,4 +105,69 @@ describe('distanceToMapX', () => {
       }
     }
   });
+});
+
+describe('belts on the system map', () => {
+  const withBelts = systems.filter((s) => s.belts.length > 0);
+
+  it('puts each belt column between the planets it lies between, Trojans after their host', () => {
+    expect(withBelts.length).toBeGreaterThan(50);
+    for (const system of withBelts) {
+      const orbits = system.planets.map((p) => p.orbit.radius);
+      const groups = mapBeltGroups(orbits, system.belts);
+      expect(groups.flatMap((g) => g.members).sort()).toEqual(system.belts.map((_, i) => i).sort());
+      for (const g of groups) {
+        for (const m of g.members) {
+          const belt = system.belts[m]!;
+          if (belt.trojan) expect(g.after).toBe(belt.trojan.planet);
+          else {
+            if (g.after >= 0) expect(orbits[g.after]!).toBeLessThan(belt.inner);
+            if (g.after + 1 < orbits.length) expect(orbits[g.after + 1]!).toBeGreaterThan(belt.outer);
+          }
+        }
+      }
+    }
+  });
+
+  for (const [width, maxHeight] of [
+    [440, 230],
+    [343, 500],
+  ] as const) {
+    it(`fits belts and their asteroids in ${width} × ${maxHeight} without overlapping the planets`, () => {
+      for (const system of withBelts) {
+        const groups = mapBeltGroups(
+          system.planets.map((p) => p.orbit.radius),
+          system.belts,
+        );
+        const map = layoutSystemMap(
+          system.planets.map((p) => ({ radius: p.radius, ringOuter: p.rings?.outer ?? null, moons: p.moons.map((m) => ({ radius: m.radius })) })),
+          { width, maxHeight, stars: system.stars.map((s) => s.radius), belts: mapBeltInputs(groups, system.belts) },
+        );
+        expect(map.belts.length).toBe(groups.length);
+        expect(map.height).toBeLessThanOrEqual(Math.max(maxHeight, mapLayoutParams.minHeight));
+        // Every column (planets and belts) left to right without overlaps, in orbit order.
+        const columns = [
+          ...map.planets.map((p, i) => ({ x: p.x, half: half(p), key: i })),
+          ...map.belts.map((b, j) => ({ x: b.x, half: Math.max(b.halfWidth, ...b.asteroids.map((a) => a.r)), key: groups[j]!.after + 0.5 })),
+        ].sort((a, b) => a.x - b.x);
+        let right = map.sunEdge;
+        let key = -Infinity;
+        for (const c of columns) {
+          expect(c.x - c.half).toBeGreaterThanOrEqual(right - 1e-6);
+          expect(c.key).toBeGreaterThanOrEqual(key);
+          right = c.x + c.half;
+          key = c.key;
+        }
+        expect(right).toBeLessThanOrEqual(width + 1e-6);
+        for (const b of map.belts) {
+          let below = map.axisY - b.halfHeight;
+          for (const a of b.asteroids) {
+            expect(a.y + a.r).toBeLessThan(below);
+            below = a.y - a.r;
+          }
+          expect(below).toBeGreaterThanOrEqual(0);
+        }
+      }
+    });
+  }
 });

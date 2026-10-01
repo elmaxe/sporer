@@ -1,10 +1,10 @@
 import type { Rng } from '../gen/rng';
-import type { SfxName } from './whoosh';
 
 /**
  * Sound cues played from audio files. Each has its own folder under
  * `src/assets/audio/sfx/<cue>/`, and every audio file in it is one variant:
- * a play picks one at random (never the same one twice in a row).
+ * a play picks one at random (never the same one twice in a row). A cue
+ * whose folder is empty is silent.
  */
 export type SoundCue = 'select' | 'systemTravel' | 'interstellarTravel' | 'reentry' | 'leavePlanet';
 
@@ -26,40 +26,36 @@ export interface CueSpec {
   fadeIn: number;
   fadeOut: number;
   loopCrossfade: number;
-  /** The synthesised whoosh played instead while the cue's folder has no files, or null for silence. */
-  fallback: SfxName | null;
 }
 
-const oneShot = (fallback: SfxName | null): CueSpec => ({
+const oneShot = (): CueSpec => ({
   volume: 1,
   loop: false,
   fadeIn: 0,
   fadeOut: 0.15,
   loopCrossfade: 0,
-  fallback,
 });
 
-const travel = (fallback: SfxName | null): CueSpec => ({
+const travel = (): CueSpec => ({
   volume: 1,
   loop: true,
   fadeIn: 0.2,
   fadeOut: 1.2,
   loopCrossfade: 0.5,
-  fallback,
 });
 
 /** Tunables per cue (bound to the 'Sound cues' debug folder). */
 export const cueParams: Record<SoundCue, CueSpec> = {
   // Clicking a star, planet, moon or comet (in the view, on the system map or on the galaxy map).
-  select: oneShot(null),
+  select: oneShot(),
   // The autopilot flying between bodies in a system, from setting off until it arrives.
-  systemTravel: travel(null),
+  systemTravel: travel(),
   // Flying between stars on the galaxy map, from setting off until it docks.
-  interstellarTravel: travel('travel'),
-  // Descending to a planet or moon with air (or a gas giant); airless bodies keep the transition whoosh.
-  reentry: oneShot('transitionIn'),
+  interstellarTravel: travel(),
+  // Descending to a planet or moon with air (or a gas giant); airless bodies are silent.
+  reentry: oneShot(),
   // Climbing from low orbit back to the system.
-  leavePlanet: oneShot('transitionOut'),
+  leavePlanet: oneShot(),
 };
 
 /** File types picked up as variants. */

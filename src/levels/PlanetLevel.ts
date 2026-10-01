@@ -3,6 +3,7 @@ import type { Debug } from '../core/Debug';
 import type { Input } from '../core/Input';
 import { describeClimateDetail } from '../gen/climate';
 import { cometActivity, describeNucleus } from '../gen/comets';
+import { describeShape } from '../gen/shape';
 import { keplerPosition, type KeplerOrbit } from '../gen/orbit';
 import { GLOBE_SIZE_FACTOR } from '../gen/planets';
 import { bodyLabLink } from '../lab/bodyLink';
@@ -30,6 +31,7 @@ import { plantSetup } from '../surface/plantSetup';
 import { SurfaceEntities } from '../surface/SurfaceEntities';
 import type { Tooltip } from '../ui/Tooltip';
 import { cometParams } from '../world/Comet';
+import { galacticLightParams } from '../world/galacticLight';
 import type { Planet } from '../world/Planet';
 import { Level } from './Level';
 import type { SystemLevel } from './SystemLevel';
@@ -166,7 +168,17 @@ export class PlanetLevel extends Level {
       ),
     );
     this.hidden = [body, ...this.moons.moons];
-    this.add(new PlanetLights(this.scene, this.frame, system.world.stars, globe.sun, globe.sunLight, globe.ambientLight));
+    this.add(
+      new PlanetLights(
+        this.scene,
+        this.frame,
+        system.world.stars,
+        globe.sun,
+        globe.sunLight,
+        globe.ambientLight,
+        system.world.galacticCentre,
+      ),
+    );
 
     this.frame.toLocalDirection(side, this.start);
     this.radius = globe.radius;
@@ -218,9 +230,11 @@ export class PlanetLevel extends Level {
     const weatherLine = globe.weather ? describeWeather(globe.weather.data) : '';
     const detail = climate
       ? describeClimateDetail(climate) + (geysers ? ` · ${describeGeysers(geysers.kind)}` : '') + (weatherLine ? ` · ${weatherLine}` : '')
-      : config.shape
+      : config.small === 'comet' && config.shape
         ? describeNucleus(config.shape, activity())
-        : null;
+        : config.shape
+          ? describeShape(config.shape)
+          : null;
     this.hud = this.add(new PlanetHud(this.ship, `${body.name} · ${body.description}`, input, detail));
     this.map = this.add(new PlanetMap(config, body.name, this.ship, globe, input, debug));
     debug
@@ -263,6 +277,8 @@ export class PlanetLevel extends Level {
   }
 
   override update(frameDt: number, alpha: number): void {
+    // Round a rogue planet only the galaxy's dim glow lights the air.
+    if (this.system.starless) this.globe.sunStrength.value = galacticLightParams.air;
     if (this.comet && this.cometOrbit) {
       // The dust tail lags behind the comet: opposite its motion, in the body frame.
       const time = this.frame.renderTime;
@@ -287,7 +303,7 @@ export class PlanetLevel extends Level {
     const world = this.system.world;
     return {
       stars: world.stars.length,
-      bodies: world.planets.length + world.moons.length + world.nuclei.length - this.hidden.length,
+      bodies: world.planets.length + world.moons.length + world.nuclei.length + world.asteroids.length - this.hidden.length,
       localMoons: this.moons.moons.length,
     };
   }
@@ -305,6 +321,8 @@ export class PlanetLevel extends Level {
     sky.updateMatrixWorld();
     const pixelAngle = THREE.MathUtils.degToRad(camera.fov) / renderer.domElement.clientHeight;
 
+    // Round a rogue planet the eye has opened up to the dark (the sky and the globe alike).
+    if (this.system.starless) renderer.toneMappingExposure = galacticLightParams.exposure;
     renderer.autoClear = false;
     renderer.clear();
     this.system.renderSky(renderer, sky, this.frame.renderTime, this.hidden, SKY_MIN_PIXELS * pixelAngle);
@@ -312,6 +330,7 @@ export class PlanetLevel extends Level {
     renderer.clearDepth();
     this.globe.renderDepth(renderer, camera);
     renderer.render(this.scene, camera);
+    renderer.toneMappingExposure = 1;
     this.map.render(renderer);
     renderer.autoClear = true;
   }

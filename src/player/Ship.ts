@@ -208,7 +208,7 @@ export class Ship implements Entity {
    * camera distance `view` (it follows the zoom from then on).
    */
   flyIn(body: CelestialBody, start: THREE.Vector3, speed: number, view: number): void {
-    // The zoom in from the galaxy has its own whoosh.
+    // Not a trip: the zoom in from the galaxy.
     this.silence();
     this._targetBody = body;
     this.arrived = false;
