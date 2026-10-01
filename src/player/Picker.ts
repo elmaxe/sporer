@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Entity } from '../core/Entity';
 import type { Input } from '../core/Input';
-import type { CelestialBody, Sight } from '../world/CelestialBody';
+import type { CelestialBody, Region, Sight } from '../world/CelestialBody';
 import type { Ship } from './Ship';
 
 /**
@@ -16,7 +16,9 @@ const MIN_PICK_ANGLE = 0.02;
  * sight does nothing: the ship only ever goes to bodies, and sights can be
  * looked at, not flown to.
  * Everything is tested as spheres (a comet's as big as its coma, `pickRadius`),
- * which is cheaper than raycasting meshes.
+ * which is cheaper than raycasting meshes. Regions (asteroid belts) have
+ * their own ray test and only count where no body or sight is under the
+ * pointer; clicking one flies to the body it names (its nearest asteroid).
  */
 export class Picker implements Entity {
   /** The body or sight under the pointer, if any. */
@@ -25,6 +27,8 @@ export class Picker implements Entity {
   private readonly raycaster = new THREE.Raycaster();
   private readonly ndc = new THREE.Vector2();
   private readonly point = new THREE.Vector3();
+  /** Where the ray met the region picked last. */
+  private readonly regionPoint = new THREE.Vector3();
   /** Nearest hit so far during `pick`. */
   private best: Sight | null = null;
   private bestDepth = Infinity;
@@ -36,6 +40,8 @@ export class Picker implements Entity {
     private readonly bodies: readonly CelestialBody[],
     /** Hoverable only. */
     private readonly sights: readonly Sight[] = [],
+    /** Hovered by their own ray test; a click flies to `bodyNear` where it hit. */
+    private readonly regions: readonly Region[] = [],
   ) {}
 
   update(): void {
@@ -47,6 +53,10 @@ export class Picker implements Entity {
     if (!click) return;
     const hit = this.pick(click.ndcX, click.ndcY);
     if (hit && this.isBody(hit)) this.ship.moveTo(hit);
+    else if (hit && this.regions.includes(hit as Region)) {
+      const body = (hit as Region).bodyNear(this.regionPoint);
+      if (body) this.ship.moveTo(body);
+    }
   }
 
   /** The nearest body or sight whose (padded) sphere the ray through `ndc` hits. Leaves the ray set. */
@@ -56,6 +66,16 @@ export class Picker implements Entity {
     this.bestDepth = Infinity;
     for (const body of this.bodies) this.test(body);
     for (const sight of this.sights) this.test(sight);
+    if (this.best) return this.best;
+    let nearest = Infinity;
+    for (const region of this.regions) {
+      const t = region.hit(this.raycaster.ray, this.point);
+      if (t !== null && t < nearest) {
+        nearest = t;
+        this.best = region;
+        this.regionPoint.copy(this.point);
+      }
+    }
     return this.best;
   }
 

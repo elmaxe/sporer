@@ -3,6 +3,7 @@ import type { Debug } from '../core/Debug';
 import type { Input } from '../core/Input';
 import { describeClimateDetail } from '../gen/climate';
 import { cometActivity, describeNucleus } from '../gen/comets';
+import { describeShape } from '../gen/shape';
 import { keplerPosition, type KeplerOrbit } from '../gen/orbit';
 import { GLOBE_SIZE_FACTOR } from '../gen/planets';
 import { bodyLabLink } from '../lab/bodyLink';
@@ -229,9 +230,11 @@ export class PlanetLevel extends Level {
     const weatherLine = globe.weather ? describeWeather(globe.weather.data) : '';
     const detail = climate
       ? describeClimateDetail(climate) + (geysers ? ` · ${describeGeysers(geysers.kind)}` : '') + (weatherLine ? ` · ${weatherLine}` : '')
-      : config.shape
+      : config.small === 'comet' && config.shape
         ? describeNucleus(config.shape, activity())
-        : null;
+        : config.shape
+          ? describeShape(config.shape)
+          : null;
     this.hud = this.add(new PlanetHud(this.ship, `${body.name} · ${body.description}`, input, detail));
     this.map = this.add(new PlanetMap(config, body.name, this.ship, globe, input, debug));
     debug
@@ -300,7 +303,7 @@ export class PlanetLevel extends Level {
     const world = this.system.world;
     return {
       stars: world.stars.length,
-      bodies: world.planets.length + world.moons.length + world.nuclei.length - this.hidden.length,
+      bodies: world.planets.length + world.moons.length + world.nuclei.length + world.asteroids.length - this.hidden.length,
       localMoons: this.moons.moons.length,
     };
   }

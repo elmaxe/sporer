@@ -22,6 +22,7 @@ A browser game inspired by the space stage of *Spore*. Fly a UFO through a proce
 - **Spore-style controls.** Click a star, planet or point to autopilot there. Scroll to zoom, drag to orbit the camera, WASD to nudge. Touch controls on phones.
 - **Living stars.** Granulation, sunspots, prominences and flares. Main-sequence stars of every class, red and white dwarfs, giants and binaries.
 - **Varied worlds.** Lava, barren, desert, terran, ocean, ice and gas giants, from tiny moons to huge Jupiters, with rings, moons and comets on elliptical orbits; fly down to a comet's lumpy nucleus and watch its jets wake near the star.
+- **Asteroid belts.** Main belts with Kirkwood gaps, icy outer belts and Trojan swarms, thousands of tumbling rocks up close and a dusty band from afar; visit their named asteroids, contact binaries included.
 - **Climate from real physics.** Temperature, air pressure and composition, and geothermal heat follow the star, the orbit and the body's size. They drive atmospheres, lava, cryo and steam geysers, and weather (clouds, storms, rain, snow and lightning). Habitable worlds grow plants, more species and denser cover the more Earth-like they are. The numbers are checked against real references in [`docs/research/`](docs/research/).
 - **Nebulas.** Named emission, reflection and dark nebulas, planetary nebulas round white dwarfs and supernova remnants on the galaxy map. Fly into one and its gas fills the sky of the systems inside, down to low orbit.
 - **Rogue planets.** A handful of planets drift between the stars with no sun, faint rings on the galaxy map. Fly to one and it's a dark, frozen world lit only by the galaxy's glow and its own heat: glowing lava cracks, ice geysers, and under a thick hydrogen sky, sometimes a warm hidden sea.
@@ -71,7 +72,7 @@ Every push to `main` runs the typecheck, tests and build in GitHub Actions and d
 
 | Folder | Holds |
 |---|---|
-| `src/gen/` | Pure, seeded generation: galaxy, nebulas, rogue planets, stars, planets, climate, weather, geysers, plants, comets |
+| `src/gen/` | Pure, seeded generation: galaxy, nebulas, rogue planets, stars, planets, climate, weather, geysers, plants, comets, asteroid belts |
 | `src/levels/` | The galaxy, system and planet levels and the scene manager that zooms between them |
 | `src/galaxy/`, `src/world/`, `src/planet/`, `src/surface/` | What each level draws (`surface/`: plants on the ground) |
 | `src/player/` | Ship, autopilot, orbit camera, picking |

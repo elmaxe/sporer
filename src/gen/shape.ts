@@ -441,3 +441,9 @@ export function shapeExtents(shape: ShapeData): Vec3Tuple {
   }
   return [(hi[0] - lo[0]) / 2, (hi[1] - lo[1]) / 2, (hi[2] - lo[2]) / 2];
 }
+
+/** The low-orbit HUD's line for an asteroid's shape, e.g. "Contact binary: two lobes joined by a neck". */
+export function describeShape(shape: Pick<ShapeData, 'binary' | 'lobes'>): string {
+  if (shape.binary) return shape.lobes.length > 2 ? 'Contact binary with a third lobe' : 'Contact binary: two lobes joined by a neck';
+  return shape.lobes.length > 1 ? 'Irregular rock with a knob' : 'Irregular rock';
+}

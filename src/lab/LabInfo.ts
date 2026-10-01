@@ -3,7 +3,7 @@ import type { Input } from '../core/Input';
 import { celsius, describeAtmosphere } from '../gen/climate';
 import { EARTH_RADIUS_KM, atmosphereLook, scaleHeight } from '../gen/atmosphere';
 import { shapeExtents } from '../gen/shape';
-import { describeLab, labClimateData, labEarthRadii } from './labPlanet';
+import { describeLab, isSmallKind, labClimateData, labEarthRadii } from './labPlanet';
 import type { PlanetLab } from './PlanetLab';
 
 /** Seconds between refreshes of the live values. */
@@ -49,7 +49,9 @@ export class LabInfo implements Entity {
     const { planet, source } = this.lab;
     const from = !source
       ? ''
-      : source.comet !== undefined
+      : source.asteroid !== undefined
+        ? `Star ${source.star}, belt ${source.belt ?? 0}, asteroid ${source.asteroid} (seed ${source.seed})`
+        : source.comet !== undefined
         ? `Star ${source.star}, comet ${source.comet} (seed ${source.seed})`
         : `Star ${source.star}, planet ${source.planet}${source.moon !== undefined ? `, moon ${source.moon}` : ''} (seed ${source.seed})`;
     // Back to the game: at this planet's system when it came from one.
@@ -170,7 +172,7 @@ export class LabInfo implements Entity {
       rows.push(['Plants', 'none']);
     }
     if (planet.rings) rows.push(['Rings', `${fmt(planet.rings.inner / planet.radius)}–${fmt(planet.rings.outer / planet.radius)} R`]);
-    if (planet.kind !== 'moon' && planet.kind !== 'comet') rows.push(['Moons', `${planet.moons.length}${planet.moons.length ? ' (system view)' : ''}`]);
+    if (planet.kind !== 'moon' && !isSmallKind(planet.kind)) rows.push(['Moons', `${planet.moons.length}${planet.moons.length ? ' (system view)' : ''}`]);
     if (level) rows.push(['Build', `${Math.round(level.triangles / 1000)}k triangles · ${Math.round(level.buildMs)} ms`]);
     const lod = level?.globe?.lodStats();
     if (lod) rows.push(['Detail', `${lod.chunks} chunks drawn · depth ${lod.minDepth}–${lod.maxDepth}`]);

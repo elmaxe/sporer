@@ -1,4 +1,5 @@
 import { flatTilt, type Quat } from './galactic';
+import { BELT_MARGIN, generateBelts, reserveMainBelt, wantsMainBelt, type BeltData } from './belts';
 import { generateComets, type CometData } from './comets';
 import { atmosphereTint, generateClimate, type ClimateData } from './climate';
 import type { GalaxyData, StarRef } from './galaxy';
@@ -11,6 +12,7 @@ import {
   MOON_COUNT_WEIGHTS,
   atmosphereColor,
   chooseSizeClass,
+  isGiant,
   choosePlanetType,
   gasBands,
   gasStyle,
@@ -111,6 +113,8 @@ export interface SystemData {
   comets: CometData[];
   /** The nebula the system sits in, if any (from its StarRef). */
   nebula: NebulaData | null;
+  /** Asteroid belts, outer icy belts and Trojan swarms, with their named asteroids (see gen/belts.ts). */
+  belts: BeltData[];
 }
 
 /** G-class period at the reference distance; other orbits follow Kepler's third law. */
@@ -142,6 +146,10 @@ export function generateSystem(ref: StarRef): SystemData {
   const planets: PlanetData[] = [];
   // Inner edge of the free space where the next planet's neighbourhood can start.
   let edge = starZone * 1.5 + 25;
+  // A main belt goes before the first giant, which moves out to make room (its own stream, so no planet draw changes).
+  const beltRng = rng.fork('belts');
+  const wantsBelt = wantsMainBelt(beltRng);
+  let mainBelt: [number, number] | null = null;
   for (let i = 0; i < planetCount; i++) {
     const prng = rng.fork('planet', i);
     const name = `${ref.name} ${romanNumeral(i + 1)}`;
@@ -154,6 +162,10 @@ export function generateSystem(ref: StarRef): SystemData {
     const zone = (edge + gap) / habitableRadius;
     const size = chooseSizeClass(prng.fork('size'), zone);
     const type = choosePlanetType(prng, zone, size);
+    if (wantsBelt && !mainBelt && isGiant(size)) {
+      mainBelt = reserveMainBelt(planets[i - 1]?.orbit.radius ?? null, edge);
+      edge = mainBelt[1] + BELT_MARGIN;
+    }
     const radius = planetRadius(prng, size);
     const rings =
       type === 'gas'
@@ -232,6 +244,15 @@ export function generateSystem(ref: StarRef): SystemData {
     period: (a) => keplerPeriod(a, totalMass),
   });
 
+  // Own stream too: belts sit in the gaps the planets left.
+  const belts = generateBelts(beltRng, {
+    systemName: ref.name,
+    starZone,
+    planets,
+    mainBelt,
+    period: (r) => keplerPeriod(r, totalMass),
+  });
+
   return {
     id: ref.id,
     name: ref.name,
@@ -243,6 +264,7 @@ export function generateSystem(ref: StarRef): SystemData {
     galacticTilt: flatTilt(rng.fork('galactic')),
     comets,
     nebula: ref.nebula ?? null,
+    belts,
   };
 }
 
@@ -314,6 +336,7 @@ export function generateRogueSystem(ref: StarRef): SystemData {
     habitableRadius: 0,
     galacticTilt: flatTilt(rng.fork('galactic')),
     comets: [],
+    belts: [],
     nebula: ref.nebula ?? null,
   };
 }
@@ -496,4 +519,4 @@ export function describePlanet(type: PlanetType): string {
 
 // Re-exported so callers can import all generation types from one place.
 export type { ClimateData } from './climate';
-export type { CometData, PlanetStyle, PlanetType, MoonType, SizeClass };
+export type { BeltData, CometData, PlanetStyle, PlanetType, MoonType, SizeClass };

@@ -38,6 +38,7 @@ const KIND_LABELS: Record<string, LabKind> = {
   'gas giant': 'gasGiant',
   moon: 'moon',
   'comet (irregular)': 'comet',
+  'asteroid (irregular)': 'asteroid',
 };
 /** Fallback sea colours when a sea is switched on for a type that has none. */
 const SEA_COLOR: Record<PlanetType, string> = {
@@ -63,7 +64,7 @@ export class LabPanel {
   private readonly planetRoot: GUI;
   /** Open/closed state of the planet folders across rebuilds. */
   private readonly closed = new Map<string, boolean>();
-  private readonly loader = { seed: '1337', star: 0, planet: 0, moon: -1, comet: -1 };
+  private readonly loader = { seed: '1337', star: 0, planet: 0, moon: -1, comet: -1, belt: 0, asteroid: -1 };
   private recolours = 0;
 
   constructor(
@@ -136,11 +137,18 @@ export class LabPanel {
     g.add(this.loader, 'planet', 0, 8, 1).name('planet #');
     g.add(this.loader, 'moon', -1, 4, 1).name('moon # (-1: planet)');
     g.add(this.loader, 'comet', -1, 2, 1).name('comet # (-1: planet)');
+    g.add(this.loader, 'belt', 0, 6, 1).name('belt #');
+    g.add(this.loader, 'asteroid', -1, 5, 1).name('asteroid # (-1: planet)');
     g.add(
       {
         load: () => {
-          const { seed, star, planet, moon, comet } = this.loader;
-          const loading = comet >= 0 ? lab.loadComet(seed, star, comet) : lab.load(seed, star, planet, moon >= 0 ? moon : undefined);
+          const { seed, star, planet, moon, comet, belt, asteroid } = this.loader;
+          const loading =
+            asteroid >= 0
+              ? lab.loadAsteroid(seed, star, belt, asteroid)
+              : comet >= 0
+                ? lab.loadComet(seed, star, comet)
+                : lab.load(seed, star, planet, moon >= 0 ? moon : undefined);
           loading.catch((err: unknown) => alert(String(err)));
         },
       },

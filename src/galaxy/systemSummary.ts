@@ -36,6 +36,8 @@ export interface PlanetRow extends BodyMark {
 export interface SystemSummary {
   planets: PlanetRow[];
   moonCount: number;
+  /** Asteroid belts, a giant's two Trojan swarms counting as one (as on the system map). */
+  beltCount?: number;
 }
 
 /**
@@ -79,14 +81,19 @@ export function summarizeSystem(system: SystemData): SystemSummary {
     const temperature = EARTH_ANALOGUE_TEMPERATURE * insolation ** 0.25;
     return { ...row, tier: 0, warmth: warmthOf(0, temperature), air: 'thick' };
   });
-  return { planets, moonCount };
+  const trojanHosts = new Set(system.belts.flatMap((b) => (b.trojan ? [b.trojan.planet] : [])));
+  const beltCount = system.belts.filter((b) => !b.trojan).length + trojanHosts.size;
+  return { planets, moonCount, beltCount };
 }
 
-/** e.g. "4 planets · 7 moons", "1 planet", "No planets". */
+/** e.g. "4 planets · 7 moons · 1 belt", "1 planet", "No planets". */
 export function describeBodyCount(summary: SystemSummary): string {
   const n = summary.planets.length;
   if (n === 0) return 'No planets';
-  const planets = `${n} planet${n === 1 ? '' : 's'}`;
+  const parts = [`${n} planet${n === 1 ? '' : 's'}`];
   const m = summary.moonCount;
-  return m === 0 ? planets : `${planets} · ${m} moon${m === 1 ? '' : 's'}`;
+  if (m > 0) parts.push(`${m} moon${m === 1 ? '' : 's'}`);
+  const b = summary.beltCount ?? 0;
+  if (b > 0) parts.push(`${b} belt${b === 1 ? '' : 's'}`);
+  return parts.join(' · ');
 }
