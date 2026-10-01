@@ -8,11 +8,11 @@ import { describePlanet, describeSized, type PlanetData, type SystemData } from 
 import { skyScale } from '../planet/frame';
 import type { Physics } from '../physics/Physics';
 import type { CelestialBody } from './CelestialBody';
-import { describeAsteroid, type AsteroidData, type BeltData } from '../gen/belts';
+import { describeAsteroid } from '../gen/belts';
 import { describeComet } from '../gen/comets';
 import { Comet, cometConfig, cometParams } from './Comet';
-import { AsteroidBelt, beltParams } from './AsteroidBelt';
-import { Planet, type PlanetConfig } from './Planet';
+import { AsteroidBelt, asteroidConfig, beltParams } from './AsteroidBelt';
+import { Planet } from './Planet';
 import { Star } from './Star';
 import { addAtmosphereDebug, type AtmosphereSun } from './atmosphereShell';
 import { stormParams } from './StarStorms';
@@ -222,28 +222,6 @@ export class StarSystem implements Entity {
     const at = p.positionAt(time, p.object.position);
     p.object.scale.setScalar(skyScale(p.radius, this.scratch.subVectors(at, observer).length(), minAngle));
   }
-}
-
-/** What the renderers take for a named asteroid: an airless, sealess body with its shape, on its circular orbit. */
-export function asteroidConfig(asteroid: AsteroidData): PlanetConfig {
-  return {
-    name: asteroid.name,
-    type: 'barren',
-    radius: asteroid.radius,
-    seed: asteroid.seed,
-    spin: asteroid.spin,
-    orbit: asteroid.orbit,
-    style: asteroid.style,
-    tilt: asteroid.tilt,
-    climate: null,
-    shape: asteroid.shape,
-    small: 'asteroid',
-  };
-}
-
-/** The belt a named asteroid body belongs to, if any. */
-export function beltOf(belts: readonly AsteroidBelt[], body: Planet): BeltData | null {
-  return belts.find((b) => b.asteroids.includes(body))?.data ?? null;
 }
 
 function describe(p: PlanetData): string {

@@ -352,8 +352,7 @@ export function beltFraction(belt: Pick<BeltData, 'inner' | 'outer'>, r: number)
 /** The named asteroids: spaced out across the belt so no two orbits touch, nearest first. */
 function namedAsteroids(rng: Rng, belt: BeltData, ctx: BeltContext): AsteroidData[] {
   const want = rng.int(...NAMED_COUNT[belt.kind]);
-  const [minKm, maxKm] = NAMED_RADIUS_KM[belt.kind];
-  const maxRadius = asteroidRadius(maxKm);
+  const maxRadius = asteroidRadius(NAMED_RADIUS_KM[belt.kind][1]);
   // Orbits at least two of the biggest apart, so neighbours can never touch.
   const spacing = 2 * maxRadius + 1;
   const slots = Math.max(1, Math.floor((belt.outer - belt.inner) / spacing));
@@ -368,13 +367,8 @@ function namedAsteroids(rng: Rng, belt: BeltData, ctx: BeltContext): AsteroidDat
   return chosen.map((slot, i) => {
     const arng = rng.fork('asteroid', i);
     const r = belt.inner + width * (slot + 0.5) + arng.range(-0.5, 0.5) * Math.max(0, width - spacing);
-    const t = beltFraction(belt, r);
-    const kind = asteroidClass(belt, t, arng.next());
-    const radius = asteroidRadius(logRange(arng, minKm, maxKm));
-    const binary = arng.chance(CONTACT_BINARY_SHARE[belt.kind]);
-    const shapeOptions = { lobes: binary ? 2 : arng.chance(0.15) ? 3 : 1, binary, elongation: ASTEROID_ELONGATION };
-    const shapeRng = arng.fork('shape');
-    let shape: ShapeData | null = null;
+    const kind = asteroidClass(belt, beltFraction(belt, r), arng.next());
+    const body = asteroidBody(arng.fork('body'), belt.kind, kind);
     let orbit: Orbit;
     if (belt.trojan) {
       const host = belt.trojan.orbit;
@@ -387,22 +381,35 @@ function namedAsteroids(rng: Rng, belt: BeltData, ctx: BeltContext): AsteroidDat
     } else {
       orbit = { radius: r, period: ctx.period(r), phase: arng.range(0, Math.PI * 2), inclination: arng.gaussian(0, belt.inclination) };
     }
-    return {
-      name: generateName(arng.fork('name')),
-      class: kind,
-      radius,
-      seed: arng.int(0, 1_000_000),
-      // Turns in 15–60 s, like the comets and moons (the game's compressed days).
-      spin: arng.range(0.1, 0.4) * arng.sign(),
-      tilt: arng.range(-Math.PI / 2, Math.PI / 2),
-      binary,
-      get shape(): ShapeData {
-        return (shape ??= generateShape(shapeRng, shapeOptions));
-      },
-      style: asteroidStyle(arng.fork('style'), kind),
-      orbit,
-    };
+    return Object.defineProperties({ name: generateName(arng.fork('name')), orbit }, Object.getOwnPropertyDescriptors(body)) as AsteroidData;
   });
+}
+
+/**
+ * A named asteroid's body (size, spin, shape and colours) for a belt of
+ * `beltKind` and composition `kind`, all from `rng` (its own stream). The
+ * shape is built on first read (see AsteroidData.shape).
+ */
+export function asteroidBody(rng: Rng, beltKind: BeltKind, kind: AsteroidClass): Omit<AsteroidData, 'name' | 'orbit'> {
+  const [minKm, maxKm] = NAMED_RADIUS_KM[beltKind];
+  const radius = asteroidRadius(logRange(rng, minKm, maxKm));
+  const binary = rng.chance(CONTACT_BINARY_SHARE[beltKind]);
+  const shapeOptions = { lobes: binary ? 2 : rng.chance(0.15) ? 3 : 1, binary, elongation: ASTEROID_ELONGATION };
+  const shapeRng = rng.fork('shape');
+  let shape: ShapeData | null = null;
+  return {
+    class: kind,
+    radius,
+    seed: rng.int(0, 1_000_000),
+    // Turns in 15–60 s, like the comets and moons (the game's compressed days).
+    spin: rng.range(0.1, 0.4) * rng.sign(),
+    tilt: rng.range(-Math.PI / 2, Math.PI / 2),
+    binary,
+    get shape(): ShapeData {
+      return (shape ??= generateShape(shapeRng, shapeOptions));
+    },
+    style: asteroidStyle(rng.fork('style'), kind),
+  };
 }
 
 /**

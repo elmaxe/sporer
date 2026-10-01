@@ -7,6 +7,7 @@ import {
   librationTurns,
   rockPosition,
   type AsteroidClass,
+  type AsteroidData,
   type BeltData,
   type RockData,
 } from '../gen/belts';
@@ -16,7 +17,7 @@ import { generateShape, shapeRadius } from '../gen/shape';
 import type { CelestialBody, Region } from './CelestialBody';
 import { createCubeSphere } from './cubeSphere';
 import { VALUE_NOISE_GLSL } from './noiseGlsl';
-import type { Planet } from './Planet';
+import type { Planet, PlanetConfig } from './Planet';
 
 export const beltParams = {
   /** A rock is a mesh from this size on screen (device px), a dot below it... */
@@ -509,6 +510,23 @@ export class AsteroidBelt implements Region {
     this.dust.geometry.dispose();
     this.dust.material.dispose();
   }
+}
+
+/** What the renderers take for a named asteroid: an airless, sealess body with its shape, on its circular orbit. */
+export function asteroidConfig(asteroid: AsteroidData): PlanetConfig {
+  return {
+    name: asteroid.name,
+    type: 'barren',
+    radius: asteroid.radius,
+    seed: asteroid.seed,
+    spin: asteroid.spin,
+    orbit: asteroid.orbit,
+    style: asteroid.style,
+    tilt: asteroid.tilt,
+    climate: null,
+    shape: asteroid.shape,
+    small: 'asteroid',
+  };
 }
 
 /** A rock mesh: a small cube sphere pushed out to an irregular shape (the last one a contact binary), lumpy, unit size. */

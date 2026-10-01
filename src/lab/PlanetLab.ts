@@ -14,6 +14,7 @@ import {
   encodeLab,
   generateLabPlanet,
   labClimateData,
+  labFromAsteroid,
   labFromComet,
   labFromSystem,
   toPlanetConfig,
@@ -82,7 +83,8 @@ export class PlanetLab {
 
   /**
    * The state a page URL asks for: `#<lab link>`, `?seed&star&planet[&moon]`
-   * (a game planet), `?seed&star&comet` (a game comet) or `?gen=<seed>[&type&kind]`.
+   * (a game planet), `?seed&star&comet` (a game comet), `?seed&star&belt&asteroid`
+   * (a game asteroid) or `?gen=<seed>[&type&kind]`.
    */
   static stateFromUrl(url: URL): LabState {
     const params = url.searchParams;
@@ -96,13 +98,15 @@ export class PlanetLab {
       const state = decodeLab(hash);
       if (state) return state;
     }
-    if (params.has('star') && (params.has('planet') || params.has('comet'))) {
+    if (params.has('star') && (params.has('planet') || params.has('comet') || params.has('asteroid'))) {
       const source: LabSource = {
         seed: params.get('seed') ?? '1337',
         star: Number(params.get('star')),
         planet: Number(params.get('planet') ?? 0),
         moon: params.has('moon') ? Number(params.get('moon')) : undefined,
         comet: params.has('comet') ? Number(params.get('comet')) : undefined,
+        belt: params.has('asteroid') ? Number(params.get('belt') ?? 0) : undefined,
+        asteroid: params.has('asteroid') ? Number(params.get('asteroid')) : undefined,
       };
       const planet = loadFromGalaxy(source);
       if (planet) return { planet, view, source };
@@ -224,6 +228,14 @@ export class PlanetLab {
     const source: LabSource = { seed: String(seed), star, planet: 0, comet };
     const loaded = loadFromGalaxy(source);
     if (!loaded) return Promise.reject(new Error(`No comet ${comet} at star ${star}`));
+    return this.replace(loaded, source);
+  }
+
+  /** Named asteroid `asteroid` of belt `belt` of star `star` in the galaxy of `seed`. */
+  loadAsteroid(seed: string | number, star: number, belt: number, asteroid: number): Promise<void> {
+    const source: LabSource = { seed: String(seed), star, planet: 0, belt, asteroid };
+    const loaded = loadFromGalaxy(source);
+    if (!loaded) return Promise.reject(new Error(`No asteroid ${asteroid} in belt ${belt} at star ${star}`));
     return this.replace(loaded, source);
   }
 
@@ -373,5 +385,6 @@ function loadFromGalaxy(source: LabSource): LabPlanet | null {
   const ref = galaxy.stars[source.star];
   if (!ref) return null;
   const system = generateSystem(ref);
+  if (source.asteroid !== undefined) return labFromAsteroid(system, source.belt ?? 0, source.asteroid);
   return source.comet !== undefined ? labFromComet(system, source.comet) : labFromSystem(system, source.planet, source.moon);
 }
