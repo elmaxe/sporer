@@ -346,7 +346,7 @@ Status: ⬜ todo · 🟨 in progress · ✅ done
 - *Lab:* `kind=comet` (and later `asteroid`) in `lab.html`, with the shape's lobes, noise and activity in the panel.
 - *Checks:* unit tests for the shape (deterministic, never below the floor, contact binaries have one connected surface, the sampler matches the mesh). Smoke test: visit a comet in the home system (or a seeded one), zoom in and out, jets on near the star and off far out.
 
-### 26. ⬜ Asteroid belts
+### 26. ✅ Asteroid belts
 **Needs step 25** (its shape system and low orbit over irregular bodies) for the visitable named asteroids.
 
 - Some systems have an asteroid belt: a ring of rocks between the rocky and gas-giant zones, and sometimes an icy one beyond the outermost planet (Kuiper-style). Gas giants can have Trojan swarms 60° ahead of and behind them.
@@ -358,6 +358,45 @@ Status: ⬜ todo · 🟨 in progress · ✅ done
 - *Data (`gen/belts.ts`, `rng.fork('belts')`):* `BeltData` {inner, outer radius, thickness, inclination, rock count, colour range, icy or rocky, named asteroids: `AsteroidData` with orbit, radius, `ShapeData`, name}. Placement rules (gaps in the planets, not overlapping a planet's neighbourhood, Trojans at L4/L5) researched, not guessed: real belt positions relative to the frost line and giants.
 - *View (`world/AsteroidBelt.ts`):* one `InstancedMesh` of a few low-poly rock shapes (made from the shape function), each instance on its own circular Kepler orbit computed in the vertex shader from the system clock (like the star storms), with its own tumble. A faint dusty ring mesh fades in as the rocks fade out with distance. Named asteroids are separate `CelestialBody`s. Measure draw calls and FPS (target: no visible drop on the user's GPU, and report SwiftShader numbers).
 - *System map and planet sky:* the belt shows on the system map; from low orbit over a belt asteroid, nearby rocks drift through the sky.
+
+**Done (as built; sources, measurements and the mapping in `docs/research/asteroid-belts.md`):**
+- *Data, `gen/belts.ts` (pure, from `rng.fork('belts')`).*
+  - **Main belt**: room is made for it while the planets are placed, so systems with one change (the planets beyond it move out; nothing else about them does). The real belt runs from Jupiter's 4:1 resonance to its 2:1 (2.065–3.278 AU), so its outer edge is 1.587× its inner one, and the inner edge is 1.355× Mars's orbit. `reserveMainBelt` puts the belt just before the first giant: from 1.355× the previous planet's orbit (or just past its neighbourhood) to 1.587× that. The giant then follows at its usual gap, not at its 2:1 distance, to keep systems compact. Every main belt is as wide for its size as the real one (width / radius 0.45), and systems keep about the same size (outer edge median 699, max 2501). The home system's giant moves from 559 to 966. The Kirkwood gaps (3:1, 5:2, 7:3) are thinned.
+  - **Icy outer belt**: from 1.31 to 1.66 times the outermost planet's orbit (Neptune's 3:2 to the 50 AU edge).
+  - **Trojan swarms**: at a giant's L4 and L5, librating by up to 26–35° over 12.5 of its orbits, L4 with 60% of the pair's rocks.
+  - **How often**: Herschel sees debris belts round ~20% of FGK stars, but only ones ≳10× the Sun's, so belts are made common: a main belt in 60% of the systems with a giant, an outer belt in 45%, Trojans for 25% of gas giants and 15% of ice giants. Over 1500 systems, 71% have a belt: 39% a main belt, 45% an outer one, 25% Trojans.
+  - **Rocks** (`generateRocks`, made by the view from the belt's seed): each on its own tilted circle, with half the real inclination spread (main-belt median 3.8° against the real 7.15°; the outer belt's cold and hot populations). Sizes follow a slope of 1.3, the SDSS one for small main-belt asteroids. Dense on purpose: tens of their own sizes apart, where real ones are 10⁵–10⁶ (200 per 1000 square units, up to 60 000 in a main belt and 80 000 in a system).
+  - **Named asteroids**: 3–6 per main belt, 2–4 per outer belt, 1–3 per swarm, on orbits that never touch. Real radii from 64 km to the biggest non-dwarf member (Vesta 261 km, Hektor 125, Ixion 349) through the planets' size mapping, so game radius 0.8–1.9. Contact binaries make up 14% of the main belt's (radar NEAs), 18% of Trojans' and 25% of the outer belt's. Their classes follow the measured dark share of the main belt (0.55 → 0.87 outwards), D-types on Trojans, red icy bodies outside. Colours come from the Bus-DeMeo spectra scaled by albedo, the dark ones lifted to stay visible. Shapes are built on first read (`asteroidBody`), which keeps `generateSystem` at 1.3 ms.
+- *View, `world/AsteroidBelt.ts`:*
+  - Every rock is a dot in one `Points`, moved in the vertex shader as a pure function of the clock. Rocks bigger than 4 px on screen become tumbling instanced meshes: four rock shapes from `generateShape`, 48 triangles each, one draw call per shape. Which rocks qualify is chosen on the CPU at most every 0.25 s or 4 units of camera motion. `rockWithin` rejects most rocks without trigonometry and checks the rest with `rockPosition`, the shader's maths; a test checks it against every rock's true distance. Choosing among 60 000 rocks takes 5.3 ms.
+  - A dusty ring with the gaps and clumps fades in beyond 150–900 units (a Trojan swarm's ring is an arc that follows its host), so far away it's a band and close up it's thousands of rocks. Its colour is evened out, outer belts are fainter, and it dims from inside the belt and seen edge-on.
+  - Named asteroids are `Planet`s (`asteroidConfig`, `small: 'asteroid'`) in `StarSystem.asteroids` and `bodies`, so picking, the autopilot, the target ring and descending to low orbit work as for moons and comets. Low orbit's HUD says "Contact binary: two lobes joined by a neck", and the belt's rocks drift through its sky.
+  - The belt is a `Region`: the `Picker` hovers it with its own ray test against the mid-plane (the tooltip says "Asteroid belt · 6 named asteroids"), and a click flies to the named asteroid nearest the point.
+  - The system map shows each belt as a speckled column in orbit order (a giant's Trojans just after it), with its named asteroids stacked above it like moons. The title and the galaxy map's star tooltip count the belts.
+- *Lab:* `kind=asteroid`, `?seed=&star=&belt=&asteroid=` or `lab.loadAsteroid(...)` loads a game asteroid, and the menu's lab link works for asteroids. The Shape folder edits them like comets.
+- *Cost* (headless SwiftShader, 1280×720, full quality, FPS with belts / without): the home system (one main belt of 60 000 rocks) 5 / 6 on arrival, and 7 / 9 next to a named asteroid inside it (~1270 meshes chosen near the ship). With every rock a mesh, a 12 000-rock system had run at 5 / 16 (`?quality=low`).
+- *Tests:* `tests/belts.test.ts`:
+  - the main belt's span and the Kirkwood gaps against Kepler's law;
+  - room made for the main belt past the inner planet and clear of the giant;
+  - `rockWithin` against the true distances;
+  - the S/C gradient against the measured shares;
+  - the size mapping;
+  - determinism;
+  - a fair share of every kind;
+  - belts clear of every neighbourhood;
+  - main belts inside the first giant, outer belts beyond the last planet;
+  - Trojans at ±60° within their libration;
+  - the rock budget;
+  - named asteroids inside their belt on non-touching orbits;
+  - the contact-binary share and lazily built shapes;
+  - the home system's main belt has a contact binary.
+
+  `tests/systemMapLayout.test.ts`: belt columns in orbit order, nothing overlapping, asteroids above. Lab and summary tests cover the rest.
+- *Smoke:*
+  - `core`: the home belt's rocks (meshes near the ship), hovering the belt names it, a click flies to the nearest named asteroid, and the map shows every named asteroid and counts the belt.
+  - `planet`: visits a single asteroid and a contact binary with the full planet loop (the HUD, the shape, belt rocks in the sky, every zoom crossfading).
+  - `lab`: builds an asteroid in both views and loads a game one.
+  - The seamless zooms' camera clearance is now measured in low orbit against the ground beneath the camera, not the highest peak. Low over a valley, the old measure read 0.926 (below its limit of 1) with `audio,planet`, on the step 25 commit too: the step 24/25 notes' 0.94–0.95 flake. Against the ground it reads 1.005, the camera's 1.5 units over it.
 
 ### 27. ✅ Nebulas
 - Nebulas are places you can see on the galaxy map and fly into, but **only to look at**: no gameplay, just beauty.

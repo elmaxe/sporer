@@ -4,6 +4,7 @@ import { nominalStar } from '../src/gen/stars';
 import { generateSystem, type SystemData } from '../src/gen/system';
 import { perihelion } from '../src/gen/orbit';
 import { cometConfig } from '../src/world/Comet';
+import { asteroidConfig } from '../src/world/AsteroidBelt';
 import {
   giantKind,
   LAB_TYPES,
@@ -13,6 +14,7 @@ import {
   generateLabPlanet,
   kindRadiusRange,
   labClimateData,
+  labFromAsteroid,
   labFromComet,
   labFromSystem,
   labLink,
@@ -170,6 +172,57 @@ describe('comets in the lab', () => {
     const state = decodeLab(encodeLab({ planet, view: DEFAULT_VIEW, source: { seed: '1337', star: 3, planet: 0, comet: 1 } }))!;
     expect(state.planet).toEqual(planet);
     expect(state.source?.comet).toBe(1);
+  });
+});
+
+describe('asteroids in the lab', () => {
+  it('draws named asteroids as the game does', () => {
+    let checked = 0;
+    for (const system of systems) {
+      system.belts.forEach((belt, b) =>
+        belt.asteroids.forEach((a, k) => {
+          const lab = labFromAsteroid(system, b, k)!;
+          expect(lab.kind).toBe('asteroid');
+          const config = toPlanetConfig(lab);
+          const game = asteroidConfig(a);
+          expect(config.shape).toEqual(game.shape);
+          expect(config.style).toEqual(game.style);
+          expect(config.radius).toBe(game.radius);
+          expect(config.seed).toBe(game.seed);
+          expect(config.small).toBe('asteroid');
+          expect(config.climate).toBeNull();
+          checked++;
+        }),
+      );
+    }
+    expect(checked).toBeGreaterThan(10);
+    expect(labFromAsteroid(systems[0]!, 99, 0)).toBeNull();
+  });
+
+  it('are made like the game makes them, and turn into comets, round bodies and back', () => {
+    for (let seed = 0; seed < 20; seed++) {
+      const p = generateLabPlanet(seed, { kind: 'asteroid' });
+      expect(p).toEqual(generateLabPlanet(seed, { kind: 'asteroid' }));
+      expect(p.kind).toBe('asteroid');
+      expect(p.shape).not.toBeNull();
+      expect(p.climate).toBeNull();
+      const [min, max] = kindRadiusRange('asteroid');
+      expect(p.radius).toBeGreaterThanOrEqual(min - 1e-9);
+      expect(p.radius).toBeLessThanOrEqual(max + 1e-9);
+      expect(toPlanetConfig(p).small).toBe('asteroid');
+    }
+    const asteroid = generateLabPlanet(4, { kind: 'asteroid' });
+    expect(withKind(asteroid, 'comet').kind).toBe('comet');
+    expect(withKind(asteroid, 'moon').shape).toBeNull();
+    expect(withKind(withKind(asteroid, 'moon'), 'asteroid').kind).toBe('asteroid');
+    expect(withType(asteroid, 'ice').shape).toEqual(asteroid.shape);
+  });
+
+  it('round-trip through a link, with where they came from', () => {
+    const planet = generateLabPlanet(9, { kind: 'asteroid' });
+    const state = decodeLab(encodeLab({ planet, view: DEFAULT_VIEW, source: { seed: '1337', star: 6, planet: 0, belt: 0, asteroid: 2 } }))!;
+    expect(state.planet).toEqual(planet);
+    expect(state.source?.asteroid).toBe(2);
   });
 });
 

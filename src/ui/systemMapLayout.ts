@@ -21,6 +21,14 @@ export interface MapPlanetInput extends MapBodyInput {
   moons: readonly MapBodyInput[];
 }
 
+/** An asteroid belt's column: it sits between the planets by its orbit (a Trojan swarm right after its host). */
+export interface MapBeltInput {
+  /** Index of the planet the column comes after (−1: before the first). */
+  after: number;
+  /** Its named asteroids, stacked above the belt's strip like moons. */
+  asteroids: readonly MapBodyInput[];
+}
+
 export interface MapLayoutOptions {
   /** CSS px. */
   width: number;
@@ -28,6 +36,8 @@ export interface MapLayoutOptions {
   maxHeight: number;
   /** Radii of the star(s), largest first matters only for their relative sizes. */
   stars: readonly number[];
+  /** Belt columns, in orbit order. */
+  belts?: readonly MapBeltInput[];
 }
 
 export interface MapDisc {
@@ -42,6 +52,15 @@ export interface MapPlanetDisc extends MapDisc {
   moons: MapDisc[];
 }
 
+/** A belt's column: a speckled strip across the axis, `half` px either side of it, and its asteroids above. */
+export interface MapBeltColumn {
+  x: number;
+  /** Half the strip's width and height, px. */
+  halfWidth: number;
+  halfHeight: number;
+  asteroids: MapDisc[];
+}
+
 export interface SystemMapLayout {
   width: number;
   height: number;
@@ -51,6 +70,7 @@ export interface SystemMapLayout {
   sunEdge: number;
   stars: MapDisc[];
   planets: MapPlanetDisc[];
+  belts: MapBeltColumn[];
   /** Where the numerals under the planets sit (their top). */
   labelY: number;
 }
@@ -61,6 +81,11 @@ export const mapLayoutParams = {
   gap: 1.3,
   /** Space between a planet and its first moon, and between moons, disc units. */
   moonGap: 0.45,
+  /** A belt's strip: half its width and height, disc units. */
+  beltHalfWidth: 0.7,
+  beltHalfHeight: 1.6,
+  /** Smallest named asteroid radius, px. */
+  minAsteroid: 1.6,
   /** The ring ellipse's height over its width (seen from a little above the ecliptic). */
   ringTilt: 0.3,
   /** Largest disc scale, px per disc unit (a system with few planets doesn't blow them up). */
@@ -86,17 +111,38 @@ export function discUnits(radius: number): number {
 export function layoutSystemMap(planets: readonly MapPlanetInput[], options: MapLayoutOptions): SystemMapLayout {
   const p = mapLayoutParams;
   const { width } = options;
+  const belts = options.belts ?? [];
   const sunEdge = clamp(width * p.sunFraction, p.minSun, p.maxSun);
 
-  // Column widths, and heights above and below the centre line, in disc units.
-  const columns = planets.map((planet) => {
+  // Columns in orbit order: each planet, with the belts that come after it.
+  type Column = { planet: number; belt: number; r: number; ring: number; moons: number[] };
+  const order: Column[] = [];
+  const beltColumn = (i: number): Column => ({
+    planet: -1,
+    belt: i,
+    r: p.beltHalfHeight,
+    ring: 0,
+    moons: belts[i]!.asteroids.map((a) => discUnits(a.radius)),
+  });
+  belts.forEach((b, i) => b.after < 0 && order.push(beltColumn(i)));
+  planets.forEach((planet, i) => {
     const r = discUnits(planet.radius);
-    const ring = planet.ringOuter ? (r * planet.ringOuter) / planet.radius : 0;
-    const moons = planet.moons.map((m) => discUnits(m.radius));
-    const half = Math.max(r, ring, ...moons);
-    const below = Math.max(r, ring * p.ringTilt);
-    const above = moons.reduce((h, m) => h + p.moonGap + 2 * m, below);
-    return { r, ring, moons, half, above, below };
+    order.push({
+      planet: i,
+      belt: -1,
+      r,
+      ring: planet.ringOuter ? (r * planet.ringOuter) / planet.radius : 0,
+      moons: planet.moons.map((m) => discUnits(m.radius)),
+    });
+    belts.forEach((b, j) => b.after === i && order.push(beltColumn(j)));
+  });
+
+  // Column widths, and heights above and below the centre line, in disc units.
+  const columns = order.map((c) => {
+    const half = Math.max(c.belt >= 0 ? p.beltHalfWidth : c.r, c.ring, ...c.moons);
+    const below = Math.max(c.r, c.ring * p.ringTilt);
+    const above = c.moons.reduce((h, m) => h + p.moonGap + 2 * m, below);
+    return { half, above, below };
   });
 
   const across = columns.reduce((w, c) => w + 2 * c.half + p.gap, 0);
@@ -106,11 +152,12 @@ export function layoutSystemMap(planets: readonly MapPlanetInput[], options: Map
   const scale = Math.min(p.maxScale, across > 0 ? room / across : p.maxScale, tallest > 0 ? heightRoom / tallest : p.maxScale);
 
   // Measured in px from the centre line; small discs are enlarged to their minimum.
-  const measured = columns.map((c) => {
-    const r = Math.max(c.r * scale, p.minPlanet);
+  const measured = order.map((c) => {
+    const isBelt = c.belt >= 0;
+    const r = isBelt ? c.r * scale : Math.max(c.r * scale, p.minPlanet);
     const ring = c.ring * scale;
-    const moons = c.moons.map((m) => Math.max(m * scale, p.minMoon));
-    const half = Math.max(r, ring, ...moons);
+    const moons = c.moons.map((m) => Math.max(m * scale, isBelt ? p.minAsteroid : p.minMoon));
+    const half = Math.max(isBelt ? p.beltHalfWidth * scale : r, ring, ...moons);
     const below = Math.max(r, ring * p.ringTilt);
     const above = moons.reduce((h, m) => h + p.moonGap * scale + 2 * m, below);
     return { r, ring, moons, half, above, below };
@@ -125,7 +172,9 @@ export function layoutSystemMap(planets: readonly MapPlanetInput[], options: Map
   const used = measured.reduce((w, c) => w + 2 * c.half, 0);
   const spacing = measured.length > 0 ? (room - used) / measured.length : 0;
   let x = sunEdge + spacing / 2;
-  const discs = measured.map((c): MapPlanetDisc => {
+  const discs: MapPlanetDisc[] = [];
+  const beltColumns: MapBeltColumn[] = new Array(belts.length);
+  measured.forEach((c, k) => {
     const cx = x + c.half;
     x += 2 * c.half + spacing;
     let top = axisY - c.below;
@@ -135,7 +184,9 @@ export function layoutSystemMap(planets: readonly MapPlanetInput[], options: Map
       top -= 2 * r;
       return { x: cx, y, r };
     });
-    return { x: cx, y: axisY, r: c.r, ring: c.ring, moons };
+    const column = order[k]!;
+    if (column.belt >= 0) beltColumns[column.belt] = { x: cx, halfWidth: p.beltHalfWidth * scale, halfHeight: c.r, asteroids: moons };
+    else discs.push({ x: cx, y: axisY, r: c.r, ring: c.ring, moons });
   });
 
   return {
@@ -145,6 +196,7 @@ export function layoutSystemMap(planets: readonly MapPlanetInput[], options: Map
     sunEdge,
     stars: layoutStars(options.stars, sunEdge, height),
     planets: discs,
+    belts: beltColumns,
     labelY: axisY + maxBelow + 2,
   };
 }
@@ -194,4 +246,39 @@ const END_MARGIN = 6;
 
 function clamp(v: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, v));
+}
+
+/** What the map needs of a belt (gen/belts.ts's BeltData). */
+export interface MapBeltSource {
+  inner: number;
+  trojan: { planet: number } | null;
+  asteroids: readonly MapBodyInput[];
+}
+
+/** A belt column on the map: the belts it shows (a host's two Trojan swarms share one) and where it goes. */
+export interface MapBeltGroup {
+  after: number;
+  /** Indices into the belts given to `mapBeltGroups`. */
+  members: number[];
+}
+
+/**
+ * The map's belt columns: each belt after the last planet inside it (by
+ * orbit radius), a giant's Trojan swarms together right after their host.
+ */
+export function mapBeltGroups(orbits: readonly number[], belts: readonly MapBeltSource[]): MapBeltGroup[] {
+  const groups: MapBeltGroup[] = [];
+  belts.forEach((belt, i) => {
+    const after = belt.trojan ? belt.trojan.planet : orbits.filter((r) => r < belt.inner).length - 1;
+    const shared = belt.trojan ? groups.find((g) => g.after === after && belts[g.members[0]!]!.trojan) : undefined;
+    if (shared) shared.members.push(i);
+    else groups.push({ after, members: [i] });
+  });
+  // In orbit order by the planet they follow (sort is stable, so a gap's belts keep their order).
+  return groups.sort((a, b) => a.after - b.after);
+}
+
+/** The layout's input for those columns. */
+export function mapBeltInputs(groups: readonly MapBeltGroup[], belts: readonly MapBeltSource[]): MapBeltInput[] {
+  return groups.map((g) => ({ after: g.after, asteroids: g.members.flatMap((m) => belts[m]!.asteroids) }));
 }

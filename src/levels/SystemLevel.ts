@@ -110,7 +110,7 @@ export class SystemLevel extends Level {
     );
     this.aimAt(star, 1);
     this.eye = this.add(new EyeAdaptation(camera, this.world.stars, debug));
-    const picker = this.add(new Picker(camera, input, this.ship, this.world.bodies));
+    const picker = this.add(new Picker(camera, input, this.ship, this.world.bodies, [], this.world.belts));
     this.trails = this.add(
       new OrbitTrails(
         this.scene,
@@ -123,7 +123,7 @@ export class SystemLevel extends Level {
     );
     this.marker = this.add(new TargetMarker(this.scene, camera, this.ship));
     this.map = this.add(
-      new SystemMap(this.data, this.world.stars, this.world.planets, this.world.moons, this.ship, picker, input),
+      new SystemMap(this.data, this.world.stars, this.world.planets, this.world.moons, this.ship, picker, input, this.world.belts),
     );
     this.hud = this.add(new Hud(this.ship, picker, this.map, input, this.data, tooltip));
   }
