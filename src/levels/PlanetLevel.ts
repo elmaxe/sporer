@@ -44,6 +44,8 @@ export const planetCameraParams: OrbitParams = {
 
 /** Where the camera settles after descending. */
 export const PLANET_VIEW_DISTANCE = 45;
+/** The camera keeps this far above the highest terrain (planet units; the ship's lowest altitude is 3). */
+const CAMERA_CLEARANCE = 1.5;
 /** Bodies in the sky are drawn at least this many pixels in radius. */
 const SKY_MIN_PIXELS = 1.5;
 /** The sky camera's clipping range, in system units. */
@@ -143,6 +145,8 @@ export class PlanetLevel extends Level {
         {
           distance: PLANET_VIEW_DISTANCE,
           up: this.ship.up,
+          // Never inside the globe, whatever the zoom transitions do: above the highest terrain.
+          keepOut: (position) => this.keepAboveTerrain(position),
           // Stay above the ship's horizon, so the camera never dips into the ground.
           minPitch: THREE.MathUtils.degToRad(5),
           pitch: THREE.MathUtils.degToRad(40),
@@ -184,6 +188,15 @@ export class PlanetLevel extends Level {
   flyingRadius(view: number): number {
     const { minDistance, maxDistance } = this.cameraParams;
     return this.top + flightAltitude(zoomFraction(view, minDistance, maxDistance), this.radius);
+  }
+
+  /** Lifts a camera position (the globe is centred on the origin) to just above the highest terrain if it's lower. */
+  private keepAboveTerrain(position: THREE.Vector3): void {
+    const floor = this.top + CAMERA_CLEARANCE;
+    const d = position.length();
+    if (d >= floor) return;
+    if (d < 1e-6) position.set(0, floor, 0);
+    else position.multiplyScalar(floor / d);
   }
 
   override update(frameDt: number, alpha: number): void {

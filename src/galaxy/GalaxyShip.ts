@@ -104,6 +104,13 @@ export class GalaxyShip implements Entity {
     this._destination = dest;
   }
 
+  /** Docks at `ref` at once, without flying there (automation and tests). */
+  jumpTo(ref: StarRef): void {
+    this._destination = null;
+    this._current = ref;
+    this.dockAt(ref);
+  }
+
   fixedUpdate(dt: number): void {
     this.prev.copy(this.curr);
     const dest = this._destination;

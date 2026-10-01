@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Entity } from '../core/Entity';
 import type { Input } from '../core/Input';
 import type { GalaxyData, StarRef } from '../gen/galaxy';
+import { describeNebula } from '../gen/nebulas';
 import { describeStars } from '../gen/stars';
 import { MarkerRing } from '../player/MarkerRing';
 import { HelpText } from '../ui/HelpText';
@@ -12,8 +13,8 @@ import type { GalaxyPicker } from './GalaxyPicker';
 import type { GalaxyShip } from './GalaxyShip';
 
 const REFRESH_SECONDS = 0.1;
-const HELP = 'Click a star: travel there · Scroll in at a star: enter its system · Scroll: zoom · Drag: rotate view · M: mute · Esc: menu';
-const TOUCH_HELP = 'Tap a star: travel there · Pinch in at a star: enter its system · Pinch: zoom · Drag: rotate view · Hold: identify';
+const HELP = 'Click a star or nebula: travel there · Scroll in at a star: enter its system · Scroll: zoom · Drag: rotate view · M: mute · Esc: menu';
+const TOUCH_HELP = 'Tap a star or nebula: travel there · Pinch in at a star: enter its system · Pinch: zoom · Drag: rotate view · Hold: identify';
 
 /**
  * The galaxy level's overlay: HUD text, star tooltip, and rings marking the
@@ -75,10 +76,14 @@ export class GalaxyHud implements Entity {
     // The star you're at (or heading to) and the one under the pointer shine steadily.
     this.map.holdSteady(ship.destination ?? ship.current, hovered);
 
+    const nebula = this.picker.hoveredNebula;
+    const { clientX, clientY } = this.input.pointer;
     if (hovered) {
       const here = hovered === ship.current && !ship.travelling ? ' · you are here' : '';
-      const { clientX, clientY } = this.input.pointer;
-      this.tooltip.show(hovered, hovered.name, describeStars(hovered.stars) + here, clientX, clientY, undefined, this.input.touchMode);
+      const inside = hovered.nebula ? ` · in the ${hovered.nebula.name}` : '';
+      this.tooltip.show(hovered, hovered.name, describeStars(hovered.stars) + inside + here, clientX, clientY, undefined, this.input.touchMode);
+    } else if (nebula) {
+      this.tooltip.show(nebula, nebula.name, describeNebula(nebula.kind), clientX, clientY, undefined, this.input.touchMode);
     } else {
       this.tooltip.hide();
     }
@@ -89,7 +94,8 @@ export class GalaxyHud implements Entity {
     this.help.refresh();
     this.locationEl.textContent = ship.travelling
       ? `Galaxy · ${this.galaxy.stars.length} stars · in deep space`
-      : `Galaxy · ${this.galaxy.stars.length} stars · at ${ship.current.name}`;
+      : `Galaxy · ${this.galaxy.stars.length} stars · at ${ship.current.name}` +
+        (ship.current.nebula ? ` · in the ${ship.current.nebula.name}` : '');
     this.targetEl.textContent = ship.destination ? `Travelling → ${ship.destination.name}` : '';
   }
 

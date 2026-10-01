@@ -96,6 +96,29 @@ export function generateCompanion(rng: Rng): StarData {
   );
 }
 
+/**
+ * The colour of a star's light on what it lights (planets, moons, the UFO):
+ * a black body at its class's temperature (Stellar classification's
+ * representative values: O 50,000 K, B 20,000, A 8,750, F 6,650, G 5,600,
+ * K 4,450, M 3,050), white-balanced to the Sun's 5,772 K as eyes adapted to
+ * daylight would see it. Not `StarData.color`, which is deliberately more
+ * saturated so the star itself reads well: lit by that, a K star turned a
+ * blue planet orange and black. See docs/research/star-light.md.
+ */
+const LIGHT_COLORS: Record<SpectralClass, string> = {
+  O: '#8fb1ff',
+  B: '#9cbcff',
+  A: '#c7dbff',
+  F: '#e7f0ff',
+  G: '#fffdf9',
+  K: '#ffeacb',
+  M: '#ffc57b',
+};
+
+export function starLightColor(star: StarData): string {
+  return LIGHT_COLORS[star.spectralClass];
+}
+
 export function describeStar(star: StarData): string {
   switch (star.kind) {
     case 'mainSequence':

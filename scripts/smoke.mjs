@@ -1,7 +1,8 @@
 // Headless browser smoke test over the Chrome DevTools Protocol.
 // Usage: npm run smoke [-- [options] [http://localhost:5173/]]   (dev server must be running)
 //   --only <sections>  run just these, comma-separated, in the usual order: core (flying, picking, system map,
-//                      living stars, comets, eye, sky), galaxy (the galaxy loop), audio, planet (the home planet
+//                      living stars, comets, eye, sky), galaxy (the galaxy loop), nebulas (every kind on the map
+//                      and from inside), audio, planet (the home planet
 //                      loop, held zoom, seamless zooms), types (every planet type and geyser kind), lab, touch
 //   --quick            everything but types
 //   --timeout <s>      give up after this long (default 900), reporting the section it was in
@@ -37,6 +38,10 @@
 // the full-screen button shows, and the Map button opens the system map (in space) and the planet map (in low
 // orbit), a tap on either flies there, × closes it; the menu button opens the menu. The planet lab works on the
 // phone too (stick, Map button, drag, tap to fly).
+// Nebulas: the galaxy map draws every nebula and dims its stars behind dark ones; hovering one names it and clicking it
+// sets course for its star; then a system inside each kind (emission, reflection, dark, planetary, remnant) is entered
+// from the galaxy: its HUD names the nebula, its sky is baked (glowing kinds add light, a dark one blocks it) and
+// hiding that sky changes the picture, also in low orbit inside the emission nebula; FPS in each.
 // Planet lab (lab.html): every type and a moon build and draw in both views, a game planet loads, the panel works.
 // Prints JSON with FPS, console errors and screenshot paths. Exit 1 on failure.
 import { mkdtempSync, writeFileSync } from 'node:fs';
@@ -46,7 +51,7 @@ import { launch, sleep, StallError } from './lib/browser.mjs';
 
 const args = process.argv.slice(2);
 const option = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
-const SECTIONS = ['core', 'galaxy', 'audio', 'planet', 'types', 'lab', 'touch'];
+const SECTIONS = ['core', 'galaxy', 'nebulas', 'audio', 'planet', 'types', 'lab', 'touch'];
 const only = option('--only')?.split(',');
 if (only?.some((name) => !SECTIONS.includes(name))) {
   console.error(`--only takes some of: ${SECTIONS.join(', ')}`);
@@ -97,7 +102,7 @@ const started = await page.goto(url, READY, 60000);
 if (started) await drawFrames(20);
 
 const state = `({ speed: +ship.speed.toFixed(1), pos: ship.object.position.toArray().map((n) => +n.toFixed(1)) })`;
-let before, after, autopilot, pick, systemMap, sky, living, comet, eye, galaxyLoop, fps, audio, planetLoop, heldZoom, seamless;
+let before, after, autopilot, pick, systemMap, sky, living, comet, eye, galaxyLoop, fps, audio, planetLoop, heldZoom, seamless, nebulas;
 const planetTypes = [];
 let lab = null;
 let touch = null;
@@ -558,7 +563,8 @@ await section('core', async () => {
   eye = { start: await evaluate(`+levels.systemLevel.eye.exposure.toFixed(2)`) };
   await evaluate(`(() => { const s = world.stars[0], o = levels.systemLevel.orbit;
     o.setFocus(s.renderPosition); o.setDistance(s.radius * 3); })()`);
-  await until(`levels.systemLevel.eye.exposure < ${eye.start} - 0.2`, 8000);
+  // (It already starts low: the view is centred on the star.)
+  await until(`levels.systemLevel.eye.exposure < ${eye.start} - 0.07`, 8000);
   eye.close = await evaluate(`+levels.systemLevel.eye.exposure.toFixed(2)`);
   await evaluate(`levels.systemLevel.orbit.setFocus(null), levels.systemLevel.orbit.setDistance(45)`);
 
@@ -592,12 +598,12 @@ await section('core', async () => {
     living.cometsMoved &&
     !living.pickable &&
     (comet.none || (comet.tooltip === comet.name && !comet.autopilot)) &&
-    eye.close < eye.start - 0.1;
+    eye.close < eye.start - 0.05;
   Object.assign(sections.core, { hovered, noManual, picked, skyOk, alive });
   return hovered && noManual && picked && skyOk && alive;
 });
 
-if (started && (runs('galaxy') || runs('audio') || runs('planet'))) {
+if (started && (runs('galaxy') || runs('nebulas') || runs('audio') || runs('planet'))) {
   // Seamless zooms: while a level transition runs, sample every drawn frame (after drawing, before it's shown):
   // the crossfade weight and the canvas brightness (mean over a sparse grid). Each transition is one segment,
   // from the level it left to the one it reached. Setting __seamless.freezeWhen to a mode stops the game once
@@ -621,7 +627,12 @@ if (started && (runs('galaxy') || runs('audio') || runs('planet'))) {
         const i = 4 * (y * w + x); sum += s.px[i] + s.px[i + 1] + s.px[i + 2]; n++;
       }
       const weight = levels.crossfade;
-      s.current.frames.push({ weight, brightness: sum / (3 * n) });
+      // Planet zooms: how far the camera is from the body's centre, in radii (over the highest terrain in the planet level).
+      const pl = levels.planetLevel;
+      const clearance = !pl ? null : levels.mode === 'planet'
+        ? game.camera.position.length() / pl.top
+        : game.camera.position.distanceTo(pl.body.renderPosition) / pl.body.radius;
+      s.current.frames.push({ weight, brightness: sum / (3 * n), clearance });
       if (s.freezeWhen && weight !== null && weight > 0.35 && levels.mode === s.freezeWhen) {
         s.freezeWhen = null; s.frozen = true; game.stop();
       }
@@ -677,11 +688,16 @@ await section('galaxy', async () => {
     requestAnimationFrame(() => requestAnimationFrame(() =>
       resolve({ nearest: best.id, destination: levels.galaxyLevel.ship.destination?.id ?? null })));
   })`);
-  // Scroll in mid-jump: held until the ship docks, then it zooms into the destination.
+  // Scroll in mid-jump: the camera zooms in, but the level doesn't change until the ship docks and we scroll on.
   await evaluate(`__seamless.freezeWhen = 'system'`);
+  const zoomBeforeJump = await evaluate(`levels.galaxyLevel.orbit.zoom`);
   await wheel(-50000);
+  await sleep(600);
   galaxyLoop.heldWhileTravelling = await evaluate(`levels.galaxyLevel.ship.travelling && levels.mode === 'galaxy'`);
+  galaxyLoop.zoomedWhileTravelling = (await evaluate(`levels.galaxyLevel.orbit.zoom`)) < zoomBeforeJump * 0.9;
   for (let i = 0; i < 60 && (await evaluate(`levels.galaxyLevel.ship.travelling`)); i++) await sleep(250);
+  await sleep(1500);
+  await wheel(-50000);
   galaxyLoop.dockedAt = await evaluate(`levels.galaxyLevel.ship.travelling ? null : levels.galaxyLevel.ship.current.id`);
   galaxyLoop.handoverShot = await freezeShot('handover');
   for (let i = 0; i < 20 && (await evaluate(`levels.mode !== 'system' || levels.transitioning`)); i++) await sleep(250);
@@ -710,6 +726,7 @@ await section('galaxy', async () => {
     galaxyLoop.polish.twinkleTime > 0 &&
     galaxyLoop.clicked.destination === galaxyLoop.clicked.nearest &&
     galaxyLoop.heldWhileTravelling &&
+    galaxyLoop.zoomedWhileTravelling &&
     galaxyLoop.dockedAt === galaxyLoop.clicked.nearest &&
     galaxyLoop.handoverShot !== null &&
     galaxyLoop.modeAfterZoomIn === 'system' &&
@@ -723,6 +740,147 @@ await section('galaxy', async () => {
     galaxyLoop.arrival.parked.cameraAboveShip > 0 &&
     typeof galaxyLoop.shipSpeed === 'number'
   );
+});
+
+/** Mean brightness (0–255) of the canvas as drawn now, over a sparse grid, after drawing a fresh frame. */
+const canvasBrightness = `(() => {
+  game.redraw();
+  const gl = game.renderer.getContext();
+  const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
+  const px = new Uint8Array(w * h * 4);
+  gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+  let sum = 0, n = 0;
+  for (let y = 2; y < h; y += 8) for (let x = 2; x < w; x += 8) { const i = 4 * (y * w + x); sum += px[i] + px[i + 1] + px[i + 2]; n++; }
+  return +(sum / (3 * n)).toFixed(2);
+})()`;
+/** How much the nebula sky changes the current view: brightness with it minus without it. */
+const nebulaEffect = `(() => {
+  const sky = levels.systemLevel.nebulaSky;
+  if (!sky) return null;
+  const on = ${canvasBrightness};
+  sky.visible = false;
+  const off = ${canvasBrightness};
+  sky.visible = true;
+  return +(on - off).toFixed(2);
+})()`;
+
+await section('nebulas', async () => {
+  const r = (nebulas = { kinds: {} });
+  const home = await evaluate(`system.id`);
+  const toGalaxy = async () => {
+    await until(`!levels.transitioning`, 20000);
+    await evaluate(`levels.toGalaxy()`);
+    return until(`levels.mode === 'galaxy' && !levels.transitioning`, 40000);
+  };
+  /** Docks the galaxy ship at `id` and zooms into its system; true once there with its sky baked. */
+  const enter = async (id) => {
+    await evaluate(`levels.galaxyLevel.ship.jumpTo(galaxy.stars[${id}]), levels.toSystem()`);
+    return until(`levels.mode === 'system' && !levels.transitioning && system.id === ${id} &&
+      (!levels.systemLevel.nebulaSky || levels.systemLevel.nebulaSky.ready)`, 40000);
+  };
+  await toGalaxy();
+  r.map = await evaluate(`({
+    nebulas: galaxy.nebulas.length,
+    drawn: levels.galaxyLevel.nebulas.count,
+    kinds: [...new Set(galaxy.nebulas.map((n) => n.kind))],
+    darkBlobs: levels.galaxyLevel.map.points.material.uniforms.uDimCount.value,
+  })`);
+  // Hover and click the biggest emission nebula from the nearest star outside it, looking across the ship at it
+  // from one side, so the nebula's middle isn't behind the ship's own star; the pointer then searches round its
+  // middle for a spot clear of stars (a star under the pointer wins).
+  r.pick = await evaluate(`new Promise((resolve) => {
+    const n = galaxy.nebulas.filter((x) => x.kind === 'emission').sort((a, b) => b.radius - a.radius)[0];
+    const d = (s) => Math.hypot(s.position.x - n.position.x, s.position.y - n.position.y, s.position.z - n.position.z);
+    const from = galaxy.stars.filter((s) => d(s) > 1.3 * n.radius).sort((a, b) => d(a) - d(b))[0];
+    const level = levels.galaxyLevel;
+    level.ship.jumpTo(from);
+    const V = game.camera.position.constructor;
+    const centre = () => new V(n.position.x, n.position.y, n.position.z).applyMatrix4(level.root.matrixWorld);
+    const ship = () => new V(from.position.x, from.position.y, from.position.z).applyMatrix4(level.root.matrixWorld);
+    level.orbit.setDistance(n.radius * 1.5);
+    level.orbit.lookFrom(ship().sub(centre()).normalize().applyAxisAngle(new V(0, 1, 0), 0.5));
+    const canvas = game.renderer.domElement;
+    const rect = canvas.getBoundingClientRect();
+    const frames = (k) => new Promise((r) => { let i = 0; (function f() { if (++i > k) r(); else requestAnimationFrame(f); })(); });
+    setTimeout(async () => {
+      const p = centre().project(game.camera);
+      const cx = rect.left + ((p.x + 1) / 2) * rect.width, cy = rect.top + ((1 - p.y) / 2) * rect.height;
+      let at = null, tooltip = null;
+      for (let k = 0; k < 25 && !at; k++) {
+        const a = k * 2.4, rr = 12 * Math.sqrt(k);
+        const here = { clientX: cx + rr * Math.cos(a), clientY: cy + rr * Math.sin(a), bubbles: true };
+        canvas.dispatchEvent(new PointerEvent('pointermove', here));
+        await frames(2);
+        tooltip = document.getElementById('tooltip').hidden ? null : document.getElementById('tooltip-name').textContent;
+        if (tooltip === n.name) at = here;
+      }
+      if (at) {
+        canvas.dispatchEvent(new PointerEvent('pointerdown', { ...at, button: 0 }));
+        canvas.dispatchEvent(new PointerEvent('pointerup', { ...at, button: 0 }));
+        await frames(2);
+      }
+      resolve({ nebula: n.name, host: n.star, tooltip, destination: level.ship.destination?.id ?? null });
+    }, 1500);
+  })`);
+  // What the nebulas cost on the map: frames per second in this view with them and without them.
+  r.galaxyFps = await evaluate(measureFps);
+  r.galaxyFpsWithout = await evaluate(`(levels.galaxyLevel.nebulas.visible = false, ${measureFps})`);
+  await evaluate(`levels.galaxyLevel.nebulas.visible = true`);
+  // The ship is flying to the nebula's star; the visits below jump instead.
+
+  // A system inside each kind: the nebula's own star (always inside it).
+  const hosts = await evaluate(`Object.fromEntries(['emission', 'reflection', 'dark', 'planetary', 'remnant'].map((k) =>
+    [k, galaxy.nebulas.filter((n) => n.kind === k).sort((a, b) => b.radius - a.radius)[0].star]))`);
+  for (const [kind, id] of Object.entries(hosts)) {
+    current = `nebulas (${kind})`;
+    const k = (r.kinds[kind] = { star: id, entered: await enter(id) });
+    Object.assign(k, await evaluate(`({
+      nebula: system.nebula?.kind ?? null,
+      hud: document.getElementById('hud-location').textContent,
+      sky: levels.systemLevel.nebulaSky?.stats(game.renderer) ?? null,
+    })`));
+    k.effect = await evaluate(nebulaEffect);
+    k.fps = await evaluate(measureFps);
+    k.fpsWithout = await evaluate(`(levels.systemLevel.nebulaSky.visible = false, ${measureFps})`);
+    await evaluate(`levels.systemLevel.nebulaSky.visible = true`);
+    const shot = await send('Page.captureScreenshot', { format: 'png' });
+    k.screenshot = join(outDir, `nebula-${kind}.png`);
+    writeFileSync(k.screenshot, Buffer.from(shot.result.data, 'base64'));
+    if (kind === 'emission') {
+      // Low orbit inside it: the nebula is in the planet level's sky too.
+      await evaluate(`(() => { const p = world.planets[0]; ship.parkAt(p); levels.toPlanet(p); })()`);
+      k.lowOrbit = await until(`levels.mode === 'planet' && !levels.transitioning`, 40000);
+      if (k.lowOrbit) {
+        k.lowOrbitEffect = await evaluate(nebulaEffect);
+        await evaluate(`levels.leavePlanet()`);
+        await until(`levels.mode === 'system' && !levels.transitioning`, 40000);
+      }
+    }
+    await toGalaxy();
+  }
+  // Back to where the section started, for the sections after it.
+  r.back = (await enter(home)) && (await evaluate(`system.id`)) === home;
+
+  const glowing = ['emission', 'reflection', 'planetary', 'remnant'];
+  r.ok =
+    r.map.drawn === r.map.nebulas &&
+    r.map.kinds.length === 5 &&
+    r.map.darkBlobs > 0 &&
+    r.pick.tooltip === r.pick.nebula &&
+    r.pick.destination === r.pick.host &&
+    Object.entries(r.kinds).every(
+      ([kind, k]) =>
+        k.entered &&
+        k.nebula === kind &&
+        k.hud.includes(' Nebula') &&
+        k.sky !== null &&
+        // Glowing kinds light the sky up; a dark one blocks what's behind it.
+        (glowing.includes(kind) ? k.sky.light > 0.02 && Math.abs(k.effect) > 1 : k.sky.transmittance < 0.8),
+    ) &&
+    r.kinds.emission.lowOrbit &&
+    Math.abs(r.kinds.emission.lowOrbitEffect) > 1 &&
+    r.back;
+  return r.ok;
 });
 
 await section('audio', async () => {
@@ -816,7 +974,7 @@ await section('planet', async () => {
     'planet-handover',
   );
 
-  // Scrolling in while the autopilot flies is held until it arrives, then descends to the destination.
+  // Scrolling in while the autopilot flies zooms the camera but doesn't descend; once it arrives, scrolling on does.
   heldZoom = await evaluate(`(() => {
     const here = ship.targetBody;
     // The nearest other body at least 150 units away, so the trip lasts a couple of seconds.
@@ -833,13 +991,16 @@ await section('planet', async () => {
   heldZoom.whileFlying = await evaluate(
     `({ enRoute: ship.enRoute, mode: levels.mode, zoom: +levels.systemLevel.orbit.zoom.toFixed(1) })`,
   );
+  for (let i = 0; i < 80 && (await evaluate(`ship.enRoute`)); i++) await sleep(250);
+  await sleep(1500);
+  await wheel(-50000);
   for (let i = 0; i < 80 && (await evaluate(`levels.mode !== 'planet' || levels.transitioning`)); i++) await sleep(250);
   heldZoom.mode = await evaluate(`levels.mode`);
   heldZoom.descendedTo = await evaluate(`planet?.body.name ?? null`);
   heldZoom.ok =
     heldZoom.whileFlying.enRoute &&
     heldZoom.whileFlying.mode === 'system' &&
-    Math.abs(heldZoom.whileFlying.zoom - heldZoom.zoomBefore) < 1 &&
+    heldZoom.whileFlying.zoom < heldZoom.zoomBefore * 0.9 &&
     heldZoom.mode === 'planet' &&
     heldZoom.descendedTo === heldZoom.target;
   await evaluate(`levels.leavePlanet()`);
@@ -855,6 +1016,7 @@ await section('planet', async () => {
         frames: seg.frames.length,
         crossfadeFrames: blended.length,
         minBrightness: +Math.min(...seg.frames.map((x) => x.brightness)).toFixed(2),
+        minClearance: +Math.min(...seg.frames.map((x) => x.clearance ?? Infinity)).toFixed(3),
       };
     });
     const kinds = [...new Set(segments.map((x) => x.zoom))];
@@ -862,9 +1024,13 @@ await section('planet', async () => {
   })()`);
   seamless.handoverShots = [galaxyLoop?.handoverShot, planetLoop.handoverShot];
   // Each zoom this run went through (the galaxy loop's only if that section ran).
-  const kinds = [...(sections.galaxy ? ['system → galaxy', 'galaxy → system'] : []), 'system → planet', 'planet → system'];
+  const kinds = [
+    ...(sections.galaxy || sections.nebulas ? ['system → galaxy', 'galaxy → system'] : []),
+    'system → planet',
+    'planet → system',
+  ];
   seamless.ok =
-    kinds.every((k) => seamless.kinds.includes(k)) && seamless.segments.every((x) => x.crossfadeFrames > 0 && x.minBrightness > 0.5);
+    kinds.every((k) => seamless.kinds.includes(k)) && seamless.segments.every((x) => x.crossfadeFrames > 0 && x.minBrightness > 0.5 && (x.minClearance ?? Infinity) >= 1);
   // Audio is only unlocked by the audio section's real click, so only then can the loop hear its whooshes.
   const heard = !sections.audio || (planetLoop.soundIn === 'transitionIn' && planetLoop.soundOut === 'transitionOut');
   return planetLoop.ok && heard && heldZoom.ok && planetLoop.handoverShot !== null && seamless.ok;
@@ -1249,7 +1415,7 @@ const ok = started && !stalled && Object.keys(sections).length > 0 && Object.val
 console.error(`[smoke] ${ok ? 'ok' : 'FAILED'} in ${Math.round((Date.now() - T0) / 1000)} s${errors.length ? `, ${errors.length} console errors` : ''}`);
 console.log(
   JSON.stringify(
-    { ok, started, stalled, sections, before, after, autopilot, pick, systemMap, sky, living, comet, eye, galaxyLoop, seamless, audio, planetLoop, heldZoom, planetTypes, touch, touchLab, lab, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
+    { ok, started, stalled, sections, before, after, autopilot, pick, systemMap, sky, living, comet, eye, galaxyLoop, nebulas, seamless, audio, planetLoop, heldZoom, planetTypes, touch, touchLab, lab, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
     null,
     2,
   ),

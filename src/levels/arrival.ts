@@ -23,6 +23,8 @@ export const arrivalParams = {
   shipElevation: [(1 * Math.PI) / 180, (4 * Math.PI) / 180] as [number, number],
   /** Where the camera settles behind the hovering ship: looking down on it from this high, radians. */
   cameraElevation: [(20 * Math.PI) / 180, (75 * Math.PI) / 180] as [number, number],
+  /** ...over a star, which the camera looks at: from this high, radians. */
+  starElevation: (20 * Math.PI) / 180,
   /** ...high enough that the centre of the body under the ship is at most this far below the view's centre, radians. */
   bodyBelowCentre: (16 * Math.PI) / 180,
 };

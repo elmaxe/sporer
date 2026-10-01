@@ -32,11 +32,18 @@ export interface OrbitOptions {
    */
   onZoomPastLimit?: (direction: 1 | -1) => void;
   /**
-   * While this returns true (e.g. the autopilot is still flying), scrolling in
-   * is held back rather than applied, and played out smoothly once it turns
-   * false, so zooming in (and descending) happens at the destination.
+   * While this returns true (e.g. the autopilot is still flying), zooming works
+   * as usual but scrolling past a limit doesn't leave the level: the changes of
+   * level wait until the ship is where it's going.
    */
-  holdZoomIn?: () => boolean;
+  zoomLimitsHold?: () => boolean;
+  /**
+   * Moves a camera position out of anything it must not be inside (e.g. a
+   * planet the view dips into from below, or a zoom that shrinks faster than
+   * the centre moves), in place. Runs on the camera's final position, also
+   * while a view override (`setView`) sets it.
+   */
+  keepOut?: (position: THREE.Vector3) => void;
   /**
    * Live "up" direction (e.g. a ship's radial direction over a planet). Yaw and
    * pitch are then measured in the plane perpendicular to it, and that plane
@@ -59,10 +66,6 @@ const MAX_PITCH = THREE.MathUtils.degToRad(85);
 const PAST_LIMIT_PX = 180;
 /** Seconds for the past-limit tally to fade, so slow, stray scrolling doesn't add up. */
 const PAST_LIMIT_DECAY = 0.6;
-/** Most scroll-in (wheel pixels) kept while zooming in is held: min to max zoom and past the limit. */
-const MAX_HELD_WHEEL = 2500;
-/** How fast held scroll-in is played out once released, in wheel pixels per second. */
-const HELD_RELEASE_RATE = 1000;
 
 /**
  * Spore-style orbit camera, always centred on the target. Scroll zooms
@@ -70,7 +73,8 @@ const HELD_RELEASE_RATE = 1000;
  * A focus override (`setFocus`) can pull the centre over to another point,
  * e.g. to fly at a planet during a level transition, and a view override
  * (`setView`) can turn the camera to any orientation about the centre, e.g.
- * to match another level's camera.
+ * to match another level's camera. An aim (`setAim`) turns the camera, where it
+ * is, to look at another point while the centre stays in view.
  */
 export class OrbitCamera implements Entity {
   private yaw = 0;
@@ -82,14 +86,15 @@ export class OrbitCamera implements Entity {
   private wantedPitch: number;
   private targetDistance: number;
   private pastLimit = 0;
-  /** Scroll-in (negative wheel pixels) held back by `holdZoomIn`, still to be played out. */
-  private heldWheel = 0;
   private readonly baseMinPitch: number;
   private minPitch: number;
   private focus: THREE.Vector3 | null = null;
   private focusBlend = 0;
   private view: THREE.Quaternion | null = null;
   private viewBlend = 0;
+  private aim: THREE.Vector3 | null = null;
+  private aimBlend = 0;
+  private aimLimit = 0;
   /** Carries the yaw/pitch frame along with `options.up` (identity for world up). */
   private readonly frame = new THREE.Quaternion();
   private readonly frameUp = new THREE.Vector3(0, 1, 0);
@@ -99,6 +104,8 @@ export class OrbitCamera implements Entity {
   private readonly back = new THREE.Vector3();
   private readonly look = new THREE.Matrix4();
   private readonly orient = new THREE.Quaternion();
+  private readonly toCentre = new THREE.Vector3();
+  private readonly toAim = new THREE.Vector3();
 
   constructor(
     private readonly camera: THREE.PerspectiveCamera,
@@ -129,7 +136,6 @@ export class OrbitCamera implements Entity {
   setDistance(distance: number): void {
     this.distance = this.targetDistance = distance;
     this.pastLimit = 0;
-    this.heldWheel = 0;
   }
 
   /**
@@ -149,6 +155,19 @@ export class OrbitCamera implements Entity {
   setView(view: THREE.Quaternion | null, blend = 1): void {
     this.view = view;
     this.viewBlend = view ? blend : 0;
+  }
+
+  /**
+   * Looks at `point` (a live vector) instead of the centre, where the camera
+   * stands, mixed by `blend` (0 = the centre, 1 = `point`), but never turning
+   * more than `limit` radians away from the centre, which therefore stays in
+   * view. `null` looks at the centre again. Ignored while a view override is
+   * in use.
+   */
+  setAim(point: THREE.Vector3 | null, blend = 1, limit = Math.PI): void {
+    this.aim = point;
+    this.aimBlend = point ? blend : 0;
+    this.aimLimit = limit;
   }
 
   /** The camera orientation of the orbit's current yaw and pitch (ignoring any view override). */
@@ -198,7 +217,7 @@ export class OrbitCamera implements Entity {
     }
     this.targetPitch = THREE.MathUtils.clamp(this.wantedPitch, this.minPitch, MAX_PITCH);
 
-    const wheel = this.holdZoomIn(this.input.consumeWheel(), frameDt);
+    const wheel = this.input.consumeWheel();
     this.trackPastLimit(wheel, frameDt);
     this.targetDistance = THREE.MathUtils.clamp(
       this.targetDistance * Math.exp(wheel * p.zoomSpeed),
@@ -230,39 +249,48 @@ export class OrbitCamera implements Entity {
       const q = this.orientation(this.orient).slerp(this.view, this.viewBlend);
       this.camera.quaternion.copy(q);
       this.camera.position.copy(this.center).addScaledVector(this.back.copy(BACK).applyQuaternion(q), this.distance);
+      this.options.keepOut?.(this.camera.position);
       return;
     }
     this.camera.position.copy(this.center).addScaledVector(this.offset, this.distance);
-    this.camera.lookAt(this.center);
+    this.options.keepOut?.(this.camera.position);
+    this.camera.lookAt(this.aimPoint());
   }
 
   dispose(): void {}
 
   /**
-   * Holds back scroll-in while `options.holdZoomIn` says so, and plays it out
-   * after. Returns the wheel movement to apply this frame. Scrolling out
-   * applies at once and drops whatever was held.
+   * What the camera looks at: the centre, or towards the aim point (mixed by
+   * its blend) as far as keeps the centre within `aimLimit` of the view's axis.
+   * Returns a scratch vector.
    */
-  private holdZoomIn(wheel: number, frameDt: number): number {
-    if (wheel > 0) {
-      this.heldWheel = 0;
-      return wheel;
-    }
-    if (this.options.holdZoomIn?.()) {
-      this.heldWheel = Math.max(this.heldWheel + wheel, -MAX_HELD_WHEEL);
-      return 0;
-    }
-    const release = Math.max(this.heldWheel, -HELD_RELEASE_RATE * frameDt);
-    this.heldWheel -= release;
-    return wheel + release;
+  private aimPoint(): THREE.Vector3 {
+    const position = this.camera.position;
+    if (!this.aim || this.aimBlend <= 0) return this.center;
+    const toCentre = this.toCentre.subVectors(this.center, position).normalize();
+    const toAim = this.toAim.subVectors(this.aim, position).normalize();
+    const angle = toCentre.angleTo(toAim);
+    if (angle < 1e-6) return this.center;
+    // Turn from the centre towards the aim by the blend, but no more than the limit.
+    const turn = Math.min(angle * this.aimBlend, this.aimLimit);
+    // Rotate `toCentre` by `turn` about the axis towards `toAim`: sin-weighted mix of the two directions.
+    toAim.multiplyScalar(Math.sin(turn) / Math.sin(angle));
+    toCentre.multiplyScalar(Math.sin(angle - turn) / Math.sin(angle)).add(toAim);
+    return toCentre.add(position);
   }
 
   /** Tallies wheel movement that pushes against a limit already reached, and reports it. */
   private trackPastLimit(wheel: number, frameDt: number): void {
+    this.pastLimit *= Math.exp(-frameDt / PAST_LIMIT_DECAY);
+    // The level changes wait until the ship has arrived (the zoom itself works meanwhile).
+    if (this.options.zoomLimitsHold?.()) this.pastLimit = 0;
+    else if (wheel === 0) return;
+    else this.tallyPastLimit(wheel);
+  }
+
+  private tallyPastLimit(wheel: number): void {
     const { onZoomPastLimit } = this.options;
     if (!onZoomPastLimit) return;
-    this.pastLimit *= Math.exp(-frameDt / PAST_LIMIT_DECAY);
-    if (wheel === 0) return;
 
     // Only once the view has (almost) arrived at the limit, so the zoom is seen to finish first.
     const atMax = this.targetDistance >= this.params.maxDistance && this.distance > this.params.maxDistance * 0.8;

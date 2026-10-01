@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
 import type { GalaxyData, StarRef } from '../gen/galaxy';
+import { STAR_DIMMING_GLSL, starDimmingUniforms } from '../world/nebulaLook';
 import { BULGE_GLOW_COLOR, DISC_GLOW_COLOR, binaryLayout, galaxyMemberSize } from './appearance';
 import { createGlowVolume } from './glowVolume';
 
@@ -39,6 +40,8 @@ export class GalaxyMap implements Entity {
   private readonly bufferSize = new THREE.Vector2();
   private readonly steady = new THREE.Vector2(-1, -1);
   private readonly faded = new THREE.Vector2(-1, 0);
+  private readonly cameraLocal = new THREE.Vector3();
+  private readonly inverse = new THREE.Matrix4();
   private time = 0;
 
   constructor(
@@ -92,6 +95,9 @@ export class GalaxyMap implements Entity {
         steady: { value: this.steady },
         // A star (id) whose dots fade out by the given amount, 0–1.
         faded: { value: this.faded },
+        // The camera in galaxy coordinates, and the dark nebulas between it and each star.
+        cameraLocal: { value: this.cameraLocal },
+        ...starDimmingUniforms(galaxy.nebulas),
       },
       vertexShader: /* glsl */ `
         attribute float size;
@@ -106,8 +112,10 @@ export class GalaxyMap implements Entity {
         uniform float twinkleSpeed;
         uniform vec2 steady;
         uniform vec2 faded;
+        uniform vec3 cameraLocal;
         varying vec3 vColor;
         varying float vDim;
+        ${STAR_DIMMING_GLSL}
         void main() {
           vec4 mv = modelViewMatrix * vec4(position, 1.0);
           // Binary members turn about their centre of mass in the view plane.
@@ -127,6 +135,8 @@ export class GalaxyMap implements Entity {
           bool held = abs(starId - steady.x) < 0.5 || abs(starId - steady.y) < 0.5;
           vDim *= held ? 1.0 : 1.0 + twinkle * (1.0 + 0.6 * small) * wave;
           if (abs(starId - faded.x) < 0.5) vDim *= 1.0 - faded.y;
+          // Hidden behind dark nebulas.
+          vDim *= starDimming(cameraLocal, position);
 
           vColor = color;
           gl_Position = projectionMatrix * mv;
@@ -161,6 +171,8 @@ export class GalaxyMap implements Entity {
       u.time!.value = this.time;
       u.twinkle!.value = galaxyMapParams.twinkle;
       u.twinkleSpeed!.value = galaxyMapParams.twinkleSpeed;
+      this.inverse.copy(this.points.matrixWorld).invert();
+      this.cameraLocal.setFromMatrixPosition(camera.matrixWorld).applyMatrix4(this.inverse);
     };
     parent.add(this.points);
 

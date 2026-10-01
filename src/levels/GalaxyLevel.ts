@@ -7,6 +7,7 @@ import { generateDust, type GalaxyData, type StarRef } from '../gen/galaxy';
 import type { SystemData } from '../gen/system';
 import { DistantGalaxies } from '../galaxy/DistantGalaxies';
 import { GalaxyDust } from '../galaxy/GalaxyDust';
+import { GalaxyNebulas } from '../galaxy/GalaxyNebulas';
 import { GalaxyHud } from '../galaxy/GalaxyHud';
 import { GalaxyMap } from '../galaxy/GalaxyMap';
 import { GalaxyPicker } from '../galaxy/GalaxyPicker';
@@ -50,6 +51,7 @@ export class GalaxyLevel extends Level {
   readonly map: GalaxyMap;
   readonly spin: GalaxySpin;
   readonly distantGalaxies: DistantGalaxies;
+  readonly nebulas: GalaxyNebulas;
   private readonly hud: GalaxyHud;
   private readonly light: THREE.HemisphereLight;
   private closeUp: StarCloseUp | null = null;
@@ -77,6 +79,7 @@ export class GalaxyLevel extends Level {
     this.spin = this.add(new GalaxySpin(this.root, debug));
     this.distantGalaxies = this.add(new DistantGalaxies(this.scene, generateDistantGalaxies(galaxy.seed), debug));
     this.add(new GalaxyDust(this.root, generateDust(galaxy), galaxy.radius));
+    this.nebulas = this.add(new GalaxyNebulas(this.scene, this.root, galaxy.nebulas, debug));
     this.map = this.add(new GalaxyMap(this.root, galaxy, debug));
     this.ship = this.add(new GalaxyShip(this.root, start, debug, sfx));
     this.orbit = this.add(
@@ -88,8 +91,8 @@ export class GalaxyLevel extends Level {
         {
           distance: GALAXY_VIEW_DISTANCE,
           onZoomPastLimit: (dir) => dir < 0 && onZoomIn(),
-          // Scrolling in mid-jump zooms into the destination once there.
-          holdZoomIn: () => this.ship.travelling,
+          // Zoom freely mid-jump, but enter the system only once there.
+          zoomLimitsHold: () => this.ship.travelling,
         },
         debug,
         'Galaxy camera',
@@ -137,6 +140,12 @@ export class GalaxyLevel extends Level {
   override update(frameDt: number, alpha: number): void {
     super.update(frameDt, alpha);
     this.closeUp?.update();
+  }
+
+  /** The nebulas first, at low resolution; the scene lays them over the glow behind them. */
+  override render(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera): void {
+    this.nebulas.renderVolumes(renderer, camera);
+    super.render(renderer, camera);
   }
 
   override enter(): void {

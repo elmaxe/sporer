@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { Entity } from '../core/Entity';
 import { orbitPosition } from '../gen/orbit';
 import { starActivity, type StarActivity } from '../gen/starActivity';
-import { describeStar } from '../gen/stars';
+import { describeStar, starLightColor } from '../gen/stars';
 import type { SystemStar } from '../gen/system';
 import { RAPIER, type Physics } from '../physics/Physics';
 import type { CelestialBody } from './CelestialBody';
@@ -58,7 +58,7 @@ export class Star implements Entity, CelestialBody {
     this.storms = new StarStorms(this.activity, seed, data.radius, data.color);
 
     // decay 0 keeps intensity constant with distance, so outer planets stay lit.
-    this.light = new THREE.PointLight(data.color, starLightIntensity(data), 0, 0);
+    this.light = new THREE.PointLight(starLightColor(data), starLightIntensity(data), 0, 0);
 
     this.object.name = `Star (${data.kind})`;
     this.look.spin.add(this.storms.points);

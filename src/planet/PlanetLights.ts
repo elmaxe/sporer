@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { Entity } from '../core/Entity';
+import { starLightColor } from '../gen/stars';
 import { starLightIntensity, type Star } from '../world/Star';
 import { lightDirection } from './frame';
 import type { PlanetFrame } from './PlanetFrame';
@@ -28,7 +29,7 @@ export class PlanetLights implements Entity {
     ambientLight?: THREE.Color,
   ) {
     // Same intensity as the star's point light in the system view.
-    this.lights = stars.map((s) => new THREE.DirectionalLight(s.data.color, starLightIntensity(s.data)));
+    this.lights = stars.map((s) => new THREE.DirectionalLight(starLightColor(s.data), starLightIntensity(s.data)));
     scene.add(this.ambient, ...this.lights);
     sunLight?.copy(this.lights[0]!.color).multiplyScalar(this.lights[0]!.intensity);
     ambientLight?.copy(this.ambient.color).multiplyScalar(this.ambient.intensity);

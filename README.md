@@ -23,6 +23,7 @@ A browser game inspired by the space stage of *Spore*. Fly a UFO through a proce
 - **Living stars.** Granulation, sunspots, prominences and flares. Main-sequence stars of every class, red and white dwarfs, giants and binaries.
 - **Varied worlds.** Lava, barren, desert, terran, ocean, ice and gas giants, from tiny moons to huge Jupiters, with rings, moons and comets on elliptical orbits.
 - **Climate from real physics.** Temperature, air pressure and composition, and geothermal heat follow the star, the orbit and the body's size. They drive atmospheres, lava, cryo and steam geysers, and weather (clouds, storms, rain, snow and lightning). Habitable worlds grow plants, more species and denser cover the more Earth-like they are. The numbers are checked against real references in [`docs/research/`](docs/research/).
+- **Nebulas.** Named emission, reflection and dark nebulas, planetary nebulas round white dwarfs and supernova remnants on the galaxy map. Fly into one and its gas fills the sky of the systems inside, down to low orbit.
 - **Maps.** A row-of-planets system map and an Equal Earth map of the planet you're orbiting.
 - **Sound.** Music, ambience and synthesised whooshes for travel and transitions.
 
@@ -69,7 +70,7 @@ Every push to `main` runs the typecheck, tests and build in GitHub Actions and d
 
 | Folder | Holds |
 |---|---|
-| `src/gen/` | Pure, seeded generation: galaxy, stars, planets, climate, weather, geysers, plants, comets |
+| `src/gen/` | Pure, seeded generation: galaxy, nebulas, stars, planets, climate, weather, geysers, plants, comets |
 | `src/levels/` | The galaxy, system and planet levels and the scene manager that zooms between them |
 | `src/galaxy/`, `src/world/`, `src/planet/`, `src/surface/` | What each level draws (`surface/`: plants on the ground) |
 | `src/player/` | Ship, autopilot, orbit camera, picking |
