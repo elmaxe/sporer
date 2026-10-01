@@ -488,7 +488,8 @@ await section('core', async () => {
   eye = { start: await evaluate(`+levels.systemLevel.eye.exposure.toFixed(2)`) };
   await evaluate(`(() => { const s = world.stars[0], o = levels.systemLevel.orbit;
     o.setFocus(s.renderPosition); o.setDistance(s.radius * 3); })()`);
-  await until(`levels.systemLevel.eye.exposure < ${eye.start} - 0.2`, 8000);
+  // (It already starts low: the view is centred on the star.)
+  await until(`levels.systemLevel.eye.exposure < ${eye.start} - 0.07`, 8000);
   eye.close = await evaluate(`+levels.systemLevel.eye.exposure.toFixed(2)`);
   await evaluate(`levels.systemLevel.orbit.setFocus(null), levels.systemLevel.orbit.setDistance(45)`);
 
@@ -522,7 +523,7 @@ await section('core', async () => {
     living.cometsMoved &&
     !living.pickable &&
     (comet.none || (comet.tooltip === comet.name && !comet.autopilot)) &&
-    eye.close < eye.start - 0.1;
+    eye.close < eye.start - 0.05;
   Object.assign(sections.core, { hovered, noManual, picked, skyOk, alive });
   return hovered && noManual && picked && skyOk && alive;
 });
@@ -551,7 +552,12 @@ if (started && (runs('galaxy') || runs('audio') || runs('planet'))) {
         const i = 4 * (y * w + x); sum += s.px[i] + s.px[i + 1] + s.px[i + 2]; n++;
       }
       const weight = levels.crossfade;
-      s.current.frames.push({ weight, brightness: sum / (3 * n) });
+      // Planet zooms: how far the camera is from the body's centre, in radii (over the highest terrain in the planet level).
+      const pl = levels.planetLevel;
+      const clearance = !pl ? null : levels.mode === 'planet'
+        ? game.camera.position.length() / pl.top
+        : game.camera.position.distanceTo(pl.body.renderPosition) / pl.body.radius;
+      s.current.frames.push({ weight, brightness: sum / (3 * n), clearance });
       if (s.freezeWhen && weight !== null && weight > 0.35 && levels.mode === s.freezeWhen) {
         s.freezeWhen = null; s.frozen = true; game.stop();
       }
@@ -607,11 +613,16 @@ await section('galaxy', async () => {
     requestAnimationFrame(() => requestAnimationFrame(() =>
       resolve({ nearest: best.id, destination: levels.galaxyLevel.ship.destination?.id ?? null })));
   })`);
-  // Scroll in mid-jump: held until the ship docks, then it zooms into the destination.
+  // Scroll in mid-jump: the camera zooms in, but the level doesn't change until the ship docks and we scroll on.
   await evaluate(`__seamless.freezeWhen = 'system'`);
+  const zoomBeforeJump = await evaluate(`levels.galaxyLevel.orbit.zoom`);
   await wheel(-50000);
+  await sleep(600);
   galaxyLoop.heldWhileTravelling = await evaluate(`levels.galaxyLevel.ship.travelling && levels.mode === 'galaxy'`);
+  galaxyLoop.zoomedWhileTravelling = (await evaluate(`levels.galaxyLevel.orbit.zoom`)) < zoomBeforeJump * 0.9;
   for (let i = 0; i < 60 && (await evaluate(`levels.galaxyLevel.ship.travelling`)); i++) await sleep(250);
+  await sleep(1500);
+  await wheel(-50000);
   galaxyLoop.dockedAt = await evaluate(`levels.galaxyLevel.ship.travelling ? null : levels.galaxyLevel.ship.current.id`);
   galaxyLoop.handoverShot = await freezeShot('handover');
   for (let i = 0; i < 20 && (await evaluate(`levels.mode !== 'system' || levels.transitioning`)); i++) await sleep(250);
@@ -640,6 +651,7 @@ await section('galaxy', async () => {
     galaxyLoop.polish.twinkleTime > 0 &&
     galaxyLoop.clicked.destination === galaxyLoop.clicked.nearest &&
     galaxyLoop.heldWhileTravelling &&
+    galaxyLoop.zoomedWhileTravelling &&
     galaxyLoop.dockedAt === galaxyLoop.clicked.nearest &&
     galaxyLoop.handoverShot !== null &&
     galaxyLoop.modeAfterZoomIn === 'system' &&
@@ -746,7 +758,7 @@ await section('planet', async () => {
     'planet-handover',
   );
 
-  // Scrolling in while the autopilot flies is held until it arrives, then descends to the destination.
+  // Scrolling in while the autopilot flies zooms the camera but doesn't descend; once it arrives, scrolling on does.
   heldZoom = await evaluate(`(() => {
     const here = ship.targetBody;
     // The nearest other body at least 150 units away, so the trip lasts a couple of seconds.
@@ -763,13 +775,16 @@ await section('planet', async () => {
   heldZoom.whileFlying = await evaluate(
     `({ enRoute: ship.enRoute, mode: levels.mode, zoom: +levels.systemLevel.orbit.zoom.toFixed(1) })`,
   );
+  for (let i = 0; i < 80 && (await evaluate(`ship.enRoute`)); i++) await sleep(250);
+  await sleep(1500);
+  await wheel(-50000);
   for (let i = 0; i < 80 && (await evaluate(`levels.mode !== 'planet' || levels.transitioning`)); i++) await sleep(250);
   heldZoom.mode = await evaluate(`levels.mode`);
   heldZoom.descendedTo = await evaluate(`planet?.body.name ?? null`);
   heldZoom.ok =
     heldZoom.whileFlying.enRoute &&
     heldZoom.whileFlying.mode === 'system' &&
-    Math.abs(heldZoom.whileFlying.zoom - heldZoom.zoomBefore) < 1 &&
+    heldZoom.whileFlying.zoom < heldZoom.zoomBefore * 0.9 &&
     heldZoom.mode === 'planet' &&
     heldZoom.descendedTo === heldZoom.target;
   await evaluate(`levels.leavePlanet()`);
@@ -785,6 +800,7 @@ await section('planet', async () => {
         frames: seg.frames.length,
         crossfadeFrames: blended.length,
         minBrightness: +Math.min(...seg.frames.map((x) => x.brightness)).toFixed(2),
+        minClearance: +Math.min(...seg.frames.map((x) => x.clearance ?? Infinity)).toFixed(3),
       };
     });
     const kinds = [...new Set(segments.map((x) => x.zoom))];
@@ -794,7 +810,7 @@ await section('planet', async () => {
   // Each zoom this run went through (the galaxy loop's only if that section ran).
   const kinds = [...(sections.galaxy ? ['system → galaxy', 'galaxy → system'] : []), 'system → planet', 'planet → system'];
   seamless.ok =
-    kinds.every((k) => seamless.kinds.includes(k)) && seamless.segments.every((x) => x.crossfadeFrames > 0 && x.minBrightness > 0.5);
+    kinds.every((k) => seamless.kinds.includes(k)) && seamless.segments.every((x) => x.crossfadeFrames > 0 && x.minBrightness > 0.5 && (x.minClearance ?? Infinity) >= 1);
   // Audio is only unlocked by the audio section's real click, so only then can the loop hear its whooshes.
   const heard = !sections.audio || (planetLoop.soundIn === 'transitionIn' && planetLoop.soundOut === 'transitionOut');
   return planetLoop.ok && heard && heldZoom.ok && planetLoop.handoverShot !== null && seamless.ok;

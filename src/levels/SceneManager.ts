@@ -170,6 +170,7 @@ export class SceneManager implements Entity {
         if (s.blend < 1) {
           from.setFocus(ORIGIN, s.lead);
           from.setDistance(s.distance);
+          system.aimFade(1 - s.lead);
           system.ship.setScale(1 - s.lead);
         }
         if (s.blend > 0) {
@@ -243,12 +244,13 @@ export class SceneManager implements Entity {
         this.game.setLevel(system);
         system.eye.settleNext();
         // Whichever side of the ecliptic the view came in from, the ship arrives along it, just above, to
-        // hover over the star, and the camera settles behind it, looking down far enough to see the star.
+        // hover over the star, and the camera settles behind it, low, turning to look at the star.
         const dir = this.direction.copy(BACK).applyQuaternion(matchView());
         this.settle.copy(dir);
         this.flyIn(system, clampElevation(dir, ...arrivalParams.shipElevation, dir), handover);
         const elevation = system.hoverElevation(ARRIVAL_DISTANCE, 0);
         to.lookFrom(clampElevation(this.settle, elevation, elevation, this.settle));
+        system.aimAt(system.world.stars[0]!, 0);
       },
       finish: () => {
         galaxy.hideCloseUp();
@@ -299,11 +301,12 @@ export class SceneManager implements Entity {
         if (s.blend < 1) {
           from.setFocus(body.renderPosition, s.lead);
           from.setDistance(s.distance);
+          system.aimFade(1 - s.lead);
           system.ship.setScale(1 - s.lead);
         }
         if (s.blend > 0) {
           to.setFocus(ORIGIN, 1 - s.tail);
-          to.setDistance(s.distance * scale);
+          to.setDistance(this.descentDistance(s, handover * scale, level.ship.object.position.length(), scale));
           to.setView(matchView(), 1 - s.tail);
           level.ship.setScale(s.tail);
         }
@@ -404,6 +407,20 @@ export class SceneManager implements Entity {
     this.dropPlanet();
     this._systemLevel.dispose();
     this.galaxyLevel.dispose();
+  }
+
+  /**
+   * The planet camera's distance from its centre during the tail of the descent (planet units). The centre
+   * rises from the globe's middle to the ship as the camera closes in on it, so closing in as the timeline
+   * does, faster than that, would carry the camera through the globe. Instead the camera's height over the
+   * globe's centre follows a smooth descent, log-scaled from the handover's to the ship's own height plus the
+   * final distance, and it never comes in nearer than the timeline's distance.
+   */
+  private descentDistance(s: SeamlessSample, handover: number, shipRadius: number, scale: number): number {
+    const timeline = s.distance * scale;
+    if (s.blend < 1) return timeline;
+    const height = Math.exp(Math.log(handover) * (1 - s.tail) + Math.log(shipRadius + PLANET_VIEW_DISTANCE) * s.tail);
+    return Math.max(timeline, height - s.tail * shipRadius);
   }
 
   private seamlessZoom(start: number, handover: number, end: number): SeamlessZoom {
