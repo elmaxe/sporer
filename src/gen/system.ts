@@ -1,4 +1,5 @@
 import { flatTilt, type Quat } from './galactic';
+import { generateBelts, type BeltData } from './belts';
 import { generateComets, type CometData } from './comets';
 import { atmosphereTint, generateClimate, type ClimateData } from './climate';
 import type { GalaxyData, StarRef } from './galaxy';
@@ -100,6 +101,8 @@ export interface SystemData {
   comets: CometData[];
   /** The nebula the system sits in, if any (from its StarRef). */
   nebula: NebulaData | null;
+  /** Asteroid belts, outer icy belts and Trojan swarms, with their named asteroids (see gen/belts.ts). */
+  belts: BeltData[];
 }
 
 /** G-class period at the reference distance; other orbits follow Kepler's third law. */
@@ -129,7 +132,8 @@ export function generateSystem(ref: StarRef): SystemData {
 
   const planets: PlanetData[] = [];
   // Inner edge of the free space where the next planet's neighbourhood can start.
-  let edge = starZone * 1.5 + 25;
+  const firstEdge = starZone * 1.5 + 25;
+  let edge = firstEdge;
   for (let i = 0; i < planetCount; i++) {
     const prng = rng.fork('planet', i);
     const name = `${ref.name} ${romanNumeral(i + 1)}`;
@@ -220,6 +224,15 @@ export function generateSystem(ref: StarRef): SystemData {
     period: (a) => keplerPeriod(a, totalMass),
   });
 
+  // Own stream too: belts sit in the gaps the planets left.
+  const belts = generateBelts(rng.fork('belts'), {
+    systemName: ref.name,
+    starZone,
+    firstEdge,
+    planets,
+    period: (r) => keplerPeriod(r, totalMass),
+  });
+
   return {
     id: ref.id,
     name: ref.name,
@@ -231,6 +244,7 @@ export function generateSystem(ref: StarRef): SystemData {
     galacticTilt: flatTilt(rng.fork('galactic')),
     comets,
     nebula: ref.nebula ?? null,
+    belts,
   };
 }
 
@@ -412,4 +426,4 @@ export function describePlanet(type: PlanetType): string {
 
 // Re-exported so callers can import all generation types from one place.
 export type { ClimateData } from './climate';
-export type { CometData, PlanetStyle, PlanetType, MoonType, SizeClass };
+export type { BeltData, CometData, PlanetStyle, PlanetType, MoonType, SizeClass };
