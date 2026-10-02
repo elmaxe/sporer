@@ -1,93 +1,68 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { PlantKind, PlantSpecies } from '../gen/plants';
+import { growPlant, type PlantSkeleton } from '../gen/plantForm';
 import { groundDepthPass } from '../world/groundDepth';
+import { PLANT_LOD_COUNT, buildPlantMesh, type PlantMeshData } from './plantMesh';
 
 /*
- * How placeholder plants look: a few primitives per species (a cone, ball or
- * stacked cones on a cylinder for a tree, one or two icosahedra for a bush),
- * in two levels of detail, and the material that fades them in and out with a
- * screen-door dither. Not a plant generator: the plant designer comes later.
+ * How plants look: each species' generated mesh (gen/plantForm.ts grows the
+ * skeleton, surface/plantMesh.ts builds it) at its levels of detail, and the
+ * material that crossfades between the levels with a screen-door dither.
  */
 
-/** Distances in multiples of a plant's height: fully drawn up to `near`, then fading to the cheap mesh, which fades out by `far`. */
-export interface PlantRanges {
-  readonly near: number;
-  readonly far: number;
-}
+export { SINK } from '../gen/plantForm';
 
-/** Bigger plants show further out, smaller ones sooner (in heights: a tree's 8 units reach further than a bush's 1). */
-export const PLANT_RANGES: Readonly<Record<PlantKind, PlantRanges>> = {
-  tree: { near: 22, far: 46 },
-  largeBush: { near: 30, far: 60 },
-  smallBush: { near: 36, far: 70 },
+/**
+ * Where each level of detail ends, in multiples of the plant's height: level
+ * 0 (the full plant) up to the first, and so on; past the last nothing is
+ * drawn. Bigger plants show further out, smaller ones sooner (in heights: a
+ * tree's 8 units reach further than a bush's 1). The switches are where what a
+ * level leaves out gets too small to see: at the first, a single leaf mass
+ * (about a tenth of the plant's height) is ~8 px across on a 720 px tall
+ * view (65° field of view); at the second, a branch's merged leaves are ~5 px.
+ * See docs/research/plant-forms.md.
+ */
+export const PLANT_LODS: Readonly<Record<PlantKind, readonly number[]>> = {
+  tree: [8, 18, 30, 46],
+  largeBush: [10, 24, 38, 60],
+  smallBush: [12, 30, 46, 70],
 };
 
 /** The fade starts this fraction of the way to a range's end. */
 export const FADE_START = 0.8;
 
-/** How far below the ground a plant's base reaches, as a share of its height: hides gaps where the drawn ground is coarser than the terrain. */
-export const SINK = 0.12;
+/** A species' skeleton (grown once per species object). */
+const skeletons = new WeakMap<PlantSpecies, PlantSkeleton>();
 
-export type PlantDetail = 'full' | 'simple';
-
-const color = new THREE.Color();
-
-/** A part of a plant: geometry coloured `hex`, made non-indexed so parts merge. */
-function part(geometry: THREE.BufferGeometry, hex: string): THREE.BufferGeometry {
-  const g = geometry.index ? geometry.toNonIndexed() : geometry;
-  if (g !== geometry) geometry.dispose();
-  g.deleteAttribute('uv');
-  color.set(hex);
-  const colors = new Float32Array(g.getAttribute('position').count * 3);
-  for (let i = 0; i < colors.length; i += 3) color.toArray(colors, i);
-  g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  return g;
+export function plantSkeleton(s: PlantSpecies): PlantSkeleton {
+  let k = skeletons.get(s);
+  if (!k) {
+    k = growPlant(s);
+    skeletons.set(s, k);
+  }
+  return k;
 }
 
-/** An ellipsoid (an icosahedron stretched to `rx`, `ry`, `rx`) centred at `y`. */
-function ball(rx: number, ry: number, y: number, detail: number, hex: string, x = 0): THREE.BufferGeometry {
-  return part(new THREE.IcosahedronGeometry(1, detail).scale(rx, ry, rx).translate(x, y, 0), hex);
+/** Drops a species' cached skeleton (after editing it in place, as the plant lab does). */
+export function forgetPlant(s: PlantSpecies): void {
+  skeletons.delete(s);
 }
 
-/** A cone with its base at `y0`. */
-function cone(radius: number, height: number, y0: number, segments: number, hex: string): THREE.BufferGeometry {
-  return part(new THREE.ConeGeometry(radius, height, segments).translate(0, y0 + height / 2, 0), hex);
+/** The species' mesh data at level of detail `lod` (0 = full), as plain arrays. */
+export function plantMeshData(s: PlantSpecies, lod: number): PlantMeshData {
+  return buildPlantMesh(plantSkeleton(s), { bark: s.trunkColor, leaf: s.leafColor, leaf2: s.form.leafColor2, accent: s.form.accentColor }, lod);
 }
 
 /**
  * The species' mesh in body-frame-up units (+Y up, base at the origin, reaching
- * `SINK` below it), vertex-coloured. `simple` is a few dozen triangles for the
- * middle distance.
+ * `SINK` below it), vertex-coloured, at level of detail `lod` (0 = full, up to
+ * PLANT_LOD_COUNT − 1, a few dozen triangles).
  */
-export function createPlantGeometry(s: PlantSpecies, detail: PlantDetail): THREE.BufferGeometry {
-  const full = detail === 'full';
-  const H = s.height;
-  const trunkH = H * s.trunkShare;
-  const crownH = H - trunkH;
-  const R = s.crownRadius;
-  const parts: THREE.BufferGeometry[] = [];
-  if (s.kind === 'tree') {
-    const w = Math.max(0.12, H * s.trunkWidth);
-    const base = -SINK * H;
-    const length = trunkH + crownH * 0.3 - base;
-    parts.push(part(new THREE.CylinderGeometry(w * 0.6, w, length, full ? 8 : 3, 1, true).translate(0, base + length / 2, 0), s.trunkColor));
-    if (s.crown === 'cone') {
-      parts.push(cone(R, crownH, trunkH, full ? 9 : 4, s.leafColor));
-    } else if (s.crown === 'tiers') {
-      parts.push(cone(R, crownH * 0.6, trunkH, full ? 9 : 4, s.leafColor));
-      parts.push(cone(R * 0.65, crownH * 0.6, trunkH + crownH * 0.4, full ? 9 : 4, s.leafColor));
-    } else {
-      parts.push(ball(R, crownH / 2, trunkH + crownH / 2, full ? 1 : 0, s.leafColor));
-    }
-  } else {
-    // Bushes: a ball of leaves on the ground, a second one beside it for the 'tiers' shape.
-    const y = crownH / 2 - SINK * H * 0.5;
-    parts.push(ball(R, crownH / 2, y, full ? 1 : 0, s.leafColor));
-    if (s.crown === 'tiers') parts.push(ball(R * 0.65, crownH * 0.35, crownH * 0.35, full ? 1 : 0, s.leafColor, R * 0.7));
-  }
-  const geometry = mergeGeometries(parts, false)!;
-  for (const p of parts) p.dispose();
+export function createPlantGeometry(s: PlantSpecies, lod: number): THREE.BufferGeometry {
+  const data = plantMeshData(s, Math.min(PLANT_LOD_COUNT - 1, Math.max(0, lod)));
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(data.positions, 3));
+  geometry.setAttribute('color', new THREE.BufferAttribute(data.colors, 3));
   geometry.computeBoundingSphere();
   return geometry;
 }
@@ -97,39 +72,94 @@ export interface PlantFadeUniforms {
   uHeight: THREE.IUniform<number>;
   /** Multiplies the view distances (plantParams.range). */
   uRange: THREE.IUniform<number>;
-  /** Start and end of each fade, in heights. */
-  uNear: THREE.IUniform<THREE.Vector2>;
-  uFar: THREE.IUniform<THREE.Vector2>;
+  /** Start and end, in heights, of the fade at this level's near edge (the level before ends there) and at its far edge. */
+  uLower: THREE.IUniform<THREE.Vector2>;
+  uUpper: THREE.IUniform<THREE.Vector2>;
+  /** Debug: blends the level towards a colour (by `uTintMix`, 0 for none), to see which level draws what. */
+  uTint: THREE.IUniform<THREE.Color>;
+  uTintMix: THREE.IUniform<number>;
 }
 
-export type PlantLevel = 'near' | 'mid';
+/** How far a tinted level is blended towards its LOD colour. */
+export const TINT_MIX = 0.7;
+
+/** Sets a level's debug tint: its LOD colour, or none. */
+export function setLodTint(u: Pick<PlantFadeUniforms, 'uTint' | 'uTintMix'>, lod: number, on: boolean): void {
+  u.uTint.value.set(LOD_TINTS[Math.min(lod, LOD_TINTS.length - 1)]!);
+  u.uTintMix.value = on ? TINT_MIX : 0;
+}
+
+/** A plant material without the fade (a level drawn as it is, as the plant lab's line-up does), with the same debug tint. */
+export function createTintedPlantMaterial(lod: number): { material: THREE.MeshStandardMaterial; tint: Pick<PlantFadeUniforms, 'uTint' | 'uTintMix'> } {
+  const tint = { uTint: { value: new THREE.Color() }, uTintMix: { value: 0 } };
+  setLodTint(tint, lod, false);
+  const material = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9 });
+  material.customProgramCacheKey = () => 'plant-tinted';
+  material.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, tint);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform vec3 uTint;\nuniform float uTintMix;')
+      .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb = mix(diffuseColor.rgb, uTint, uTintMix);');
+  };
+  return { material, tint };
+}
+
+/** Tints that show the levels of detail apart (plantParams.showLods), from the full plant out. */
+export const LOD_TINTS: readonly string[] = ['#ff5a5a', '#ffd34d', '#5ce07a', '#4da6ff'];
+
+/** The fade window (start, end) at the far edge of level `lod` in `ranges`, in heights; before level 0, a window that is always passed. */
+export function fadeWindow(ranges: readonly number[], lod: number): [number, number] {
+  if (lod < 0) return [-2, -1];
+  const end = ranges[Math.min(lod, ranges.length - 1)]!;
+  return [end * FADE_START, end];
+}
+
+/** Which level of detail a plant is drawn at, and how far through the fade to the next (0 to 1); `lod` is the number of levels past the last. */
+export interface LodPosition {
+  lod: number;
+  fade: number;
+}
+
+/** The level of detail at `distance` (in the plant's heights) with ranges `ranges`, as the material draws it. Writes and returns `out`. */
+export function lodAt(ranges: readonly number[], distance: number, out: LodPosition): LodPosition {
+  for (let lod = 0; lod < ranges.length; lod++) {
+    const [start, end] = fadeWindow(ranges, lod);
+    if (distance < end) {
+      out.lod = lod;
+      out.fade = Math.max(0, (distance - start) / (end - start));
+      return out;
+    }
+  }
+  out.lod = ranges.length;
+  out.fade = 0;
+  return out;
+}
 
 /**
  * A lit, vertex-coloured, flat-shaded material whose instances fade by their
  * distance to the camera, worked out in the shader (so nothing is rebuilt as
  * the camera moves). Dithered, not blended: a pixel is drawn or discarded by a
- * screen-space pattern, so nothing needs sorting and the two levels
- * exchange pixels without a pop. The near level keeps pixels where the dither
- * is below its weight (1 up to the near fade, then falling to 0), the mid level the complement
- * of that, also under the far weight, which fades the plant out entirely.
- * The meshes are also drawn into the atmosphere's ground-depth texture
+ * screen-space pattern, so nothing needs sorting and neighbouring levels
+ * exchange pixels without a pop. With w(d) = 1 − smoothstep over a level's far
+ * fade, level k keeps the pixels whose dither is in [w_(k−1), w_k): level 0
+ * those below its weight (1 up to its fade, then falling to 0), each next
+ * level the band the one before gave up, and past the last level's fade
+ * nothing. The meshes are also drawn into the atmosphere's ground-depth texture
  * (GROUND_DETAIL_LAYER, see SurfaceEntities), so the haze stops at a tree
  * and doesn't wash it over with the haze of the ground behind it.
  */
-export function createPlantMaterial(
-  level: PlantLevel,
-  height: number,
-  ranges: PlantRanges,
-): { material: THREE.MeshStandardMaterial; uniforms: PlantFadeUniforms } {
+export function createPlantMaterial(lod: number, height: number, ranges: readonly number[]): { material: THREE.MeshStandardMaterial; uniforms: PlantFadeUniforms } {
   const uniforms: PlantFadeUniforms = {
     uHeight: { value: height },
     uRange: { value: 1 },
-    uNear: { value: new THREE.Vector2(ranges.near * FADE_START, ranges.near) },
-    uFar: { value: new THREE.Vector2(ranges.far * FADE_START, ranges.far) },
+    uLower: { value: new THREE.Vector2(...fadeWindow(ranges, lod - 1)) },
+    uUpper: { value: new THREE.Vector2(...fadeWindow(ranges, lod)) },
+    uTint: { value: new THREE.Color() },
+    uTintMix: { value: 0 },
   };
+  setLodTint(uniforms, lod, false);
   const material = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9 });
-  if (level === 'near') material.defines = { PLANT_NEAR: '' };
-  material.customProgramCacheKey = () => `plant-${level}`;
+  material.customProgramCacheKey = () => 'plant-lod';
   material.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
     shader.uniforms.uDepthPass = groundDepthPass;
@@ -146,26 +176,26 @@ export function createPlantMaterial(
         }`,
       );
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying float vPlantDistance;\nuniform vec2 uNear;\nuniform vec2 uFar;\nuniform bool uDepthPass;')
+      .replace(
+        '#include <common>',
+        '#include <common>\nvarying float vPlantDistance;\nuniform vec2 uLower;\nuniform vec2 uUpper;\nuniform vec3 uTint;\nuniform float uTintMix;\nuniform bool uDepthPass;',
+      )
       .replace(
         '#include <clipping_planes_fragment>',
         `#include <clipping_planes_fragment>
         {
           float dither = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
-          float wNear = 1.0 - smoothstep(uNear.x, uNear.y, vPlantDistance);
-          #ifdef PLANT_NEAR
-          if (dither >= wNear) discard;
-          #else
-          float wFar = 1.0 - smoothstep(uFar.x, uFar.y, vPlantDistance);
-          if (dither < wNear || dither >= wFar) discard;
-          #endif
+          float wLower = 1.0 - smoothstep(uLower.x, uLower.y, vPlantDistance);
+          float wUpper = 1.0 - smoothstep(uUpper.x, uUpper.y, vPlantDistance);
+          if (dither < wLower || dither >= wUpper) discard;
           // The atmosphere's ground-depth pass only needs what is left after the discard.
           if (uDepthPass) {
             gl_FragColor = vec4(0.0);
             return;
           }
         }`,
-      );
+      )
+      .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb = mix(diffuseColor.rgb, uTint, uTintMix);');
   };
   return { material, uniforms };
 }

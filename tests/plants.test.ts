@@ -236,16 +236,15 @@ describe('surface changes', () => {
 });
 
 describe('plant meshes', () => {
-  it('have a cheap middle-distance level', () => {
+  it('get cheaper at every level of detail, down to a few dozen triangles', () => {
     for (const s of plan(3).species) {
       const tris = (g: THREE.BufferGeometry) => g.getAttribute('position').count / 3;
-      const full = createPlantGeometry(s, 'full');
-      const simple = createPlantGeometry(s, 'simple');
-      expect(tris(simple)).toBeLessThan(tris(full));
-      expect(tris(simple)).toBeLessThanOrEqual(60);
-      expect(full.getAttribute('color').count).toBe(full.getAttribute('position').count);
-      full.dispose();
-      simple.dispose();
+      const levels = [0, 1, 2].map((lod) => createPlantGeometry(s, lod));
+      expect(tris(levels[1]!)).toBeLessThan(tris(levels[0]!));
+      expect(tris(levels[2]!)).toBeLessThan(tris(levels[1]!));
+      expect(tris(levels[2]!)).toBeLessThanOrEqual(120);
+      expect(levels[0]!.getAttribute('color').count).toBe(levels[0]!.getAttribute('position').count);
+      for (const g of levels) g.dispose();
     }
   });
 });
@@ -283,7 +282,7 @@ describe('SurfaceEntities', () => {
     const s = surface.stats();
     expect(s.cells).toBeGreaterThan(20);
     expect(s.plants).toBeGreaterThan(100);
-    expect(s.near + s.mid).toBeGreaterThan(0);
+    expect(s.lods.reduce((a, b) => a + b, 0)).toBeGreaterThan(0);
     expect(s.drawCalls).toBeGreaterThan(0);
     expect(surface.settled).toBe(true);
     surface.dispose();

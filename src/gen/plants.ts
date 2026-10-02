@@ -1,6 +1,7 @@
 import { faceGridPoint, type Vec3Like } from '../world/cubeSphereMath';
 import type { Habitability } from './climate';
 import { hslToHex } from './color';
+import { architectureFor, generateForm, type PlantForm } from './plantForm';
 import { generateName } from './names';
 import { terrainNoise } from './noise';
 import { Rng } from './rng';
@@ -8,9 +9,10 @@ import { Rng } from './rng';
 /*
  * Plants on habitable bodies (roadmap step 25): which species a planet has
  * (from its seed and habitability tier) and where they stand. Pure data, no
- * THREE: the view is in src/surface/. Placeholders for now: a species is a
- * handful of numbers (kind, height, crown, colours) that a later plant
- * designer will edit, not a generated tree.
+ * THREE: the view is in src/surface/. A species is a handful of numbers
+ * (kind, height, crown, colours) plus its `PlantForm`, the branching that
+ * gen/plantForm.ts grows into a tree or bush; the plant lab (plants.html)
+ * edits them all.
  *
  * The ground is cut into cells on the cube sphere (the same faces as the
  * planet level's LOD, see world/cubeSphereMath.ts), and a cell's plants depend
@@ -33,7 +35,7 @@ export interface PlantKindInfo {
   readonly height: readonly [number, number];
   /** Share of the height that is bare trunk. */
   readonly trunkShare: readonly [number, number];
-  /** Crown radius as a fraction of the crown's height. */
+  /** Crown radius as a fraction of the crown's height (bushes; trees go by TREE_CROWN_WIDTH). */
   readonly crownRatio: readonly [number, number];
   /** Highest they grow, as a fraction of the terrain's relief above sea level (the tree line: hardy small plants climb higher). */
   readonly maxElevation: number;
@@ -49,7 +51,21 @@ export const PLANT_KINDS: Readonly<Record<PlantKind, PlantKindInfo>> = {
   smallBush: { label: 'Small bush', height: [0.8, 1.5], trunkShare: [0, 0.05], crownRatio: [0.5, 0.8], maxElevation: 0.92, maxSlope: 0.9, temperature: [248, 330] },
 };
 
-/** A species, as the plant designer will edit it. */
+/**
+ * A tree's crown diameter as a share of its height, by how it grows. Open-grown
+ * broadleaf trees measure 0.61–1.16, mostly about 0.85 (Peper et al. 2001,
+ * twelve street-tree species); a coconut palm's fronds span 8–9 m on a 20–22 m
+ * trunk, 0.36–0.45, stylised a little wider for younger palms; conifers are
+ * narrow spires (no measured open-grown ratio found: stylised).
+ * docs/research/plant-forms.md.
+ */
+export const TREE_CROWN_WIDTH: Readonly<Record<'conifer' | 'broadleaf' | 'palm', readonly [number, number]>> = {
+  broadleaf: [0.6, 1.1],
+  palm: [0.4, 0.6],
+  conifer: [0.28, 0.44],
+};
+
+/** A species, as the plant lab edits it. */
 export interface PlantSpecies {
   readonly index: number;
   readonly kind: PlantKind;
@@ -70,6 +86,8 @@ export interface PlantSpecies {
   readonly maxTemperature: number;
   /** Relative abundance. */
   readonly weight: number;
+  /** How it branches and leafs (gen/plantForm.ts), inside the envelope of the numbers above. */
+  readonly form: PlantForm;
 }
 
 /** How many species each habitability tier has (T0 has no plants): more species the higher the tier. */
@@ -136,7 +154,7 @@ export function planPlants(input: PlantInput): PlantPlan | null {
   const hue = tier === 3 ? rng.range(85, 140) : rng.range(0, 360);
   const species: PlantSpecies[] = [];
   for (let i = 0; i < SPECIES_PER_TIER[tier]!; i++) {
-    species.push(makeSpecies(rng.fork('species', i), i, KIND_ORDER[i]!, hue, tier));
+    species.push(generateSpecies(rng.fork('species', i), i, KIND_ORDER[i]!, hue, tier));
   }
   // A dry world has sparser cover (Earth's deserts and tundra hold a fraction of the trees of moist forests).
   const moisture = 0.55 + 0.45 * Math.sqrt(Math.min(1, Math.max(0, input.water)));
@@ -151,7 +169,8 @@ export function planPlants(input: PlantInput): PlantPlan | null {
   };
 }
 
-function makeSpecies(rng: Rng, index: number, kind: PlantKind, baseHue: number, tier: Habitability): PlantSpecies {
+/** Species number `index` of kind `kind` from `rng`, leaves near hue `baseHue` (degrees); a planet's are made by `planPlants`. */
+export function generateSpecies(rng: Rng, index: number, kind: PlantKind, baseHue: number, tier: Habitability): PlantSpecies {
   const info = PLANT_KINDS[kind];
   const height = rng.range(info.height[0], info.height[1]);
   const trunkShare = rng.range(info.trunkShare[0], info.trunkShare[1]);
@@ -159,7 +178,10 @@ function makeSpecies(rng: Rng, index: number, kind: PlantKind, baseHue: number, 
   const crown = kind === 'tree' ? rng.pick<CrownShape>(['cone', 'ball', 'tiers']) : kind === 'largeBush' ? rng.pick<CrownShape>(['ball', 'tiers']) : 'ball';
   const hue = baseHue + rng.range(-18, 18);
   const name = generateName(rng);
-  const noun = kind === 'tree' ? 'tree' : kind === 'largeBush' ? 'bush' : 'shrub';
+  // The form has a stream of its own, so the draws above (and every species made before forms) stay as they were.
+  const formRng = rng.fork('form');
+  const form = generateForm(formRng, architectureFor(kind === 'tree', crown, formRng), hue, kind === 'smallBush');
+  const noun = kind === 'tree' ? (form.architecture === 'palm' ? 'palm' : 'tree') : kind === 'largeBush' ? 'bush' : 'shrub';
   return {
     index,
     kind,
@@ -167,7 +189,7 @@ function makeSpecies(rng: Rng, index: number, kind: PlantKind, baseHue: number, 
     height,
     trunkShare,
     trunkWidth: kind === 'tree' ? rng.range(0.025, 0.04) : 0.02,
-    crownRadius: crownHeight * rng.range(info.crownRatio[0], info.crownRatio[1]),
+    crownRadius: crownRadiusFor(kind, form.architecture, height, crownHeight, rng.next()),
     crown,
     trunkColor: hslToHex(rng.range(20, 40), rng.range(0.3, 0.45), rng.range(0.2, 0.3)),
     leafColor: hslToHex(hue, rng.range(0.4, 0.65), rng.range(0.26, 0.42) + (tier === 3 ? 0 : 0.04)),
@@ -175,7 +197,15 @@ function makeSpecies(rng: Rng, index: number, kind: PlantKind, baseHue: number, 
     minTemperature: info.temperature[0] + rng.range(-6, 6),
     maxTemperature: info.temperature[1] + rng.range(-6, 6),
     weight: rng.range(0.5, 1.5),
+    form,
   };
+}
+
+/** A crown's radius from a 0–1 roll: a tree's by its height and architecture (TREE_CROWN_WIDTH), a bush's by its crown's height. */
+function crownRadiusFor(kind: PlantKind, architecture: string, height: number, crownHeight: number, roll: number): number {
+  const lerp = (r: readonly [number, number]) => r[0] + (r[1] - r[0]) * roll;
+  if (kind === 'tree' && (architecture === 'conifer' || architecture === 'broadleaf' || architecture === 'palm')) return (height * lerp(TREE_CROWN_WIDTH[architecture])) / 2;
+  return crownHeight * lerp(PLANT_KINDS[kind].crownRatio);
 }
 
 /** One plant. Its id is stable: the same cell and index on every visit, so what happens to it can be recorded. */
