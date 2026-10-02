@@ -9,6 +9,8 @@ import type { CelestialBody } from './CelestialBody';
 import { atmosphereLook } from '../gen/atmosphere';
 import { createAtmosphere, type AtmosphereSun } from './atmosphereShell';
 import { createLavaLook, type LavaLook } from './lavaMaterial';
+import { createGasLook, type GasLook } from './gasLook';
+import type { SizeClass } from '../gen/planets';
 import { createGasGeometry, createRings, createTerrainGeometry } from './planetGeometry';
 import { createWeatherLook, type WeatherLook } from './weatherLook';
 import { globeRadius } from '../planet/frame';
@@ -25,6 +27,8 @@ export interface PlanetConfig {
   orbit: Orbit;
   style: PlanetStyle;
   bands?: string[] | null;
+  /** Planets' size class (ice giants' clouds differ from gas giants'). */
+  size?: SizeClass;
   atmosphere?: string | null;
   rings?: RingData | null;
   tilt?: number;
@@ -47,6 +51,8 @@ export type SmallBodyKind = 'comet' | 'asteroid';
  */
 export const TERRAIN_SEGMENTS = 8;
 export const GAS_SEGMENTS = 22;
+/** Lava bodies' terrain: finer, since their seas' glow is worked out per vertex (1728 triangles). */
+export const LAVA_SEGMENTS = 12;
 /** A vent's glow in the system view, radians (wider than up close, so it shows at that size). */
 export const COARSE_VENT_RADIUS = 0.15;
 /** Cube sphere segments of the system view's cloud layers (4800 triangles; the drift is worked out per vertex). */
@@ -80,6 +86,8 @@ export class Planet implements Entity, CelestialBody {
   private readonly surface: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
   /** Lava worlds and moons: the animated seas. */
   private readonly lava: LavaLook | null;
+  /** Gas and ice giants: the cloud tops. */
+  readonly gas: GasLook | null;
   /** Bodies with weather: the clouds, storms and lightning (see gen/weather.ts). */
   readonly weather: WeatherLook | null;
   private readonly body: RAPIER.RigidBody;
@@ -103,12 +111,14 @@ export class Planet implements Entity, CelestialBody {
     this.lava = gas ? null : createLavaLook(config, COARSE_VENT_RADIUS);
     this.surface = new THREE.Mesh(
       gas
-        ? createGasGeometry(radius, seed, config.bands, GAS_SEGMENTS)
-        : createTerrainGeometry(radius, seed, style, { segments: TERRAIN_SEGMENTS, seaFloor: this.lava !== null, shape: config.shape }),
+        ? createGasGeometry(radius, seed, config.bands, GAS_SEGMENTS, config.size === 'iceGiant')
+        : createTerrainGeometry(radius, seed, style, { segments: this.lava ? LAVA_SEGMENTS : TERRAIN_SEGMENTS, shape: config.shape }),
       new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: !gas, roughness: 0.9 }),
     );
-    // Lava seas are a separate animated sphere over the sunken sea floor, turning with the surface.
-    if (this.lava) this.surface.add(this.lava.createSeaSphere(radius));
+    // Lava seas glow on the terrain's own flat sea.
+    this.lava?.paintTerrain(this.surface.material, radius);
+    this.gas = createGasLook(config);
+    this.gas?.apply(this.surface.material);
     // Clouds turn with the ground; the same layer as low orbit's, in planet radii.
     this.weather = gas ? null : createWeatherLook(config, this.lava?.activity ?? null);
     if (this.weather) this.surface.add(this.weather.createCloudLayer(radius / globeRadius(radius), CLOUD_SEGMENTS, sun));
@@ -187,13 +197,15 @@ export class Planet implements Entity, CelestialBody {
     this.surface.rotation.y += this.config.spin * frameDt;
   }
 
-  /** Animated surfaces (lava seas) and weather at system time `time`. */
+  /** Animated surfaces (lava seas, gas giants' clouds) and weather at system time `time`. */
   animate(time: number): void {
     this.lava?.animate(time);
+    this.gas?.animate(time);
     this.weather?.animate(time);
   }
 
   dispose(): void {
+    this.gas?.dispose();
     this.scene.remove(this.object);
     this.object.traverse((o) => {
       if (o instanceof THREE.Mesh) {

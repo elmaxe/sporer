@@ -6,6 +6,7 @@ import {
   flightAltitude,
   highAltitude,
   hoverGap,
+  maxLookUpAt,
   minPitchAt,
   systemMaxView,
   parkGap,
@@ -76,6 +77,14 @@ describe('planet flight altitude', () => {
     expect(minPitchAt(1)).toBeCloseTo(params.highPitch);
     expect(minPitchAt(0.8)).toBeGreaterThan(params.lowPitch);
     expect(minPitchAt(0.8)).toBeLessThan(params.highPitch);
+  });
+
+  it('lets the view tip up to the sky down low, and not at all at the top (where it leaves for the system)', () => {
+    expect(maxLookUpAt(0)).toBeCloseTo(params.lookUp);
+    expect(maxLookUpAt(0.5)).toBeCloseTo(params.lookUp);
+    expect(maxLookUpAt(0.8)).toBeGreaterThan(0);
+    expect(maxLookUpAt(0.8)).toBeLessThan(params.lookUp);
+    expect(maxLookUpAt(1)).toBeCloseTo(0);
   });
 });
 

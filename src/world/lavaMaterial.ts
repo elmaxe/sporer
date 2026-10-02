@@ -3,7 +3,6 @@ import type { Debug } from '../core/Debug';
 import { EruptionSchedule, eruptionGlow, lavaActivity, type LavaActivity } from '../gen/lavaActivity';
 import { globeRadius } from '../planet/frame';
 import type { PlanetConfig } from './Planet';
-import { createCubeSphere } from './cubeSphere';
 import { SIMPLEX_GLSL } from './noiseGlsl';
 
 /** Global multipliers over every lava sea (debug tuning). */
@@ -227,19 +226,23 @@ export class LavaLook {
 
   /**
    * A cheaper lava sea for small, distant views (the system view and a
-   * visited planet's moons): a lit cube sphere at sea level (`segments`
-   * per cube face: 12·segments² triangles, evenly spaced), whose glow is worked out per vertex from the broad flow and the vents
-   * (like the stars' spots). The crust plates and their seams are averaged out.
+   * visited planet's moons), painted onto the body's own terrain, which must
+   * be built with a flat sea at `radius` (no `seaFloor`); `material` is its
+   * lit, vertex-coloured terrain material. Where the surface is at sea level it
+   * takes the crust's colour and a glow worked out per vertex from the broad
+   * flow and the vents (like the stars' spots); the crust plates and their
+   * seams are averaged out. One surface, so the sea can't z-fight a sea floor
+   * under it when seen from far away.
    */
-  createSeaSphere(radius: number, segments = 10): THREE.Mesh {
-    const material = new THREE.MeshStandardMaterial({ color: this.crust, roughness: 0.9 });
+  paintTerrain(material: THREE.MeshStandardMaterial, radius: number): void {
     material.onBeforeCompile = (shader) => {
-      Object.assign(shader.uniforms, this.uniforms);
+      Object.assign(shader.uniforms, this.uniforms, { uCrust: { value: this.crust }, uShore: { value: radius * (1 + 1e-4) } });
       shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', `#include <common>\n${LAVA_GLSL}\nvarying vec3 vLavaGlow;`)
+        .replace('#include <common>', `#include <common>\n${LAVA_GLSL}\nvarying vec3 vLavaPos;\nvarying vec3 vLavaGlow;`)
         .replace(
           '#include <begin_vertex>',
           `#include <begin_vertex>
+          vLavaPos = position;
           {
             vec3 dir = normalize(position);
             float heat = lavaFlow(dir) + 0.6 * lavaVents(dir);
@@ -248,14 +251,24 @@ export class LavaLook {
           }`,
         );
       shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', '#include <common>\nvarying vec3 vLavaGlow;')
-        .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vLavaGlow;');
+        .replace(
+          '#include <common>',
+          '#include <common>\nuniform vec3 uCrust;\nuniform float uShore;\nvarying vec3 vLavaPos;\nvarying vec3 vLavaGlow;\nfloat lavaSea;',
+        )
+        .replace(
+          '#include <color_fragment>',
+          `#include <color_fragment>
+          {
+            // Sea where the surface is at sea level (the flat sea's chords dip just under it), the coast antialiased outward.
+            float r = length(vLavaPos);
+            float w = fwidth(r);
+            lavaSea = 1.0 - smoothstep(uShore, uShore + 1.5 * w, r);
+            diffuseColor.rgb = mix(diffuseColor.rgb, uCrust, lavaSea);
+          }`,
+        )
+        .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vLavaGlow * lavaSea;');
     };
-    material.customProgramCacheKey = () => 'lava-sea';
-    const mesh = new THREE.Mesh(createCubeSphere(radius, segments), material);
-    mesh.name = 'Lava';
-    mesh.renderOrder = SEA_RENDER_ORDER;
-    return mesh;
+    material.customProgramCacheKey = () => 'lava-terrain';
   }
 }
 

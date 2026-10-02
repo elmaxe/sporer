@@ -54,6 +54,12 @@ export interface OrbitOptions {
   minPitch?: number;
   /** Starting pitch in radians (default 22°). */
   pitch?: number;
+  /**
+   * How far the view may tip up (radians, default 0): dragging on past the
+   * lowest pitch turns the camera, where it stands, to look up above the
+   * target (e.g. at the sky over a planet) instead of lowering it further.
+   */
+  lookUp?: number;
 }
 
 const MIN_PITCH = THREE.MathUtils.degToRad(-80);
@@ -61,6 +67,8 @@ const WORLD_UP = new THREE.Vector3(0, 1, 0);
 const ORIGIN = new THREE.Vector3();
 /** A camera looks along its local -Z, so +Z points from what it looks at back to it. */
 const BACK = new THREE.Vector3(0, 0, 1);
+/** A turn about the camera's local +X tips its view up. */
+const RIGHT = new THREE.Vector3(1, 0, 0);
 const MAX_PITCH = THREE.MathUtils.degToRad(85);
 /** Wheel pixels past a limit (about two notches) that count as "keep scrolling". */
 const PAST_LIMIT_PX = 180;
@@ -88,6 +96,11 @@ export class OrbitCamera implements Entity {
   private pastLimit = 0;
   private readonly baseMinPitch: number;
   private minPitch: number;
+  /** How far the view is tipped up past the target (see `OrbitOptions.lookUp`), as with the pitch. */
+  private lookUp = 0;
+  private targetLookUp = 0;
+  private wantedLookUp = 0;
+  private maxLookUp: number;
   private focus: THREE.Vector3 | null = null;
   private focusBlend = 0;
   private view: THREE.Quaternion | null = null;
@@ -106,6 +119,7 @@ export class OrbitCamera implements Entity {
   private readonly orient = new THREE.Quaternion();
   private readonly toCentre = new THREE.Vector3();
   private readonly toAim = new THREE.Vector3();
+  private readonly tip = new THREE.Quaternion();
 
   constructor(
     private readonly camera: THREE.PerspectiveCamera,
@@ -119,6 +133,7 @@ export class OrbitCamera implements Entity {
     this.distance = this.targetDistance = options.distance;
     this.pitch = this.targetPitch = this.wantedPitch = options.pitch ?? THREE.MathUtils.degToRad(22);
     this.minPitch = this.baseMinPitch = options.minPitch ?? MIN_PITCH;
+    this.maxLookUp = options.lookUp ?? 0;
     const f = debug.folder(debugName);
     f?.add(params, 'minDistance', 0.5, 100);
     f?.add(params, 'maxDistance', 100, 10000);
@@ -170,9 +185,10 @@ export class OrbitCamera implements Entity {
     this.aimLimit = limit;
   }
 
-  /** The camera orientation of the orbit's current yaw and pitch (ignoring any view override). */
+  /** The camera orientation of the orbit's current yaw, pitch and look-up (ignoring any view override). */
   orientation(out: THREE.Quaternion): THREE.Quaternion {
-    return out.setFromRotationMatrix(this.look.lookAt(this.offset, ORIGIN, this.options.up ?? WORLD_UP));
+    out.setFromRotationMatrix(this.look.lookAt(this.offset, ORIGIN, this.options.up ?? WORLD_UP));
+    return this.lookUp > 0 ? out.multiply(this.tip.setFromAxisAngle(RIGHT, this.lookUp)) : out;
   }
 
   /**
@@ -203,6 +219,15 @@ export class OrbitCamera implements Entity {
     this.minPitch = THREE.MathUtils.clamp(pitch, this.baseMinPitch, MAX_PITCH);
   }
 
+  /**
+   * Limits how far the view may tip up (radians, at most the `lookUp` it was
+   * made with): it eases down while over it, and back to what the player
+   * chose as the limit rises again.
+   */
+  setMaxLookUp(angle: number): void {
+    this.maxLookUp = THREE.MathUtils.clamp(angle, 0, this.options.lookUp ?? 0);
+  }
+
   /** Smoothly zooms to `distance` (clamped to the limits). */
   zoomTo(distance: number): void {
     this.targetDistance = THREE.MathUtils.clamp(distance, this.params.minDistance, this.params.maxDistance);
@@ -212,10 +237,9 @@ export class OrbitCamera implements Entity {
     const p = this.params;
     const drag = this.input.consumeDrag();
     this.targetYaw -= drag.x * p.rotateSpeed;
-    if (drag.y !== 0) {
-      this.wantedPitch = THREE.MathUtils.clamp(this.targetPitch + drag.y * p.rotateSpeed, this.baseMinPitch, MAX_PITCH);
-    }
+    if (drag.y !== 0) this.dragPitch(drag.y * p.rotateSpeed);
     this.targetPitch = THREE.MathUtils.clamp(this.wantedPitch, this.minPitch, MAX_PITCH);
+    this.targetLookUp = Math.min(this.wantedLookUp, this.maxLookUp);
 
     const wheel = this.input.consumeWheel();
     this.trackPastLimit(wheel, frameDt);
@@ -228,6 +252,7 @@ export class OrbitCamera implements Entity {
     const k = p.damping > 0 ? 1 - Math.exp(-frameDt / p.damping) : 1;
     this.yaw += (this.targetYaw - this.yaw) * k;
     this.pitch += (this.targetPitch - this.pitch) * k;
+    this.lookUp += (this.targetLookUp - this.lookUp) * k;
     // Smooth the distance in log space so zooming feels even at every scale.
     this.distance *= Math.pow(this.targetDistance / this.distance, k);
 
@@ -255,9 +280,30 @@ export class OrbitCamera implements Entity {
     this.camera.position.copy(this.center).addScaledVector(this.offset, this.distance);
     this.options.keepOut?.(this.camera.position);
     this.camera.lookAt(this.aimPoint());
+    if (this.lookUp > 0) this.camera.rotateX(this.lookUp);
   }
 
   dispose(): void {}
+
+  /**
+   * Turns the pitch by `delta` radians (+ = the camera rises, looking further
+   * down). Past the lowest pitch, lowering it tips the view up instead, and
+   * raising it first tips the view back down.
+   */
+  private dragPitch(delta: number): void {
+    if (delta > 0 && this.wantedLookUp > 0) {
+      const back = Math.min(delta, this.targetLookUp);
+      this.wantedLookUp = this.targetLookUp - back;
+      delta -= back;
+    }
+    if (delta < 0 && this.maxLookUp > 0) {
+      // The part of the drag that would take the pitch below its floor.
+      const past = Math.min(0, delta + Math.max(0, this.targetPitch - this.minPitch));
+      this.wantedLookUp = Math.min(this.maxLookUp, this.targetLookUp - past);
+      delta -= past;
+    }
+    if (delta !== 0) this.wantedPitch = THREE.MathUtils.clamp(this.targetPitch + delta, this.baseMinPitch, MAX_PITCH);
+  }
 
   /**
    * What the camera looks at: the centre, or towards the aim point (mixed by

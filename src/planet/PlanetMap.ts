@@ -4,6 +4,7 @@ import type { Entity } from '../core/Entity';
 import type { Input } from '../core/Input';
 import { detailedTerrain } from '../gen/noise';
 import { LAVA_SEA_GLSL } from '../world/lavaMaterial';
+import { GAS_GLSL } from '../world/gasLook';
 import { isGas, type PlanetConfig } from '../world/Planet';
 import { SHAPE_FLOOR, shapeRadius } from '../gen/shape';
 import { gasPainter, terrainPainter, type GasPainter, type TerrainPainter } from '../world/planetGeometry';
@@ -68,6 +69,10 @@ const fragmentShader = /* glsl */ `
   #else
   uniform vec3 uSun;
   #endif
+  #ifdef GAS
+  ${GAS_GLSL}
+  uniform float uGasFp;   // how much of the globe a map pixel spans
+  #endif
   #ifndef TONE_MAPPING
   #define toneMapping(c) (c)
   #endif
@@ -119,6 +124,10 @@ const fragmentShader = /* glsl */ `
     {
       // A soft terminator, a few degrees wide.
       float day = smoothstep(-0.06, 0.06, dot(dir, uSun));
+      #ifdef GAS
+      // The globe's own clouds, storms and all.
+      ground.rgb = gasColor(dir, uGasFp);
+      #endif
       col = ground.rgb * mix(uNight, 1.0, day);
     }
     gl_FragColor = vec4(col, 1.0);
@@ -217,7 +226,8 @@ export class PlanetMap implements Entity {
     this.texture.generateMipmaps = false;
 
     const gas = isGas(config);
-    this.gas = gas ? gasPainter(config.seed, config.bands, true) : null;
+    // Gas giants' clouds are drawn by the globe's shader (GAS); the bake only fills the outline.
+    this.gas = gas ? gasPainter(config.seed, config.bands, config.size === 'iceGiant') : null;
     this.terrain = gas ? null : terrainPainter(config.style);
     this.relief = gas ? 0 : config.style.relief;
     this.lava = globe.lava !== null;
@@ -227,9 +237,10 @@ export class PlanetMap implements Entity {
     this.material = new THREE.ShaderMaterial({
       vertexShader,
       fragmentShader,
-      defines: this.lava ? { LAVA: '' } : {},
+      defines: this.lava ? { LAVA: '' } : globe.gas ? { GAS: '' } : {},
       uniforms: {
         ...(globe.lava ? globe.lava.seaUniforms(globe.sun, globe.sunLight, globe.ambientLight) : { uSun: { value: globe.sun } }),
+        ...(globe.gas ? { ...globe.gas.uniforms, uGasFp: { value: (2 * Math.PI) / this.width } } : {}),
         uMap: { value: this.texture },
         uExtent: { value: new THREE.Vector2(this.width / this.scale, this.height / this.scale) },
         uSize: { value: new THREE.Vector2() },
