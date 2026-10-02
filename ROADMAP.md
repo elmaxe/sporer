@@ -1,6 +1,6 @@
 # Roadmap
 
-Spore-style space stage in the browser. Each step leaves the game playable and is verified (`typecheck`, `test`, `build`, `smoke`) before it is pushed to `main`. Pushing to `main` deploys to GitHub Pages (https://elmaxe.github.io/sporer/) via `.github/workflows/deploy.yml`.
+Spore-style space stage in the browser. Each step leaves the game playable and is verified (`typecheck`, `test`, `build`, `smoke`) before it is pushed to `main`. Pushing to `main` deploys the preview (https://elmaxe.github.io/sporer/preview/) via `.github/workflows/deploy.yml`; a `v*` release tag deploys https://elmaxe.github.io/sporer/.
 
 Status: ⬜ todo · 🟨 in progress · ✅ done
 
