@@ -1714,6 +1714,9 @@ await section('touch', async () => {
   return touch.ok && touchLab.ok;
 });
 await section('buster', async () => {
+  // A fresh game (the lab section leaves the page on lab.html).
+  if (!(await page.goto(url, READY, 60000))) return false;
+  await drawFrames(20);
   for (let i = 0; i < 40 && (await evaluate(`levels.transitioning || levels.mode !== 'system'`)); i++) {
     if (await evaluate(`levels.mode === 'planet' && !levels.transitioning`)) await evaluate(`levels.leavePlanet()`);
     if (await evaluate(`levels.mode === 'galaxy' && !levels.transitioning`)) await evaluate(`levels.toSystem()`);
