@@ -1,6 +1,7 @@
 import { Debug } from '../core/Debug';
 import { Game } from '../core/Game';
 import { addPlantDebug } from '../surface/plantParams';
+import { loadSurfaceMaps } from '../world/surfaceMaps';
 import { FpsCounter } from '../ui/FpsCounter';
 import { PlantLab } from './PlantLab';
 import { PlantLabInfo } from './PlantLabInfo';
@@ -12,7 +13,8 @@ import { PlantLabPanel } from './PlantLabPanel';
  * drives it from the console or automation (npm run shot -- --plants).
  */
 async function main(): Promise<void> {
-  const debug = await Debug.create({ force: true, title: 'Plant lab' });
+  // The real bodies' maps first: Earth's plants grow where its map is green.
+  const [debug] = await Promise.all([Debug.create({ force: true, title: 'Plant lab' }), loadSurfaceMaps()]);
   const game = new Game(document.getElementById('app')!, debug);
   const lab = new PlantLab(game, debug, PlantLab.stateFromUrl(new URL(location.href)));
   const fps = game.add(new FpsCounter());

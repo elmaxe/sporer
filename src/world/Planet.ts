@@ -14,6 +14,7 @@ import type { SizeClass } from '../gen/planets';
 import { createGasGeometry, createRings, createTerrainGeometry } from './planetGeometry';
 import { createWeatherLook, type WeatherLook } from './weatherLook';
 import { globeRadius } from '../planet/frame';
+import { realSurface } from '../gen/realSurface';
 
 /** What the renderer needs; generated PlanetData and MoonData both satisfy it. */
 export interface PlanetConfig {
@@ -51,6 +52,8 @@ export type SmallBodyKind = 'comet' | 'asteroid';
  */
 export const TERRAIN_SEGMENTS = 8;
 export const GAS_SEGMENTS = 22;
+/** Bodies with real maps (Earth, the Moon, Mars, Pluto): fine enough for their continents and seas to read (19 200 triangles). */
+export const REAL_SEGMENTS = 40;
 /** Lava bodies' terrain: finer, since their seas' glow is worked out per vertex (1728 triangles). */
 export const LAVA_SEGMENTS = 12;
 /** A vent's glow in the system view, radians (wider than up close, so it shows at that size). */
@@ -112,7 +115,7 @@ export class Planet implements Entity, CelestialBody {
     this.surface = new THREE.Mesh(
       gas
         ? createGasGeometry(radius, seed, config.bands, GAS_SEGMENTS, config.size === 'iceGiant')
-        : createTerrainGeometry(radius, seed, style, { segments: this.lava ? LAVA_SEGMENTS : TERRAIN_SEGMENTS, shape: config.shape }),
+        : createTerrainGeometry(radius, seed, style, { segments: realSurface(seed) ? REAL_SEGMENTS : this.lava ? LAVA_SEGMENTS : TERRAIN_SEGMENTS, shape: config.shape }),
       new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: !gas, roughness: 0.9 }),
     );
     // Lava seas glow on the terrain's own flat sea.

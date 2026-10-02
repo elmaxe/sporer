@@ -3,6 +3,7 @@ import { generateName } from './names';
 import { generateNebulas, nebulaAt, type NebulaData } from './nebulas';
 import { hashSeed, Rng } from './rng';
 import { generateRogues } from './rogues';
+import { SUN } from './sol';
 import { generateCompanion, generateStar, type StarData } from './stars';
 
 /** Galaxy-scene units. Unrelated to system units; each level has its own scale. */
@@ -24,6 +25,8 @@ export interface StarRef {
   stars: StarData[];
   /** The nebula the system sits in, if any (see gen/nebulas.ts). */
   nebula: NebulaData | null;
+  /** A real system instead of a generated one: 'sol', our own (gen/sol.ts). Absent for every other star. */
+  real?: 'sol';
 }
 
 export interface GalaxyData {
@@ -88,7 +91,47 @@ export function generateGalaxy(seed: number, count = DEFAULT_STAR_COUNT): Galaxy
   const nebulas = generateNebulas(seed, stars, GALAXY_RADIUS);
   for (const star of stars) star.nebula = nebulaAt(nebulas, star.position)?.nebula ?? null;
   const rogues = generateRogues(seed, stars, nebulas, (r) => armPosition(r, arms, twist, armOffset));
+  placeSol(stars, nebulas);
   return { seed, radius: GALAXY_RADIUS, arms, twist, armOffset, stars, nebulas, rogues };
+}
+
+/**
+ * Where the Sun is: real Sun sits ~8.2 kpc from the centre of a disc ~15 kpc
+ * in radius, just off the plane, in a minor arm (docs/research/sol.md).
+ */
+export const SOL_GALACTIC_RADIUS = 0.55;
+
+/**
+ * Turns one star into Sol (gen/sol.ts): the arm star nearest SOL_GALACTIC_RADIUS
+ * of the way out that's on its own, outside every nebula and not one a nebula
+ * is built round, and not a lone G or K star (so it never was the home system).
+ * Only its name and star change; its place, id and seed stay, so nothing else
+ * in the galaxy moves.
+ */
+function placeSol(stars: StarRef[], nebulas: readonly NebulaData[]): void {
+  const lit = new Set(nebulas.map((n) => n.star));
+  let best: StarRef | null = null;
+  let bestScore = Infinity;
+  for (const ref of stars) {
+    const [star, companion] = ref.stars;
+    if (companion || ref.nebula || lit.has(ref.id)) continue;
+    if (star!.kind === 'mainSequence' && (star!.spectralClass === 'G' || star!.spectralClass === 'K')) continue;
+    const d = Math.hypot(ref.position.x, ref.position.z) / GALAXY_RADIUS;
+    const score = Math.abs(d - SOL_GALACTIC_RADIUS) + Math.abs(ref.position.y) / GALAXY_RADIUS;
+    if (score < bestScore) {
+      best = ref;
+      bestScore = score;
+    }
+  }
+  if (!best) return;
+  best.name = 'Sol';
+  best.stars = [{ ...SUN }];
+  best.real = 'sol';
+}
+
+/** The Sol system's star (gen/sol.ts), present in every galaxy. */
+export function solRef(galaxy: Pick<GalaxyData, 'stars'>): StarRef | undefined {
+  return galaxy.stars.find((s) => s.real === 'sol');
 }
 
 /** The star system or rogue planet with this id (as in `?star=`), or undefined. */
