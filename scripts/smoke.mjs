@@ -15,8 +15,9 @@
 // fly, N folds it), and the galaxy loop works (scroll out to the galaxy, click the nearest star, travel, scroll in to
 // its system, where the ship flies in and hovers straight above the star with the camera over it; the galaxy shows distant
 // galaxies, twinkles, spins and draws binaries as two dots, and picking works while it's turned), a real click on the
-// menu button starts audio and opens the menu (the game pauses; volume sliders and a planet lab link; a real Esc
-// closes it); then galaxy travel asks for its sound (and the zooms between levels for none), and M mutes. Then the planet loop (hover at
+// menu button starts audio and opens the menu (the game pauses; volume sliders and a planet lab link; its Save debug
+// dump opens the dump dialog, where typing a note doesn't reach the game and Save makes the JSON file with the
+// pictures and state, and Esc closes just the dialog; a real Esc closes the menu); then galaxy travel asks for its sound (and the zooms between levels for none), and M mutes. Then the planet loop (hover at
 // a planet, scroll in to low orbit, click the globe and fly, the Equal Earth map is shown and a click on it sets the
 // autopilot there, scroll all the way in and out and check the ship's altitude follows, scroll back out to hover
 // above it, as high as the zoom says, with the camera zoomed out past the handover and the planet in view), and again for every planet
@@ -1112,6 +1113,29 @@ await section('audio', async () => {
       frames(3, () => resolve({ on, offText, offHidden, back: button.getAttribute('aria-pressed') === 'true' && clouds().every((c) => c.visible), bodies: clouds().length }));
     });
   })`);
+  // The debug dump from the menu: its dialog shows the screen; typing in the note doesn't reach the game (M would
+  // mute); Save makes one JSON file with the pictures and the game state; Esc in a new one closes only the dialog.
+  await evaluate(`window.__dumpBlob = null; { const o = URL.createObjectURL; URL.createObjectURL = (b) => { window.__dumpBlob = b; return o(b); }; }
+    document.getElementById('menu-dump').click()`);
+  await until(`!document.getElementById('dump').hidden && document.getElementById('dump-image').naturalWidth > 0`, 30000);
+  await evaluate(`document.getElementById('dump-note').focus()`);
+  for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, code: 'KeyM', key: 'm', ...(type === 'keyDown' ? { text: 'm' } : {}) });
+  const picture = await evaluate(`(() => { const r = document.getElementById('dump-image').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  for (const type of ['mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, ...picture, button: 'left', clickCount: 1 });
+  audio.dump = await evaluate(`({ note: document.getElementById('dump-note').value, muted: document.getElementById('audio').classList.contains('muted'),
+    marks: document.querySelectorAll('#dump-marks .dump-mark').length })`);
+  await evaluate(`document.getElementById('dump-save').click()`);
+  await until(`window.__dumpBlob !== null && document.getElementById('dump').hidden`, 60000);
+  Object.assign(audio.dump, await evaluate(`window.__dumpBlob.text().then((t) => { const d = JSON.parse(t);
+    return { format: d.format, mode: d.state?.mode, star: d.state?.star === levels.systemLevel.data.id, savedNote: d.note, savedMarks: d.marks.length,
+      game: d.images.game?.startsWith('data:image/png'), screen: d.images.screen?.startsWith('data:image/jpeg'),
+      annotated: d.images.annotated?.startsWith('data:image/jpeg'), gpu: !!d.renderer?.gpu, frames: d.performance.frames?.frames ?? 0,
+      menuOpen: menu.isOpen && game.paused }; })`));
+  await evaluate(`document.getElementById('menu-dump').click()`);
+  await until(`!document.getElementById('dump').hidden`, 30000);
+  for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, code: 'Escape', key: 'Escape', windowsVirtualKeyCode: 27 });
+  await until(`document.getElementById('dump').hidden`, 5000);
+  audio.dump.escClosesDialogOnly = await evaluate(`menu.isOpen && game.paused`);
   audio.menuShot = join(outDir, 'menu.png');
   writeFileSync(audio.menuShot, await page.screenshot());
   for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, code: 'Escape', key: 'Escape', windowsVirtualKeyCode: 27 });
@@ -1158,6 +1182,21 @@ await section('audio', async () => {
     audio.weatherToggle.offText === 'Weather: off' &&
     audio.weatherToggle.offHidden &&
     audio.weatherToggle.back &&
+    audio.dump.note === 'm' &&
+    !audio.dump.muted &&
+    audio.dump.marks === 1 &&
+    audio.dump.format === 'sporer-debug-dump' &&
+    audio.dump.mode === 'system' &&
+    audio.dump.star &&
+    audio.dump.savedNote === 'm' &&
+    audio.dump.savedMarks === 1 &&
+    audio.dump.game &&
+    audio.dump.screen &&
+    audio.dump.annotated &&
+    audio.dump.gpu &&
+    audio.dump.frames > 0 &&
+    audio.dump.menuOpen &&
+    audio.dump.escClosesDialogOnly &&
     audio.closedByEsc &&
     audio.sfx.out === null &&
     audio.sfx.travel?.name === 'interstellarTravel' &&

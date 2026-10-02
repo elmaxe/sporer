@@ -11,7 +11,8 @@ import { buildInfo, formatBuildInfo } from './buildInfo';
  * FPS switch (FpsCounter) and the Weather, Plants and Wireframe switches (GraphicsSettings), a link
  * to the planet lab, for the planet you're at: in low orbit the one below,
  * in a system the one the autopilot is headed for (else the first planet),
- * from the galaxy an empty lab, and at the bottom which build is running
+ * from the galaxy an empty lab, the Save debug dump button (#menu-dump, run
+ * by debug/DebugDump.ts), and at the bottom which build is running
  * (branch · build number · commit, see buildInfo.ts). Esc, Resume, × or a
  * click beside the panel closes it.
  */

@@ -156,6 +156,18 @@ export class SystemLevel extends Level {
     this.orbit.setAim(star.renderPosition, weight, AIM_LIMIT);
   }
 
+  /** The star the camera looks at (see `aimAt`) and how far it has turned to it (0–1); null body: at the ship. */
+  get aim(): { body: CelestialBody | null; weight: number } {
+    return { body: this.aimBody, weight: this.aimWeight };
+  }
+
+  /** Looks back at the ship at once (e.g. restoring a debug dump taken away from the star). */
+  clearAim(): void {
+    this.aimBody = null;
+    this.aimWeight = 0;
+    this.orbit.setAim(null);
+  }
+
   /** While a transition drives the camera: looks at the star `k` (0–1) as much as it would (the transition fades it out). */
   aimFade(k: number): void {
     this.orbit.setAim(this.aimBody?.renderPosition ?? null, this.aimWeight * k, AIM_LIMIT);
