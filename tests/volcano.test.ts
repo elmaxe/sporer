@@ -5,8 +5,6 @@ import {
   VolcanoShape,
   eruptionStrength,
   lavaFront,
-  shellControl,
-  shellPoint,
   shellProgress,
   volcanoGrowth,
   volcanoParams,
@@ -38,41 +36,6 @@ describe('the volcano bomb', () => {
       lastStep = p - last;
       last = p;
     }
-  });
-});
-
-describe("the volcano bomb's path", () => {
-  const R0 = 150;
-  const sphere = () => R0;
-  const point = (u: number, from: THREE.Vector3, c: THREE.Vector3, to: THREE.Vector3) => shellPoint(from, c, to, u, new THREE.Vector3());
-
-  it('starts at the ship and ends on the point', () => {
-    const from = new THREE.Vector3(0, 330, 0);
-    const to = new THREE.Vector3(R0, 0, 0);
-    const c = shellControl(from, to, sphere, new THREE.Vector3());
-    expect(point(0, from, c, to).distanceTo(from)).toBeLessThan(1e-9);
-    expect(point(1, from, c, to).distanceTo(to)).toBeLessThan(1e-9);
-  });
-
-  it('goes the shortest way, straight, when nothing is in the way', () => {
-    // High over a small moon, at a point on the near side (the dump of a shell that went round the globe instead).
-    const from = new THREE.Vector3(0, 330, 0);
-    const to = new THREE.Vector3(0, 1, 0.9).normalize().multiplyScalar(R0);
-    const c = shellControl(from, to, sphere, new THREE.Vector3());
-    expect(c.distanceTo(new THREE.Vector3().addVectors(from, to).multiplyScalar(0.5))).toBeLessThan(1e-9);
-    // Every point lies on the line from the ship to the point.
-    const line = new THREE.Line3(from, to);
-    for (let u = 0; u <= 1; u += 0.1) expect(line.closestPointToPoint(point(u, from, c, to), true, new THREE.Vector3()).distanceTo(point(u, from, c, to))).toBeLessThan(1e-6);
-  });
-
-  it('bows out over the ground in the way, staying above it', () => {
-    // Low over the globe, at a point a quarter of the way round: the line would cut through it.
-    const from = new THREE.Vector3(0, R0 + 20, 0);
-    const to = new THREE.Vector3(R0, 0, 0);
-    const c = shellControl(from, to, sphere, new THREE.Vector3());
-    for (let u = 0.05; u < 0.8; u += 0.05) expect(point(u, from, c, to).length()).toBeGreaterThan(R0 + volcanoParams.shellClearance - 1e-6);
-    // No higher than it needs: well inside twice the ship's height.
-    expect(c.length()).toBeLessThan(2 * (R0 + 20));
   });
 });
 

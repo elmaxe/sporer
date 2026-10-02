@@ -7,7 +7,7 @@ import { Rng } from '../gen/rng';
  * maths types only, no scene). Unit-tested in tests/volcano.test.ts.
  *
  *   0           launch: a molten shell leaves the ship and flies straight at
- *               the point (bowed out only to clear the ground: shellControl)
+ *               the point (bowed out only to clear the ground: combat/path.ts)
  *   flightTime  impact: a flash and a ring of dust on the ground, and a
  *               volcano starts to rise out of it (growTime), erupting hard:
  *               lava fountains, an ash column, lava running down its flanks
@@ -21,8 +21,6 @@ import { Rng } from '../gen/rng';
 export const volcanoParams = {
   /** Seconds from launch to impact. */
   flightTime: 1.6,
-  /** The shell's path keeps at least this far above the ground on the way (planet units), closing in at the end. */
-  shellClearance: 2,
   /** Seconds the volcano takes to rise to its full height after the impact. */
   growTime: 4,
   /** Seconds of the violent eruption that comes with its birth, fading into its lasting activity. */
@@ -225,62 +223,4 @@ export function lavaFront(age: number, p: VolcanoParams = volcanoParams): number
 export function shellProgress(t: number, p: VolcanoParams = volcanoParams): number {
   const s = Math.min(1, Math.max(0, t / p.flightTime));
   return s * (0.4 + 0.6 * s);
-}
-
-/** Path samples tested against the ground, and the most times the path is bowed further out to clear it. */
-const PATH_SAMPLES = 24;
-const PATH_TRIES = 30;
-const pathPoint = new THREE.Vector3();
-const pathDir = new THREE.Vector3();
-const outward = new THREE.Vector3();
-
-/** Point `u` (0 → 1) of the quadratic Bézier from `from` through control point `control` to `to`, written into `out`. */
-export function shellPoint(from: THREE.Vector3, control: THREE.Vector3, to: THREE.Vector3, u: number, out: THREE.Vector3): THREE.Vector3 {
-  const a = (1 - u) * (1 - u);
-  const b = 2 * u * (1 - u);
-  const c = u * u;
-  return out.set(
-    a * from.x + b * control.x + c * to.x,
-    a * from.y + b * control.y + c * to.y,
-    a * from.z + b * control.z + c * to.z,
-  );
-}
-
-/**
- * The control point of the shell's path from `from` (the ship) to `to` (a
- * point on the ground), both relative to the globe's centre, written into
- * `out`: the shortest way, a straight line, when nothing is in the way;
- * else bowed out from the globe (along the line's midpoint) just enough to
- * pass over the ground between, `ground(dir)` being its radius in a unit
- * direction. The clearance closes to nothing over the last stretch, where
- * the shell comes down onto its point.
- */
-export function shellControl(
-  from: THREE.Vector3,
-  to: THREE.Vector3,
-  ground: (dir: THREE.Vector3) => number,
-  out: THREE.Vector3,
-  p: VolcanoParams = volcanoParams,
-): THREE.Vector3 {
-  out.addVectors(from, to).multiplyScalar(0.5);
-  // Out from the globe at the middle of the way (from the ship's side if that's the centre).
-  outward.copy(out.lengthSq() > 1e-6 ? out : from).normalize();
-  let step = 0.05 * Math.max(from.length(), to.length());
-  for (let k = 0; k < PATH_TRIES && !clears(from, out, to, ground, p.shellClearance); k++) {
-    out.addScaledVector(outward, step);
-    step *= 1.3;
-  }
-  return out;
-}
-
-/** True if the path keeps `clearance` over the ground until near its end (less and less over its last fifth). */
-function clears(from: THREE.Vector3, control: THREE.Vector3, to: THREE.Vector3, ground: (dir: THREE.Vector3) => number, clearance: number): boolean {
-  for (let i = 1; i < PATH_SAMPLES; i++) {
-    const u = i / PATH_SAMPLES;
-    shellPoint(from, control, to, u, pathPoint);
-    const r = pathPoint.length();
-    const need = clearance * Math.min(1, (1 - u) / 0.2);
-    if (r - ground(pathDir.copy(pathPoint).divideScalar(r)) < need) return false;
-  }
-  return true;
 }

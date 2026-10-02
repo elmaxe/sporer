@@ -8,7 +8,8 @@ import { createGlowTexture } from '../world/glowTexture';
 import { CLOUD_RENDER_ORDER } from '../world/weatherLook';
 import type { BusterTarget } from './PlanetBuster';
 import type { ItemStatus } from './items';
-import { shellControl, shellPoint, shellProgress, volcanoParams } from './volcano';
+import { pathControl, pathPoint } from './path';
+import { shellProgress, volcanoParams } from './volcano';
 
 /** The aiming ring's size on the ground, planet units. */
 const RETICLE_SIZE = 6;
@@ -25,7 +26,7 @@ export type VolcanoBombBlock = string | null;
  * The volcano bomb in low orbit. Selected on the item bar (`arm`), an orange
  * ring follows the pointer over the ground; a click there fires it: a molten
  * shell leaves the ship and flies down to the point, the shortest way unless
- * the ground is in the way (shellControl), and on impact `onImpact` raises a
+ * the ground is in the way (combat/path.ts), and on impact `onImpact` raises a
  * volcano there (planet/Volcanoes.ts). It stays armed, so the next click
  * fires again once the shell has landed, as long as the level allows
  * (`blocked`).
@@ -41,7 +42,7 @@ export class VolcanoBomb implements Entity {
   private readonly normal = new THREE.Vector3();
   private readonly from = new THREE.Vector3();
   private readonly to = new THREE.Vector3();
-  /** The path's control point: see shellControl. */
+  /** The path's control point: see pathControl. */
   private readonly control = new THREE.Vector3();
   private readonly at = new THREE.Vector3();
   private readonly glow = createGlowTexture();
@@ -133,7 +134,7 @@ export class VolcanoBomb implements Entity {
     this.fireTime = this.clock.renderTime;
     this.from.copy(this.ship.position);
     this.to.copy(point);
-    shellControl(this.from, this.to, this.target.groundHeight, this.control);
+    pathControl(this.from, this.to, this.target.groundHeight, this.control);
     this.group.visible = true;
     this.sfx.play('volcanoFire');
   }
@@ -151,7 +152,7 @@ export class VolcanoBomb implements Entity {
       this.onImpact(this.to, this.fireTime + volcanoParams.flightTime);
       return;
     }
-    shellPoint(this.from, this.control, this.to, shellProgress(t), this.at);
+    pathPoint(this.from, this.control, this.to, shellProgress(t), this.at);
     const size = Math.max(1.8, this.camera.position.distanceTo(this.at) * MIN_ANGULAR_SIZE);
     this.core.position.copy(this.at);
     this.halo.position.copy(this.at);
@@ -162,7 +163,7 @@ export class VolcanoBomb implements Entity {
     const span = TRAIL_LENGTH * volcanoParams.flightTime;
     for (let i = 0; i < TRAIL_POINTS; i++) {
       const u = Math.max(0, t - (span * i) / TRAIL_POINTS);
-      shellPoint(this.from, this.control, this.to, shellProgress(u), this.point);
+      pathPoint(this.from, this.control, this.to, shellProgress(u), this.point);
       positions.setXYZ(i, this.point.x, this.point.y, this.point.z);
     }
     positions.needsUpdate = true;
