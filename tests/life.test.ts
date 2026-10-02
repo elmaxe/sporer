@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { evaluateClimate } from '../src/gen/climate';
 import { generateGalaxy, solRef } from '../src/gen/galaxy';
 import {
+  FLARES,
   RADIATION,
   airColumn,
   areaBetween,
@@ -10,6 +11,8 @@ import {
   bodyLife,
   bulkOf,
   describeLife,
+  flareDose,
+  flareFactor,
   formatChance,
   lifetime,
   meltDepth,
@@ -136,6 +139,41 @@ describe('chance of life: the parts', () => {
     expect(radiationFactor(0.001)).toBe(1);
     expect(radiationFactor(RADIATION.sterile * 2)).toBe(0);
     expect(radiationFactor(100)).toBeGreaterThan(radiationFactor(10_000));
+  });
+
+  it("Jupiter's belts reproduce the Galilean moons' surface doses within a factor of 2", () => {
+    const dose = (distance: number) => beltDose({ size: 'gasGiant', distance });
+    for (const [distance, measured] of [
+      [9.4, 5400],
+      [14.97, 65],
+      [26.33, 0.1],
+    ] as const) {
+      expect(dose(distance) / measured).toBeGreaterThan(0.5);
+      expect(dose(distance) / measured).toBeLessThan(2);
+    }
+    // No more than Europa's inside it (Io's particle energy flux is lower).
+    expect(dose(5.9)).toBe(dose(9.4));
+    expect(beltDose({ size: 'iceGiant', distance: 10 })).toBeLessThan(dose(10) / 100);
+  });
+
+  it("red dwarfs' superflares follow Atri 2017: sterile nowhere, harmless under Earth's air, harsh under a thin one", () => {
+    expect(flareDose(1000, 0.65)).toBeLessThan(FLARES.harmful);
+    expect(flareFactor(flareDose(1000, 0.65))).toBe(1);
+    expect(flareDose(700, 0.65)).toBeCloseTo(7.5, 5);
+    expect(flareDose(10, 0.65)).toBeCloseTo(1.46e4, -2);
+    expect(flareFactor(flareDose(10, 0.65))).toBeGreaterThan(0);
+    expect(flareFactor(flareDose(10, 0.65))).toBeLessThan(0.3);
+    expect(flareFactor(FLARES.sterile)).toBe(0);
+    // A thin-aired world with liquid water round a red dwarf loses most of its surface chance; round a G star, none.
+    const climate = evaluateClimate(
+      { insolation: 1.4, gravity: 0.5, escapeVelocity: 7, heatFlow: 0.05 },
+      { pressure: 0.05, composition: 'oxygenNitrogen', greenhouse: 1, water: 0.3, surfaceAlbedo: 0.3 },
+    );
+    const thin = { ...climate, habitability: 0 as const };
+    const red = assessLife({ type: 'desert', climate: thin, stars: [nominalStar('redDwarf')], host: null });
+    const sun = assessLife({ type: 'desert', climate: thin, stars: [nominalStar('mainSequence', 'G')], host: null });
+    expect(sun.surface.area).toBeGreaterThan(0);
+    expect(red.surface.chance).toBeLessThan(sun.surface.chance * 0.5);
   });
 
   it("belts fall off with distance and miss solid planets' moons", () => {

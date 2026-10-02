@@ -227,7 +227,7 @@ function escape(s: string): string {
 function describeLifeDetail(life: LifeEstimate): string {
   const { surface: s, subsurface: u } = life;
   const parts = [life.plants ? `${formatChance(life.chance)} (plants grow here)` : formatChance(life.chance)];
-  const dose = `${fmt(s.dose)} mGy/day (×${fmt(s.radiation)})`;
+  const dose = `${fmt(s.dose)} mGy/day${s.flare > 0 ? ` + flares ${fmt(s.flare)} Sv` : ''} (×${fmt(s.radiation)})`;
   parts.push(
     s.area > 0
       ? `surface ${formatChance(s.chance)}: liquid water on ${fmt(s.area * 100)}% · radiation ${dose} · energy ×${fmt(s.energy)}`
