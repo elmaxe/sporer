@@ -17,6 +17,11 @@ export type SoundCue =
   | 'busterFlight'
   | 'busterImpact'
   | 'planetExplode'
+  | 'abductBeam'
+  | 'abductStart'
+  | 'abductSuccess'
+  | 'exportBeam'
+  | 'dropImpact'
   | 'starNear'
   | 'starFar'
   | 'shipHum';
@@ -31,13 +36,18 @@ export const SOUND_CUES: readonly SoundCue[] = [
   'busterFlight',
   'busterImpact',
   'planetExplode',
+  'abductBeam',
+  'abductStart',
+  'abductSuccess',
+  'exportBeam',
+  'dropImpact',
   'starNear',
   'starFar',
   'shipHum',
 ];
 
 /** Cues that loop until stopped (`SoundEffects.start`); the rest play once (`SoundEffects.play`). */
-export type LoopCue = 'systemTravel' | 'interstellarTravel' | 'busterFlight';
+export type LoopCue = 'systemTravel' | 'interstellarTravel' | 'busterFlight' | 'abductBeam' | 'exportBeam';
 
 /**
  * Background loops on the Ambience channel whose loudness the game sets as
@@ -114,6 +124,16 @@ export const cueParams: Record<SoundCue, CueSpec> = {
   busterImpact: oneShot(),
   // The planet blowing apart (the blinding flash).
   planetExplode: oneShot(),
+  // The abduction beam holding something, from the press until it's let go or reaches the ship.
+  abductBeam: { ...travel(), fadeIn: 0.1, fadeOut: 0.3 },
+  // The beam catching something to lift (the press on it).
+  abductStart: oneShot(),
+  // Something reaching the ship and going into the inventory.
+  abductSuccess: oneShot(),
+  // The beam lowering cargo from the ship, from the press until it's let go or lands.
+  exportBeam: { ...travel(), fadeIn: 0.1, fadeOut: 0.3 },
+  // Cargo landing on the ground: set down by the beam, dropped, or falling from it.
+  dropImpact: oneShot(),
   // A star close up, as the camera nears its surface (see StarSounds).
   starNear: ambient(0.8),
   // A star from across its system, giving way to starNear close up.
