@@ -1,7 +1,7 @@
 /**
  * Which build is running, for the menu's footer. The values are baked in by
- * vite.config.ts (`__BUILD_INFO__`): in GitHub Actions the branch, run number
- * and commit of the workflow; elsewhere the local git branch and commit, with
+ * vite.config.ts (`__BUILD_INFO__`): in GitHub Actions the branch, run number,
+ * commit and Pages folder of the workflow; elsewhere the local git branch and commit, with
  * no build number (a dev server or a local build).
  */
 export interface BuildInfo {
@@ -13,6 +13,12 @@ export interface BuildInfo {
   commit: string | null;
   /** True when served by the dev server. */
   dev: boolean;
+  /**
+   * Where this build sits on the GitHub Pages site, from its root: '' for the
+   * release, 'preview/' for main, 'pr/<n>/' for a pull request (see
+   * versions.ts), or null for a build that isn't published there.
+   */
+  pagesPath: string | null;
 }
 
 declare const __BUILD_INFO__: BuildInfo;

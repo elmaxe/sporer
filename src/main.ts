@@ -16,6 +16,7 @@ import { FpsCounter } from './ui/FpsCounter';
 import { GraphicsSettingsControl, loadGraphicsSettings } from './ui/GraphicsSettings';
 import { installConsoleLog } from './debug/consoleLog';
 import { DebugDumpControl } from './debug/DebugDump';
+import { openChosenVersion } from './ui/versions';
 
 // First, so the debug dump has the console's errors from start-up on.
 const consoleLog = installConsoleLog();
@@ -23,6 +24,8 @@ const consoleLog = installConsoleLog();
 const DEFAULT_SEED = '1337';
 
 async function main(): Promise<void> {
+  // An installed app starts at the release: on to the version picked in the menu, if another.
+  if (await openChosenVersion()) return;
   // ?seed=<number or any text> picks the galaxy, ?star=<id> jumps to a system (or a rogue planet).
   const params = new URLSearchParams(location.search);
   const galaxy = generateGalaxy(parseSeed(params.get('seed') ?? DEFAULT_SEED));

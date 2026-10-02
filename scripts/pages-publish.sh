@@ -1,27 +1,33 @@
 #!/usr/bin/env bash
-# Publishes a build of a git ref into its folder of the gh-pages branch, which GitHub Pages serves as the site
+# Publishes a build into its folder of the gh-pages branch, which GitHub Pages serves as the site
 # (called by .github/workflows/deploy.yml):
-#   scripts/pages-publish.sh <ref> <build>   replace the ref's folder with the contents of <build>
-#   scripts/pages-publish.sh <ref>           remove the ref's folder
-# A tag (refs/tags/...) is the release at the root (its preview/ and branch/ folders are kept), refs/heads/main
-# goes in preview/, any other branch in branch/<name>/. Folders of branches that no longer exist are removed too.
+#   scripts/pages-publish.sh <target> <build>   replace the target's folder with the contents of <build>
+#   scripts/pages-publish.sh <target>           remove the target's folder
+# <target> is "release" (the site's root, whose preview/ and pr/ folders are kept), "preview" (main) or
+# "pr/<number>". A published folder gets a version.json ({id, label, path, ref, commit, date}; label and ref
+# from $PUBLISH_LABEL and $PUBLISH_REF, commit from $PUBLISH_COMMIT), and the root's versions.json lists them
+# all for the game's version picker (src/ui/versions.ts). With $GH_TOKEN, folders of pull requests that are
+# no longer open are removed too.
 # gh-pages is always a single commit, so old builds don't pile up in the repository. Several workflows can
 # publish at once: a push that lost the race starts again from the new gh-pages.
 set -euo pipefail
 
-# Folder name for a branch: lower case, anything but letters, digits, '.', '_' and '-' turned into '-'.
-slug() { tr '[:upper:]' '[:lower:]' <<<"$1" | sed 's/[^a-z0-9._-]/-/g'; }
-
-ref=$1
+target=$1
 build=${2:+$(realpath "$2")}
-case "$ref" in
-  refs/tags/*) folder=. ;;
-  refs/heads/main) folder=preview ;;
-  refs/heads/*) folder=branch/$(slug "${ref#refs/heads/}") ;;
-  *) echo "Not a branch or tag: $ref" >&2; exit 1 ;;
+case "$target" in
+  release) folder=. id=release path='' ;;
+  preview) folder=preview id=preview path=preview/ ;;
+  pr/[0-9]*) folder=$target id=pr-${target#pr/} path=$target/ ;;
+  *) echo "Not a target: $target (release, preview or pr/<number>)" >&2; exit 1 ;;
 esac
 site=$(mktemp -u)
 trap 'git worktree remove --force "$site" 2>/dev/null || true' EXIT
+
+# The open pull requests' numbers, one per line, or "unknown" without a token or when GitHub can't be asked.
+open_prs=unknown
+if [ -n "${GH_TOKEN:-}" ] && [ -n "${GITHUB_REPOSITORY:-}" ]; then
+  open_prs=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls?state=open&per_page=100" --jq '.[].number') || open_prs=unknown
+fi
 
 for attempt in $(seq 10); do
   git worktree remove --force "$site" 2>/dev/null || true
@@ -41,22 +47,35 @@ for attempt in $(seq 10); do
   fi
 
   if [ "$folder" = . ]; then
-    find "$site" -mindepth 1 -maxdepth 1 ! -name .git ! -name preview ! -name branch -exec rm -rf {} +
+    find "$site" -mindepth 1 -maxdepth 1 ! -name .git ! -name preview ! -name pr -exec rm -rf {} +
   else
     rm -rf "${site:?}/$folder"
   fi
   if [ -n "$build" ]; then
     mkdir -p "$site/$folder"
     cp -a "$build/." "$site/$folder/"
+    jq -n --arg id "$id" --arg label "${PUBLISH_LABEL:-$target}" --arg path "$path" --arg ref "${PUBLISH_REF:-}" \
+      --arg commit "${PUBLISH_COMMIT:-}" --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      '{id: $id, label: $label, path: $path, ref: $ref, commit: $commit, date: $date}' >"$site/$folder/version.json"
   fi
 
-  if [ -d "$site/branch" ]; then
-    live=$(git ls-remote --heads origin | sed 's|.*refs/heads/||' | while read -r b; do slug "$b"; done)
-    for dir in "$site"/branch/*/; do
+  if [ "$open_prs" != unknown ] && [ -d "$site/pr" ]; then
+    for dir in "$site"/pr/*/; do
       [ -d "$dir" ] || continue
-      grep -qxF "$(basename "$dir")" <<<"$live" || { echo "Removing branch/$(basename "$dir") (branch is gone)"; rm -rf "$dir"; }
+      n=$(basename "$dir")
+      grep -qxF "$n" <<<"$open_prs" || { echo "Removing pr/$n (pull request is closed)"; rm -rf "$dir"; }
     done
   fi
+  # The release, then the preview, then the pull requests, newest first.
+  (
+    cd "$site"
+    shopt -s nullglob
+    prs=(pr/*/version.json)
+    files=()
+    for f in version.json preview/version.json; do [ -f "$f" ] && files+=("$f"); done
+    [ ${#prs[@]} -gt 0 ] && files+=($(printf '%s\n' "${prs[@]}" | sort -t/ -k2,2nr))
+    if [ ${#files[@]} -gt 0 ]; then jq -s '{versions: .}' "${files[@]}"; else echo '{"versions":[]}'; fi
+  ) >"$site/versions.json"
   touch "$site/.nojekyll"  # serve the files as they are, without Jekyll
 
   git -C "$site" add -A
@@ -64,12 +83,12 @@ for attempt in $(seq 10); do
     echo "gh-pages is already up to date"
     exit 0
   fi
-  commit=$(git -C "$site" commit-tree "$(git -C "$site" write-tree)" \
-    -m "Publish ${ref#refs/*/} ${GITHUB_SHA:-} to /${folder#.}")
+  if [ -n "$build" ]; then message="Publish $target ${PUBLISH_REF:-} ${PUBLISH_COMMIT:-}"; else message="Remove $target"; fi
+  commit=$(git -C "$site" commit-tree "$(git -C "$site" write-tree)" -m "$message")
   if git push --quiet --force-with-lease="refs/heads/gh-pages:$old" origin "$commit:refs/heads/gh-pages"; then
     if [ -n "${GITHUB_REPOSITORY:-}" ]; then
-      url="https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/${folder#.}"
-      if [ -n "$build" ]; then summary="Published ${ref#refs/*/} to ${url%/}/"; else summary="Removed $url"; fi
+      url="https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/$path"
+      if [ -n "$build" ]; then summary="Published ${PUBLISH_LABEL:-$target} to $url"; else summary="Removed $url"; fi
       echo "$summary" | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
     fi
     exit 0
