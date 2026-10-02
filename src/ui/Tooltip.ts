@@ -16,6 +16,26 @@ export class Tooltip {
   private subject: unknown = null;
   private width = 0;
   private height = 0;
+  /** An overlay (the item bar) has the pointer: the levels' `show`/`hide` are ignored until it lets go. */
+  private claimed = false;
+
+  /**
+   * `show` for an overlay over the game (the item bar): it keeps the tooltip
+   * until `release`, so the levels, which hide it every frame nothing of
+   * theirs is hovered, don't take it away.
+   */
+  showClaimed(...args: Parameters<Tooltip['show']>): void {
+    this.claimed = false;
+    this.show(...args);
+    this.claimed = true;
+  }
+
+  /** The overlay is done with it: hidden, and the levels' again. */
+  release(): void {
+    if (!this.claimed) return;
+    this.claimed = false;
+    this.hide();
+  }
 
   /**
    * Shows `name`/`info` (and an optional `details` line) for `subject` next to
@@ -34,6 +54,7 @@ export class Tooltip {
     above = false,
     extra?: (el: HTMLElement) => void,
   ): void {
+    if (this.claimed) return;
     if (subject !== this.subject) {
       this.subject = subject;
       this.nameEl.textContent = name;
@@ -55,7 +76,7 @@ export class Tooltip {
   }
 
   hide(): void {
-    if (this.subject === null) return;
+    if (this.claimed || this.subject === null) return;
     this.subject = null;
     this.el.hidden = true;
   }

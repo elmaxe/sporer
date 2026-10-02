@@ -38,6 +38,8 @@ export interface MapLayoutOptions {
   stars: readonly number[];
   /** Belt columns, in orbit order. */
   belts?: readonly MapBeltInput[];
+  /** Rows of planet names under the discs: 2 when neighbours' names would overlap (see staggerLabels). */
+  labelRows?: number;
 }
 
 export interface MapDisc {
@@ -100,6 +102,8 @@ export const mapLayoutParams = {
   padding: 8,
   /** Height of the numerals' row under the planets, px. */
   labelHeight: 14,
+  /** Each extra row of names (crowded inner planets), px. */
+  labelRowHeight: 12,
   minHeight: 84,
 };
 
@@ -149,7 +153,8 @@ export function layoutSystemMap(planets: readonly MapPlanetInput[], options: Map
   const across = columns.reduce((w, c) => w + 2 * c.half + p.gap, 0);
   const tallest = columns.reduce((h, c) => Math.max(h, c.above + c.below), 0);
   const room = width - sunEdge - p.padding;
-  const heightRoom = options.maxHeight - 2 * p.padding - p.labelHeight;
+  const labelHeight = p.labelHeight + ((options.labelRows ?? 1) - 1) * p.labelRowHeight;
+  const heightRoom = options.maxHeight - 2 * p.padding - labelHeight;
   const scale = Math.min(p.maxScale, across > 0 ? room / across : p.maxScale, tallest > 0 ? heightRoom / tallest : p.maxScale);
 
   // Measured in px from the centre line; small discs are enlarged to their minimum.
@@ -165,7 +170,7 @@ export function layoutSystemMap(planets: readonly MapPlanetInput[], options: Map
   });
   const maxAbove = measured.reduce((h, c) => Math.max(h, c.above), 0);
   const maxBelow = measured.reduce((h, c) => Math.max(h, c.below), 0);
-  const content = maxAbove + maxBelow + p.labelHeight;
+  const content = maxAbove + maxBelow + labelHeight;
   const height = Math.max(p.minHeight, Math.ceil(content + 2 * p.padding));
   const axisY = p.padding + maxAbove + (height - 2 * p.padding - content) / 2;
 
@@ -283,4 +288,21 @@ export function mapBeltGroups(orbits: readonly number[], belts: readonly MapBelt
 /** The layout's input for those columns. */
 export function mapBeltInputs(groups: readonly MapBeltGroup[], belts: readonly MapBeltSource[]): MapBeltInput[] {
   return groups.map((g) => ({ after: g.after, asteroids: g.members.flatMap((m) => belts[m]!.asteroids) }));
+}
+
+/**
+ * Which row each centred label goes on, left to right: the first row unless
+ * it would run into the last label there (within `gap` px), then the second.
+ * `xs` are the labels' centres, `widths` their widths, in px.
+ */
+export function staggerLabels(xs: readonly number[], widths: readonly number[], gap = 4): number[] {
+  let end = -Infinity;
+  return xs.map((x, i) => {
+    const left = x - widths[i]! / 2;
+    if (left >= end + gap) {
+      end = x + widths[i]! / 2;
+      return 0;
+    }
+    return 1;
+  });
 }

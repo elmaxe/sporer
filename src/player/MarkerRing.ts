@@ -1,8 +1,14 @@
 import * as THREE from 'three';
+import { CLOUD_RENDER_ORDER } from '../world/weatherLook';
 
 const FLAT = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
 /** The ring geometry's normal. */
 const FACING = new THREE.Vector3(0, 0, 1);
+/**
+ * After every transparent layer (atmospheres, clouds): the ring writes no depth, so
+ * a body's clouds drawn later would cover it even when the ring is in front of them.
+ */
+const MARKER_RENDER_ORDER = CLOUD_RENDER_ORDER + 1;
 
 /**
  * A pulsing, glowing ring used to mark targets and locations. Not an Entity:
@@ -31,6 +37,7 @@ export class MarkerRing {
         toneMapped: false,
       }),
     );
+    this.mesh.renderOrder = MARKER_RENDER_ORDER;
     this.mesh.visible = false;
     scene.add(this.mesh);
   }

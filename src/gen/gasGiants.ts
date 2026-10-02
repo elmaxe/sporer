@@ -1,4 +1,5 @@
 import { hashSeed, Rng } from './rng';
+import { SOL_SEEDS } from './solSeeds';
 
 /*
  * The cloud tops of gas and ice giants as data: belts and zones, the jets
@@ -81,6 +82,8 @@ const NEPTUNE = { equator: -0.15, jets: 0.10 };
 
 /** The cloud tops of a gas giant (`ice` = an ice giant) with this seed. */
 export function generateGasLayout(seed: number, ice: boolean): GasLayout {
+  const sol = solLayout(seed);
+  if (sol) return sol;
   const rng = new Rng(hashSeed(seed, 'gasLayout'));
   return ice ? iceLayout(rng) : gasLayout(rng);
 }
@@ -112,17 +115,7 @@ function gasLayout(rng: Rng): GasLayout {
   // Jets at every band edge: prograde on a belt's equatorward edge, retrograde on its poleward one.
   const prograde = JUPITER_PROGRADE * rng.range(0.8, 1.3);
   const retrograde = JUPITER_RETROGRADE * rng.range(0.8, 1.2);
-  for (let i = 1; i < bands.length; i++) {
-    const below = bands[i - 1]!;
-    const above = bands[i]!;
-    const lat = below.north;
-    // A dark belt on the poleward side: its equatorward edge.
-    const poleward = lat >= 0 ? above : below;
-    const width = 0.25 * Math.min(below.north - below.south, above.north - above.south);
-    // Jets weaken towards the poles (Jupiter's last one, where the bands break down, is ~40 m/s).
-    const fade = Math.cos(lat);
-    jets.push({ lat, width, speed: (poleward.zone ? -retrograde : prograde) * fade });
-  }
+  jets.push(...edgeJets(bands, prograde, retrograde));
   // The equatorial super-rotation: Jupiter's ~1% to Saturn's ~5%.
   jets.push({ lat: 0, width: equator * 0.8, speed: lerp(prograde, SATURN_EQUATOR * rng.range(0.9, 1.05), saturn) });
 
@@ -233,6 +226,23 @@ function iceLayout(rng: Rng): GasLayout {
   };
 }
 
+/** Jets at every band edge: prograde on a belt's equatorward edge, retrograde on its poleward one. */
+function edgeJets(bands: readonly GasBand[], prograde: number, retrograde: number): GasJet[] {
+  const jets: GasJet[] = [];
+  for (let i = 1; i < bands.length; i++) {
+    const below = bands[i - 1]!;
+    const above = bands[i]!;
+    const lat = below.north;
+    // A dark belt on the poleward side: its equatorward edge.
+    const poleward = lat >= 0 ? above : below;
+    const width = 0.25 * Math.min(below.north - below.south, above.north - above.south);
+    // Jets weaken towards the poles (Jupiter's last one, where the bands break down, is ~40 m/s).
+    const fade = Math.cos(lat);
+    jets.push({ lat, width, speed: (poleward.zone ? -retrograde : prograde) * fade });
+  }
+  return jets;
+}
+
 /** Anticyclones turn anticlockwise in the south (the Great Red Spot), clockwise in the north. */
 function anticyclone(lat: number): number {
   return lat < 0 ? 1 : -1;
@@ -289,4 +299,201 @@ function lerp(a: number, b: number, t: number): number {
 function smoothstep(a: number, b: number, x: number): number {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
   return t * t * (3 - 2 * t);
+}
+
+// --- The Sol system's giants (gen/sol.ts), drawn from the real planets (docs/research/sol.md) ---
+
+/**
+ * Bands from latitudes in degrees, south pole to north pole: each entry is a
+ * band's northern edge (the last one's is the pole) and its tone; `zone` for
+ * the bright ones.
+ */
+function solBands(south: number, edges: readonly (readonly [north: number, tone: number, zone: boolean])[]): GasBand[] {
+  let lat = south * DEG;
+  return edges.map(([north, tone, zone]) => {
+    const band = { south: lat, north: north * DEG, zone, tone };
+    lat = north * DEG;
+    return band;
+  });
+}
+
+/** The real giant with this seed's cloud tops, or null for every other seed. */
+function solLayout(seed: number): GasLayout | null {
+  switch (seed) {
+    case SOL_SEEDS.jupiter:
+      return jupiterLayout();
+    case SOL_SEEDS.saturn:
+      return saturnLayout();
+    case SOL_SEEDS.uranus:
+      return uranusLayout();
+    case SOL_SEEDS.neptune:
+      return neptuneLayout();
+    default:
+      return null;
+  }
+}
+
+/**
+ * Jupiter's belts and zones at their planetographic latitudes (Rogers, The
+ * Giant Planet Jupiter): the equatorial zone to 7°, the North and South
+ * Equatorial Belts (7–18°N, 7–20°S), the tropical zones, the temperate belts
+ * and so on to the polar regions past ~66°. The Great Red Spot sits at 22°S
+ * in the South Tropical Zone, ~14 000 km long today (Simon et al. 2018), Oval
+ * BA at 33°S; the poles' cyclones are Juno's (8 round the north, 5 round the south).
+ */
+function jupiterLayout(): GasLayout {
+  const bands = solBands(-90, [
+    [-66, 0.3, false],
+    [-58, 0.55, true],
+    [-52, 0.3, false],
+    [-47, 0.75, true],
+    [-41, 0.35, false],
+    [-36, 0.8, true],
+    [-29, 0.2, false],
+    [-20, 0.9, true],
+    [-7, 0.12, false],
+    [7, 0.95, true],
+    [18, 0.08, false],
+    [24, 0.88, true],
+    [31, 0.25, false],
+    [36, 0.8, true],
+    [41, 0.35, false],
+    [47, 0.75, true],
+    [53, 0.35, false],
+    [60, 0.6, true],
+    [66, 0.35, false],
+    [90, 0.3, false],
+  ]);
+  const jets = edgeJets(bands, JUPITER_PROGRADE, JUPITER_RETROGRADE);
+  jets.push({ lat: 0, width: 7 * DEG * 0.8, speed: JUPITER_PROGRADE });
+  const white = (lat: number, lon: number, radius: number): GasStorm => ({ kind: 'white', lat: lat * DEG, lon: lon * DEG, radius: radius * DEG, aspect: 1.4, spin: anticyclone(lat) });
+  return {
+    ice: false,
+    saturn: 0.05,
+    bands,
+    jets,
+    contrast: 0.95,
+    polar: 66 * DEG,
+    polarCyclones: [8, 5],
+    polygon: null,
+    hood: null,
+    storms: [
+      // 14 000 km over a 71 492 km radius: 11° long, so a half-length of ~5.6°, rounder than it was (aspect ~1.4).
+      { kind: 'red', lat: -22 * DEG, lon: 0, radius: 6.5 * DEG, aspect: 1.45, spin: anticyclone(-22) },
+      white(-33, 70, 2.6),
+      white(-40, -60, 1.8),
+      white(-41, 150, 1.6),
+      white(40, -120, 1.6),
+      white(-44, 20, 1.5),
+    ],
+  };
+}
+
+/**
+ * Saturn: a broad, bright equatorial zone (its jet spans ±35°, ~480 m/s), a
+ * few muted belts and zones, the hexagon at 78°N, and a darker, bluer north
+ * polar region (Cassini). Muted: contrast about half Jupiter's.
+ */
+function saturnLayout(): GasLayout {
+  const bands = solBands(-90, [
+    [-74, 0.3, false],
+    [-62, 0.6, true],
+    [-50, 0.4, false],
+    [-38, 0.72, true],
+    [-22, 0.45, false],
+    [22, 0.92, true],
+    [33, 0.4, false],
+    [44, 0.75, true],
+    [55, 0.45, false],
+    [66, 0.68, true],
+    [78, 0.4, false],
+    [90, 0.22, false],
+  ]);
+  const jets = edgeJets(bands, JUPITER_PROGRADE * 1.4, JUPITER_RETROGRADE);
+  jets.push({ lat: 0, width: 22 * DEG * 0.8, speed: SATURN_EQUATOR });
+  return {
+    ice: false,
+    saturn: 1,
+    bands,
+    jets,
+    contrast: 0.55,
+    polar: 78 * DEG,
+    polarCyclones: [0, 0],
+    polygon: { sides: 6, lat: 78 * DEG },
+    hood: null,
+    storms: [],
+  };
+}
+
+/**
+ * Uranus: nearly featureless pale cyan, a faintly brighter band at southern
+ * mid-latitudes and the bright cap round the north pole of its northern spring
+ * (Voyager, Hubble; the polar hood edge at ~45°N in the 2010s–20s).
+ */
+function uranusLayout(): GasLayout {
+  const bands = solBands(-90, [
+    [-50, 0.55, true],
+    [-25, 0.45, false],
+    [20, 0.4, false],
+    [45, 0.5, true],
+    [90, 0.6, true],
+  ]);
+  const jetLat = 60 * DEG;
+  return {
+    ice: true,
+    saturn: 1,
+    bands,
+    jets: [
+      { lat: 0, width: 20 * DEG * 0.7, speed: URANUS.equator },
+      { lat: jetLat, width: 15 * DEG, speed: URANUS.jets },
+      { lat: -jetLat, width: 15 * DEG, speed: URANUS.jets },
+    ],
+    contrast: 0.3,
+    polar: Math.PI / 2,
+    polarCyclones: [0, 0],
+    polygon: null,
+    hood: 45 * DEG,
+    storms: [{ kind: 'streak', lat: 30 * DEG, lon: 1.2, radius: 7 * DEG, aspect: 4, spin: 0 }],
+  };
+}
+
+/**
+ * Neptune as Voyager 2 saw it in 1989: deep blue, the Great Dark Spot at 22°S
+ * (13 000 × 6 600 km: 30° × 15°) with its bright companion cloud, the
+ * "Scooter" at 42°S, and white methane streaks; the fast retrograde
+ * equatorial jet (−400 m/s) reaching ±50°.
+ */
+function neptuneLayout(): GasLayout {
+  const bands = solBands(-90, [
+    [-62, 0.55, true],
+    [-50, 0.4, false],
+    [50, 0.45, false],
+    [65, 0.6, true],
+    [90, 0.45, false],
+  ]);
+  const jetLat = 70 * DEG;
+  const gds = -22 * DEG;
+  const radius = 15 * DEG;
+  return {
+    ice: true,
+    saturn: 1,
+    bands,
+    jets: [
+      { lat: 0, width: 50 * DEG * 0.7, speed: NEPTUNE.equator },
+      { lat: jetLat, width: 10 * DEG, speed: NEPTUNE.jets },
+      { lat: -jetLat, width: 10 * DEG, speed: NEPTUNE.jets },
+    ],
+    contrast: 0.5,
+    polar: Math.PI / 2,
+    polarCyclones: [0, 0],
+    polygon: null,
+    hood: null,
+    storms: [
+      { kind: 'dark', lat: gds, lon: 0, radius, aspect: 2, spin: anticyclone(gds) },
+      { kind: 'streak', lat: gds - (radius / 2) * 0.9, lon: 0.05, radius: radius * 0.6, aspect: 4, spin: 0 },
+      { kind: 'streak', lat: -42 * DEG, lon: 2.2, radius: 6 * DEG, aspect: 3, spin: 0 },
+      { kind: 'dark', lat: -55 * DEG, lon: -2.0, radius: 4 * DEG, aspect: 1.6, spin: anticyclone(-55) },
+      { kind: 'streak', lat: 27 * DEG, lon: -1.0, radius: 10 * DEG, aspect: 5, spin: 0 },
+    ],
+  };
 }

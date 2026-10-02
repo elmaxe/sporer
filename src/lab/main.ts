@@ -5,6 +5,7 @@ import { addGasDebug } from '../world/gasLook';
 import { addAtmosphereDebug } from '../world/atmosphereShell';
 import { addWeatherDebug } from '../world/weatherLook';
 import { Physics } from '../physics/Physics';
+import { loadSurfaceMaps } from '../world/surfaceMaps';
 import { addPlantDebug, plantParams } from '../surface/plantParams';
 import { FpsCounter } from '../ui/FpsCounter';
 import { isTouchDevice } from '../ui/GraphicsSettings';
@@ -19,7 +20,8 @@ import { PlanetLab } from './PlanetLab';
  * it from the console or automation (npm run shot -- --lab).
  */
 async function main(): Promise<void> {
-  const [debug] = await Promise.all([Debug.create({ force: true, title: 'Planet lab' }), Physics.init()]);
+  // The real bodies' maps first, so a Sol planet shows its own surface.
+  const [debug] = await Promise.all([Debug.create({ force: true, title: 'Planet lab' }), Physics.init(), loadSurfaceMaps()]);
   const game = new Game(document.getElementById('app')!, debug);
   const lab = new PlanetLab(game, debug, PlanetLab.stateFromUrl(new URL(location.href)));
   const fps = game.add(new FpsCounter());

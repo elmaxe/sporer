@@ -101,6 +101,10 @@ if (s) {
   say(`Camera: orbit distance ${s.orbit.distance.toFixed(2)}, look-up ${s.orbit.lookUp.toFixed(3)} · position ${c.position.map((v) => v.toFixed(2)).join(', ')} · fov ${c.fov}`);
   const g = s.graphics;
   say(`Graphics: weather ${g.weather ? 'on' : 'off'} · plants ${g.plants ? 'on' : 'off'} · wireframe ${g.wireframe ? 'on' : 'off'}`);
+  if (s.busted && (s.busted.total > 0 || s.busted.firing)) {
+    const here = s.busted.bodies.map((b) => `${b.body.name} (blast at t=${b.time.toFixed(1)} s)`).join(', ') || 'none here';
+    say(`Busted: ${here} · ${s.busted.total} in the game${s.busted.firing ? ` · a planet buster going off, ${s.busted.elapsed?.toFixed(1)} s after firing` : ''}`);
+  }
   const hud = Object.values(s.ui.hud);
   if (hud.length > 0) say(`HUD: ${hud.join(' | ')}`);
   if (s.ui.tooltip) say(`Tooltip: ${s.ui.tooltip}`);

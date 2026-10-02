@@ -245,7 +245,7 @@ export class DebrisField {
     // The rocks move far from where the mesh's bounds were taken.
     this.mesh.frustumCulled = false;
     const rng = new Rng(hashOf(seed));
-    const glow = new Float32Array(Math.max(1, this.chunks.length));
+    const glow = new Float32Array(Math.max(1, this.chunks.length) * 2);
     const color = new THREE.Color();
     this.chunks.forEach((c, i) => {
       // `melt` of the rocks melted (where the energy went, they all did): crusted dark, with glowing fissures;
@@ -257,9 +257,10 @@ export class DebrisField {
       this.mesh.setColorAt(i, color.multiplyScalar(c.light));
       this.mesh.setMatrixAt(i, this.zero);
       // How wide this rock's fissures are (none on cold rock), and a seed for where they run.
-      glow[i] = (molten ? rng.range(0.6, 1.4) : 0) + Math.floor(rng.range(0, 50)) * 2;
+      glow[i * 2] = molten ? rng.range(0.6, 1.4) : 0;
+      glow[i * 2 + 1] = rng.range(0, 100);
     });
-    this.mesh.geometry.setAttribute('aGlow', new THREE.InstancedBufferAttribute(glow, 1));
+    this.mesh.geometry.setAttribute('aGlow', new THREE.InstancedBufferAttribute(glow, 2));
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 
     // Dust, a share of it molten droplets.
@@ -402,7 +403,8 @@ export class DebrisField {
    * The rocks' glowing fissures: the material's emission is the melt's glow
    * where ridged noise in the rock's own space runs below the crack width,
    * which shrinks as the skin crusts over. Each rock has its own width and
-   * pattern (`aGlow`: width in its fraction, seed in its whole part).
+   * pattern (`aGlow`: width, 0 for cold rock, and seed; kept apart, as one packed number decoded per
+   * pixel flickered between the two where interpolation nudged it).
    */
   private addFissures(material: THREE.MeshStandardMaterial): void {
     material.onBeforeCompile = (shader) => {
@@ -413,24 +415,24 @@ export class DebrisField {
       shader.vertexShader = shader.vertexShader
         .replace(
           '#include <common>',
-          '#include <common>\nattribute float aGlow;\nvarying vec3 vRock;\nvarying float vGlow;',
+          '#include <common>\nattribute vec2 aGlow;\nvarying vec3 vRock;\nvarying vec2 vGlow;',
         )
         .replace('#include <begin_vertex>', '#include <begin_vertex>\nvRock = position;\nvGlow = aGlow;');
       shader.fragmentShader = shader.fragmentShader
         .replace(
           '#include <common>',
-          `#include <common>\nuniform float uCrack;\nuniform vec3 uCrackGlow;\nuniform vec3 uCrustGlow;\nuniform vec2 uPulse;\nvarying vec3 vRock;\nvarying float vGlow;\n${SIMPLEX_GLSL}`,
+          `#include <common>\nuniform float uCrack;\nuniform vec3 uCrackGlow;\nuniform vec3 uCrustGlow;\nuniform vec2 uPulse;\nvarying vec3 vRock;\nvarying vec2 vGlow;\n${SIMPLEX_GLSL}`,
         )
         .replace(
           '#include <emissivemap_fragment>',
           `#include <emissivemap_fragment>
           {
-            float seed = floor(vGlow * 0.5) * 2.0;
-            float width = uCrack * (vGlow - seed);
+            float seed = vGlow.y;
+            float width = uCrack * vGlow.x;
             // Thin glowing lines where ridged noise crosses zero, never thinner than a pixel so far rocks still glint.
             float n = abs(snoise(vRock * 2.2 + seed * 1.37));
             float wide = max(width, 0.35 * fwidth(n));
-            float molten = step(0.001, vGlow - seed) * step(0.001, width);
+            float molten = step(0.001, vGlow.x) * step(0.001, width);
             float crack = 1.0 - smoothstep(0.4 * wide, wide, n);
             // The melt wells up and sinks back: a slow throb, out of step from rock to rock and along each crack.
             float throb = 1.0 - uPulse.y * (0.5 + 0.5 * sin(uPulse.x + seed * 0.37 + dot(vRock, vec3(2.1, 1.3, 1.7))));

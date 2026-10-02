@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { terrainNoise } from '../gen/noise';
+import { realSurface, surfaceColor } from '../gen/realSurface';
 import { hashSeed, Rng } from '../gen/rng';
 import { gasTone, generateGasLayout } from '../gen/gasGiants';
 import { paletteAt } from './gasLook';
@@ -49,18 +50,25 @@ export function peakRadius(radius: number, style: PlanetStyle, reliefScale = 1):
  * `seaFloor` down to -1 at the deepest point (else 0 underwater, sea-coloured).
  * Shared by the globe meshes and the planet level's map, so they match.
  */
-export type TerrainPainter = (n: number, out: THREE.Color) => number;
+export type TerrainPainter = (n: number, out: THREE.Color, x: number, y: number, z: number) => number;
 
-export function terrainPainter(style: PlanetStyle, seaFloor = false): TerrainPainter {
+/**
+ * `seed`: a real body's (gen/realSurface.ts) ground takes its colour map's
+ * colour at the point's direction (x, y, z) instead of the height ramp.
+ */
+export function terrainPainter(style: PlanetStyle, seaFloor = false, seed?: number): TerrainPainter {
   const sea = style.sea === null ? null : new THREE.Color(style.sea);
   const low = new THREE.Color(style.low);
   const high = new THREE.Color(style.high);
   // Without a sea, terrain spans the full noise range [-1, 1].
   const base = sea === null ? -1 : style.seaLevel;
-  return (n, out) => {
+  const real = seed === undefined ? undefined : realSurface(seed);
+  const rgb: [number, number, number] = [0, 0, 0];
+  return (n, out, x, y, z) => {
     const underwater = sea !== null && n < base;
     const height = !underwater ? (n - base) / (1 - base) : seaFloor ? (n - base) / (base + 1) : 0;
     if (underwater) out.copy(sea).multiplyScalar(seaFloor ? 0.75 + 0.25 * height : 1);
+    else if (real) out.setRGB(...surfaceColor(real, x, y, z, rgb), THREE.SRGBColorSpace);
     else out.lerpColors(low, high, height);
     return height;
   };
@@ -80,17 +88,17 @@ export function terrainSampler(
   style: PlanetStyle,
   { noise = terrainNoise, reliefScale = 1, seaFloor = false, shape = null }: Omit<TerrainOptions, 'segments'>,
 ): SurfaceSampler {
-  const paint = terrainPainter(style, seaFloor);
+  const paint = terrainPainter(style, seaFloor, seed);
   const relief = style.relief * reliefScale;
   if (shape) {
     // No sea on small bodies: the relief is added on top of the shape.
     return (dir, color) => {
       const s = shapeRadius(shape, dir.x, dir.y, dir.z);
-      return radius * (s + relief * paint(noise(dir.x * s, dir.y * s, dir.z * s, seed), color));
+      return radius * (s + relief * paint(noise(dir.x * s, dir.y * s, dir.z * s, seed), color, dir.x, dir.y, dir.z));
     };
   }
   return (dir, color) => {
-    const height = paint(noise(dir.x, dir.y, dir.z, seed), color);
+    const height = paint(noise(dir.x, dir.y, dir.z, seed), color, dir.x, dir.y, dir.z);
     return radius * (1 + relief * (height < 0 ? SEA_FLOOR_DEPTH : 1) * height);
   };
 }
@@ -177,14 +185,16 @@ export function createGasGeometry(radius: number, seed: number, bands: readonly 
 export function createRings(rings: RingData, seed: number, scale = 1): THREE.Mesh {
   const inner = rings.inner * scale;
   const outer = rings.outer * scale;
-  const geometry = new THREE.RingGeometry(inner, outer, 128, 24);
+  const geometry = new THREE.RingGeometry(inner, outer, 128, rings.profile ? Math.max(24, rings.profile.length * 2) : 24);
   geometry.rotateX(-Math.PI / 2);
 
   const rng = new Rng(hashSeed(seed, 'rings'));
-  const samples = Array.from({ length: 16 }, () => ({
-    alpha: rng.chance(0.15) ? 0.1 : rng.range(0.5, 1),
-    light: rng.range(0.75, 1.15),
-  }));
+  const samples =
+    rings.profile ??
+    Array.from({ length: 16 }, () => ({
+      alpha: rng.chance(0.15) ? 0.1 : rng.range(0.5, 1),
+      light: rng.range(0.75, 1.15),
+    }));
 
   const position = geometry.getAttribute('position') as THREE.BufferAttribute;
   const colors = new Float32Array(position.count * 4);
@@ -197,8 +207,8 @@ export function createRings(rings: RingData, seed: number, scale = 1): THREE.Mes
     const a = samples[Math.floor(f)]!;
     const b = samples[Math.min(Math.floor(f) + 1, samples.length - 1)]!;
     const w = f - Math.floor(f);
-    // Fade the inner and outer edges.
-    const edge = Math.min(1, t * 8, (1 - t) * 8);
+    // Fade the inner and outer edges (a real profile has its own).
+    const edge = rings.profile ? 1 : Math.min(1, t * 8, (1 - t) * 8);
     color.copy(base).multiplyScalar(THREE.MathUtils.lerp(a.light, b.light, w));
     color.toArray(colors, i * 4);
     colors[i * 4 + 3] = rings.opacity * THREE.MathUtils.lerp(a.alpha, b.alpha, w) * edge;

@@ -13,7 +13,7 @@ The player presses **Save debug dump** in the menu (Esc, or the menu button on p
 | `images.annotated` | JPEG: the screen with the marks as numbered rings and a summary strip **under** it (note, where, build, device, FPS, console). Look at this first |
 | `images.screen` | JPEG: what the player saw, the game with the HUD, tooltip, maps and buttons drawn over it (html-to-image). `images.screenError` if that failed |
 | `images.game` | PNG: the game canvas alone, exact pixels (the planet map's terrain is drawn in it; HTML overlays aren't) |
-| `state` | the game's state (`GameState` in `src/debug/dumpFormat.ts`): seed, system id, level (`mode`), mid-transition or not, camera and orbit, system clock, the ship and its target body, every body's spin, low orbit's body, clock and ship spot, the galaxy's spin, graphics switches, the HUD's text, the tooltip, which maps were shown, and the overlays' rectangles (CSS px) |
+| `state` | the game's state (`GameState` in `src/debug/dumpFormat.ts`): seed, system id, level (`mode`), mid-transition or not, camera and orbit, system clock, the ship and its target body, every body's spin, low orbit's body, clock and ship spot, the bodies blown apart by the planet buster (and when) and whether one was going off, the galaxy's spin, graphics switches, the HUD's text, the tooltip, which maps were shown, and the overlays' rectangles (CSS px) |
 | `device` | user agent, viewport (CSS px), devicePixelRatio, touch, orientation, home-screen app, fullscreen |
 | `renderer` | GPU, WebGL version, pixel ratio, drawing buffer, quality, draw calls and triangles in the last frame, programs, context lost |
 | `performance` | FPS stats and the last ~600 frame times, JS heap, uptime |
@@ -46,7 +46,7 @@ Start the dev server (see `screenshot`), then:
 npm run shot -- --dump <file.json> --out <dir> --clean [steps...]
 ```
 
-It loads the dump's seed and system at its page size and quality (a touch device in `--phone` mode), then restores the state (`debugDump.restore(state)`): graphics switches; the system clock and every body's spin; the ship at its body; for low orbit, the descent to the body, its clock and spin, the ship's spot and altitude, and the globe's detail built; for the galaxy, its spin; then the orbit camera's distance, direction and look-up, the HUD and the map. It leaves the game **paused** at that moment, and the first result is a list of notes on what couldn't be matched (a ship caught mid-flight is parked at its destination; a mid-transition dump comes back at the incoming level, settled). With no steps it takes `shot:restored`; add more steps as usual, e.g. `crop:` around a mark, `js:game.paused = false` then `wait:` to watch it move, or `freeze:` on something.
+It loads the dump's seed and system at its page size and quality (a touch device in `--phone` mode), then restores the state (`debugDump.restore(state)`): graphics switches; the system clock and every body's spin; the ship at its body; busted bodies (blown apart again, at their blast times, before anything else); for low orbit, the descent to the body, its clock and spin, the ship's spot and altitude, and the globe's detail built; for the galaxy, its spin; then the orbit camera's distance, direction and look-up, the HUD and the map. It leaves the game **paused** at that moment, and the first result is a list of notes on what couldn't be matched (a ship caught mid-flight is parked at its destination; a mid-transition dump comes back at the incoming level, settled). With no steps it takes `shot:restored`; add more steps as usual, e.g. `crop:` around a mark, `js:game.paused = false` then `wait:` to watch it move, or `freeze:` on something.
 
 Compare `restored.png` with `screen.jpg`. Animated things (twinkle, storm particles) and the pixel ratio (headless runs at DPR 1) differ; positions, the body, the light and the terrain should match. If they don't, that's a restore bug: fix it in `src/debug/gameState.ts`.
 
@@ -56,7 +56,7 @@ Other ways in:
 
 ## 3. Fix, then check against the dump
 
-After a fix, run the same `--dump` command and compare with the dump's pictures. Report what the player marked, what caused it and what changed, with the restored before/after shots.
+After a fix, run the same `--dump` command and compare with the dump's pictures. Report what the player marked, what caused it and what changed, with the restored before/after shots, and put the same pictures in the pull request's description (see Pull requests in `CLAUDE.md`).
 
 ## Changing the dump
 

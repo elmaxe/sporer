@@ -155,7 +155,8 @@ export class PlanetGlobe implements Entity {
 
   /** True when the surface has every chunk the camera wants (for automation). */
   get settled(): boolean {
-    return this.surface.settled;
+    // A busted globe builds nothing more.
+    return this.busted || this.surface.settled;
   }
 
   /** The surface's chunks drawn now and their depths (the lab's readout). */
