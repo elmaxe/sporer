@@ -38,8 +38,13 @@ export const zoomCurveParams = {
   /** Lowest camera pitch over the planet (radians): above the horizon down low, looking down on the globe high up. */
   lowPitch: (5 * Math.PI) / 180,
   highPitch: (50 * Math.PI) / 180,
-  /** Share of the zoom range (from the top) over which the lowest pitch rises. */
+  /** Share of the zoom range (from the top) over which the lowest pitch rises (and looking up fades out). */
   pitchRange: 0.45,
+  /**
+   * How far the view may tip up past the ship (radians), dragging on below the
+   * lowest pitch: up to the zenith down low (the view is 65° tall), none high up.
+   */
+  lookUp: (75 * Math.PI) / 180,
 };
 
 export type ZoomCurveParams = typeof zoomCurveParams;
@@ -97,8 +102,18 @@ export function flightAltitude(f: number, radius: number, p: ZoomCurveParams = z
   return p.lowAltitude * Math.pow(highAltitude(radius, p) / p.lowAltitude, u);
 }
 
+/** 0 → 1 smoothly over the top `pitchRange` of the zoom. */
+function pitchRise(f: number, p: ZoomCurveParams): number {
+  const u = Math.min(1, Math.max(0, (f - (1 - p.pitchRange)) / p.pitchRange));
+  return u * u * (3 - 2 * u);
+}
+
 /** Lowest camera pitch for zoom fraction `f`: rises smoothly over the top `pitchRange` of the zoom. */
 export function minPitchAt(f: number, p: ZoomCurveParams = zoomCurveParams): number {
-  const u = Math.min(1, Math.max(0, (f - (1 - p.pitchRange)) / p.pitchRange));
-  return p.lowPitch + (p.highPitch - p.lowPitch) * u * u * (3 - 2 * u);
+  return p.lowPitch + (p.highPitch - p.lowPitch) * pitchRise(f, p);
+}
+
+/** How far the view may tip up at zoom fraction `f`: all of `lookUp` low down, fading out as the lowest pitch rises. */
+export function maxLookUpAt(f: number, p: ZoomCurveParams = zoomCurveParams): number {
+  return p.lookUp * (1 - pitchRise(f, p));
 }

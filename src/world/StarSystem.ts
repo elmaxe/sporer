@@ -17,6 +17,7 @@ import { addAtmosphereDebug, type AtmosphereSun } from './atmosphereShell';
 import { stormParams } from './StarStorms';
 import { createGlowTexture } from './glowTexture';
 import { addLavaDebug } from './lavaMaterial';
+import { addGasDebug } from './gasLook';
 import { addWeatherDebug } from './weatherLook';
 import { starParams } from './starMaterials';
 import { addGalacticLightDebug, galacticLightParams } from './galacticLight';
@@ -126,6 +127,7 @@ export class StarSystem implements Entity {
       if (this.galacticLight) addGalacticLightDebug(debug);
       addAtmosphereDebug(debug);
       addLavaDebug(debug);
+      addGasDebug(debug);
       addWeatherDebug(debug);
     }
     const stars = debug?.folder('Stars');

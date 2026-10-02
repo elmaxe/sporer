@@ -1,6 +1,7 @@
 import { Debug } from '../core/Debug';
 import { Game } from '../core/Game';
 import { addLavaDebug } from '../world/lavaMaterial';
+import { addGasDebug } from '../world/gasLook';
 import { addAtmosphereDebug } from '../world/atmosphereShell';
 import { addWeatherDebug } from '../world/weatherLook';
 import { Physics } from '../physics/Physics';
@@ -26,6 +27,7 @@ async function main(): Promise<void> {
   // The game's own tunables for what the lab shows, below the lab's controls.
   debug.nestFolders('Game tunables');
   addLavaDebug(debug);
+  addGasDebug(debug);
   addAtmosphereDebug(debug);
   addWeatherDebug(debug);
   // Plants are off by default on touch devices, as in the game's menu.

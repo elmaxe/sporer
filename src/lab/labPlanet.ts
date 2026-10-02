@@ -503,6 +503,7 @@ export function toPlanetConfig(planet: LabPlanet): PlanetConfig {
     orbit: STILL_ORBIT,
     style: planet.style,
     bands: gas ? planet.bands : null,
+    size: planet.kind === 'iceGiant' || planet.kind === 'gasGiant' ? planet.kind : undefined,
     atmosphere: gas ? null : planet.atmosphere,
     rings: planet.rings,
     tilt: planet.tilt,
