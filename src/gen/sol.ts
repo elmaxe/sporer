@@ -2,6 +2,7 @@ import { MAX_SYSTEM_ROCKS, asteroidRadius, asteroidStyle, BELT_MARGIN, makeBelt,
 import { hslToHex } from './color';
 import { evaluateClimate, type ClimateData, type Composition } from './climate';
 import { cometNucleus, type CometData } from './comets';
+import type { DustDiscData } from './discs';
 import { flatTilt } from './galactic';
 import type { StarRef } from './galaxy';
 import { gameRadius, gasStyle, type MoonType, type PlanetStyle, type PlanetType, type SizeClass } from './planets';
@@ -602,6 +603,33 @@ export function solSystem(ref: StarRef): SystemData {
     comets: [halley(minorSeed--, period)],
     nebula: ref.nebula ?? null,
     belts,
+    dust: zodiacalCloud(),
+  };
+}
+
+/**
+ * Our zodiacal cloud: warm dust from asteroid collisions and Jupiter-family
+ * comets, its density falling off as r^−1.34 (COBE's fit, Kelsall et al.
+ * 1998) from near the Sun, thinning out past the asteroid belt, in a fan
+ * whose density halves 13.7° off the ecliptic (σ ≈ 0.21 r). Fainter than the
+ * debris discs telescopes see round other stars (docs/research/dust.md).
+ */
+function zodiacalCloud(): DustDiscData {
+  return {
+    kind: 'debris',
+    inner: SUN.radius * 1.5,
+    outer: solOrbit(5.2),
+    slope: 1.34,
+    taper: solOrbit(3.5),
+    aspect: 0.21,
+    flare: 1,
+    depth: 0.5,
+    gaps: [],
+    rings: [],
+    spiral: 0,
+    pitch: 0,
+    color: '#ece2d0',
+    seed: hashSeed('sol', 'zodiacal'),
   };
 }
 

@@ -3,7 +3,7 @@ import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
 import { FIXED_DT } from '../core/Game';
 import { hashSeed } from '../gen/rng';
-import { describePlanet, describeSized, type PlanetData, type SystemData } from '../gen/system';
+import { describePlanet, describeSized, keplerPeriod, type PlanetData, type SystemData } from '../gen/system';
 import { skyScale } from '../planet/frame';
 import type { Physics } from '../physics/Physics';
 import type { CelestialBody } from './CelestialBody';
@@ -12,6 +12,8 @@ import { describeComet } from '../gen/comets';
 import { Comet, cometConfig, cometParams } from './Comet';
 import { AsteroidBelt, asteroidConfig, beltParams } from './AsteroidBelt';
 import { Planet } from './Planet';
+import { CometTrail, addCometTrailDebug } from './CometTrail';
+import { DustDisc, addDustDiscDebug } from './DustDisc';
 import { Star } from './Star';
 import { addAtmosphereDebug, type AtmosphereSun } from './atmosphereShell';
 import { stormParams } from './StarStorms';
@@ -44,6 +46,10 @@ export class StarSystem implements Entity {
   readonly nuclei: Planet[];
   /** Asteroid belts and Trojan swarms: scenery rocks and dust, hovered as a whole (see AsteroidBelt). */
   readonly belts: AsteroidBelt[];
+  /** A young star's protoplanetary disc or a faint debris disc (null for most systems). */
+  readonly dust: DustDisc | null;
+  /** The comets' dust trails: the meteoroid streams along their orbits. */
+  readonly trails: CometTrail[];
   /** The belts' named asteroids: irregular small bodies, picked and flown to like moons. */
   readonly asteroids: Planet[] = [];
   /** Comet nuclei and asteroids: stepped, posed and spun like the moons. */
@@ -97,7 +103,7 @@ export class StarSystem implements Entity {
       scene.add(this.galacticLight);
     }
     this.planets = data.planets.map((p) => {
-      const planet = new Planet(scene, physics, p, describe(p), p.extent + PLANET_STANDOFF_MARGIN, sun);
+      const planet = new Planet(scene, physics, p, describe(p, data.dust?.kind === 'protoplanetary'), p.extent + PLANET_STANDOFF_MARGIN, sun);
       for (const m of p.moons) {
         const moon = new Planet(scene, physics, m, `${describePlanet(m.type)} · moon`, m.radius + MOON_STANDOFF_MARGIN, sun, planet);
         this.moons.push(moon);
@@ -117,6 +123,9 @@ export class StarSystem implements Entity {
       return new AsteroidBelt(scene, b, asteroids);
     });
     this.small = [...this.nuclei, ...this.asteroids];
+    const totalMass = data.stars.reduce((m, s) => m + s.mass, 0);
+    this.dust = data.dust ? new DustDisc(scene, data.dust, data.stars, data.habitableRadius, keplerPeriod(data.dust.inner, totalMass)) : null;
+    this.trails = data.comets.map((c) => new CometTrail(scene, c, data.habitableRadius));
     this.bodies = [...this.stars, ...this.planets, ...this.moons, ...this.small];
     this.anchor = this.stars[0] ?? this.planets[0]!;
     this.ambient = new THREE.HemisphereLight('#9bb8ff', '#1a1020', 0.35);
@@ -129,6 +138,8 @@ export class StarSystem implements Entity {
       addLavaDebug(debug);
       addGasDebug(debug);
       addWeatherDebug(debug);
+      addDustDiscDebug(debug);
+      addCometTrailDebug(debug);
     }
     const stars = debug?.folder('Stars');
     stars?.add(starParams, 'pace', 0, 5);
@@ -228,6 +239,8 @@ export class StarSystem implements Entity {
     for (const m of this.moons) m.animate(time);
     for (const c of this.comets) c.poseAt(time);
     for (const b of this.belts) b.animate(time);
+    this.dust?.animate(time);
+    for (const t of this.trails) t.animate(time);
   }
 
   dispose(): void {
@@ -237,6 +250,8 @@ export class StarSystem implements Entity {
     for (const c of this.comets) c.dispose();
     for (const n of this.small) n.dispose();
     for (const b of this.belts) b.dispose();
+    this.dust?.dispose();
+    for (const t of this.trails) t.dispose();
     this.scene.remove(this.ambient);
     this.ambient.dispose();
     if (this.galacticLight) {
@@ -252,8 +267,10 @@ export class StarSystem implements Entity {
   }
 }
 
-function describe(p: PlanetData): string {
+function describe(p: PlanetData, forming: boolean): string {
   const parts = [describeSized(p.type, p.size)];
+  // In a young star's disc, still gathering its dust and gas.
+  if (forming) parts.push('forming');
   if (p.rings) parts.push('rings');
   if (p.moons.length > 0) parts.push(p.moons.length === 1 ? '1 moon' : `${p.moons.length} moons`);
   return parts.join(' · ');
