@@ -48,7 +48,7 @@ async function main(): Promise<void> {
   const menu = new GameMenu(game, levels);
   game.add(new FpsCounter());
   game.add(new TouchControls(game));
-  game.add(new ItemBar(levels, game.input));
+  game.add(new ItemBar(levels, game.input, levels.tooltip));
   const debugDump = game.add(new DebugDumpControl(game, levels, consoleLog, debug));
 
   document.getElementById('loading')?.remove();
