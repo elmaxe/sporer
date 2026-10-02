@@ -684,7 +684,7 @@ await section('core', async () => {
   return hovered && noManual && picked && skyOk && alive;
 });
 
-if (started && (runs('galaxy') || runs('nebulas') || runs('rogues') || runs('audio') || runs('planet'))) {
+if (started && (runs('galaxy') || runs('nebulas') || runs('rogues') || runs('dust') || runs('audio') || runs('planet'))) {
   // Seamless zooms: while a level transition runs, sample every drawn frame (after drawing, before it's shown):
   // the crossfade weight and the canvas brightness (mean over a sparse grid). Each transition is one segment,
   // from the level it left to the one it reached. Setting __seamless.freezeWhen to a mode stops the game once
@@ -1156,40 +1156,30 @@ async function watchShower(bodyExpr, name) {
 
 await section('dust', async () => {
   const r = (dust = {});
-  const base = new URL(url);
+  const home = await evaluate(`system.id`);
   const segmentsBefore = await evaluate(`window.__seamless ? __seamless.segments.length : 0`);
+  /** Through the galaxy map to system `id` (no page load, so the zoom recorder keeps running). */
+  const visit = async (id) => {
+    await until(`!levels.transitioning`, 20000);
+    await evaluate(`levels.toGalaxy()`);
+    await until(`levels.mode === 'galaxy' && !levels.transitioning`, 40000);
+    await evaluate(`levels.galaxyLevel.ship.jumpTo(galaxy.stars[${id}]), levels.toSystem()`);
+    const entered = await until(`levels.mode === 'system' && !levels.transitioning && system.id === ${id}`, 40000);
+    await until(`!ship.enRoute`, 30000);
+    return entered;
+  };
   r.young = await evaluate(`(() => {
     const stars = galaxy.stars.filter((s) => s.young);
     const ref = stars.find((s) => generateSystem(s).planets.length > 0);
     return { count: stars.length, inNebulas: stars.filter((s) => s.nebula).length, id: ref?.id ?? null };
   })()`);
   if (r.young.id === null) return false;
-  base.searchParams.set('star', String(r.young.id));
   current = 'dust (young star)';
-  r.loaded = await page.goto(base.href, READY, 30000);
-  await until(`!ship.enRoute`, 30000);
-  r.system = await evaluate(`(() => {
-    const d = system.dust;
-    return {
-      kind: d?.kind ?? null,
-      sheets: world.dust?.sheets.length ?? 0,
-      hud: document.getElementById('hud-location').textContent,
-      forming: world.planets.every((p) => p.description.includes('forming')),
-      inGaps: system.planets.length > 0 && system.planets.every((p, i) => Math.abs(p.orbit.radius - d.gaps[i].at) < 1e-6 && d.gaps[i].width >= p.radius),
-      comets: system.comets.length,
-      belts: system.belts.length,
-    };
-  })()`);
-  // From above, the disc lights the view (and hiding it darkens it).
-  await evaluate(`(() => { const o = levels.systemLevel.orbit; o.setDistance(system.dust.outer * 1.3); o.lookFrom(new (game.camera.position.constructor)(0.25, 1, 0.15)); })()`);
-  await sleep(2500);
-  r.disc = await evaluate(dustEffect);
-  const shot = await send('Page.captureScreenshot', { format: 'png' });
-  r.screenshot = join(outDir, 'young-system.png');
-  writeFileSync(r.screenshot, Buffer.from(shot.result.data, 'base64'));
   // The galaxy map's tooltip says it's young.
   await evaluate(`levels.toGalaxy()`);
   await until(`levels.mode === 'galaxy' && !levels.transitioning`, 40000);
+  await evaluate(`levels.galaxyLevel.ship.jumpTo(galaxy.stars[${r.young.id}])`);
+  await sleep(1500);
   r.tooltip = await evaluate(`new Promise((resolve) => {
     const level = levels.galaxyLevel, ref = galaxy.stars[${r.young.id}];
     const V = game.camera.position.constructor;
@@ -1204,9 +1194,28 @@ await section('dust', async () => {
       resolve(tip.hidden ? null : { name: document.getElementById('tooltip-name').textContent, text: tip.textContent });
     })();
   })`);
-  await evaluate(`levels.toSystem()`);
-  r.back = await until(`levels.mode === 'system' && !levels.transitioning && system.id === ${r.young.id}`, 40000);
-  await until(`!ship.enRoute`, 30000);
+  r.loaded = await visit(r.young.id);
+  r.system = await evaluate(`(() => {
+    const d = system.dust;
+    return {
+      kind: d?.kind ?? null,
+      sheets: world.dust?.sheets.length ?? 0,
+      hud: document.getElementById('hud-location').textContent,
+      forming: world.planets.every((p) => p.description.includes('forming')),
+      inGaps: system.planets.length > 0 && system.planets.every((p, i) => Math.abs(p.orbit.radius - d.gaps[i].at) < 1e-6 && d.gaps[i].width >= p.radius),
+      comets: system.comets.length,
+      belts: system.belts.length,
+    };
+  })()`);
+  r.fps = await evaluate(measureFps);
+  // From above, the disc lights the view (and hiding it darkens it).
+  await evaluate(`(() => { const o = levels.systemLevel.orbit; o.setDistance(system.dust.outer * 1.3); o.lookFrom(new (game.camera.position.constructor)(0.25, 1, 0.15)); })()`);
+  await sleep(2500);
+  r.disc = await evaluate(dustEffect);
+  const shot = await send('Page.captureScreenshot', { format: 'png' });
+  r.screenshot = join(outDir, 'young-system.png');
+  writeFileSync(r.screenshot, Buffer.from(shot.result.data, 'base64'));
+  r.back = true;
   // Down to a forming planet: the disc is in its sky too, as in the system view.
   r.loop = await runPlanetLoop('world.planets[0]', 'forming-planet', null, async () => {
     // Pulled out to see the sky round the planet.
@@ -1218,30 +1227,23 @@ await section('dust', async () => {
     await sleep(1500);
     return effect;
   });
-  r.segments = await evaluate(`window.__seamless ? __seamless.segments.slice(${segmentsBefore}).map((seg) => ({
-    zoom: seg.from + ' → ' + seg.to,
-    crossfadeFrames: seg.frames.filter((x) => x.weight !== null && x.weight > 0 && x.weight < 1).length,
-    minBrightness: +Math.min(...seg.frames.map((x) => x.brightness)).toFixed(2),
-  })) : null`);
 
   // A debris disc: the first system with one draws it, and it adds a little light.
   current = 'dust (debris disc)';
   const debris = await evaluate(`galaxy.stars.find((s) => !s.young && generateSystem(s).dust?.kind === 'debris')?.id ?? null`);
-  base.searchParams.set('star', String(debris));
-  r.debris = { id: debris, loaded: await page.goto(base.href, READY, 30000) };
+  r.debris = { id: debris, loaded: await visit(debris) };
+  r.debris.fps = await evaluate(measureFps);
   await evaluate(`(() => { const o = levels.systemLevel.orbit; o.setDistance(system.dust.outer * 1.8); o.lookFrom(new (game.camera.position.constructor)(0.25, 1, 0.15)); })()`);
   await sleep(2500);
   Object.assign(r.debris, await evaluate(`({ kind: system.dust.kind, hud: document.getElementById('hud-location').textContent })`), { effect: await evaluate(dustEffect) });
 
   // Meteor showers in the home system: a planet with air, and an airless moon, at their shower's peak.
   current = 'dust (meteor showers)';
-  base.searchParams.delete('star');
-  r.home = await page.goto(base.href, READY, 30000);
-  await until(`!ship.enRoute`, 30000);
+  r.home = await visit(home);
   r.trails = await evaluate(`({ trails: world.trails.length, comets: world.comets.length })`);
   const pick = (airless) => `(() => {
     const showers = (b) => meteorShowers({ orbit: (b.parent ?? b).config.orbit, escapeVelocity: 0, seed: b.config.seed }, system.comets, system.habitableRadius);
-    const air = (b) => b.config.type === 'gas' || (b.config.climate && b.config.climate.pressure >= 0.001);
+    const air = (b) => b.config.type === 'gas' || (b.config.climate && b.config.climate.pressure >= 4e-7);
     const body = [...world.planets, ...world.moons].find((b) => showers(b).length > 0 && ${airless ? '!' : ''}air(b));
     return body ? (body.parent ? 'world.moons[' + world.moons.indexOf(body) + ']' : 'world.planets[' + world.planets.indexOf(body) + ']') : null;
   })()`;
@@ -1249,6 +1251,11 @@ await section('dust', async () => {
   const airless = await evaluate(pick(true));
   r.meteors = withAir ? await watchShower(withAir, 'meteor-shower') : null;
   r.flashes = airless ? await watchShower(airless, 'impact-flashes') : null;
+  r.segments = await evaluate(`window.__seamless ? __seamless.segments.slice(${segmentsBefore}).map((seg) => ({
+    zoom: seg.from + ' → ' + seg.to,
+    crossfadeFrames: seg.frames.filter((x) => x.weight !== null && x.weight > 0 && x.weight < 1).length,
+    minBrightness: +Math.min(...seg.frames.map((x) => x.brightness)).toFixed(2),
+  })) : null`);
 
   r.ok =
     r.young.count >= 3 &&
