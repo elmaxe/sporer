@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
 import type { Input } from '../core/Input';
 import { describeClimateDetail } from '../gen/climate';
+import { describeLife } from '../gen/life';
 import { cometActivity, describeNucleus } from '../gen/comets';
 import { describeShape } from '../gen/shape';
 import { keplerPosition, type KeplerOrbit } from '../gen/orbit';
@@ -273,7 +274,10 @@ export class PlanetLevel extends Level implements ItemUser {
     const detail = busted
       ? BUSTED_DETAIL
       : climate
-        ? describeClimateDetail(climate) + (geysers ? ` · ${describeGeysers(geysers.kind)}` : '') + (weatherLine ? ` · ${weatherLine}` : '')
+        ? describeClimateDetail(climate) +
+          (geysers ? ` · ${describeGeysers(geysers.kind)}` : '') +
+          (weatherLine ? ` · ${weatherLine}` : '') +
+          (config.life ? ` · ${describeLife(config.life)}` : '')
         : config.small === 'comet' && config.shape
           ? describeNucleus(config.shape, activity())
           : config.shape

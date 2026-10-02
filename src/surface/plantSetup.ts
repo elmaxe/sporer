@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { detailedTerrain } from '../gen/noise';
-import { planPlants, type GroundRadius, type PlantPlan } from '../gen/plants';
+import { growsPlants, planPlants, type GroundRadius, type PlantPlan } from '../gen/plants';
 import { RELIEF_SCALE, globeRadius } from '../planet/frame';
 import { isGas, type PlanetConfig } from '../world/Planet';
 import { peakRadius, terrainSampler } from '../world/planetGeometry';
@@ -18,8 +18,7 @@ export interface PlantSetup {
  * nothing grows (tier 0).
  */
 export function plantSetup(config: PlanetConfig): PlantSetup | null {
-  // No starlight (a rogue planet), no photosynthesis: nothing grows.
-  if (isGas(config) || !config.climate || config.climate.insolation <= 0) return null;
+  if (isGas(config) || !config.climate || !growsPlants(config.climate)) return null;
   const R = globeRadius(config.radius);
   const { style, seed, climate } = config;
   const plan = planPlants({

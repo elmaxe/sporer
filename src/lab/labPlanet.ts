@@ -34,7 +34,8 @@ import {
 } from '../gen/planets';
 import { Rng, hashSeed } from '../gen/rng';
 import type { ShapeData } from '../gen/shape';
-import type { StarKind, SpectralClass } from '../gen/stars';
+import { nominalStar, type StarKind, type SpectralClass } from '../gen/stars';
+import { assessLife, moonDistance, type LifeEstimate, type LifeHost, type LifeStar } from '../gen/life';
 import {
   describePlanet,
   describeSized,
@@ -101,6 +102,8 @@ export interface LabPlanet {
   shape: ShapeData | null;
   /** Comets: how far from the star, in habitable radii (≈ AU), which sets how active it is. */
   zone: number;
+  /** A game body's system for its chance of life: its stars and, for a moon, its planet. Absent: lit by the lab's star, no host. */
+  home?: { stars: LifeStar[]; host: LifeHost | null } | null;
 }
 
 /** A comet's distance from the star in the lab by default (habitable radii): fully active, as at a close pass. */
@@ -491,6 +494,15 @@ export function labClimateData(planet: LabPlanet): ClimateData | null {
   return evaluateClimate(planet.climate.setting, planet.climate.state);
 }
 
+/** The chance of life on a lab planet: in its game system if it came from one, else lit by the lab's `star`; null for gas giants. */
+export function labLife(planet: LabPlanet, star: LabStar): LifeEstimate | null {
+  const climate = labClimateData(planet);
+  if (!climate || planet.type === 'gas' || isSmallKind(planet.kind)) return null;
+  const nominal = star.length === 1 ? nominalStar('mainSequence', star as SpectralClass) : nominalStar(star as StarKind);
+  const stars = planet.home?.stars ?? [nominal];
+  return assessLife({ type: planet.type, climate, stars, host: planet.home?.host ?? null });
+}
+
 /** What the game's renderers take, at rest at the origin. */
 export function toPlanetConfig(planet: LabPlanet): PlanetConfig {
   const gas = planet.type === 'gas';
@@ -579,9 +591,10 @@ export function labFromComet(system: SystemData, comet: number): LabPlanet | nul
 export function labFromSystem(system: SystemData, planet: number, moon?: number): LabPlanet | null {
   const p = system.planets[planet];
   if (!p) return null;
-  if (moon === undefined) return labFromBody(p, false, p.moons);
+  const stars = system.stars.map(({ kind, mass, luminosity }) => ({ kind, mass, luminosity }));
+  if (moon === undefined) return { ...labFromBody(p, false, p.moons), home: { stars, host: null } };
   const m = p.moons[moon];
-  return m ? labFromBody(m, true) : null;
+  return m ? { ...labFromBody(m, true), home: { stars, host: { size: p.size, distance: moonDistance(m, p) } } } : null;
 }
 
 // --- Links ---
