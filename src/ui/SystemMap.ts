@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Entity } from '../core/Entity';
 import type { Input } from '../core/Input';
+import { DEBRIS_REACH, debrisPalette, debrisPosition, generateDebris } from '../gen/debris';
 import { terrainNoise } from '../gen/noise';
 import type { SystemData } from '../gen/system';
 import type { Picker } from '../player/Picker';
@@ -39,6 +40,9 @@ const LIGHT = new THREE.Vector3(-0.8, 0.3, 0.55).normalize();
 /** Brightness of the discs' unlit side. */
 const NIGHT = 0.3;
 const TOGGLE_KEY = 'KeyN';
+/** A busted body is drawn as this many of its pieces, where they settle (seconds after the blast). */
+const RUBBLE_DOTS = 60;
+const SETTLED = 600;
 const STORAGE_KEY = 'spore2.systemMap';
 const ACCENT = '#66ffcc';
 const LABEL = 'rgba(207, 227, 255, 0.6)';
@@ -120,6 +124,8 @@ export class SystemMap implements Entity {
   private touchLayout: boolean | null = null;
   private keyWasDown = false;
   private sinceDraw = DRAW_SECONDS;
+  /** Busted bodies' dots (see drawRubble), in disc radii. */
+  private readonly rubble = new Map<Planet, { x: number; y: number; size: number; color: string }[]>();
   private bakeIndex = 0;
   private readonly color = new THREE.Color();
   private readonly srgb = { r: 0, g: 0, b: 0 };
@@ -522,6 +528,10 @@ export class SystemMap implements Entity {
   private drawBody(ctx: CanvasRenderingContext2D, d: BodyDisc): void {
     const { x, y, r } = d.disc;
     const { config } = d.body;
+    if (d.body.busted) {
+      this.drawRubble(ctx, d);
+      return;
+    }
     const rings = config.rings;
     const tilt = config.tilt ?? 0;
     const inner = rings ? (d.ring * rings.inner) / rings.outer : 0;
@@ -549,6 +559,28 @@ export class SystemMap implements Entity {
     }
     // The near half, in front.
     if (rings && d.ring > 0) ringHalf(ctx, x, y, d.ring, inner, tilt, true, d.ringStyle);
+  }
+
+  /** A busted body: its biggest pieces as dots, seen from above the old pole, inside its disc. */
+  private drawRubble(ctx: CanvasRenderingContext2D, d: BodyDisc): void {
+    const { x, y, r } = d.disc;
+    const { config } = d.body;
+    let rubble = this.rubble.get(d.body);
+    if (!rubble) {
+      const palette = debrisPalette(config.style, config.bands).map((c) => `#${new THREE.Color(c).multiplyScalar(1.3).getHexString()}`);
+      const at = { x: 0, y: 0, z: 0 };
+      rubble = generateDebris(config.seed, RUBBLE_DOTS, 0).chunks.map((c) => {
+        debrisPosition(c, SETTLED, at);
+        return { x: at.x / DEBRIS_REACH, y: at.y / DEBRIS_REACH, size: c.size / DEBRIS_REACH, color: palette[c.shade]! };
+      });
+      this.rubble.set(d.body, rubble);
+    }
+    for (const dot of rubble) {
+      ctx.fillStyle = dot.color;
+      ctx.beginPath();
+      ctx.arc(x + dot.x * r, y - dot.y * r, Math.max(0.7, dot.size * r * 1.6), 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
   /** Where a body is drawn, with the radius its marks go round (stars: at the edge). */

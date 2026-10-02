@@ -14,6 +14,8 @@ import type { SizeClass } from '../gen/planets';
 import { createGasGeometry, createRings, createTerrainGeometry } from './planetGeometry';
 import { createWeatherLook, type WeatherLook } from './weatherLook';
 import { globeRadius } from '../planet/frame';
+import { DEBRIS_REACH, debrisLookFor } from '../gen/debris';
+import { DEBRIS_FAR, DebrisField } from './DebrisField';
 import { realSurface } from '../gen/realSurface';
 
 /** What the renderer needs; generated PlanetData and MoonData both satisfy it. */
@@ -76,8 +78,7 @@ export class Planet implements Entity, CelestialBody {
   readonly object = new THREE.Group();
   readonly position = new THREE.Vector3();
   readonly velocity = new THREE.Vector3();
-  /** The climate line of the tooltip, e.g. "−140 °C · thin N₂ atmosphere". */
-  readonly details: string | undefined;
+  private readonly climateLine: string | undefined;
   /** Picked as a sphere this big when it's more than the body (a comet's coma); else its radius. */
   pickRadius: number | undefined = undefined;
   /**
@@ -96,20 +97,29 @@ export class Planet implements Entity, CelestialBody {
   private readonly body: RAPIER.RigidBody;
   private readonly prev = new THREE.Vector3();
   private readonly parentPosition = new THREE.Vector3();
+  /** What it was before it was busted, e.g. "Terran world · 1 moon". */
+  private readonly whole: string;
+  /** Holds the surface and rings, leaning with the axis. */
+  private readonly tilted = new THREE.Group();
+  private readonly atmosphere: THREE.Object3D | null = null;
+  /** Once busted by a planet buster: its debris and the system time of the blast. */
+  private debris: DebrisField | null = null;
+  private blastTime = 0;
 
   constructor(
     private readonly scene: THREE.Scene,
     private readonly physics: Physics,
     readonly config: PlanetConfig,
-    readonly description: string,
+    description: string,
     readonly standoff: number,
     /** Lights the atmosphere (the main star). */
-    sun: AtmosphereSun,
+    private readonly sun: AtmosphereSun,
     /** The planet a moon orbits; null for planets. */
     readonly parent: Planet | null = null,
   ) {
     const { radius, seed, style } = config;
-    this.details = config.climate ? describeClimate(config.climate) : undefined;
+    this.whole = description;
+    this.climateLine = config.climate ? describeClimate(config.climate) : undefined;
     const gas = isGas(config);
     this.lava = gas ? null : createLavaLook(config, COARSE_VENT_RADIUS);
     this.surface = new THREE.Mesh(
@@ -127,13 +137,13 @@ export class Planet implements Entity, CelestialBody {
     if (this.weather) this.surface.add(this.weather.createCloudLayer(radius / globeRadius(radius), CLOUD_SEGMENTS, sun));
 
     // The tilted group holds everything aligned with the equator: surface and rings.
-    const tilted = new THREE.Group();
+    const tilted = this.tilted;
     tilted.rotation.z = config.tilt ?? 0;
     tilted.add(this.surface);
     if (config.rings) tilted.add(createRings(config.rings, seed));
     this.object.add(tilted);
     const look = config.atmosphere && config.climate ? atmosphereLook(config.climate, radius) : null;
-    if (look) this.object.add(createAtmosphere(radius, config.atmosphere!, look, sun));
+    if (look) this.object.add((this.atmosphere = createAtmosphere(radius, config.atmosphere!, look, sun)));
 
     this.object.name = config.name;
     this.positionAt(0, this.position);
@@ -151,8 +161,46 @@ export class Planet implements Entity, CelestialBody {
     return this.config.name;
   }
 
+  /** Its radius; once busted, the debris field's (bigger: the ship hovers above it and dives into it). */
   get radius(): number {
-    return this.config.radius;
+    return this.debris ? this.config.radius * DEBRIS_REACH : this.config.radius;
+  }
+
+  /** e.g. "Terran world · 1 moon", or "Debris field · was a terran world" once busted. */
+  get description(): string {
+    if (!this.debris) return this.whole;
+    const was = this.whole.split(' · ')[0]!.toLowerCase();
+    return `Debris field · was ${/^[aeiou]/.test(was) ? 'an' : 'a'} ${was}`;
+  }
+
+  /** The climate line of the tooltip, e.g. "−140 °C · thin N₂ atmosphere". */
+  get details(): string | undefined {
+    return this.debris ? 'Blown apart by a planet buster' : this.climateLine;
+  }
+
+  /** The system time it was blown apart by a planet buster, or null if it's whole. */
+  get blastedAt(): number | null {
+    return this.debris ? this.blastTime : null;
+  }
+
+  /** True once a planet buster has blown it apart. */
+  get busted(): boolean {
+    return this.debris !== null;
+  }
+
+  /**
+   * Blows it apart (once): from then on it's a debris field, thrown out by a
+   * blast at system time `blastTime` (gen/debris.ts). The rings stay.
+   */
+  bust(blastTime: number): void {
+    if (this.debris) return;
+    this.blastTime = blastTime;
+    // Nothing of it is left, not even its rings: the debris ploughs through them at escape speed, with ~10⁸ times their mass.
+    for (const child of this.tilted.children) child.visible = false;
+    if (this.atmosphere) this.atmosphere.visible = false;
+    const { config } = this;
+    this.debris = new DebrisField(config.seed, config.style, config.bands, config.radius, DEBRIS_FAR, this.sun, debrisLookFor(config));
+    this.tilted.add(this.debris.object);
   }
 
   get renderPosition(): THREE.Vector3 {
@@ -202,12 +250,19 @@ export class Planet implements Entity, CelestialBody {
 
   /** Animated surfaces (lava seas, gas giants' clouds) and weather at system time `time`. */
   animate(time: number): void {
+    if (this.debris) {
+      // Turning with the old surface, as low orbit's field does in the body frame.
+      this.debris.object.rotation.y = this.surface.rotation.y;
+      this.debris.animate(time - this.blastTime);
+      return;
+    }
     this.lava?.animate(time);
     this.gas?.animate(time);
     this.weather?.animate(time);
   }
 
   dispose(): void {
+    this.debris?.dispose();
     this.gas?.dispose();
     this.scene.remove(this.object);
     this.object.traverse((o) => {

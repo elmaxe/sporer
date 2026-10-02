@@ -30,15 +30,33 @@ export class Level {
     return entity;
   }
 
+  /** Entities to take out once the current step or update is over. */
+  private readonly removals: Entity[] = [];
+
+  /** Takes an entity out of the level and disposes it (at the end of the current step or update, so it's safe from one). */
+  remove(entity: Entity): void {
+    if (this.entities.includes(entity) && !this.removals.includes(entity)) this.removals.push(entity);
+  }
+
+  private flushRemovals(): void {
+    for (const e of this.removals) {
+      this.entities.splice(this.entities.indexOf(e), 1);
+      e.dispose();
+    }
+    this.removals.length = 0;
+  }
+
   /** One fixed step: fixedUpdate → physics.step → afterPhysics. */
   fixedStep(dt: number): void {
     for (const e of this.entities) e.fixedUpdate?.(dt);
     this.physics?.step();
     for (const e of this.entities) e.afterPhysics?.();
+    this.flushRemovals();
   }
 
   update(frameDt: number, alpha: number): void {
     for (const e of this.entities) e.update?.(frameDt, alpha);
+    this.flushRemovals();
   }
 
   /** Draws the level; the default renders its scene (as a wireframe with the menu's switch, see renderScene). */
@@ -53,6 +71,7 @@ export class Level {
   exit(): void {}
 
   dispose(): void {
+    this.removals.length = 0;
     for (const e of this.entities) e.dispose();
     this.entities.length = 0;
     this.physics?.dispose();

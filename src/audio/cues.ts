@@ -13,6 +13,10 @@ export type SoundCue =
   | 'interstellarTravel'
   | 'reentry'
   | 'leavePlanet'
+  | 'busterFire'
+  | 'busterFlight'
+  | 'busterImpact'
+  | 'planetExplode'
   | 'starNear'
   | 'starFar'
   | 'shipHum';
@@ -23,13 +27,17 @@ export const SOUND_CUES: readonly SoundCue[] = [
   'interstellarTravel',
   'reentry',
   'leavePlanet',
+  'busterFire',
+  'busterFlight',
+  'busterImpact',
+  'planetExplode',
   'starNear',
   'starFar',
   'shipHum',
 ];
 
 /** Cues that loop until stopped (`SoundEffects.start`); the rest play once (`SoundEffects.play`). */
-export type LoopCue = 'systemTravel' | 'interstellarTravel';
+export type LoopCue = 'systemTravel' | 'interstellarTravel' | 'busterFlight';
 
 /**
  * Background loops on the Ambience channel whose loudness the game sets as
@@ -98,6 +106,14 @@ export const cueParams: Record<SoundCue, CueSpec> = {
   reentry: oneShot(),
   // Climbing from low orbit back to the system.
   leavePlanet: oneShot(),
+  // Firing the planet buster: the projectile leaving the ship.
+  busterFire: oneShot(),
+  // The planet buster's projectile flying down to the surface, from launch until it hits.
+  busterFlight: { ...travel(), fadeIn: 0.1, fadeOut: 0.3 },
+  // The projectile hitting the ground (the first flash; the crust starts to crack).
+  busterImpact: oneShot(),
+  // The planet blowing apart (the blinding flash).
+  planetExplode: oneShot(),
   // A star close up, as the camera nears its surface (see StarSounds).
   starNear: ambient(0.8),
   // A star from across its system, giving way to starNear close up.

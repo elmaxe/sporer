@@ -66,6 +66,11 @@ export interface GameState {
   /** The galaxy map, when there. */
   galaxy: { spin: number; current: number; destination: number | null } | null;
   graphics: { weather: boolean; plants: boolean; wireframe: boolean };
+  /**
+   * Bodies blown apart by the planet buster (missing in dumps from before it): this system's, each with its
+   * blast's system time, and how many there are in the whole game. Also whether one was going off.
+   */
+  busted?: { bodies: { body: BodyRef; time: number }[]; total: number; firing: boolean; elapsed: number | null };
   /** What the DOM overlays showed (text the screenshot's game picture leaves out). */
   ui: {
     touchMode: boolean;
