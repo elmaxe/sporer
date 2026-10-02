@@ -13,6 +13,7 @@ import { TouchControls } from './ui/TouchControls';
 import { FullscreenButton } from './ui/FullscreenButton';
 import { GameMenu } from './ui/GameMenu';
 import { FpsCounter } from './ui/FpsCounter';
+import { ItemBar } from './ui/ItemBar';
 import { GraphicsSettingsControl, loadGraphicsSettings } from './ui/GraphicsSettings';
 
 const DEFAULT_SEED = '1337';
@@ -35,6 +36,7 @@ async function main(): Promise<void> {
   const menu = new GameMenu(game, levels);
   game.add(new FpsCounter());
   game.add(new TouchControls(game));
+  game.add(new ItemBar(levels, game.input));
 
   document.getElementById('loading')?.remove();
   game.start();

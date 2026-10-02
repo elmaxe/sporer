@@ -249,6 +249,12 @@ export class Comet {
 
   /** Places the coma and shapes the tails for system time `time`. The star is at the barycentre. */
   poseAt(time: number): void {
+    // A busted nucleus has nothing left to boil off: only its debris goes on round the orbit.
+    this.object.visible = !this.nucleus.busted;
+    if (this.nucleus.busted) {
+      this.nucleus.pickRadius = undefined;
+      return;
+    }
     keplerPosition(this.data.orbit, time, this.position);
     keplerPosition(this.data.orbit, time - VELOCITY_DT, this.before);
     this.head.position.copy(this.position);

@@ -226,6 +226,7 @@ export class StarSystem implements Entity {
     for (const s of this.stars) s.animate(time);
     for (const p of this.planets) p.animate(time);
     for (const m of this.moons) m.animate(time);
+    for (const n of this.small) n.animate(time);
     for (const c of this.comets) c.poseAt(time);
     for (const b of this.belts) b.animate(time);
   }

@@ -10,6 +10,8 @@ import { Tooltip } from '../ui/Tooltip';
 import { isGas, type Planet } from '../world/Planet';
 import { arrivalParams, clampElevation, descentParams, leaveParams } from './arrival';
 import { SurfaceChangeStore } from '../surface/changes';
+import { BustedBodies, bodyKey } from '../combat/busted';
+import type { ItemUser } from '../combat/items';
 import { GALAXY_VIEW_DISTANCE, GALAXY_VIEW_ELEVATION, GalaxyLevel } from './GalaxyLevel';
 import { PLANET_VIEW_DISTANCE, PlanetLevel } from './PlanetLevel';
 import type { Level } from './Level';
@@ -38,6 +40,9 @@ const ORIGIN = new THREE.Vector3();
 const BACK = new THREE.Vector3(0, 0, 1);
 /** The ecliptic's north: the ship hovers this way from a body. */
 const UP = new THREE.Vector3(0, 1, 0);
+
+/** Seconds since the blast that a busted body's debris is shown at in a newly built system (long settled). */
+const SETTLED_DEBRIS = 600;
 
 export type LevelMode = 'system' | 'galaxy' | 'planet';
 
@@ -85,6 +90,8 @@ export class SceneManager implements Entity {
   private readonly tooltip = new Tooltip();
   /** What the player has done to each visited planet's surface (removed plants), kept across visits. */
   private readonly surfaceChanges = new SurfaceChangeStore();
+  /** The bodies blown apart by planet busters, and when (they stay debris fields for the rest of the game). */
+  readonly busted = new BustedBodies();
   private seamless: SeamlessTransition | null = null;
   // Scratch for the seamless zoom (live: the cameras read them every frame).
   private readonly view = new THREE.Quaternion();
@@ -144,6 +151,11 @@ export class SceneManager implements Entity {
   get mode(): LevelMode {
     const level = this.game.level;
     return level === this.galaxyLevel ? 'galaxy' : level === this._planetLevel ? 'planet' : 'system';
+  }
+
+  /** What the item bar works with: the planet level (it can fire the planet buster), or null elsewhere and mid-zoom. */
+  get itemUser(): ItemUser | null {
+    return this.mode === 'planet' && !this.transitioning ? this._planetLevel : null;
   }
 
   get transitioning(): boolean {
@@ -350,7 +362,7 @@ export class SceneManager implements Entity {
    */
   leavePlanet(): void {
     const planet = this._planetLevel;
-    if (this.transitioning || !planet || this.mode !== 'planet') return;
+    if (this.transitioning || !planet || this.mode !== 'planet' || planet.busy) return;
     const system = this._systemLevel;
     const { body, frame } = planet;
     const from = planet.orbit;
@@ -497,8 +509,15 @@ export class SceneManager implements Entity {
       input,
       this.debug,
       () => this.leavePlanet(),
-      this.surfaceChanges.forPlanet(`${body.config.name}:${body.config.seed}`),
+      this.surfaceChanges.forPlanet(bodyKey(body.config)),
       this.tooltip,
+      this.sfx,
+      body.blastedAt,
+      (time) => {
+        // Recorded at once (it can't be fired twice), and the system view's body is debris from the blast on.
+        this.busted.bust(bodyKey(body.config), time);
+        body.bust(time);
+      },
     );
     return this._planetLevel;
   }
@@ -522,6 +541,11 @@ export class SceneManager implements Entity {
       () => this.toGalaxy(),
       () => this.toPlanet(),
     );
+    // Busted bodies stay busted.
+    for (const body of [...level.world.planets, ...level.world.moons, ...level.world.nuclei, ...level.world.asteroids]) {
+      // A new system's clock starts afresh: its debris has long settled.
+      if (this.busted.isBusted(bodyKey(body.config))) body.bust(level.world.time - SETTLED_DEBRIS);
+    }
     // Remember the system in the URL, so a reload comes back here.
     const url = new URL(location.href);
     url.searchParams.set('star', String(ref.id));

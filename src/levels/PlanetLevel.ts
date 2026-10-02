@@ -36,6 +36,11 @@ import type { Planet } from '../world/Planet';
 import { Level } from './Level';
 import type { SystemLevel } from './SystemLevel';
 import { renderScene } from '../world/wireframe';
+import type { SoundEffects } from '../audio/sfx';
+import { PlanetBuster } from '../combat/PlanetBuster';
+import type { ItemId, ItemStatus, ItemUser } from '../combat/items';
+import { DEBRIS_REACH } from '../gen/debris';
+import { DEBRIS_NEAR, DebrisField } from '../world/DebrisField';
 
 /**
  * Low-orbit camera, in planet-level units (an Earth-sized globe's radius is
@@ -58,6 +63,13 @@ const CAMERA_CLEARANCE = 1.5;
 export const SMALL_BODY_VIEW_RADII = 6;
 /** Seconds back along a comet's orbit to find the way it's going. */
 const COMET_MOTION_DT = 0.25;
+/** The globe's centre (the planet level's origin). Never modified. */
+const ORIGIN = new THREE.Vector3();
+/** Watching a planet buster: seconds to turn to the globe and back, and the most the view turns from the ship (radians). */
+const WATCH_EASE = 0.8;
+const WATCH_LIMIT = 0.45;
+/** The HUD's line under the name once the body is busted. */
+const BUSTED_DETAIL = 'Blown apart by a planet buster: a field of rubble and dust';
 /** Bodies in the sky are drawn at least this many pixels in radius. */
 const SKY_MIN_PIXELS = 1.5;
 /** The sky camera's clipping range, in system units. */
@@ -75,7 +87,7 @@ const SKY_FAR = 20000;
  * So the star, other planets and moons are where they really are, at their
  * true angular size and lit with correct phases.
  */
-export class PlanetLevel extends Level {
+export class PlanetLevel extends Level implements ItemUser {
   override readonly touchControls = 'surface';
   readonly frame: PlanetFrame;
   readonly ship: PlanetShip;
@@ -83,21 +95,28 @@ export class PlanetLevel extends Level {
   /** The globe's sea-level radius in planet-level units: the body's true size (see planet/frame.ts). */
   readonly radius: number;
   private readonly moons: LocalMoons;
-  /** Lava worlds and moons only. */
-  readonly eruptions: LavaEruptions | null;
+  /** Lava worlds and moons only (and not once busted, as for the rest of what lives on the surface). */
+  eruptions: LavaEruptions | null = null;
   /** Bodies with geothermal activity only (see gen/geysers.ts). */
-  readonly geysers: Geysers | null;
+  geysers: Geysers | null = null;
   /** Bodies with weather only: rain, lightning bolts and their light (the clouds are the globe's). */
-  readonly weather: Weather | null;
+  weather: Weather | null = null;
   /** Comets only: their jets, coma and tails, as active as the comet is close to the star. */
-  readonly comet: CometActivity | null;
+  comet: CometActivity | null = null;
   /** A comet's orbit, which bends its dust tail back. */
   private readonly cometOrbit: KeplerOrbit | null;
   private readonly before = new THREE.Vector3();
   private readonly now = new THREE.Vector3();
   /** Habitable bodies (T1 and up) only: plants standing on the ground (see gen/plants.ts). */
-  readonly plants: SurfaceEntities | null;
-  private readonly plantTooltip: PlantTooltip | null;
+  plants: SurfaceEntities | null = null;
+  private plantTooltip: PlantTooltip | null = null;
+  /** The planet buster, fired from here (spent once the body is busted). */
+  readonly buster: PlanetBuster;
+  /** Once busted: its debris field, and the system time of the blast. */
+  private debris: DebrisField | null = null;
+  private blastTime = 0;
+  /** How far the camera has turned from the ship to the globe's centre to watch the buster go off (0–1). */
+  private watchWeight = 0;
   private readonly globe: PlanetGlobe;
   private readonly hud: PlanetHud;
   /** The Equal Earth map in the corner (mouse players). */
@@ -108,8 +127,6 @@ export class PlanetLevel extends Level {
   private readonly start = new THREE.Vector3();
   private readonly cameraDir = new THREE.Vector3();
   private readonly cameraParams: OrbitParams;
-  /** Radius of the highest terrain: the ship's altitude is measured from it. */
-  private readonly top: number;
 
   constructor(
     private readonly system: SystemLevel,
@@ -125,20 +142,31 @@ export class PlanetLevel extends Level {
     changes: SurfaceChanges,
     /** Shows the plant under the pointer. */
     tooltip: Tooltip,
+    sfx: SoundEffects,
+    /** The system time the body was blown apart by a planet buster, or null if it's whole. */
+    blastTime: number | null,
+    /** Called as a planet buster is fired here, with the system time of the blast to come. */
+    private readonly onBust: (blastTime: number) => void,
   ) {
     super();
     this.frame = this.add(new PlanetFrame(body, system.world.time, debug));
     const globe = (this.globe = this.add(new PlanetGlobe(this.scene, body.config, this.frame, camera, debug)));
-    this.eruptions = globe.lava
-      ? this.add(new LavaEruptions(this.scene, this.frame, globe.lava.activity, body.config.seed, body.config.style.sea!, debug))
-      : null;
+    const busted = blastTime !== null;
+    if (busted) {
+      globe.bust(globe.radius * DEBRIS_REACH);
+      this.addDebris(blastTime);
+    }
+    this.eruptions =
+      globe.lava && !busted
+        ? this.add(new LavaEruptions(this.scene, this.frame, globe.lava.activity, body.config.seed, body.config.style.sea!, debug))
+        : null;
     const { config } = body;
     // Its activity follows the same 1/r² from the star as the tails in the sky (and is off far out).
     const activity = () => cometActivity(this.frame.center.length(), system.data.habitableRadius, cometParams.activeDistance);
     const comet = config.small === 'comet' && config.shape ? system.world.comets.find((c) => c.nucleus === body) : undefined;
     this.cometOrbit = comet?.data.orbit ?? null;
     this.comet =
-      comet && config.shape
+      comet && config.shape && !busted
         ? this.add(
             new CometActivity(
               this.scene,
@@ -157,9 +185,10 @@ export class PlanetLevel extends Level {
           )
         : null;
     const geysers = geyserActivity({ ...config, moon: body.parent !== null }, globe.radius, RELIEF_SCALE);
-    this.geysers = geysers
-      ? this.add(new Geysers(this.scene, this.frame, geysers, config.seed, globe.sun, globe.sunLight, globe.ambientLight, debug))
-      : null;
+    this.geysers =
+      geysers && !busted
+        ? this.add(new Geysers(this.scene, this.frame, geysers, config.seed, globe.sun, globe.sunLight, globe.ambientLight, debug))
+        : null;
     this.moons = this.add(
       new LocalMoons(
         this.scene,
@@ -183,14 +212,16 @@ export class PlanetLevel extends Level {
 
     this.frame.toLocalDirection(side, this.start);
     this.radius = globe.radius;
-    this.top = globe.top;
     // A small body is framed by its own size (the usual minimum would leave a comet a speck).
     const small = config.shape ? SMALL_BODY_VIEW_RADII * globe.radius : undefined;
     this.cameraParams = { ...planetCameraParams, maxDistance: maxViewDistance(globe.radius, planetCameraParams.maxDistance, small) };
     this.ship = this.add(
       new PlanetShip(this.scene, input, camera, debug, this.flyingRadius(PLANET_VIEW_DISTANCE), this.start, travelScale(globe.radius), {
         height: globe.groundHeight,
-        top: globe.top,
+        // The debris field's edge once busted.
+        get top() {
+          return globe.top;
+        },
       }),
     );
     this.setFlight(PLANET_VIEW_DISTANCE);
@@ -211,33 +242,43 @@ export class PlanetLevel extends Level {
           pitch: THREE.MathUtils.degToRad(40),
           // Dragging on down tips the view up to the sky.
           lookUp: zoomCurveParams.lookUp,
-          onZoomPastLimit: (dir) => dir > 0 && onZoomOut(),
+          // Not while a planet buster is going off.
+          onZoomPastLimit: (dir) => dir > 0 && !this.busy && onZoomOut(),
         },
         debug,
         'Planet camera',
       ),
     );
     // After the camera: the bolts face this frame's view.
-    this.weather = globe.weather
-      ? this.add(
-          new Weather(this.scene, this.frame, globe.weather, config, camera, globe.sun, globe.sunLight, globe.ambientLight, debug),
-        )
-      : null;
-    const plantsSetup = plantSetup(config);
+    this.weather =
+      globe.weather && !busted
+        ? this.add(
+            new Weather(this.scene, this.frame, globe.weather, config, camera, globe.sun, globe.sunLight, globe.ambientLight, debug),
+          )
+        : null;
+    const plantsSetup = busted ? null : plantSetup(config);
     this.plants = plantsSetup ? this.add(new SurfaceEntities(this.scene, plantsSetup.plan, plantsSetup.ground, camera, changes, debug)) : null;
     this.plantTooltip = this.plants
       ? this.add(new PlantTooltip(camera, input, this.plants, tooltip, (ray, out) => globe.groundHit(ray, out)))
       : null;
-    this.add(new PlanetPicker(this.scene, camera, input, this.ship, (ray, out) => globe.groundHit(ray, out), globe.groundHeight));
+    const events = { fire: (time: number) => this.fire(time), blast: () => this.blast(), done: () => this.settled() };
+    this.buster = this.add(new PlanetBuster(this.scene, this.frame, camera, input, globe, this.ship.object, sfx, events, busted, debug));
+    this.add(
+      new PlanetPicker(this.scene, camera, input, this.ship, (ray, out) => globe.groundHit(ray, out), globe.groundHeight, (point) =>
+        this.buster.click(point),
+      ),
+    );
     const { climate } = config;
     const weatherLine = globe.weather ? describeWeather(globe.weather.data) : '';
-    const detail = climate
-      ? describeClimateDetail(climate) + (geysers ? ` · ${describeGeysers(geysers.kind)}` : '') + (weatherLine ? ` · ${weatherLine}` : '')
-      : config.small === 'comet' && config.shape
-        ? describeNucleus(config.shape, activity())
-        : config.shape
-          ? describeShape(config.shape)
-          : null;
+    const detail = busted
+      ? BUSTED_DETAIL
+      : climate
+        ? describeClimateDetail(climate) + (geysers ? ` · ${describeGeysers(geysers.kind)}` : '') + (weatherLine ? ` · ${weatherLine}` : '')
+        : config.small === 'comet' && config.shape
+          ? describeNucleus(config.shape, activity())
+          : config.shape
+            ? describeShape(config.shape)
+            : null;
     this.hud = this.add(new PlanetHud(this.ship, `${body.name} · ${body.description}`, input, detail));
     this.map = this.add(new PlanetMap(config, body.name, this.ship, globe, input, debug));
     debug
@@ -254,6 +295,89 @@ export class PlanetLevel extends Level {
   /** A link to this planet (or moon, or planet with its moons) in the planet lab (lab.html). */
   labLink(): string {
     return bodyLabLink(this.body);
+  }
+
+  /** Radius of the highest terrain (once busted, the debris field's edge): the ship's altitude is measured from it. */
+  private get top(): number {
+    return this.globe.top;
+  }
+
+  /** True while a planet buster is going off here: the player can't leave until it's over. */
+  get busy(): boolean {
+    return this.buster.busy;
+  }
+
+  /** True once the body has been blown apart (or is being: from the blast on). */
+  get busted(): boolean {
+    return this.globe.busted;
+  }
+
+  /** The item bar's view of this level: the planet buster can be fired from here. */
+  get selected(): ItemId | null {
+    return this.buster.armed ? 'planetBuster' : null;
+  }
+
+  status(item: ItemId): ItemStatus {
+    switch (item) {
+      case 'planetBuster':
+        return this.buster.status();
+    }
+  }
+
+  select(item: ItemId | null): void {
+    this.buster.arm(item === 'planetBuster');
+  }
+
+  /** The buster is away: hold the ship where it is and pull the camera back to watch. */
+  private fire(blastTime: number): void {
+    this.ship.locked = true;
+    this.ship.stop();
+    this.blastTime = blastTime;
+    // The debris is ready (and its shaders compiled) before the blast; hidden till then.
+    this.addDebris(blastTime);
+    this.onBust(blastTime);
+  }
+
+  /** The blast: the globe and everything on it give way to the debris, which becomes the ground. */
+  private blast(): void {
+    this.globe.bust(this.radius * DEBRIS_REACH);
+    for (const entity of [this.eruptions, this.geysers, this.weather, this.comet, this.plants]) if (entity) this.remove(entity);
+    this.eruptions = this.geysers = this.weather = this.comet = this.plants = null;
+    if (this.plantTooltip) {
+      this.plantTooltip.deactivate();
+      this.remove(this.plantTooltip);
+      this.plantTooltip = null;
+    }
+    this.map.deactivate();
+    this.hud.bust(`${this.body.name} · ${this.body.description}`, BUSTED_DETAIL);
+  }
+
+  /** The debris has settled: fly about the field and leave as usual. */
+  private settled(): void {
+    this.ship.locked = false;
+  }
+
+  private addDebris(blastTime: number): void {
+    const { config } = this.body;
+    this.blastTime = blastTime;
+    this.debris = new DebrisField(config.seed, config.style, config.bands, this.globe.radius, DEBRIS_NEAR, {
+      vector: this.globe.sun,
+      point: false,
+    });
+    this.scene.add(this.debris.object);
+    this.poseDebris();
+  }
+
+  /** The debris as it is now; turned back against the body frame's spin, as the system view's doesn't spin. */
+  private poseDebris(): void {
+    if (!this.debris) return;
+    this.debris.object.rotation.y = -this.frame.spinAngle;
+    this.debris.animate(this.frame.renderTime - this.blastTime);
+  }
+
+  override dispose(): void {
+    this.debris?.dispose();
+    super.dispose();
   }
 
   /** The ship's distance from the centre with the camera `view` from it: the zoom sets the altitude. */
@@ -288,7 +412,16 @@ export class PlanetLevel extends Level {
       keplerPosition(this.cometOrbit, time - COMET_MOTION_DT, this.before).sub(keplerPosition(this.cometOrbit, time, this.now));
       this.frame.toLocalDirection(this.before.normalize(), this.comet.back);
     }
+    // While the buster goes off, the camera pulls back and turns to take in the whole planet (keeping the ship in view).
+    if (this.busy && !this.zoomLocked) this.orbit.zoomTo(this.cameraParams.maxDistance);
+    const watch = this.busy ? 1 : 0;
+    if (watch > 0 || this.watchWeight > 0) {
+      this.watchWeight += (watch - this.watchWeight) * (1 - Math.exp(-frameDt / WATCH_EASE));
+      if (watch === 0 && this.watchWeight < 0.01) this.watchWeight = 0;
+      this.orbit.setAim(this.watchWeight > 0 ? ORIGIN : null, this.watchWeight, WATCH_LIMIT);
+    }
     super.update(frameDt, alpha);
+    this.poseDebris();
     if (this.zoomLocked) return;
     // Scrolling lifts or lowers the ship, and high up the camera tips over to look down on the globe.
     const { minDistance, maxDistance } = this.cameraParams;
@@ -352,11 +485,12 @@ export class PlanetLevel extends Level {
 
   override enter(): void {
     this.hud.activate();
-    this.map.activate();
+    if (!this.busted) this.map.activate();
     this.plantTooltip?.activate();
   }
 
   override exit(): void {
+    this.buster.arm(false);
     this.hud.deactivate();
     this.map.deactivate();
     this.plantTooltip?.deactivate();

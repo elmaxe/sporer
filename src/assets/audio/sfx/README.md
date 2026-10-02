@@ -12,6 +12,10 @@ rebuild; no code changes needed. Volumes and fades are in `cueParams` (`src/audi
 | `interstellarTravel/` | Flying between stars on the galaxy map: starts as it sets off, fades out when it docks | loop |
 | `reentry/` | Descending to a planet or moon with an atmosphere, or a gas giant (airless bodies are silent) | one-shot |
 | `leavePlanet/` | Climbing from low orbit back to the system | one-shot |
+| `busterFire/` | Firing the planet buster: the projectile leaving the ship | one-shot |
+| `busterFlight/` | The planet buster's projectile flying down to the surface: starts at launch, fades out on impact | loop |
+| `busterImpact/` | The projectile hitting the ground (the first flash, as the crust starts to crack) | one-shot |
+| `planetExplode/` | The planet blowing apart (the blinding flash and the debris flying out) | one-shot |
 | `starNear/` | A star close up: grows as the camera nears its surface, taking over from `starFar` | ambient |
 | `starFar/` | A star from across its system: fades with distance, giving way to `starNear` close up | ambient |
 | `shipHum/` | The UFO's own hum, always on | ambient |

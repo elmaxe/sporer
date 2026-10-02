@@ -3,7 +3,8 @@
 //   --only <sections>  run just these, comma-separated, in the usual order: core (flying, picking, system map,
 //                      living stars, comets, sky), galaxy (the galaxy loop), nebulas (every kind on the map
 //                      and from inside), rogues (fly to a rogue planet and down to it), audio, planet (the home planet
-//                      loop, held zoom, seamless zooms), types (every planet type and geyser kind), lab, touch
+//                      loop, held zoom, seamless zooms), types (every planet type and geyser kind), lab, touch,
+//                      buster (the planet buster, last: it blows up a moon of the home system)
 //   --quick            everything but types
 //   --timeout <s>      give up after this long (default 900), reporting the section it was in
 //   --full-quality     render as players see it (default: ?quality=low, half resolution without antialiasing,
@@ -51,6 +52,12 @@
 // there; scrolled into, its "system" has no star but the galactic light, the HUD and URL say where it is, the ship
 // hovers above it and it isn't pitch black (system view and low orbit); the planet loop runs over it (no plants, no
 // star in the sky) and every zoom on the way crossfades and never goes black; FPS in its system.
+// Planet buster (last, as it leaves a moon of the home system busted): the item bar shows in the system with the
+// buster unusable (pressing 1 says where to use it); in low orbit over a moon, a real 1 arms it and a real click on the
+// globe fires it (once); scrolling out is refused until it's over; the screen flashes, the globe gives way to debris,
+// the sounds go fire → flight → impact → explode (with audio on); afterwards it can't be armed again, the HUD and the
+// system view's tooltip say it's a debris field, revisiting low orbit shows the field (no globe, no plants or weather),
+// and it's still busted after a trip out to the galaxy and back.
 // Planet lab (lab.html): every type, a moon, a comet and an asteroid build and draw in both views, a game planet, a game comet
 // and a game asteroid load, the panel works.
 // Prints JSON with FPS, console errors and screenshot paths. Exit 1 on failure.
@@ -61,7 +68,7 @@ import { launch, sleep, StallError } from './lib/browser.mjs';
 
 const args = process.argv.slice(2);
 const option = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
-const SECTIONS = ['core', 'galaxy', 'nebulas', 'rogues', 'audio', 'planet', 'types', 'lab', 'touch'];
+const SECTIONS = ['core', 'galaxy', 'nebulas', 'rogues', 'audio', 'planet', 'types', 'lab', 'touch', 'buster'];
 const only = option('--only')?.split(',');
 if (only?.some((name) => !SECTIONS.includes(name))) {
   console.error(`--only takes some of: ${SECTIONS.join(', ')}`);
@@ -115,6 +122,7 @@ const state = `({ speed: +ship.speed.toFixed(1), pos: ship.object.position.toArr
 let before, after, autopilot, pick, systemMap, sky, living, comet, belt, galaxyLoop, fps, audio, planetLoop, heldZoom, cometLoop, asteroidLoops, seamless, nebulas, rogues;
 const planetTypes = [];
 let lab = null;
+let buster = null;
 let touch = null;
 let touchLab = null;
 
@@ -1705,13 +1713,125 @@ await section('touch', async () => {
   touchLab = await runTouchLab();
   return touch.ok && touchLab.ok;
 });
+await section('buster', async () => {
+  for (let i = 0; i < 40 && (await evaluate(`levels.transitioning || levels.mode !== 'system'`)); i++) {
+    if (await evaluate(`levels.mode === 'planet' && !levels.transitioning`)) await evaluate(`levels.leavePlanet()`);
+    if (await evaluate(`levels.mode === 'galaxy' && !levels.transitioning`)) await evaluate(`levels.toSystem()`);
+    await sleep(500);
+  }
+  const press = async (code, key) => {
+    for (const type of ['keyDown', 'keyUp']) {
+      await send('Input.dispatchKeyEvent', { type, code, key });
+      await drawFrames(2);
+    }
+  };
+  // In space: the bar shows, but the buster only works in low orbit.
+  await press('Digit1', '1');
+  const inSpace = await evaluate(`({ bar: !document.getElementById('item-bar').hidden, slots: document.querySelectorAll('.item-slot[data-item]').length,
+    hint: document.getElementById('item-hint').textContent })`);
+  // Down to a moon of the home system (or its first planet).
+  await evaluate(`(() => { const b = world.moons[0] ?? world.planets[0]; window.__busted = b; ship.parkAt(b); levels.toPlanet(b); })()`);
+  await until(`levels.mode === 'planet' && !levels.transitioning`, 60000);
+  await drawFrames(5);
+  await press('Digit1', '1');
+  const armed = await evaluate(`({ selected: planet.selected, aiming: document.body.classList.contains('aiming'), hint: document.getElementById('item-hint').textContent })`);
+  // A real click on the ground a little way off the ship (the ground under the ship, nudged towards the screen's centre).
+  const target = await evaluate(`(() => {
+    const p = planet.ship.object.position.clone();
+    const d = p.clone().normalize();
+    const g = d.clone().multiplyScalar(planet.groundRadius(d));
+    const v = g.project(game.camera);
+    const r = game.renderer.domElement.getBoundingClientRect();
+    return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height };
+  })()`);
+  // Every cue the game asks for, heard or not (audio may be locked).
+  await evaluate(`(() => {
+    window.__cues = [];
+    const play = audio.play.bind(audio), start = audio.start.bind(audio);
+    audio.play = (c) => (__cues.push(c), play(c));
+    audio.start = (c) => (__cues.push(c), start(c));
+  })()`);
+  for (const type of ['mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, ...target, button: 'left', clickCount: 1 });
+  await drawFrames(2);
+  const fired = await evaluate(`({ state: planet.buster.state, busy: planet.busy, selected: planet.selected })`);
+  // No way out while it goes off.
+  await evaluate(`levels.leavePlanet()`);
+  await drawFrames(2);
+  const stayed = await evaluate(`levels.mode === 'planet' && !levels.transitioning`);
+  let maxFlash = 0;
+  let blasted = false;
+  for (let i = 0; i < 600 && (await evaluate(`planet.busy`)); i++) {
+    const s = await evaluate(`({ flash: +getComputedStyle(document.getElementById('flash')).opacity, busted: planet.busted })`);
+    maxFlash = Math.max(maxFlash, s.flash);
+    blasted ||= s.busted;
+    await sleep(100);
+  }
+  const after = await evaluate(`(() => {
+    planet.select('planetBuster');
+    return { state: planet.buster.state, busy: planet.busy, busted: planet.busted, selected: planet.selected,
+      hud: document.getElementById('hud-climate').textContent, systemBody: __busted.busted, description: __busted.description, count: levels.busted.count,
+      flash: +getComputedStyle(document.getElementById('flash')).opacity };
+  })()`);
+  await evaluate(`levels.leavePlanet()`);
+  await until(`levels.mode === 'system' && !levels.transitioning`, 60000);
+  const system = await evaluate(`({ busted: __busted.busted, radius: __busted.radius > __busted.config.radius, details: __busted.details })`);
+  // Back down: a debris field from the start.
+  await evaluate(`(() => { ship.parkAt(__busted); levels.toPlanet(__busted); })()`);
+  await until(`levels.mode === 'planet' && !levels.transitioning`, 60000);
+  await drawFrames(5);
+  const revisit = await evaluate(`({ busted: planet.busted, state: planet.buster.state, plants: planet.plants, weather: planet.weather, geysers: planet.geysers,
+    available: planet.status('planetBuster').available })`);
+  await evaluate(`levels.leavePlanet()`);
+  await until(`levels.mode === 'system' && !levels.transitioning`, 60000);
+  // Out to the galaxy and back: the system is built afresh, the body still busted.
+  await evaluate(`levels.toGalaxy()`);
+  await until(`levels.mode === 'galaxy' && !levels.transitioning`, 60000);
+  await evaluate(`levels.toSystem()`);
+  await until(`levels.mode === 'system' && !levels.transitioning`, 60000);
+  const rebuilt = await evaluate(`[...world.planets, ...world.moons].filter((b) => b.busted).map((b) => b.name)`);
+  const bustedName = await evaluate(`__busted.name`);
+  const heardOrder = (await evaluate(`__cues`)).filter((c) => c.startsWith('buster') || c === 'planetExplode');
+  buster = { inSpace, armed, fired, stayed, maxFlash, blasted, sounds: heardOrder, after, system, revisit, rebuilt, bustedName };
+  buster.ok =
+    inSpace.bar &&
+    inSpace.slots === 1 &&
+    /down to a planet or moon/.test(inSpace.hint) &&
+    armed.selected === 'planetBuster' &&
+    armed.aiming &&
+    fired.state === 'firing' &&
+    fired.busy &&
+    fired.selected === null &&
+    stayed &&
+    maxFlash > 0.5 &&
+    blasted &&
+    after.state === 'spent' &&
+    !after.busy &&
+    after.busted &&
+    after.selected === null &&
+    /planet buster/.test(after.hud) &&
+    after.systemBody &&
+    /^Debris field/.test(after.description) &&
+    after.count === 1 &&
+    system.busted &&
+    system.radius &&
+    revisit.busted &&
+    revisit.state === 'spent' &&
+    !revisit.available &&
+    revisit.plants === null &&
+    revisit.weather === null &&
+    revisit.geysers === null &&
+    rebuilt.length === 1 &&
+    rebuilt[0] === bustedName &&
+    heardOrder.join(',') === 'busterFire,busterFlight,busterImpact,planetExplode';
+  return buster.ok;
+});
 clearTimeout(timer);
 
 const ok = started && !stalled && Object.keys(sections).length > 0 && Object.values(sections).every((x) => x.ok) && errors.length === 0;
 console.error(`[smoke] ${ok ? 'ok' : 'FAILED'} in ${Math.round((Date.now() - T0) / 1000)} s${errors.length ? `, ${errors.length} console errors` : ''}`);
 console.log(
   JSON.stringify(
-    { ok, started, stalled, sections, before, after, autopilot, pick, systemMap, sky, living, comet, belt, galaxyLoop, nebulas, rogues, seamless, audio, planetLoop, heldZoom, cometLoop, asteroidLoops, planetTypes, touch, touchLab, lab, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
+    { ok, started, stalled, sections, before, after, autopilot, pick, systemMap, sky, living, comet, belt, galaxyLoop, nebulas, rogues, seamless, audio, planetLoop, heldZoom, cometLoop, asteroidLoops, planetTypes, touch, touchLab, buster, lab, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
     null,
     2,
   ),
