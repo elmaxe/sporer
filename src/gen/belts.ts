@@ -280,7 +280,7 @@ export function kuiperSpan(ctx: BeltContext): [number, number] | null {
   return [inner, outer];
 }
 
-function makeBelt(
+export function makeBelt(
   rng: Rng,
   kind: BeltKind,
   name: string,

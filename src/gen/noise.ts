@@ -1,4 +1,5 @@
 import { GLOBE_SIZE_FACTOR } from './planets';
+import { realSurface, surfaceHeight } from './realSurface';
 
 /**
  * Cheap deterministic 3D noise for low-poly planet terrain. Not Perlin, but
@@ -7,6 +8,9 @@ import { GLOBE_SIZE_FACTOR } from './planets';
  * Pass a unit direction vector for seamless results on a sphere.
  */
 export function terrainNoise(x: number, y: number, z: number, seed: number): number {
+  // A real body (the Sol system's Earth, Moon, Mars, Pluto) reads its height map instead (gen/realSurface.ts).
+  const real = realSurface(seed);
+  if (real) return surfaceHeight(real, x, y, z);
   let sum = 0;
   let amp = 1;
   let freq = 1.3;
@@ -60,5 +64,7 @@ export function detailedTerrain(x: number, y: number, z: number, seed: number): 
   }
   // Stretched like terrainNoise (the raw sum clusters near 0), then scaled down.
   const detail = DETAIL_AMPLITUDE * Math.max(-1, Math.min(1, (sum / total) * 2.5));
-  return Math.max(-1, Math.min(1, terrainNoise(x, y, z, seed) + detail));
+  // A real body keeps only some of the detail (RealSurface.detail).
+  const real = realSurface(seed);
+  return Math.max(-1, Math.min(1, terrainNoise(x, y, z, seed) + detail * (real ? real.detail : 1)));
 }

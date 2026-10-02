@@ -4,6 +4,7 @@ import { hslToHex } from './color';
 import { architectureFor, generateForm, type PlantForm } from './plantForm';
 import { generateName } from './names';
 import { terrainNoise } from './noise';
+import { realSurface, surfaceColor } from './realSurface';
 import { Rng } from './rng';
 
 /*
@@ -248,7 +249,23 @@ export function parsePlantId(id: string): { face: number; i: number; j: number; 
 export function fertility(x: number, y: number, z: number, seed: number): number {
   const big = terrainNoise(x * 3.1, y * 3.1, z * 3.1, seed ^ 0x51ed);
   const small = terrainNoise(x * 9.7, y * 9.7, z * 9.7, seed ^ 0x9e37);
-  return Math.min(1, Math.max(0, 0.5 + 0.38 * big + 0.17 * small));
+  const f = Math.min(1, Math.max(0, 0.5 + 0.38 * big + 0.17 * small));
+  // A real body (gen/realSurface.ts) grows plants only where its colour map is green (no forests in the Sahara).
+  const real = realSurface(seed);
+  return real ? f * vegetation(surfaceColor(real, x, y, z, rgb)) : f;
+}
+
+const rgb: [number, number, number] = [0, 0, 0];
+
+/**
+ * 0 to 1: how green a satellite colour is. The Blue Marble's forests are a dark
+ * green (g/r ≈ 1.35), grassland and steppe yellower, deserts, rock and ice
+ * as bright or brighter in red as in green.
+ */
+export function vegetation([r, g, b]: readonly [number, number, number]): number {
+  const greenness = smoothstep(0.98, 1.2, g / Math.max(r, 1e-3));
+  const bright = smoothstep(0.5, 0.75, (r + g + b) / 3);
+  return greenness * (1 - bright);
 }
 
 function smoothstep(a: number, b: number, v: number): number {

@@ -19,6 +19,7 @@ import {
   type MapBeltGroup,
   type MapDisc,
   type SystemMapLayout,
+  staggerLabels,
 } from './systemMapLayout';
 
 /** The map's height at most, CSS px, for mouse players (the touch overlay gets what fits on screen). */
@@ -107,6 +108,8 @@ export class SystemMap implements Entity {
   private readonly starColors: StarColors[];
   private readonly titleText: string;
   private layout: SystemMapLayout | null = null;
+  /** Which row each planet's name is on (see staggerLabels). */
+  private labelRows: number[] = [];
   private pixelRatio = 1;
   private layoutDirty = true;
   private active = false;
@@ -274,28 +277,43 @@ export class SystemMap implements Entity {
     };
   }
 
+  private labelFont(): string {
+    return `600 ${this.input.touchMode ? 12 : 10}px system-ui, sans-serif`;
+  }
+
   /** Lays the map out for the panel's current width, and sizes the canvas to match. */
   private measure(): void {
     const width = this.canvas.clientWidth;
     if (width <= 0) return;
     this.layoutDirty = false;
     const maxHeight = this.input.touchMode ? Math.max(120, window.innerHeight - TOUCH_MARGIN) : MAX_HEIGHT;
-    const layout = layoutSystemMap(
-      this.data.planets.map((p) => ({
-        radius: p.radius,
-        ringOuter: p.rings?.outer ?? null,
-        moons: p.moons.map((m) => ({ radius: m.radius })),
-      })),
-      {
-        width,
-        maxHeight,
-        stars: this.data.stars.map((s) => s.radius),
-        belts: mapBeltInputs(
-          this.beltGroups,
-          this.belts.map((b) => b.data),
-        ),
-      },
+    const lay = (labelRows: number): SystemMapLayout =>
+      layoutSystemMap(
+        this.data.planets.map((p) => ({
+          radius: p.radius,
+          ringOuter: p.rings?.outer ?? null,
+          moons: p.moons.map((m) => ({ radius: m.radius })),
+        })),
+        {
+          width,
+          maxHeight,
+          stars: this.data.stars.map((s) => s.radius),
+          belts: mapBeltInputs(
+            this.beltGroups,
+            this.belts.map((b) => b.data),
+          ),
+          labelRows,
+        },
+      );
+    let layout = lay(1);
+    // Names that would run into their neighbours' (small planets close together) go on a second row.
+    const ctx = this.canvas.getContext('2d')!;
+    ctx.font = this.labelFont();
+    this.labelRows = staggerLabels(
+      layout.planets.map((d) => d.x),
+      this.planetDiscs.map((d) => ctx.measureText(d.label ?? '').width),
     );
+    if (this.labelRows.some((row) => row > 0)) layout = lay(2);
     this.layout = layout;
     let k = 0;
     const columns = [
@@ -346,7 +364,7 @@ export class SystemMap implements Entity {
       }
       const { config } = d.body;
       const gas = isGas(config) ? gasPainter(config.seed, config.bands, config.size === 'iceGiant') : null;
-      const terrain = gas ? null : terrainPainter(config.style);
+      const terrain = gas ? null : terrainPainter(config.style, false, config.seed);
       const tilt = config.tilt ?? 0;
       const cos = Math.cos(tilt);
       const sin = Math.sin(tilt);
@@ -366,7 +384,7 @@ export class SystemMap implements Entity {
           const bx = nx * cos + ny * sin;
           const by = -nx * sin + ny * cos;
           if (gas) gas(bx, by, nz, this.color);
-          else terrain!(terrainNoise(bx, by, nz, config.seed), this.color);
+          else terrain!(terrainNoise(bx, by, nz, config.seed), this.color, bx, by, nz);
           const lit = Math.max(0, nx * LIGHT.x + ny * LIGHT.y + nz * LIGHT.z);
           this.color.multiplyScalar(NIGHT + (1 - NIGHT) * lit);
           this.color.getRGB(this.srgb, THREE.SRGBColorSpace);
@@ -411,11 +429,11 @@ export class SystemMap implements Entity {
     layout.belts.forEach((belt, i) => this.drawBelt(ctx, belt.x, layout.axisY, belt.halfWidth, belt.halfHeight, i));
     for (const d of this.discs) this.drawBody(ctx, d);
 
-    ctx.font = `600 ${this.input.touchMode ? 12 : 10}px system-ui, sans-serif`;
+    ctx.font = this.labelFont();
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
     ctx.fillStyle = LABEL;
-    for (const d of this.planetDiscs) ctx.fillText(d.label ?? '', d.disc.x, layout.labelY);
+    this.planetDiscs.forEach((d, i) => ctx.fillText(d.label ?? '', d.disc.x, layout.labelY + (this.labelRows[i] ?? 0) * mapLayoutParams.labelRowHeight));
     if (this.discs.length === 0) {
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';

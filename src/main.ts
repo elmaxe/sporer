@@ -1,7 +1,8 @@
 import { Game } from './core/Game';
 import { Debug } from './core/Debug';
 import { Physics } from './physics/Physics';
-import { generateGalaxy, systemRef } from './gen/galaxy';
+import { generateGalaxy, solRef, systemRef } from './gen/galaxy';
+import { loadSurfaceMaps } from './world/surfaceMaps';
 import { geyserKind } from './gen/geysers';
 import { volcanicLightning, weatherKind } from './gen/weather';
 import { parseSeed } from './gen/rng';
@@ -26,10 +27,13 @@ async function main(): Promise<void> {
   // ?seed=<number or any text> picks the galaxy, ?star=<id> jumps to a system (or a rogue planet).
   const params = new URLSearchParams(location.search);
   const galaxy = generateGalaxy(parseSeed(params.get('seed') ?? DEFAULT_SEED));
-  const starId = Number(params.get('star'));
-  const start = (params.has('star') && systemRef(galaxy, starId)) || findHomeSystem(galaxy);
+  // ?star=sol is our own solar system, wherever it is in this galaxy.
+  const starParam = params.get('star');
+  const start = (starParam?.toLowerCase() === 'sol' && solRef(galaxy)) || (starParam !== null && systemRef(galaxy, Number(starParam))) || findHomeSystem(galaxy);
 
-  const [debug] = await Promise.all([Debug.create(), Physics.init()]);
+  // The real bodies' maps (Earth, the Moon, Mars, Pluto): waited for when starting in Sol, else they load meanwhile.
+  const maps = loadSurfaceMaps();
+  const [debug] = await Promise.all([Debug.create(), Physics.init(), start.real ? maps : null]);
   const game = new Game(document.getElementById('app')!, debug);
   const audioSettings = loadAudioSettings();
   const audio = new AudioManager(audioSettings, debug);
