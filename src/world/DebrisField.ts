@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import {
   DEBRIS_CHUNKS,
   ROCK,
+  blastParams,
+  crustTemperature,
   debrisPalette,
   debrisParams,
   debrisPosition,
@@ -19,6 +21,7 @@ import {
 import type { PlanetStyle } from '../gen/planets';
 import { Rng } from '../gen/rng';
 import type { AtmosphereSun } from './atmosphereShell';
+import { createGlowTexture } from './glowTexture';
 import { SIMPLEX_GLSL } from './noiseGlsl';
 
 /** What a field is drawn with: how many rocks, dust motes and vapour puffs, and how much bigger than true the rocks are. */
@@ -40,6 +43,14 @@ export const DEBRIS_FAR: DebrisDetail = { chunks: 220, motes: 1200, puffs: 70, c
 export const debrisLookParams = {
   /** How bright the glowing melt is (× its blackbody brightness, see glowBrightness). */
   melt: 1.1,
+  /** How bright the hot crust glows (dull red at its floor; brighter while fresh and near the fissures). */
+  crust: 0.22,
+  /** The faint glow round a molten field (its fissures lighting its dust), and how much brighter it starts. */
+  haze: 0.12,
+  hazeStart: 1.5,
+  /** How much the fissures throb (the melt welling up), and how fast, radians per second. */
+  pulse: 0.3,
+  pulseRate: 0.9,
   /** How bright glowing droplets and the vapour are. */
   droplets: 2.5,
   vapour: 1.6,
@@ -191,6 +202,10 @@ export class DebrisField {
   /** The rocks' fissures: how wide (from the hot area) and how they glow. */
   private readonly crack = { value: 0 };
   private readonly crackGlow = { value: new THREE.Color(0, 0, 0) };
+  private readonly crustGlow = { value: new THREE.Color(0, 0, 0) };
+  private readonly pulse = { value: new THREE.Vector2(0, 0) };
+  /** A soft glow round a molten field. */
+  private readonly haze: THREE.Sprite | null;
   private readonly matrix = new THREE.Matrix4();
   private readonly position = new THREE.Vector3();
   private readonly rotation = new THREE.Quaternion();
@@ -292,6 +307,10 @@ export class DebrisField {
     this.dust.onBeforeRender = this.pointScale(this.dust.material);
     this.object.add(this.mesh, this.dust);
 
+    // A soft glow round a field that melted (a giant's gas glows on its own).
+    this.haze = look.melt > 0.05 && !look.gas ? createHaze() : null;
+    if (this.haze) this.object.add(this.haze);
+
     // The vapour cloud (a giant's gas), tinted like the dust (or the bands).
     if (look.vapour > 0) this.billows = billowTexture(seed);
     this.vapour = this.billows ? this.createVapour(seed, detail.puffs, palette, this.billows) : null;
@@ -313,6 +332,17 @@ export class DebrisField {
     // Ridged simplex noise is under w over about 1.4 w of the surface: widths for the hot area.
     this.crack.value = Math.min(1.5, 0.7 * area);
     this.setGlow(this.crackGlow.value, ROCK.triplePoint, debrisLookParams.melt * (area > 0 ? 1 : 0));
+    // The crust's own dull glow: bright while fresh, settling to red heat.
+    const fresh = Math.exp(-Math.max(0, t) / blastParams.crustTime);
+    glowColor(crustTemperature(t), this.rgb);
+    this.crustGlow.value.setRGB(this.rgb[0], this.rgb[1], this.rgb[2]).multiplyScalar(t > 0 ? debrisLookParams.crust * (1 + 3 * fresh) : 0);
+    this.pulse.value.set(t * debrisLookParams.pulseRate, debrisLookParams.pulse);
+    if (this.haze) {
+      glowColor(1300 + 900 * fresh, this.rgb);
+      this.haze.material.color.setRGB(this.rgb[0], this.rgb[1], this.rgb[2]);
+      this.haze.material.opacity = t > 0 ? debrisLookParams.haze * look.melt * (1 + debrisLookParams.hazeStart * fresh) : 0;
+      this.haze.scale.setScalar(2 * 1.5 * this.radius * Math.min(1, 0.4 + t / blastParams.crustTime));
+    }
 
     if (this.vapour) {
       const v = this.vapour.material.uniforms;
@@ -358,6 +388,8 @@ export class DebrisField {
     this.vapour?.geometry.dispose();
     this.vapour?.material.dispose();
     this.billows?.dispose();
+    this.haze?.material.map?.dispose();
+    this.haze?.material.dispose();
   }
 
   /** `out` = the blackbody colour of `T` K, as bright as it glows, × `strength`. */
@@ -376,6 +408,8 @@ export class DebrisField {
     material.onBeforeCompile = (shader) => {
       shader.uniforms.uCrack = this.crack;
       shader.uniforms.uCrackGlow = this.crackGlow;
+      shader.uniforms.uCrustGlow = this.crustGlow;
+      shader.uniforms.uPulse = this.pulse;
       shader.vertexShader = shader.vertexShader
         .replace(
           '#include <common>',
@@ -385,7 +419,7 @@ export class DebrisField {
       shader.fragmentShader = shader.fragmentShader
         .replace(
           '#include <common>',
-          `#include <common>\nuniform float uCrack;\nuniform vec3 uCrackGlow;\nvarying vec3 vRock;\nvarying float vGlow;\n${SIMPLEX_GLSL}`,
+          `#include <common>\nuniform float uCrack;\nuniform vec3 uCrackGlow;\nuniform vec3 uCrustGlow;\nuniform vec2 uPulse;\nvarying vec3 vRock;\nvarying float vGlow;\n${SIMPLEX_GLSL}`,
         )
         .replace(
           '#include <emissivemap_fragment>',
@@ -396,8 +430,13 @@ export class DebrisField {
             // Thin glowing lines where ridged noise crosses zero, never thinner than a pixel so far rocks still glint.
             float n = abs(snoise(vRock * 2.2 + seed * 1.37));
             float wide = max(width, 0.35 * fwidth(n));
-            float crack = (1.0 - smoothstep(0.4 * wide, wide, n)) * step(0.001, vGlow - seed);
-            totalEmissiveRadiance += uCrackGlow * crack * step(0.001, width);
+            float molten = step(0.001, vGlow - seed) * step(0.001, width);
+            float crack = 1.0 - smoothstep(0.4 * wide, wide, n);
+            // The melt wells up and sinks back: a slow throb, out of step from rock to rock and along each crack.
+            float throb = 1.0 - uPulse.y * (0.5 + 0.5 * sin(uPulse.x + seed * 0.37 + dot(vRock, vec3(2.1, 1.3, 1.7))));
+            // The crust glows dull red, hotter near the fissures where the heat comes through.
+            float nearCrack = 1.0 - smoothstep(0.0, 0.6, n);
+            totalEmissiveRadiance += molten * (uCrackGlow * crack * throb + uCrustGlow * (0.35 + 0.65 * nearCrack));
           }`,
         );
     };
@@ -524,6 +563,22 @@ function billowTexture(seed: number): THREE.DataTexture {
   texture.minFilter = THREE.LinearFilter;
   texture.needsUpdate = true;
   return texture;
+}
+
+/** The glow round a molten field: a soft additive sprite, tinted and sized in `animate`. */
+function createHaze(): THREE.Sprite {
+  const sprite = new THREE.Sprite(
+    new THREE.SpriteMaterial({
+      map: createGlowTexture(),
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      transparent: true,
+      toneMapped: false,
+      opacity: 0,
+    }),
+  );
+  sprite.name = 'Debris glow';
+  return sprite;
 }
 
 function hashOf(seed: number): number {

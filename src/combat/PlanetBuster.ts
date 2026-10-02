@@ -8,6 +8,8 @@ import type { GroundHeight } from '../planet/ground';
 import type { RenderClock } from '../planet/PlanetFrame';
 import { MarkerRing } from '../player/MarkerRing';
 import { createCubeSphere } from '../world/cubeSphere';
+import { blastParams } from '../gen/debris';
+import { debrisLookParams } from '../world/DebrisField';
 import { createGlowTexture } from '../world/glowTexture';
 import { SIMPLEX_GLSL } from '../world/noiseGlsl';
 import { CLOUD_RENDER_ORDER } from '../world/weatherLook';
@@ -165,6 +167,12 @@ export class PlanetBuster implements Entity {
     f?.add(busterParams, 'blastFlash', 0, 1);
     f?.add(busterParams, 'fireballSize', 0.5, 6);
     f?.add(busterParams, 'ringSize', 1, 15);
+    f?.add(debrisLookParams, 'melt', 0, 4).name('fissure glow');
+    f?.add(debrisLookParams, 'crust', 0, 1).name('crust glow');
+    f?.add(debrisLookParams, 'haze', 0, 0.5).name('field glow');
+    f?.add(debrisLookParams, 'pulse', 0, 1).name('fissure throb');
+    f?.add(blastParams, 'hotArea', 0, 1).name('fissure area');
+    f?.add(blastParams, 'crustFloor', 800, 2000).name('crust floor K');
   }
 
   get state(): BusterState {

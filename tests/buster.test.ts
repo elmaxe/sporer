@@ -19,6 +19,7 @@ import {
   ROCK,
   blastHeat,
   blastParams,
+  crustTemperature,
   debrisLook,
   debrisLookFor,
   dropletTemperature,
@@ -263,6 +264,13 @@ describe('how hot the blast leaves a body', () => {
     expect(hotArea(0.01, 1)).toBeGreaterThan(0.99);
     expect(hotArea(blastParams.crustTime * 10, 1)).toBeCloseTo(blastParams.hotArea, 3);
     expect(hotArea(blastParams.crustTime * 10, 0.5)).toBeCloseTo(blastParams.hotArea * 0.5, 3);
+  });
+
+  it('cools the crust from the melt to a dull red heat that lasts', () => {
+    expect(crustTemperature(0)).toBe(ROCK.triplePoint);
+    expect(crustTemperature(blastParams.crustTime)).toBeLessThan(ROCK.triplePoint);
+    expect(crustTemperature(1e4)).toBeCloseTo(blastParams.crustFloor);
+    expect(blastParams.crustFloor).toBeGreaterThan(DRAPER_POINT);
   });
 
   it('cools droplets below the glow within seconds', () => {

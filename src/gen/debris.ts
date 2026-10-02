@@ -235,8 +235,16 @@ export const blastParams = {
    * Stylised (an open question): it puts an Earth a third vaporised, Mars half molten and the Moon barely warm.
    */
   heatShare: 0.25,
-  /** A crust's hot area once it has formed: 3.6% of a Hawaiian flow's surface still glowed after emplacement. */
-  hotArea: 0.036,
+  /**
+   * A crust's hot area once it has formed. A calm Hawaiian flow kept 3.6% of its surface glowing, a churning
+   * channel 60%; tumbling fragments keep tearing their skins, so stylised in between (the aftermath stays lit).
+   */
+  hotArea: 0.15,
+  /**
+   * Where the crust's own temperature settles, K: a fresh crust measured 768 °C (1041 K), above the Draper
+   * point, so it glows dull red. Real crusts cool below that within the hour; held here so the wreck stays hot.
+   */
+  crustFloor: 1050,
   /** Seconds (game time, compressed from hours) for the melt's surface to crust over. */
   crustTime: 6,
   /** Seconds (game time) for a molten droplet to lose a fifth of its temperature (a real millimetre droplet: about a second). */
@@ -305,6 +313,11 @@ export function debrisLook(escapeVelocity: number, gas: boolean, p = blastParams
 export function hotArea(t: number, melt: number, p = blastParams): number {
   if (t <= 0) return 0;
   return melt * (p.hotArea + (1 - p.hotArea) * Math.exp(-t / p.crustTime));
+}
+
+/** The crust's surface temperature `t` seconds after the blast: from the melt's down to `crustFloor` as it crusts over. */
+export function crustTemperature(t: number, p = blastParams): number {
+  return p.crustFloor + (ROCK.triplePoint - p.crustFloor) * Math.exp(-Math.max(0, t) / p.crustTime);
 }
 
 /**
