@@ -56,7 +56,7 @@ Other ways in:
 
 ## 3. Fix, then check against the dump
 
-After a fix, run the same `--dump` command and compare with the dump's pictures. Report what the player marked, what caused it and what changed, with the restored before/after shots.
+After a fix, run the same `--dump` command and compare with the dump's pictures. Report what the player marked, what caused it and what changed, with the restored before/after shots, and put the same pictures in the pull request's description (see Pull requests in `CLAUDE.md`).
 
 ## Changing the dump
 

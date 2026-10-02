@@ -25,3 +25,7 @@ Browser game in Three.js inspired by Spore's space stage. Stack: Vite + TypeScri
 ## Roadmap
 
 See `ROADMAP.md`. Work one step at a time; when a step is verified, mark it ✅ there and push to `main`.
+
+## Pull requests
+
+A pull request that fixes or changes something you can see (a debug dump's bug, a rendering or layout fix, a new visual) shows pictures of it in its description: before and after, side by side, taken with `npm run shot` (for a dump, `--dump` restores its moment). GitHub's API can't upload images, so push them to the `pr-pictures` branch (an orphan branch holding only pictures; create it with `git checkout --orphan pr-pictures` and `git rm -rf .` if it doesn't exist) under a folder named after the PR's branch, and link each one in the description as `![what it shows](https://raw.githubusercontent.com/elmaxe/sporer/pr-pictures/<branch>/<file>.png)`. Never commit them to the PR's own branch. Crop to the part that matters and keep each file small (a few hundred KB).
