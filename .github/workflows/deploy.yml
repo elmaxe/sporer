@@ -1,24 +1,36 @@
-# Checks, builds and publishes the game to GitHub Pages on every push to main.
-# One-time repo setting: Settings → Pages → Source: GitHub Actions.
+# Checks, builds and publishes the game to GitHub Pages, one folder per version:
+#   https://elmaxe.github.io/sporer/                  the latest release (a pushed v* tag, e.g. from a GitHub Release)
+#   https://elmaxe.github.io/sporer/preview/          main
+#   https://elmaxe.github.io/sporer/branch/<branch>/  every other branch (lower case, '/' and the like as '-')
+# The builds live together on the gh-pages branch (scripts/pages-publish.sh); deleting a branch removes its folder.
+# Running this workflow by hand on a tag republishes that release, e.g. to roll back.
+# One-time repo setting: Settings → Pages → Source: Deploy from a branch → gh-pages, / (root).
 name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [main]
+    branches: ['**', '!gh-pages']
+    tags: ['v*']
+  delete:
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
-# One deploy at a time; a newer push cancels a queued (not running) one.
+# A newer push to the same branch or tag cancels its older run; different branches publish side by side.
 concurrency:
-  group: pages
-  cancel-in-progress: false
+  group: deploy-${{ github.event_name == 'delete' && format('delete-{0}', github.event.ref) || github.ref }}
+  cancel-in-progress: true
+
+env:
+  GIT_AUTHOR_NAME: github-actions[bot]
+  GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+  GIT_COMMITTER_NAME: github-actions[bot]
+  GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
 
 jobs:
-  build:
+  deploy:
+    if: github.event_name != 'delete'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,16 +42,15 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: dist
+      - name: Publish
+        run: scripts/pages-publish.sh "$GITHUB_REF" dist
 
-  deploy:
-    needs: build
+  remove:
+    if: github.event_name == 'delete' && github.event.ref_type == 'branch'
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+      - uses: actions/checkout@v4
+      - name: Remove the branch's folder
+        run: scripts/pages-publish.sh "refs/heads/$BRANCH"
+        env:
+          BRANCH: ${{ github.event.ref }}
