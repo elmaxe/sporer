@@ -121,6 +121,8 @@ const timer = setTimeout(() => {
 // Let the first frames draw (shader compiles, the sky's one-off bake) before timing anything.
 const started = await page.goto(url, READY, 60000);
 if (started) await drawFrames(20);
+/** The system the game starts in (the URL's, or the galaxy's home system); sections may leave it elsewhere. */
+const startId = started ? await evaluate(`system.id`) : null;
 
 const state = `({ speed: +ship.speed.toFixed(1), pos: ship.object.position.toArray().map((n) => +n.toFixed(1)) })`;
 let before, after, autopilot, pick, systemMap, sky, living, comet, belt, galaxyLoop, fps, audio, planetLoop, heldZoom, cometLoop, asteroidLoops, seamless, nebulas, rogues, dust;
@@ -1156,7 +1158,9 @@ async function watchShower(bodyExpr, name) {
 
 await section('dust', async () => {
   const r = (dust = {});
-  const home = await evaluate(`system.id`);
+  const home = startId;
+  // Where the section started: it ends there, so the sections after it run where they would without it.
+  const from = await evaluate(`system.id`);
   const segmentsBefore = await evaluate(`window.__seamless ? __seamless.segments.length : 0`);
   /** Through the galaxy map to system `id` (no page load, so the zoom recorder keeps running). */
   const visit = async (id) => {
@@ -1256,8 +1260,10 @@ await section('dust', async () => {
     crossfadeFrames: seg.frames.filter((x) => x.weight !== null && x.weight > 0 && x.weight < 1).length,
     minBrightness: +Math.min(...seg.frames.map((x) => x.brightness)).toFixed(2),
   })) : null`);
+  r.returned = from === home || (await visit(from));
 
   r.ok =
+    r.returned &&
     r.young.count >= 3 &&
     r.young.count <= 15 &&
     r.young.inNebulas >= r.young.count / 2 &&
