@@ -71,7 +71,7 @@ npm run dev        # http://localhost:5173 (debug panel on)
 
 URL parameters: `?seed=<number or text>` picks the galaxy, `?star=<id>` starts in a given system, `?debug` shows the debug panel in production builds, `?quality=low` renders at half resolution.
 
-Every push to `main` runs the typecheck, tests and build in GitHub Actions and deploys to GitHub Pages.
+GitHub Actions runs the typecheck, tests and build and deploys to GitHub Pages: the latest release (a `v*` tag) at https://elmaxe.github.io/sporer/, `main` at https://elmaxe.github.io/sporer/preview/, and each open pull request at `https://elmaxe.github.io/sporer/pr/<n>/`. The menu's **Version** picker switches between them; an app added to the home screen opens the version picked.
 
 ## Tech
 
