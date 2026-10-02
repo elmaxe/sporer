@@ -23,10 +23,10 @@ export class PlanetHud implements Entity {
   constructor(
     private readonly ship: PlanetShip,
     /** e.g. "Haikrai III · Terran world · 1 moon". */
-    private readonly location: string,
+    private location: string,
     input: Input,
     /** e.g. "15 °C · N₂–O₂ 1.0 bar · 1.0 g · geothermal low · T3"; null for gas giants. */
-    private readonly climate: string | null = null,
+    private climate: string | null = null,
   ) {
     this.help = new HelpText(input, HELP, TOUCH_HELP);
   }
@@ -39,6 +39,13 @@ export class PlanetHud implements Entity {
     this.climateEl.hidden = !this.climate;
     this.help.refresh(true);
     this.sinceRefresh = REFRESH_SECONDS;
+  }
+
+  /** New lines for a body just blown apart by a planet buster. */
+  bust(location: string, detail: string): void {
+    this.location = location;
+    this.climate = detail;
+    if (this.active) this.activate();
   }
 
   deactivate(): void {

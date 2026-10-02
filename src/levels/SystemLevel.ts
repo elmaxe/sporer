@@ -222,10 +222,10 @@ export class SystemLevel extends Level {
     this.trails.visible = false;
     for (const body of hidden) body.object.visible = false;
     // A visited comet's coma and tails are all round the camera: low orbit draws them as seen from inside.
-    for (const comet of this.world.comets) comet.object.visible = !hidden.includes(comet.nucleus);
+    for (const comet of this.world.comets) comet.object.visible = !hidden.includes(comet.nucleus) && !comet.nucleus.busted;
     renderScene(renderer, this.scene, camera);
     for (const body of hidden) body.object.visible = true;
-    for (const comet of this.world.comets) comet.object.visible = true;
+    for (const comet of this.world.comets) comet.object.visible = !comet.nucleus.busted;
     this.trails.visible = trails;
     this.ship.object.visible = shipVisible;
     // This level may be drawn itself in the same frame (crossfading with the planet level).

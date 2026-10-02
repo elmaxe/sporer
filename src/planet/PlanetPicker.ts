@@ -34,6 +34,8 @@ export class PlanetPicker implements Entity {
     private readonly hit: (ray: THREE.Ray, out: THREE.Vector3) => number | null,
     /** The ground's radius in a unit direction, for the ring. */
     private readonly height: GroundHeight,
+    /** Gets the clicked ground point first: true if it used the click (e.g. to fire a weapon), and the ship stays. */
+    private readonly intercept: ((point: THREE.Vector3) => boolean) | null = null,
   ) {
     this.ring = new MarkerRing(scene, '#66ffcc');
   }
@@ -42,7 +44,7 @@ export class PlanetPicker implements Entity {
     const click = this.input.consumeClick();
     if (click) {
       this.raycaster.setFromCamera(this.ndc.set(click.ndcX, click.ndcY), this.camera);
-      if (this.hit(this.raycaster.ray, this.point) !== null) this.ship.moveTo(this.point);
+      if (this.hit(this.raycaster.ray, this.point) !== null && !this.intercept?.(this.point)) this.ship.moveTo(this.point);
     }
 
     if (!this.ship.enRoute) {

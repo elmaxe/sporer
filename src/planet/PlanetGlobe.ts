@@ -41,8 +41,8 @@ export class PlanetGlobe implements Entity {
   readonly object = new THREE.Group();
   /** Sea-level (or cloud-top) radius; a small body's longest reach. */
   readonly radius: number;
-  /** Radius of the highest terrain (or cloud tops): the ship hovers above this. */
-  readonly top: number;
+  /** Radius of the highest terrain (or cloud tops): the ship hovers above this (once busted, the debris field's edge). */
+  top: number;
   /** Unit direction to the (main) star; the atmospheres read it for their day and night sides. */
   readonly sun = new THREE.Vector3(0, 1, 0);
   /** The sun's light (colour × intensity) and the ambient light, for the lava's crust (set by PlanetLights). */
@@ -66,6 +66,8 @@ export class PlanetGlobe implements Entity {
   /** Bodies with an atmosphere: where the ground is, so the haze stops there (see renderDepth). */
   private readonly ground: GroundDepth | null;
   private readonly cameraPosition = new THREE.Vector3();
+  /** Once busted: the radius of the debris field, which is the ground from then on. */
+  private bustedRadius: number | null = null;
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -109,6 +111,7 @@ export class PlanetGlobe implements Entity {
    * as drawn, or the sea's surface where the terrain is under it. Allocation-free.
    */
   groundRadius(dir: THREE.Vector3): number {
+    if (this.bustedRadius !== null) return this.bustedRadius;
     const r = this.sample(dir, this.groundColor);
     return this.sea ? Math.max(r, this.radius) : r;
   }
@@ -123,7 +126,8 @@ export class PlanetGlobe implements Entity {
 
   /** True when the surface has every chunk the camera wants (for automation). */
   get settled(): boolean {
-    return this.surface.settled;
+    // A busted globe builds nothing more.
+    return this.busted || this.surface.settled;
   }
 
   /** The surface's chunks drawn now and their depths (the lab's readout). */
@@ -131,12 +135,28 @@ export class PlanetGlobe implements Entity {
     return this.surface.stats();
   }
 
+  /** True once a planet buster has blown it apart. */
+  get busted(): boolean {
+    return this.bustedRadius !== null;
+  }
+
+  /**
+   * Blown apart by a planet buster: everything goes, rings and all, and the
+   * ground is a sphere `radius` out from then on (the debris field's edge),
+   * which the ship flies over and clicks land on.
+   */
+  bust(radius: number): void {
+    this.bustedRadius = this.top = radius;
+    for (const child of this.object.children) child.visible = false;
+  }
+
   /** Draws the ground's depth for the atmosphere: call before drawing the scene with `camera`. */
   renderDepth(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera): void {
-    this.ground?.render(renderer, this.scene, camera);
+    if (!this.busted) this.ground?.render(renderer, this.scene, camera);
   }
 
   update(frameDt: number): void {
+    if (this.busted) return;
     this.lava?.animate(this.frame.renderTime);
     this.gas?.animate(this.frame.renderTime);
     this.weather?.animate(this.frame.renderTime);

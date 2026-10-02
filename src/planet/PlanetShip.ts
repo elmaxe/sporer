@@ -58,6 +58,8 @@ export class PlanetShip implements Entity {
   private readonly hull: THREE.Object3D;
   private readonly ring: THREE.Object3D;
   private hasTarget = false;
+  /** While set (e.g. firing a planet buster), WASD and the autopilot do nothing: it holds its place. */
+  locked = false;
   /** Distance from the planet's centre it flies at, and the one it's climbing or sinking to. */
   private _radius: number;
   /** What the zoom asks for: the altitude above the highest terrain (it sets the autopilot's pace too). */
@@ -209,6 +211,10 @@ export class PlanetShip implements Entity {
     const boost = input.isDown('ShiftLeft') || input.isDown('ShiftRight') ? planetShipParams.boostMultiplier : 1;
 
     this.move.set(input.axis('KeyA', 'KeyD'), 0, input.axis('KeyS', 'KeyW'));
+    if (this.locked) {
+      this.move.set(0, 0, 0);
+      this.hasTarget = false;
+    }
     if (this.move.lengthSq() > 0) {
       this.stop();
       // Forward is the camera's view direction flattened onto the ground (or its up, looking straight down).
