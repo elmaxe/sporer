@@ -164,11 +164,11 @@ const RIM_VERTEX = /* glsl */ `
   uniform vec3 uStar;
   varying vec3 vWorld;
   varying float vAcross;              // height over the scale height
-  varying float vAngle;
+  varying vec2 vRound;               // the point's place round the disc (x, z), for its angle per pixel
   varying float vLight;
   void main() {
     vAcross = position.y / uHeight;
-    vAngle = atan(position.z, position.x);
+    vRound = position.xz;
     vec4 world = modelMatrix * vec4(position, 1.0);
     vWorld = world.xyz;
     float d = uLightAt > 0.0 ? uLightAt : distance(world.xyz, uStar);
@@ -180,6 +180,7 @@ const RIM_VERTEX = /* glsl */ `
 const RIM_FRAGMENT = /* glsl */ `
   uniform sampler2D uClumpMap;
   uniform float uClumpV;              // the rim's place across the clump map
+  uniform float uRimClumps;           // how much the clumps show on it (a slice of the map is stripes up a wall)
   uniform float uTime;
   uniform float uSpin;                // angular speed at the rim (rad/s)
   uniform float uRimDepth;
@@ -193,7 +194,7 @@ const RIM_FRAGMENT = /* glsl */ `
   uniform vec2 uFade;
   varying vec3 vWorld;
   varying float vAcross;
-  varying float vAngle;
+  varying vec2 vRound;               // the point's place round the disc (x, z), for its angle per pixel
   varying float vLight;
   void main() {
     vec3 toEye = cameraPosition - vWorld;
@@ -204,9 +205,11 @@ const RIM_FRAGMENT = /* glsl */ `
     float fade = smoothstep(uFade.x, uFade.y, dist) * edgeOn;
     if (fade <= 0.0) discard;
     float s = vAcross;
-    float clump = texture2D(uClumpMap, vec2((vAngle - uTime * uSpin) / 6.2831853, uClumpV)).r * ${CLUMP_SCALE.toFixed(1)};
+    // The angle per pixel: interpolated per vertex it would jump across the seam where atan wraps round.
+    float angle = atan(vRound.y, vRound.x);
+    float clump = texture2D(uClumpMap, vec2((angle - uTime * uSpin) / 6.2831853, uClumpV)).r * ${CLUMP_SCALE.toFixed(1)};
     // The column through the disc's edge: Gaussian in height, so the midplane is opaque.
-    float tau = uRimDepth * exp(-s * s * 2.0) * mix(1.0, clump, 0.4);
+    float tau = uRimDepth * exp(-s * s * 2.0) * mix(1.0, clump, uRimClumps);
     float alpha = (1.0 - exp(-tau)) * fade * (1.0 - smoothstep(1.0, ${RIM_HEIGHT.toFixed(1)}, abs(s)));
     // Lit on its flared surfaces, dark in the midplane (HH 30's dark lane).
     float shade = mix(min(1.0, uMidplane * 0.4 + (1.0 - uOpaque)), 1.0, smoothstep(0.25, 1.0, abs(s)));
@@ -379,6 +382,9 @@ export class DustDisc implements Entity {
       uStar: this.shared.uStar!,
       uClumpMap: this.shared.uClumpMap!,
       uClumpV: { value: Math.log(radius / inner) / (this.shared.uLogSpan!.value as number) },
+      // A slice of the clump map, painted up a wall, is vertical stripes: a little on a young disc's edge (seen only
+      // edge-on, where they read as clumps along it), none on a debris disc's band, which shows from higher up.
+      uRimClumps: { value: young ? 0.25 : 0 },
       uTime: this.shared.uTime!,
       uSpin: { value: ((2 * Math.PI) / innerPeriod) * (radius / inner) ** -1.5 },
       uLightAt: { value: young ? 0 : this.shared.uHabitable!.value as number },
