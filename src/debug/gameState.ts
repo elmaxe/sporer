@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Game } from '../core/Game';
 import type { SceneManager } from '../levels/SceneManager';
 import type { SystemLevel } from '../levels/SystemLevel';
+import { bodyKey } from '../combat/busted';
 import { bodyLabLink } from '../lab/bodyLink';
 import { lodParams } from '../planet/LodSurface';
 import type { OrbitCamera } from '../player/OrbitCamera';
@@ -176,6 +177,14 @@ export function captureGameState(game: Game, levels: SceneManager): GameState {
         ? { spin: galaxy.spin.angle, current: galaxy.ship.current.id, destination: galaxy.ship.destination?.id ?? null }
         : null,
     graphics: { weather: weatherParams.enabled, plants: plantParams.enabled, wireframe: wireframeParams.enabled },
+    busted: {
+      bodies: spinning(world).flatMap((b) =>
+        b.blastedAt === null ? [] : [{ body: bodyRef(world, b) ?? { kind: 'planet' as const, index: -1, name: b.name }, time: b.blastedAt }],
+      ),
+      total: levels.busted.count,
+      firing: !!planet?.busy,
+      elapsed: planet?.buster.elapsed ?? null,
+    },
     ui: {
       touchMode: game.input.touchMode,
       hud,
@@ -241,6 +250,17 @@ export async function restoreGameState(game: Game, levels: SceneManager, state: 
   if (state.transitioning) notes.push(`taken mid-transition (crossfade ${state.crossfade ?? 'none'}): restored at the ${state.mode} level, settled`);
 
   const { world, ship } = system;
+  // Busted bodies first: low orbit over one is built as a debris field.
+  for (const { body: ref, time } of state.busted?.bodies ?? []) {
+    const body = resolveBody(world, ref) as Planet | null;
+    if (!body) {
+      notes.push(`no body ${ref.name} to bust`);
+      continue;
+    }
+    body.bust(time);
+    levels.busted.bust(bodyKey(body.config), time);
+  }
+  if (state.busted?.firing) notes.push(`a planet buster was going off (${state.busted.elapsed?.toFixed(1)} s after firing): restored as busted`);
   const shipState = state.system.ship;
   const target = shipState.target ? resolveBody(world, shipState.target) : null;
   if (shipState.target && !target) notes.push(`no body ${shipState.target.name} in this system`);
