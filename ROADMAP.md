@@ -477,7 +477,7 @@ Status: ⬜ todo · 🟨 in progress · ✅ done
   - `tests/plantForm.test.ts`: every architecture appears, determinism, the envelope fit to 1%, stems rooted on their parents, Leonardo's rule, the golden angle, tiers and fronds, foreign forms still grow.
   - Also in it: finite linear-RGB meshes cheaper at every level, triangle budgets per kind, silhouettes per architecture and view, Cauchy's shadow shares, the cone's closed form, merges keeping the area from above, and the fade bands tiling.
   - `tests/plantLab.test.ts`: sets, the `#hash` round trip, repairing damaged species, architecture switches with crowns to suit, links.
-  - Smoke: a new `plants` section. Every architecture at every level lit and cheaper level by level; zooming out goes through levels 0 → 1 → 2 → 3 → none; the line-up and the grove (every level drawing) work; a game planet's plants load; the planet lab's Plants link opens the same species.
+  - Smoke: a new `plants` section, in a browser of its own (after the earlier sections, the shared tab sometimes took over a minute to navigate to it). Every architecture at every level lit and cheaper level by level; zooming out goes through levels 0 → 1 → 2 → 3 → none; the line-up and the grove (every level drawing) work; a game planet's plants load; the planet lab's Plants link opens the same species.
 
 ## Later / ideas
 

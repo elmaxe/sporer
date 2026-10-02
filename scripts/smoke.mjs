@@ -1450,12 +1450,24 @@ await section('lab', async () => (lab = await runLab()).ok);
  * The plant lab (plants.html): every architecture grows and draws a lit plant at every level of detail (each
  * cheaper than the one before), zooming out on one plant with the game's own crossfade passes through every level and
  * past the last, the line-up and the grove (the game's SurfaceEntities) draw, a game planet's plants load by star and
- * planet, and the planet lab's Plants link opens its planet's species here.
+ * planet, and the planet lab's Plants link opens its planet's species here. In a browser of its own: after the
+ * sections before it, the shared tab sometimes took over a minute to navigate to the page at all.
  */
 /** A game planet with plants: the home system's first, Haikrai I (T3, seed 1337). */
 const PLANT_STAR = 6;
 const PLANT_PLANET = 0;
 async function runPlantLab() {
+  const own = await launch({ width: 1280, height: 720 });
+  try {
+    return await plantLabChecks(own);
+  } finally {
+    errors.push(...own.errors.map((e) => `plant lab: ${e}`));
+    await own.close();
+  }
+}
+
+async function plantLabChecks(page) {
+  const evaluate = page.tryEvaluate;
   const r = { architectures: [] };
   if (!(await page.goto(pageUrl('plants.html?gen=3'), `typeof window.plantLab !== 'undefined' && plantLab.ready`, 30000))) return { ok: false, started: false };
   const brightness = `(() => {
