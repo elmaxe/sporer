@@ -29,6 +29,7 @@ npm run shot -- --out <dir> --clean [--sheet] [--star <id>] <steps...>
 - **`--phone`**: an emulated phone (390×844, mobile, real touch events), so the game (and the lab) run in touch mode with the on-screen controls; use `tap:<element id>` to press its buttons.
 - **`--dump <file>`**: restore a debug dump's state (the player's `sporer-dump-*.json`, see `debug-dump`) at its page size and quality, then run the steps (default `shot:restored`). The game is left paused there.
 - **`--lab [<query>]`**: shoot the planet lab (`lab.html`) instead of the game, e.g. `--lab "gen=7&type=ice&kind=moon"` or `--lab "seed=1337&star=5&planet=2"`. See *The planet lab* below.
+- **`--plants [<query>]`**: shoot the plant lab (`plants.html`), e.g. `--plants "gen=4&kind=tree&arch=palm&view=lineup"` or `--plants "seed=1337&star=6&planet=0"`. See *The plant lab* below.
 
 Steps run in order. With no steps, you get `shot:view`.
 
@@ -138,6 +139,30 @@ npm run shot -- --out $OUT --clean --sheet --lab "gen=5" "js:lab.setType('lava')
 `--clean` hides the lab's control panel too; the readout (top right) stays, with the climate and what's active.
 
 On a phone: `npm run shot -- --out $OUT --phone --lab "gen=4&type=terran" tap:touch-map "until:lab.level.map.baked" shot:phone-map`.
+
+## The plant lab
+
+For how plants look (branching, leaves, palms, the levels of detail and where they change), shoot the plant lab: it grows the species you ask for with the game's own code (`gen/plantForm.ts`, `surface/plantMesh.ts`) and draws them with the game's materials. The page has `game` and `plantLab` (`src/plantlab/PlantLab.ts`); every call returns a promise that resolves once it's drawn, and `settle` waits for `plantLab.ready`.
+
+| Call | Does |
+|---|---|
+| `plantLab.generate(seed, { tier, kind, architecture })` | a new set of species, as a planet of that tier has (kind: tree, largeBush, smallBush; architecture: conifer, broadleaf, palm, shrub) |
+| `plantLab.load(galaxySeed, star, planet, moon?, species?)` | a game planet's plants |
+| `plantLab.select(i)` | show and edit species `i` of the set |
+| `plantLab.set({ height: 9, crown: 'tiers', form: { branches: 20 } })`, `plantLab.setForm({ tropism: -0.6 })` | edit the selected species (its envelope, or its form) |
+| `plantLab.setArchitecture('palm')`, `plantLab.reroll()` | grow it another way, or another form of the same way |
+| `plantLab.setView({ view: 'specimen' \| 'lineup' \| 'grove', lod: 'auto' \| 0..3, showLods, wireframe, skeleton, sunAzimuth, sunElevation })` | what to show; `lod: 'auto'` is the game's choice by distance, `showLods` tints each level |
+| `plantLab.look(yaw, pitch, distance)` | camera (degrees; distance in the plant's heights, the grove's in units) |
+| `plantLab.level.lods`, `.skeleton`, `.lodNow()`, `.grove.stats()` | what got built: triangles per level and where the game draws it, the stems and leaves, the level at the camera now, the grove's counts |
+
+```bash
+# Every level of detail of a palm, side by side, then tinted
+npm run shot -- --out $OUT --clean --sheet --plants "gen=4&kind=tree&arch=palm&view=lineup" shot:palm "js:plantLab.setView({ showLods: true })" shot:tinted
+# One tree zoomed out through the game's levels (the readout names the level at the camera)
+npm run shot -- --out $OUT --clean --sheet --plants "gen=7&kind=tree&arch=broadleaf" "js:plantLab.look(0, 10, 2)" shot:near "js:plantLab.look(0, 10, 20)" wait:1000 shot:mid "js:plantLab.look(0, 10, 34)" wait:1000 shot:far
+# A grove from the UFO's height, levels tinted
+npm run shot -- --out $OUT --clean --plants "gen=12&view=grove" "js:plantLab.setView({ showLods: true })" "js:plantLab.look(0, 25, 80)" settle shot:grove
+```
 
 ## Tips
 

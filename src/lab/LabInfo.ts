@@ -3,6 +3,7 @@ import type { Input } from '../core/Input';
 import { celsius, describeAtmosphere } from '../gen/climate';
 import { EARTH_RADIUS_KM, atmosphereLook, scaleHeight } from '../gen/atmosphere';
 import { shapeExtents } from '../gen/shape';
+import { plantLabLink } from '../plantlab/labPlants';
 import { describeLab, isSmallKind, labClimateData, labEarthRadii } from './labPlanet';
 import type { PlanetLab } from './PlanetLab';
 
@@ -19,6 +20,8 @@ const GAS: Record<string, string> = { oxygenNitrogen: 'N₂–O₂', nitrogen: '
 export class LabInfo implements Entity {
   private readonly root = document.getElementById('lab-info')!;
   private readonly back = document.createElement('a');
+  /** To the plant lab with this planet's species (shown when it has plants). */
+  private readonly plants = document.createElement('a');
   private readonly details = document.createElement('button');
   private readonly head = document.createElement('div');
   private readonly table = document.createElement('table');
@@ -37,7 +40,13 @@ export class LabInfo implements Entity {
     this.details.type = 'button';
     this.details.className = 'lab-details';
     this.details.addEventListener('click', this.onDetails);
-    top.append(this.back, this.details);
+    this.plants.className = 'lab-back';
+    this.plants.textContent = 'Plants';
+    this.plants.title = "This planet's plant species in the plant lab";
+    const links = document.createElement('div');
+    links.className = 'lab-links';
+    links.append(this.back, this.plants);
+    top.append(links, this.details);
     this.help.className = 'lab-help';
     this.root.append(top, this.head, this.table, this.help);
     // Phones start with just the name, so the planet has the screen.
@@ -59,6 +68,13 @@ export class LabInfo implements Entity {
     this.back.title = this.lab.gameLink ? 'The game, at this planet\'s system' : 'The game';
     this.head.innerHTML =
       `<h1>${escape(planet.name)}</h1>` + `<div class="lab-sub">${escape(describeLab(planet))}${from ? ` · ${escape(from)}` : ''}</div>`;
+    const plants = this.lab.level?.plants;
+    this.plants.hidden = !plants;
+    if (plants) {
+      const s = this.lab.source;
+      const from = s && s.comet === undefined && s.asteroid === undefined ? { seed: s.seed, star: s.star, planet: s.planet, moon: s.moon } : null;
+      this.plants.href = plantLabLink(plants.plan.species, plants.plan.tier, plants.plan.seed, from, location.href);
+    }
     this.touch = null;
     this.render();
   }
@@ -166,7 +182,7 @@ export class LabInfo implements Entity {
       const st = plants.stats();
       rows.push([
         'Plants',
-        `T${plants.plan.tier} · ${plants.plan.species.length} species · ${st.plants} in ${st.cells} cells · ${st.near} near, ${st.mid} mid · ${st.drawCalls} draws, ${Math.round(st.triangles / 1000)}k triangles`,
+        `T${plants.plan.tier} · ${plants.plan.species.length} species · ${st.plants} in ${st.cells} cells · ${st.lods.join(' / ')} by detail · ${st.drawCalls} draws, ${Math.round(st.triangles / 1000)}k triangles`,
       ]);
     } else if (view.view === 'globe' && planet.type !== 'gas' && !planet.shape) {
       rows.push(['Plants', 'none']);

@@ -28,8 +28,8 @@ export default defineConfig(({ command }) => {
     build: {
       target: 'es2022',
       chunkSizeWarningLimit: 5000,
-      // The game, and the planet lab (lab.html, a tool for making and checking planets).
-      rollupOptions: { input: { main: 'index.html', lab: 'lab.html' } },
+      // The game, the planet lab (lab.html, a tool for making and checking planets) and the plant lab (plants.html).
+      rollupOptions: { input: { main: 'index.html', lab: 'lab.html', plants: 'plants.html' } },
     },
     test: {
       include: ['tests/**/*.test.ts'],

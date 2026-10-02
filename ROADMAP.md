@@ -437,10 +437,52 @@ Status: ⬜ todo · 🟨 in progress · ✅ done
 - *Young stars:* a star age (or a "young" flag) decides it; research what fraction of stars keep discs and for how long. Disc: a flat ring mesh with a noise shader (gaps at the few forming planets), lit by the star.
 - *Meteor showers:* pure test for whether a planet's orbit passes within some distance of a comet's orbit (minimum orbit distance, tested), then streaks in low orbit's sky while the planet is near the crossing point.
 
+### 30. ✅ Plant lab: generated plants with levels of detail
+- A page like the planet lab for making and checking plants, and the procedural generator behind them: real trees and bushes instead of step 25's placeholders, editing the same species parameters.
+- Plants in the game grow from the same generator and draw at several levels of detail that crossfade without popping.
+
+**Done (as built; numbers and sources in `docs/research/plant-forms.md`):**
+- *Generator, `src/gen/plantForm.ts` (pure).* Each species gains a `PlantForm`: architecture, branch orders, counts, angles, length ratio, droop or reach, gnarl, lean, tiers, leaf size and density, a second leaf colour, flowers. It is drawn from its own stream, so every other species value is unchanged.
+  - `growPlant` grows it into a `PlantSkeleton`: stems (polylines with radii) and leaf masses (ellipsoids), or a palm's fronds.
+  - Four architectures. *Conifer*: a leader with a spiral of near-level branches (75–100°, steeper towards the top) as long as the cone or tiered envelope is wide, each carrying a flat pad of needles. *Broadleaf*: a trunk into the crown, branches at 30–55° aimed at points on the crown's ellipsoid, twigs and leaf blobs. *Palm*: a leaning, curving trunk and 7–12 arching, folded fronds. *Shrub*: stems from the ground fanning out to one or two lobes.
+  - Branches thin by Leonardo's rule: a stem's lost cross-section is shared among its branches, ∆ = 2, the middle of the measured 1.8–2.3. Successive branches, fronds and stems turn by the golden angle.
+  - The result is stretched to fill the species' height and crown radius exactly, the crown measured about its own centre so a leaning palm keeps its fronds.
+  - Tree crowns are now sized by architecture (`TREE_CROWN_WIDTH`, diameter / height). Broadleaf 0.6–1.1, from open-grown trees' measured 0.61–1.16; step 25's broadleaf crowns were 0.35–0.84. Palms 0.4–0.6, from coconuts' 0.36–0.45. Conifers 0.28–0.44 (stylised).
+- *Levels of detail, `src/surface/plantMesh.ts` (pure).* Four meshes from the one skeleton:
+  - LOD 0: the full plant, flowers included.
+  - LOD 1: the trunk and one leaf mass per main branch (per stem for shrubs). Branches are under a pixel by then.
+  - LOD 2: the trunk and one crown, a cone per layer for conifers.
+  - LOD 3: an octahedron crown on a 3-sided trunk.
+  - Merging keeps shadows: a merged mass covers the area its leaves did from above and from the sides (exact ellipse projections). Octahedra are grown to an icosahedron's mean shadow (Cauchy). Far conifer cones match the needles' shadow from 20° up, the angle far plants are seen from in low orbit; the cone's shadow has a closed form, tested against a rasterised cone.
+  - Measured on ~480 species: every level's median side coverage is within 0.84–1.06 of the full plant's. The far conifer cones cover 0.69 from straight above, a deliberate trade for the low views they're seen from.
+  - Mean triangles, LOD 0 → 3: conifers 719 / 185 / 23 / 18, broadleaves 501 / 150 / 26 / 14, palms 484 / 121 / 60 / 60, large bushes 453 / 89 / 30 / 12, small bushes 231 / 81 / 20 / 8.
+- *Drawing them, `SurfaceEntities` and `plantLook.ts`.* One `InstancedMesh` per species per level (4).
+  - The dithered crossfade is generalised to n levels. Level k keeps the dither band [w_(k−1), w_k), so neighbouring levels exchange pixels, the bands tile with no gap, and past the last fade nothing is drawn.
+  - Switches in plant heights (`PLANT_LODS`): trees 8 / 18 / 30, gone by 46; large bushes 10 / 24 / 38, gone by 60; small bushes 12 / 30 / 46, gone by 70. At the first switch a leaf mass is ~8 px across at 720p.
+  - **Levels are chosen per plant**, not per 32-unit cell: each rescan (every 4 units of camera movement) rewrites the batches, a plant joining every level it could be at before the next rescan. Choosing per cell had put about three times too many plants in the full-detail batch. The plant lab's grove view went from 748k to 320k triangles.
+  - The debug folder **Plants** has `show LODs`, which tints the levels red, yellow, green and blue.
+  - The mesh builder writes linear vertex colours, as THREE's `Color.set` did for the placeholders.
+- *The plant lab, `plants.html` (`src/plantlab/`).* A set of species, generated for a tier (`?gen=&tier=&kind=&arch=`) or a game planet's (`?seed=&star=&planet=`), with one selected and every property editable in the panel: envelope (name, kind, height, bare trunk, trunk width, crown radius and shape, colours, temperature window, abundance) and form. Architecture switches, rerolls, copy and paste JSON. Three views:
+  - *One plant*: with the level of detail on *auto*, the game's own fade material per level, so zooming out shows the real crossfade; the readout names the level at the camera. Or a fixed level.
+  - *Levels side by side*, labelled with their triangles.
+  - *A grove* planted by the game's own `SurfaceEntities` on a 1500-radius sphere, seen from the UFO's height.
+  - Toggles for tinting the levels, the wireframe and the skeleton (stem centre lines by order and leaf-mass centres). The readout gives the skeleton, each level's triangles and where the game draws it, and the grove's counts.
+  - The `#hash` is the exact set, and `window.plantLab` drives it. The planet lab's readout has a **Plants** link to its planet's species; the plant lab links back to the planet lab and the game. `npm run shot -- --plants` shoots it.
+- *Cost in the game.* Haikrai I (home system, T3), ship over a forest, `?quality=low` in headless Chrome:
+  - Closest zoom: plant triangles 93.7k → 43.3k, draw calls 16 → 32, 3 → 4 FPS.
+  - Zoom 40: 93.3k → 42.5k triangles, 4 FPS both.
+  - Growing and meshing a planet's 8 species at 4 levels: ~13 ms, once, when the planet level is built.
+  - Per unit of ground out to the far range, trees cost 2.3–3× the placeholders' triangles before the per-plant choice; bushes about the same or less.
+- *Tests.*
+  - `tests/plantForm.test.ts`: every architecture appears, determinism, the envelope fit to 1%, stems rooted on their parents, Leonardo's rule, the golden angle, tiers and fronds, foreign forms still grow.
+  - Also in it: finite linear-RGB meshes cheaper at every level, triangle budgets per kind, silhouettes per architecture and view, Cauchy's shadow shares, the cone's closed form, merges keeping the area from above, and the fade bands tiling.
+  - `tests/plantLab.test.ts`: sets, the `#hash` round trip, repairing damaged species, architecture switches with crowns to suit, links.
+  - Smoke: a new `plants` section, in a browser of its own (after the earlier sections, the shared tab sometimes took over a minute to navigate to it). Every architecture at every level lit and cheaper level by level; zooming out goes through levels 0 → 1 → 2 → 3 → none; the line-up and the grove (every level drawing) work; a game planet's plants load; the planet lab's Plants link opens the same species.
+
 ## Later / ideas
 
 - **Beam (abduction):** lift a plant (later an animal) into the UFO with a ray beam, using the surface entities' `pick` and `promote`. For now a beamed plant just disappears (recorded in the change list). Aborting the beam drops it, and it falls back to the ground (this may need a Rapier world on the planet level, or a scripted fall).
-- **Plant lab / designer:** a page like the planet lab for making and checking plants, and the procedural generator behind them (real trees and bushes instead of step 24's placeholders), editing the same species parameters.
+- **More plant forms** (plant lab, step 30): grasses and flowers as ground cover, cacti and succulents for dry worlds, weeping and fan shapes (Weber & Penn's willow), wind sway in the vertex shader, and alien forms for T1–T2 worlds (glowing, crystalline, fungal).
 - **Weapons:** hit things on the surface (knock over, burn, destroy) through the same entity API.
 - **Animals and citizens:** moving surface entities built on the same system (placement, LOD, picking, change list), plus movement and behaviour.
 - **Volcanoes** as terrain: cones with craters on geothermally active worlds (lava worlds and the hottest terrans), whose eruptions throw ash plumes (with step 22's volcanic lightning) and lava down their flanks.

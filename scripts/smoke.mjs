@@ -3,7 +3,8 @@
 //   --only <sections>  run just these, comma-separated, in the usual order: core (flying, picking, system map,
 //                      living stars, comets, sky), galaxy (the galaxy loop), nebulas (every kind on the map
 //                      and from inside), rogues (fly to a rogue planet and down to it), audio, planet (the home planet
-//                      loop, held zoom, seamless zooms), types (every planet type and geyser kind), lab, touch
+//                      loop, held zoom, seamless zooms), types (every planet type and geyser kind), lab, plants
+//                      (the plant lab), touch
 //   --quick            everything but types
 //   --timeout <s>      give up after this long (default 900), reporting the section it was in
 //   --full-quality     render as players see it (default: ?quality=low, half resolution without antialiasing,
@@ -54,6 +55,9 @@
 // star in the sky) and every zoom on the way crossfades and never goes black; FPS in its system.
 // Planet lab (lab.html): every type, a moon, a comet and an asteroid build and draw in both views, a game planet, a game comet
 // and a game asteroid load, the panel works.
+// Plant lab (plants.html): every architecture grows and draws at every level of detail, each level cheaper than the
+// last, zooming out on one plant goes through the levels (the game's crossfade) and past the last one, the line-up and
+// the grove (the game's own plant system) draw, a game planet's plants load, the planet lab links to its plants.
 // Prints JSON with FPS, console errors and screenshot paths. Exit 1 on failure.
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -62,7 +66,7 @@ import { launch, sleep, StallError } from './lib/browser.mjs';
 
 const args = process.argv.slice(2);
 const option = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
-const SECTIONS = ['core', 'galaxy', 'nebulas', 'rogues', 'audio', 'planet', 'types', 'lab', 'touch'];
+const SECTIONS = ['core', 'galaxy', 'nebulas', 'rogues', 'audio', 'planet', 'types', 'lab', 'plants', 'touch'];
 const only = option('--only')?.split(',');
 if (only?.some((name) => !SECTIONS.includes(name))) {
   console.error(`--only takes some of: ${SECTIONS.join(', ')}`);
@@ -116,6 +120,7 @@ const state = `({ speed: +ship.speed.toFixed(1), pos: ship.object.position.toArr
 let before, after, autopilot, pick, systemMap, sky, living, comet, belt, galaxyLoop, fps, audio, planetLoop, heldZoom, cometLoop, asteroidLoops, seamless, nebulas, rogues;
 const planetTypes = [];
 let lab = null;
+let plantLab = null;
 let touch = null;
 let touchLab = null;
 
@@ -1481,6 +1486,111 @@ async function runLab() {
 await section('lab', async () => (lab = await runLab()).ok);
 
 /**
+ * The plant lab (plants.html): every architecture grows and draws a lit plant at every level of detail (each
+ * cheaper than the one before), zooming out on one plant with the game's own crossfade passes through every level and
+ * past the last, the line-up and the grove (the game's SurfaceEntities) draw, a game planet's plants load by star and
+ * planet, and the planet lab's Plants link opens its planet's species here. In a browser of its own: after the
+ * sections before it, the shared tab sometimes took over a minute to navigate to the page at all.
+ */
+/** A game planet with plants: the home system's first, Haikrai I (T3, seed 1337). */
+const PLANT_STAR = 6;
+const PLANT_PLANET = 0;
+async function runPlantLab() {
+  const own = await launch({ width: 1280, height: 720 });
+  try {
+    return await plantLabChecks(own);
+  } finally {
+    errors.push(...own.errors.map((e) => `plant lab: ${e}`));
+    await own.close();
+  }
+}
+
+async function plantLabChecks(page) {
+  const evaluate = page.tryEvaluate;
+  const r = { architectures: [] };
+  if (!(await page.goto(pageUrl('plants.html?gen=3'), `typeof window.plantLab !== 'undefined' && plantLab.ready`, 30000))) return { ok: false, started: false };
+  const brightness = `(() => {
+    game.redraw();
+    const gl = game.renderer.getContext(), w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
+    const px = new Uint8Array(w * h * 4);
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    let sum = 0, n = 0;
+    for (let y = Math.floor(h * 0.25); y < h * 0.75; y += 4) for (let x = Math.floor(w * 0.4); x < w * 0.6; x += 4) {
+      const i = 4 * (y * w + x); sum += px[i] + px[i + 1] + px[i + 2]; n++;
+    }
+    return +(sum / (3 * n)).toFixed(1);
+  })()`;
+  for (const arch of ['conifer', 'broadleaf', 'palm', 'shrub']) {
+    const kind = arch === 'shrub' ? 'largeBush' : 'tree';
+    r.architectures.push(
+      await evaluate(`(async () => {
+        await plantLab.generate(5, { kind: '${kind}', architecture: '${arch}' });
+        await plantLab.setView({ view: 'specimen', lod: 0 });
+        const levels = [];
+        for (const lod of [0, 1, 2, 3]) {
+          await plantLab.setView({ lod });
+          levels.push({ lod, triangles: plantLab.level.lods[lod].triangles, brightness: ${brightness} });
+        }
+        return { arch: plantLab.species.form.architecture, levels };
+      })()`),
+    );
+  }
+  // Zooming out on one plant with the game's own levels and fade: through every level, then gone.
+  r.zoom = await evaluate(`(async () => {
+    await plantLab.generate(5, { kind: 'tree', architecture: 'broadleaf' });
+    await plantLab.setView({ view: 'specimen', lod: 'auto' });
+    const seen = [];
+    for (const d of [2, 9, 20, 34, 80]) {
+      await plantLab.look(0, 10, d);
+      await new Promise((ok) => setTimeout(ok, 1200));
+      seen.push(plantLab.level.lodNow().lod);
+    }
+    return seen;
+  })()`);
+  r.lineup = await evaluate(`(async () => { await plantLab.setView({ view: 'lineup', lod: 0 }); return { meshes: plantLab.level.lods.length, brightness: ${brightness} }; })()`);
+  r.grove = await evaluate(`(async () => {
+    await plantLab.setView({ view: 'grove', showLods: true });
+    await plantLab.look(0, 25, 80);
+    return { ...plantLab.level.grove.stats(), brightness: ${brightness} };
+  })()`);
+  r.screenshot = join(outDir, 'plant-lab.png');
+  writeFileSync(r.screenshot, await page.screenshot());
+  await evaluate(`plantLab.setView({ view: 'specimen', showLods: false })`);
+  r.loaded = await evaluate(`(async () => {
+    await plantLab.load('1337', ${PLANT_STAR}, ${PLANT_PLANET});
+    return { species: plantLab.state.species.length, tier: plantLab.state.tier, source: plantLab.state.source, hash: location.hash.length };
+  })()`);
+  // The planet lab at the same planet links to its plants, and the link opens them here.
+  if (!(await page.goto(pageUrl(`lab.html?seed=1337&star=${PLANT_STAR}&planet=${PLANT_PLANET}`), `typeof window.lab !== 'undefined' && lab.ready`, 30000))) return { ...r, ok: false };
+  const link = await evaluate(`(() => { const a = [...document.querySelectorAll('#lab-info a')].find((x) => x.textContent === 'Plants'); return a && !a.hidden ? a.href : null; })()`);
+  r.linked = link
+    ? (await page.goto(link, `typeof window.plantLab !== 'undefined' && plantLab.ready`, 30000)) &&
+      (await evaluate(`({ species: plantLab.state.species.length, source: plantLab.state.source })`))
+    : null;
+  r.ok =
+    r.architectures.length === 4 &&
+    r.architectures.every(
+      (a, i) =>
+        a.arch === ['conifer', 'broadleaf', 'palm', 'shrub'][i] &&
+        a.levels.every((l, k) => l.triangles > 0 && l.brightness > 20 && (k === 0 || l.triangles <= a.levels[k - 1].triangles)) &&
+        a.levels[3].triangles < a.levels[0].triangles / 4,
+    ) &&
+    JSON.stringify(r.zoom) === JSON.stringify([0, 1, 2, 3, 4]) &&
+    r.lineup.meshes === 4 &&
+    r.lineup.brightness > 20 &&
+    r.grove.plants > 1000 &&
+    r.grove.lods.every((n) => n > 0) &&
+    r.grove.brightness > 20 &&
+    r.loaded.species > 0 &&
+    r.loaded.source?.star === PLANT_STAR &&
+    r.loaded.hash > 100 &&
+    r.linked?.species === r.loaded.species &&
+    r.linked.source?.planet === PLANT_PLANET;
+  return r;
+}
+await section('plants', async () => (plantLab = await runPlantLab()).ok);
+
+/**
  * Touch play on an emulated phone (390x844, real CDP touch events): hold a finger on the star (tooltip), lift
  * (autopilot to it), drag (rotates, no tap), pinch (zoom), Boost (no stick in space), then
  * pinch in at a planet to descend, tap the globe, and pinch out to the system and on to the galaxy, checking which
@@ -1750,7 +1860,7 @@ const ok = started && !stalled && Object.keys(sections).length > 0 && Object.val
 console.error(`[smoke] ${ok ? 'ok' : 'FAILED'} in ${Math.round((Date.now() - T0) / 1000)} s${errors.length ? `, ${errors.length} console errors` : ''}`);
 console.log(
   JSON.stringify(
-    { ok, started, stalled, sections, before, after, autopilot, pick, systemMap, sky, living, comet, belt, galaxyLoop, nebulas, rogues, seamless, audio, planetLoop, heldZoom, cometLoop, asteroidLoops, planetTypes, touch, touchLab, lab, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
+    { ok, started, stalled, sections, before, after, autopilot, pick, systemMap, sky, living, comet, belt, galaxyLoop, nebulas, rogues, seamless, audio, planetLoop, heldZoom, cometLoop, asteroidLoops, planetTypes, touch, touchLab, lab, plantLab, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
     null,
     2,
   ),

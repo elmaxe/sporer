@@ -40,6 +40,11 @@ body.lab #stats {
   margin-bottom: 2px;
 }
 
+#lab-info .lab-links {
+  display: flex;
+  gap: 6px;
+}
+
 #lab-info .lab-back,
 #lab-info .lab-details {
   padding: 3px 8px;
