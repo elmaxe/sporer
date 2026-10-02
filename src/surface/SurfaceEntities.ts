@@ -133,6 +133,9 @@ export class SurfaceEntities implements Entity {
   private readonly entry = new THREE.Vector3();
   private readonly matrix = new THREE.Matrix4();
   private lastRange = 1;
+  /** Under something raised on the ground since (a volcano): left out of the batches and picking. */
+  private buried: ((dir: THREE.Vector3) => boolean) | null = null;
+  private readonly plantDir = new THREE.Vector3();
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -332,7 +335,7 @@ export class SurfaceEntities implements Entity {
     const counts = new Int32Array(this.plan.species.length);
     const live: PlantData[] = [];
     for (const p of cell.plants) {
-      if (this.changes.isRemoved(p.id) || this.promoted.has(p.id)) continue;
+      if (this.changes.isRemoved(p.id) || this.promoted.has(p.id) || this.isBuried(p)) continue;
       live.push(p);
       counts[p.species]!++;
     }
@@ -461,7 +464,7 @@ export class SurfaceEntities implements Entity {
       sphere.set(cell.centre, cell.bound);
       if (!ray.intersectsSphere(sphere)) continue;
       for (const p of cell.plants) {
-        if (this.changes.isRemoved(p.id) || this.promoted.has(p.id)) continue;
+        if (this.changes.isRemoved(p.id) || this.promoted.has(p.id) || this.isBuried(p)) continue;
         const s = this.plan.species[p.species]!;
         // A sphere about the middle of the plant, as wide as its crown (at least a third of its height).
         const size = s.height * p.scale;
@@ -496,6 +499,22 @@ export class SurfaceEntities implements Entity {
 
   isRemoved(id: string): boolean {
     return this.changes.isRemoved(id);
+  }
+
+  /**
+   * Hides the plants standing where `test` (a plant's unit direction) says
+   * the ground has been covered over, e.g. by a volcano, from now on; call
+   * again when it changes. Nothing is recorded: the test is made from what
+   * the planet's change list already keeps.
+   */
+  setBuried(test: ((dir: THREE.Vector3) => boolean) | null): void {
+    this.buried = test;
+    for (const cell of this.cells.values()) this.fillGroups(cell);
+    this.dirty = true;
+  }
+
+  private isBuried(p: PlantData): boolean {
+    return this.buried !== null && this.buried(this.plantDir.set(p.x, p.y, p.z));
   }
 
   /** Removes a plant for good (it stays gone when the planet is left and visited again). False if there is no such plant or it is gone already. */

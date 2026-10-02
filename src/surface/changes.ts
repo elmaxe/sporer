@@ -1,3 +1,5 @@
+import type { VolcanoSite } from '../combat/volcano';
+
 /**
  * What the player has done to a planet's surface entities, kept outside the
  * planet level (which is built afresh on each visit): a removed plant stays
@@ -7,10 +9,13 @@
 export interface SurfaceChangesData {
   /** Ids of removed plants. */
   removed: string[];
+  /** Volcanoes raised by volcano bombs, in the order they were (older saves have none). */
+  volcanoes?: VolcanoSite[];
 }
 
 export class SurfaceChanges {
   private readonly removed = new Set<string>();
+  private readonly _volcanoes: VolcanoSite[] = [];
 
   isRemoved(id: string): boolean {
     return this.removed.has(id);
@@ -27,13 +32,24 @@ export class SurfaceChanges {
     return this.removed.size;
   }
 
+  /** The volcanoes raised on the planet, oldest first. */
+  get volcanoes(): readonly VolcanoSite[] {
+    return this._volcanoes;
+  }
+
+  /** Records a volcano raised at `site`. */
+  addVolcano(site: VolcanoSite): void {
+    this._volcanoes.push({ ...site });
+  }
+
   toJSON(): SurfaceChangesData {
-    return { removed: [...this.removed] };
+    return { removed: [...this.removed], volcanoes: this._volcanoes.map((v) => ({ ...v })) };
   }
 
   static fromJSON(data: SurfaceChangesData): SurfaceChanges {
     const changes = new SurfaceChanges();
     for (const id of data.removed) changes.removed.add(id);
+    for (const v of data.volcanoes ?? []) changes.addVolcano(v);
     return changes;
   }
 }

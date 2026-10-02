@@ -17,6 +17,8 @@ export type SoundCue =
   | 'busterFlight'
   | 'busterImpact'
   | 'planetExplode'
+  | 'volcanoFire'
+  | 'volcanoRise'
   | 'starNear'
   | 'starFar'
   | 'shipHum';
@@ -31,6 +33,8 @@ export const SOUND_CUES: readonly SoundCue[] = [
   'busterFlight',
   'busterImpact',
   'planetExplode',
+  'volcanoFire',
+  'volcanoRise',
   'starNear',
   'starFar',
   'shipHum',
@@ -114,6 +118,10 @@ export const cueParams: Record<SoundCue, CueSpec> = {
   busterImpact: oneShot(),
   // The planet blowing apart (the blinding flash).
   planetExplode: oneShot(),
+  // Firing the volcano bomb: the molten shell leaving the ship.
+  volcanoFire: oneShot(),
+  // The shell landing and the volcano rising out of the ground (a rumble and the first eruption).
+  volcanoRise: oneShot(),
   // A star close up, as the camera nears its surface (see StarSounds).
   starNear: ambient(0.8),
   // A star from across its system, giving way to starNear close up.

@@ -1,11 +1,12 @@
 /*
  * The items the ship carries, grouped into the item bar's tabs (ui/ItemBar.ts).
- * Pure data; what an item does lives with the level that can use it (the
- * planet buster: combat/PlanetBuster.ts in low orbit).
+ * Pure data; what an item does lives with the level that can use it (in low
+ * orbit: the planet buster, combat/PlanetBuster.ts, and the volcano bomb,
+ * combat/VolcanoBomb.ts).
  */
 
 export type ItemTab = 'weapons';
-export type ItemId = 'planetBuster';
+export type ItemId = 'planetBuster' | 'volcanoBomb';
 
 export interface ItemDef {
   id: ItemId;
@@ -28,6 +29,14 @@ export const ITEMS: readonly ItemDef[] = [
     description: 'Blows a whole planet or moon apart, for good. Fire it from low orbit.',
     key: 'Digit1',
     keyLabel: '1',
+  },
+  {
+    id: 'volcanoBomb',
+    tab: 'weapons',
+    name: 'Volcano Bomb',
+    description: 'Raises an erupting volcano where it lands. Fire it from low orbit over solid ground.',
+    key: 'Digit2',
+    keyLabel: '2',
   },
 ];
 

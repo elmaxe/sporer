@@ -15,6 +15,11 @@ const ICONS: Record<ItemId, string> = {
     '<circle cx="12" cy="12" r="6.5" />' +
     '<path d="m12 5.5-1.5 4 2.5 2-2 3.5.8 3.5" />' +
     '<path d="M3 3l2.6 2.6M21 3l-2.6 2.6M3 21l2.6-2.6M21 21l-2.6-2.6M12 1v1.5M12 21.5V23M1 12h1.5M21.5 12H23" /></svg>',
+  volcanoBomb:
+    '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M2 21h20l-7-10.5h-6z" />' +
+    '<path d="M9.5 10.5l1.2 3 1.3-1.6 1.3 1.6 1.2-3" />' +
+    '<path d="M10 7.5c-1-1.2-.4-2.8 1-3 .3-1.6 2.6-1.8 3.2-.4 1.4-.2 2.2 1.4 1.3 2.5" /></svg>',
 };
 
 /** What the bar needs to know about the game: where the player is, and what can use items there. */
@@ -27,10 +32,11 @@ export interface ItemBarSource {
 
 /**
  * The item bar (#item-bar in index.html): tabs of item slots at the bottom
- * of the screen, Weapons the only tab for now with the planet buster in it.
- * Click a slot or press its key (1) to select the item and again to put it
- * away; what a selected item does is up to the level (`ItemUser`): in low
- * orbit the planet buster fires at the next click on the planet. Elsewhere
+ * of the screen, Weapons the only tab for now with the planet buster and
+ * the volcano bomb in it. Click a slot or press its key (1, 2) to select the
+ * item and again to put it away; what a selected item does is up to the
+ * level (`ItemUser`): in low orbit the selected weapon fires at the next
+ * click on the planet. Elsewhere
  * the slots show but can't be used, and say where they can. A global
  * entity; hidden on the galaxy map.
  */

@@ -89,7 +89,7 @@ export class SceneManager implements Entity {
   private readonly side = new THREE.Vector3();
   private readonly tooltip = new Tooltip();
   /** What the player has done to each visited planet's surface (removed plants), kept across visits. */
-  private readonly surfaceChanges = new SurfaceChangeStore();
+  readonly surfaceChanges = new SurfaceChangeStore();
   /** The bodies blown apart by planet busters, and when (they stay debris fields for the rest of the game). */
   readonly busted = new BustedBodies();
   private seamless: SeamlessTransition | null = null;

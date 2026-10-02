@@ -16,6 +16,8 @@ rebuild; no code changes needed. Volumes and fades are in `cueParams` (`src/audi
 | `busterFlight/` | The planet buster's projectile flying down to the surface: starts at launch, fades out on impact | loop |
 | `busterImpact/` | The projectile hitting the ground (the first flash, as the crust starts to crack) | one-shot |
 | `planetExplode/` | The planet blowing apart (the blinding flash and the debris flying out) | one-shot |
+| `volcanoFire/` | Firing the volcano bomb: the molten shell leaving the ship | one-shot |
+| `volcanoRise/` | The shell landing and a volcano rising out of the ground, erupting (a rumble and a roar) | one-shot |
 | `starNear/` | A star close up: grows as the camera nears its surface, taking over from `starFar` | ambient |
 | `starFar/` | A star from across its system: fades with distance, giving way to `starNear` close up | ambient |
 | `shipHum/` | The UFO's own hum, always on | ambient |
