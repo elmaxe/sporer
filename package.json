@@ -11,10 +11,12 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "smoke": "node scripts/smoke.mjs",
-    "shot": "node scripts/shot.mjs"
+    "shot": "node scripts/shot.mjs",
+    "dump": "node scripts/dump.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.21.0",
+    "html-to-image": "^1.11.13",
     "lil-gui": "^0.21.0",
     "stats.js": "^0.17.0",
     "three": "^0.186.1"

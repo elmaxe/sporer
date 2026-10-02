@@ -15,10 +15,18 @@ import { GameMenu } from './ui/GameMenu';
 import { FpsCounter } from './ui/FpsCounter';
 import { ItemBar } from './ui/ItemBar';
 import { GraphicsSettingsControl, loadGraphicsSettings } from './ui/GraphicsSettings';
+import { installConsoleLog } from './debug/consoleLog';
+import { DebugDumpControl } from './debug/DebugDump';
+import { openChosenVersion } from './ui/versions';
+
+// First, so the debug dump has the console's errors from start-up on.
+const consoleLog = installConsoleLog();
 
 const DEFAULT_SEED = '1337';
 
 async function main(): Promise<void> {
+  // An installed app starts at the release: on to the version picked in the menu, if another.
+  if (await openChosenVersion()) return;
   // ?seed=<number or any text> picks the galaxy, ?star=<id> jumps to a system (or a rogue planet).
   const params = new URLSearchParams(location.search);
   const galaxy = generateGalaxy(parseSeed(params.get('seed') ?? DEFAULT_SEED));
@@ -37,6 +45,7 @@ async function main(): Promise<void> {
   game.add(new FpsCounter());
   game.add(new TouchControls(game));
   game.add(new ItemBar(levels, game.input));
+  const debugDump = game.add(new DebugDumpControl(game, levels, consoleLog, debug));
 
   document.getElementById('loading')?.remove();
   game.start();
@@ -44,7 +53,7 @@ async function main(): Promise<void> {
   // Handles for poking at the game from the browser console / automation.
   // ship / world / system follow the current system level, planet the planet level (or null).
   if (import.meta.env.DEV) {
-    Object.assign(window, { game, galaxy, levels, audio, menu, generateSystem, geyserKind, weatherKind, volcanicLightning });
+    Object.assign(window, { game, galaxy, levels, audio, menu, debugDump, generateSystem, geyserKind, weatherKind, volcanicLightning });
     Object.defineProperties(window, {
       ship: { get: () => levels.systemLevel.ship, configurable: true },
       world: { get: () => levels.systemLevel.world, configurable: true },

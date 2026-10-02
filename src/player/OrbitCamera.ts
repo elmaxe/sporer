@@ -228,6 +228,21 @@ export class OrbitCamera implements Entity {
     this.maxLookUp = THREE.MathUtils.clamp(angle, 0, this.options.lookUp ?? 0);
   }
 
+  /** The world direction from the centre to the camera (unit), as of the last update. */
+  direction(out: THREE.Vector3): THREE.Vector3 {
+    return out.copy(this.offset);
+  }
+
+  /** How far the view is tipped up past the centre, in radians (see `OrbitOptions.lookUp`). */
+  get lookUpAngle(): number {
+    return this.lookUp;
+  }
+
+  /** Jumps the view's tip up past the centre to `angle` radians, within its limit (e.g. restoring a debug dump). */
+  setLookUp(angle: number): void {
+    this.lookUp = this.targetLookUp = this.wantedLookUp = THREE.MathUtils.clamp(angle, 0, this.maxLookUp);
+  }
+
   /** Smoothly zooms to `distance` (clamped to the limits). */
   zoomTo(distance: number): void {
     this.targetDistance = THREE.MathUtils.clamp(distance, this.params.minDistance, this.params.maxDistance);

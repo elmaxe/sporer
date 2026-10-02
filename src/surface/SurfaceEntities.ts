@@ -5,14 +5,8 @@ import { PLANT_CELL_SIZE, generateCell, parsePlantId, plantGridSize, type Ground
 import { faceGridPoint } from '../world/cubeSphereMath';
 import { GROUND_DETAIL_LAYER } from '../world/groundDepth';
 import type { SurfaceChanges } from './changes';
-import {
-  FADE_START,
-  PLANT_RANGES,
-  createPlantGeometry,
-  createPlantMaterial,
-  type PlantFadeUniforms,
-  type PlantLevel,
-} from './plantLook';
+import { FADE_START, PLANT_LODS, createPlantGeometry, createPlantMaterial, setLodTint, type PlantFadeUniforms } from './plantLook';
+import { PLANT_LOD_COUNT } from './plantMesh';
 import { addPlantDebug, plantParams } from './plantParams';
 
 /** A cell stays loaded until it is this much further out than it was wanted (so it doesn't flicker at the edge). */
@@ -43,9 +37,12 @@ export interface LivePlant {
   restore(): void;
 }
 
-/** One species' plants of a cell, as instance matrices (removed and promoted plants left out). */
+/** One species' plants of a cell, as instance matrices (removed and promoted plants left out), with where each stands and its size, to pick its level of detail. */
 interface SpeciesGroup {
   matrices: Float32Array;
+  /** Position (body frame) and size (the plant's scale) of each. */
+  positions: Float32Array;
+  sizes: Float32Array;
   count: number;
 }
 
@@ -59,9 +56,8 @@ interface Cell {
   readonly bound: number;
   readonly plants: PlantData[];
   groups: (SpeciesGroup | null)[];
-  /** Per species: in the near and the mid batch now. */
-  readonly near: boolean[];
-  readonly mid: boolean[];
+  /** Per species, per level of detail: in that level's batch now. */
+  readonly levels: boolean[][];
 }
 
 /** The instances of one species at one level of detail: one draw call. */
@@ -70,7 +66,8 @@ interface Batch {
   readonly geometry: THREE.BufferGeometry;
   readonly material: THREE.MeshStandardMaterial;
   readonly uniforms: PlantFadeUniforms;
-  readonly level: PlantLevel;
+  /** Level of detail: 0 is the full plant. */
+  readonly lod: number;
 }
 
 /** What `SurfaceEntities` holds now, for the lab's readout and the tests. */
@@ -78,9 +75,8 @@ export interface SurfaceStats {
   cells: number;
   /** Plants in the loaded cells (not removed). */
   plants: number;
-  /** Instances in the near and mid batches, and the draw calls they make. */
-  near: number;
-  mid: number;
+  /** Instances in each level of detail's batches (full plants first), and the draw calls they make. */
+  lods: number[];
   drawCalls: number;
   /** Triangles in those instances (before culling and the fade's discards). */
   triangles: number;
@@ -90,12 +86,16 @@ export interface SurfaceStats {
  * Things standing on a planet's ground, for now plants (gen/plants.ts): the
  * cells around the camera are generated a few per frame within a time budget,
  * far ones dropped, and each species is drawn as one `InstancedMesh` per level
- * of detail: the full placeholder mesh near the camera, a few-triangle one
- * further out and nothing beyond, with distances in the plant's own heights so
- * trees show further than bushes. The levels change per pixel in the shader
- * with a dithered (screen-door) fade, so nothing pops and nothing is sorted,
- * and a cell's instances are only rewritten when a cell comes, goes or moves
- * between levels.
+ * of detail: the full generated plant near the camera (surface/plantMesh.ts),
+ * simpler ones further out down to a few dozen triangles, and nothing beyond,
+ * with distances in the plant's own heights so trees show further than bushes.
+ * The levels change per pixel in the shader with a dithered (screen-door)
+ * fade, so nothing pops and nothing is sorted. Each time the camera has moved
+ * a few units the batches are rewritten: a plant goes into the batch of every
+ * level whose distances (its fade included) it could be at before the next
+ * rewrite, so the costly full meshes are only drawn for the plants close
+ * enough to show them (choosing by whole cells, 32 units across, put about
+ * three times as many plants in the full batch).
  *
  * The API later steps need: `pick(ray)` (nearest plant along a ray), `remove(id)`
  * (recorded in the planet's change list, which outlives the level) and
@@ -110,7 +110,8 @@ export class SurfaceEntities implements Entity {
   private readonly gridSize: number;
   private readonly cellBound: number;
   private readonly cellCount: number;
-  private readonly geometries: { full: THREE.BufferGeometry; simple: THREE.BufferGeometry }[];
+  /** Per species, per level of detail. */
+  private readonly geometries: THREE.BufferGeometry[][];
   private readonly batches: Batch[][] = [];
   private readonly liveMaterials: (THREE.MeshStandardMaterial | null)[];
   private readonly live = new Map<string, LivePlant>();
@@ -159,17 +160,17 @@ export class SurfaceEntities implements Entity {
         }
       }
     }
-    this.geometries = plan.species.map((s) => ({ full: createPlantGeometry(s, 'full'), simple: createPlantGeometry(s, 'simple') }));
+    this.geometries = plan.species.map((s) => Array.from({ length: PLANT_LOD_COUNT }, (_, lod) => createPlantGeometry(s, lod)));
     this.liveMaterials = plan.species.map(() => null);
-    this.maxReach = Math.max(...plan.species.map((s) => s.height * 1.25 * PLANT_RANGES[s.kind].far));
+    this.maxReach = Math.max(...plan.species.map((s) => s.height * 1.25 * farthest(s)));
     for (const s of plan.species) {
-      const ranges = PLANT_RANGES[s.kind];
+      const ranges = PLANT_LODS[s.kind];
       const row: Batch[] = [];
-      for (const level of ['near', 'mid'] as const) {
-        const { material, uniforms } = createPlantMaterial(level, s.height, ranges);
-        const geometry = level === 'near' ? this.geometries[s.index]!.full : this.geometries[s.index]!.simple;
+      for (let lod = 0; lod < PLANT_LOD_COUNT; lod++) {
+        const { material, uniforms } = createPlantMaterial(lod, s.height, ranges);
+        const geometry = this.geometries[s.index]![lod]!;
         const mesh = this.createMesh(geometry, material, FIRST_CAPACITY);
-        row.push({ mesh, geometry, material, uniforms, level });
+        row.push({ mesh, geometry, material, uniforms, lod });
       }
       this.batches.push(row);
     }
@@ -193,13 +194,12 @@ export class SurfaceEntities implements Entity {
 
   /** Counts of what is loaded and drawn. */
   stats(): SurfaceStats {
-    const s: SurfaceStats = { cells: this.cells.size, plants: 0, near: 0, mid: 0, drawCalls: 0, triangles: 0 };
+    const s: SurfaceStats = { cells: this.cells.size, plants: 0, lods: new Array<number>(PLANT_LOD_COUNT).fill(0), drawCalls: 0, triangles: 0 };
     for (const cell of this.cells.values()) for (const g of cell.groups) if (g) s.plants += g.count;
     for (const row of this.batches) {
       for (const b of row) {
         const count = b.mesh.count;
-        if (b.level === 'near') s.near += count;
-        else s.mid += count;
+        s.lods[b.lod]! += count;
         if (count > 0 && b.mesh.visible) {
           s.drawCalls++;
           s.triangles += count * trianglesOf(b.geometry);
@@ -221,7 +221,12 @@ export class SurfaceEntities implements Entity {
       if (this.cells.size > 0) this.clear();
       return;
     }
-    for (const row of this.batches) for (const b of row) b.uniforms.uRange.value = plantParams.range;
+    for (const row of this.batches) {
+      for (const b of row) {
+        b.uniforms.uRange.value = plantParams.range;
+        setLodTint(b.uniforms, b.lod, plantParams.showLods);
+      }
+    }
     this.object.worldToLocal(this.cameraSource.getWorldPosition(this.camera));
     if (plantParams.range !== this.lastRange) {
       this.lastRange = plantParams.range;
@@ -269,6 +274,8 @@ export class SurfaceEntities implements Entity {
         this.dirty = true;
       } else this.setLevels(cell, distance);
     }
+    // The plants' levels follow the camera: rewrite the batches from where it is now.
+    this.dirty = true;
     // Load the missing ones nearest first, until the time budget is spent.
     const start = performance.now();
     this.pending = 0;
@@ -314,8 +321,7 @@ export class SurfaceEntities implements Entity {
       bound: this.cellBound,
       plants,
       groups: [],
-      near: this.plan.species.map(() => false),
-      mid: this.plan.species.map(() => false),
+      levels: this.plan.species.map(() => new Array<boolean>(PLANT_LOD_COUNT).fill(false)),
     };
     this.fillGroups(cell);
     return cell;
@@ -330,10 +336,17 @@ export class SurfaceEntities implements Entity {
       live.push(p);
       counts[p.species]!++;
     }
-    cell.groups = this.plan.species.map((s) => (counts[s.index]! > 0 ? { matrices: new Float32Array(counts[s.index]! * 16), count: 0 } : null));
+    cell.groups = this.plan.species.map((s) => {
+      const n = counts[s.index]!;
+      return n > 0 ? { matrices: new Float32Array(n * 16), positions: new Float32Array(n * 3), sizes: new Float32Array(n), count: 0 } : null;
+    });
     for (const p of live) {
       const g = cell.groups[p.species]!;
       writeMatrix(g.matrices, g.count * 16, p);
+      g.positions[g.count * 3] = p.x * p.radius;
+      g.positions[g.count * 3 + 1] = p.y * p.radius;
+      g.positions[g.count * 3 + 2] = p.z * p.radius;
+      g.sizes[g.count] = p.scale;
       g.count++;
     }
   }
@@ -342,42 +355,57 @@ export class SurfaceEntities implements Entity {
   private setLevels(cell: Cell, distance: number): void {
     const range = plantParams.range;
     const slack = SCAN_DISTANCE * 2;
+    const closest = distance - cell.bound - slack;
+    const farthest = distance + cell.bound + slack;
     for (const s of this.plan.species) {
-      const r = PLANT_RANGES[s.kind];
+      const ranges = PLANT_LODS[s.kind];
       const unit = s.height * 1.25 * range;
-      const nearEnd = r.near * unit;
-      const nearStart = nearEnd * FADE_START;
-      const farEnd = r.far * unit;
-      const closest = distance - cell.bound - slack;
-      const farthest = distance + cell.bound + slack;
-      const near = closest < nearEnd;
-      const mid = farthest > nearStart && closest < farEnd;
-      if (cell.near[s.index] !== near || cell.mid[s.index] !== mid) this.dirty = true;
-      cell.near[s.index] = near;
-      cell.mid[s.index] = mid;
+      const levels = cell.levels[s.index]!;
+      for (let lod = 0; lod < PLANT_LOD_COUNT; lod++) {
+        // A level is drawn from where the one before starts fading out to where it has faded out itself.
+        const start = lod === 0 ? -Infinity : ranges[lod - 1]! * FADE_START * unit;
+        const end = ranges[lod]! * unit;
+        const wanted = farthest > start && closest < end;
+        if (levels[lod] !== wanted) this.dirty = true;
+        levels[lod] = wanted;
+      }
     }
   }
 
-  /** Writes every batch from the cells in it. */
+  /**
+   * Writes every batch from the cells in it: each plant of a cell that may
+   * hold that level goes in if its distance from the camera (at the last
+   * scan, in its own heights) is within the level's span, widened by how far
+   * the camera can move before the next scan.
+   */
   private rebuild(): void {
     this.dirty = false;
+    const range = plantParams.range;
+    const { x: cx, y: cy, z: cz } = this.lastScan;
+    const slack = SCAN_DISTANCE * 1.5;
     for (const s of this.plan.species) {
+      const ranges = PLANT_LODS[s.kind];
       for (const batch of this.batches[s.index]!) {
-        const isNear = batch.level === 'near';
+        const lod = batch.lod;
+        // The level's span in heights: from where the level before starts fading out to where this one has faded out.
+        const from = lod === 0 ? -Infinity : ranges[lod - 1]! * FADE_START;
+        const to = ranges[lod]!;
+        let upper = 0;
+        for (const cell of this.cells.values()) if (cell.levels[s.index]![lod]) upper += cell.groups[s.index]?.count ?? 0;
+        if (upper > batch.mesh.instanceMatrix.count) this.grow(batch, upper);
+        const array = batch.mesh.instanceMatrix.array as Float32Array;
         let total = 0;
         for (const cell of this.cells.values()) {
-          if (!(isNear ? cell.near[s.index] : cell.mid[s.index])) continue;
-          total += cell.groups[s.index]?.count ?? 0;
-        }
-        if (total > batch.mesh.instanceMatrix.count) this.grow(batch, total);
-        const array = batch.mesh.instanceMatrix.array as Float32Array;
-        let at = 0;
-        for (const cell of this.cells.values()) {
-          if (!(isNear ? cell.near[s.index] : cell.mid[s.index])) continue;
+          if (!cell.levels[s.index]![lod]) continue;
           const g = cell.groups[s.index];
           if (!g) continue;
-          array.set(g.matrices.subarray(0, g.count * 16), at);
-          at += g.count * 16;
+          for (let k = 0; k < g.count; k++) {
+            const unit = s.height * g.sizes[k]! * range;
+            const d = Math.hypot(g.positions[k * 3]! - cx, g.positions[k * 3 + 1]! - cy, g.positions[k * 3 + 2]! - cz);
+            if (d + slack < from * unit || d - slack > to * unit) continue;
+            array.set(g.matrices.subarray(k * 16, k * 16 + 16), total * 16);
+            total++;
+          }
         }
         batch.mesh.count = total;
         batch.mesh.visible = total > 0;
@@ -413,7 +441,7 @@ export class SurfaceEntities implements Entity {
   /** Nothing is drawn or picked from plants that aren't loaded or are beyond their view distance. */
   private visibleAt(plant: PlantData, distance: number): boolean {
     const s = this.plan.species[plant.species]!;
-    return distance <= PLANT_RANGES[s.kind].far * s.height * plant.scale * plantParams.range;
+    return distance <= farthest(s) * s.height * plant.scale * plantParams.range;
   }
 
   /**
@@ -480,7 +508,7 @@ export class SurfaceEntities implements Entity {
 
   /**
    * Takes a plant out of the instanced batches and gives it back as an object
-   * of its own (the placeholder's full mesh, where it stood) for a beam to
+   * of its own (its full mesh, where it stood) for a beam to
    * lift or a weapon to hit. `destroy()` removes it for good, `restore()`
    * puts it back. Null if there is no such plant or it is gone or promoted already.
    */
@@ -494,7 +522,7 @@ export class SurfaceEntities implements Entity {
     const object = new THREE.Group();
     object.name = species.name;
     plantMatrix(plant, this.matrix).decompose(object.position, object.quaternion, object.scale);
-    const mesh = new THREE.Mesh(this.geometries[species.index]!.full, material);
+    const mesh = new THREE.Mesh(this.geometries[species.index]![0]!, material);
     mesh.layers.enable(GROUND_DETAIL_LAYER);
     object.add(mesh);
     this.scene.add(object);
@@ -546,12 +574,15 @@ export class SurfaceEntities implements Entity {
         b.material.dispose();
       }
     }
-    for (const g of this.geometries) {
-      g.full.dispose();
-      g.simple.dispose();
-    }
+    for (const row of this.geometries) for (const g of row) g.dispose();
     for (const m of this.liveMaterials) m?.dispose();
   }
+}
+
+/** How far out a species is drawn at all, in its heights. */
+function farthest(s: PlantSpecies): number {
+  const ranges = PLANT_LODS[s.kind];
+  return ranges[ranges.length - 1]!;
 }
 
 function trianglesOf(g: THREE.BufferGeometry): number {

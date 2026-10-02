@@ -51,6 +51,8 @@ export class Game {
     this.renderer = new THREE.WebGLRenderer({ antialias: !low });
     this.renderer.setPixelRatio(low ? 0.5 : Math.min(window.devicePixelRatio, 2));
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    // Draw counts add up over the whole frame (every level and pass), reset in `frame`: the debug dump reads them.
+    this.renderer.info.autoReset = false;
     container.appendChild(this.renderer.domElement);
 
     this.camera = new THREE.PerspectiveCamera(65, 1, 0.1, 20000);
@@ -131,6 +133,7 @@ export class Game {
 
   private frame = (time: number) => {
     this.debug.beginFrame();
+    this.renderer.info.reset();
 
     const now = time / 1000;
     const frameDt = this.lastTime < 0 || this.paused ? 0 : Math.min(now - this.lastTime, MAX_FRAME_DT);

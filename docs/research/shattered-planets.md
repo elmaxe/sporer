@@ -2,7 +2,7 @@
 
 ## Question
 
-Step 30's planet buster blows a planet or moon apart (`gen/debris.ts`, drawn by `world/DebrisField.ts`). Asked for after it shipped: the exploded planet should look like what it would really be, "a lot of warm matter, melted". That needs:
+Step 31's planet buster blows a planet or moon apart (`gen/debris.ts`, drawn by `world/DebrisField.ts`). Asked for after it shipped: the exploded planet should look like what it would really be, "a lot of warm matter, melted". That needs:
 
 1. The energy it takes to disperse a body, per kg, against the energy to melt and to vaporise its rock: does the wreck come out solid, molten or vapour, and how does that change with the body's size?
 2. The temperatures involved (melting, boiling in vacuum, the critical point, Earth's core) and the colour and brightness of the glow at each (blackbody).

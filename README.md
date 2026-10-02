@@ -2,7 +2,7 @@
 
 A browser game inspired by the space stage of *Spore*. Fly a UFO through a procedurally generated spiral galaxy, zoom from the galaxy map into a star system and all the way down to low orbit over a planet, in one continuous scroll.
 
-**Play it:** https://elmaxe.github.io/sporer/ · **Planet lab:** https://elmaxe.github.io/sporer/lab.html
+**Play it:** https://elmaxe.github.io/sporer/ · **Planet lab:** https://elmaxe.github.io/sporer/lab.html · **Plant lab:** https://elmaxe.github.io/sporer/plants.html
 
 ![A star system: the sun, planets on their orbits, comets and the UFO, with the system map in the corner](docs/screenshots/system.png)
 
@@ -40,10 +40,15 @@ A browser game inspired by the space stage of *Spore*. Fly a UFO through a proce
 | Shift | Boost |
 | N / M | Map / mute |
 | Esc | Menu |
+| F8 | Debug dump (also in the menu): mark the problem on the screenshot, add a note, save or share one file to send |
 
 ## Planet lab
 
 [`lab.html`](https://elmaxe.github.io/sporer/lab.html) draws one planet or moon with the game's own code and lets you edit every property: type, size, colours, sea, relief, gas bands, atmosphere, climate and weather, rings, moons, light and time. Use `?gen=<seed>&type=<type>&kind=<size>` to make one, or `?seed=<galaxy>&star=<id>&planet=<i>` to load one from the game. The game's menu opens the current planet in it.
+
+## Plant lab
+
+[`plants.html`](https://elmaxe.github.io/sporer/plants.html) grows plant species with the game's own generator and draws them with its own renderer. Every species is generated: conifers, broadleaf trees, palms and shrubs, branching by Leonardo's rule and the golden angle, at four levels of detail. You can edit everything: size, crown, colours, climate, branching, leaves and flowers. Look at one plant (zoom out to watch the game's level-of-detail crossfade), all its levels side by side, or a grove planted by the game's own plant system, with the levels tinted. Use `?gen=<seed>&kind=<tree|largeBush|smallBush>&arch=<conifer|broadleaf|palm|shrub>` to make a set, or `?seed=<galaxy>&star=<id>&planet=<i>` to load a game planet's plants. The planet lab's **Plants** link opens its planet's species.
 
 ## Running it
 
@@ -60,11 +65,12 @@ npm run dev        # http://localhost:5173 (debug panel on)
 | `npm test` | Unit tests (Vitest) |
 | `npm run build` / `npm run preview` | Production build and a local preview of it |
 | `npm run smoke` | Headless browser check of the whole game (needs the dev server running) |
-| `npm run shot` | Scripted in-game screenshots |
+| `npm run shot` | Scripted in-game screenshots (`-- --dump <file>` restores a debug dump's moment) |
+| `npm run dump -- <file>` | Unpacks a debug dump: its pictures and a readable summary |
 
 URL parameters: `?seed=<number or text>` picks the galaxy, `?star=<id>` starts in a given system, `?debug` shows the debug panel in production builds, `?quality=low` renders at half resolution.
 
-Every push to `main` runs the typecheck, tests and build in GitHub Actions and deploys to GitHub Pages.
+GitHub Actions runs the typecheck, tests and build and deploys to GitHub Pages: the latest release (a `v*` tag) at https://elmaxe.github.io/sporer/, `main` at https://elmaxe.github.io/sporer/preview/, and each open pull request at `https://elmaxe.github.io/sporer/pr/<n>/`. The menu's **Version** picker switches between them; an app added to the home screen opens the version picked.
 
 ## Tech
 
@@ -77,7 +83,8 @@ Every push to `main` runs the typecheck, tests and build in GitHub Actions and d
 | `src/galaxy/`, `src/world/`, `src/planet/`, `src/surface/` | What each level draws (`surface/`: plants on the ground) |
 | `src/player/` | Ship, autopilot, orbit camera, picking |
 | `src/audio/`, `src/ui/` | Sound, HUD, maps, menu |
-| `src/lab/` | The planet lab |
+| `src/debug/` | The debug dump: capture, restore and the file format |
+| `src/lab/`, `src/plantlab/` | The planet lab and the plant lab |
 | `docs/research/` | Real-world references behind the numbers |
 
 ## Roadmap
