@@ -7,6 +7,13 @@ export interface Orbit {
   phase: number;
   /** Tilt of the orbital plane in radians. */
   inclination: number;
+  /**
+   * Then turned about +Y by this (radians; 0 when absent). A moon with its
+   * planet's tilt as `inclination` and a node of π/2 orbits in the planet's
+   * equatorial plane (planets lean about Z, see world/Planet.ts), like
+   * Uranus's.
+   */
+  node?: number;
 }
 
 export interface Vec3Like {
@@ -23,9 +30,19 @@ export function orbitAngle(orbit: Orbit, time: number): number {
 export function orbitPosition<T extends Vec3Like>(orbit: Orbit, time: number, out: T): T {
   const a = orbitAngle(orbit, time);
   const flatZ = orbit.radius * Math.sin(a);
-  out.x = orbit.radius * Math.cos(a);
+  const x = orbit.radius * Math.cos(a);
+  const z = flatZ * Math.cos(orbit.inclination);
   out.y = flatZ * Math.sin(orbit.inclination);
-  out.z = flatZ * Math.cos(orbit.inclination);
+  const node = orbit.node ?? 0;
+  if (node === 0) {
+    out.x = x;
+    out.z = z;
+  } else {
+    const c = Math.cos(node);
+    const s = Math.sin(node);
+    out.x = x * c + z * s;
+    out.z = z * c - x * s;
+  }
   return out;
 }
 
@@ -34,9 +51,14 @@ export function orbitPosition<T extends Vec3Like>(orbit: Orbit, time: number, ou
  * the orbit, e.g. where a body is actually drawn.
  */
 export function orbitAngleOf(orbit: Orbit, p: Vec3Like): number {
-  // Undo the tilt about X to get the in-plane coordinate that was sin(angle).
-  const flatZ = p.y * Math.sin(orbit.inclination) + p.z * Math.cos(orbit.inclination);
-  return Math.atan2(flatZ, p.x);
+  // Undo the node's turn about Y, then the tilt about X to get the in-plane coordinate that was sin(angle).
+  const node = orbit.node ?? 0;
+  const c = Math.cos(node);
+  const s = Math.sin(node);
+  const x = p.x * c - p.z * s;
+  const z = p.x * s + p.z * c;
+  const flatZ = p.y * Math.sin(orbit.inclination) + z * Math.cos(orbit.inclination);
+  return Math.atan2(flatZ, x);
 }
 
 /**

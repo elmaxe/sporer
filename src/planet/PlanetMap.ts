@@ -228,7 +228,7 @@ export class PlanetMap implements Entity {
     const gas = isGas(config);
     // Gas giants' clouds are drawn by the globe's shader (GAS); the bake only fills the outline.
     this.gas = gas ? gasPainter(config.seed, config.bands, config.size === 'iceGiant') : null;
-    this.terrain = gas ? null : terrainPainter(config.style);
+    this.terrain = gas ? null : terrainPainter(config.style, false, config.seed);
     this.relief = gas ? 0 : config.style.relief;
     this.lava = globe.lava !== null;
     this.folded = loadFolded();
@@ -426,14 +426,14 @@ export class PlanetMap implements Entity {
           // A small body: the ground's radius in relief units (its shape plus the detail, read at the surface
           // point as the globe does), never negative, so the whole of it is shaded as land.
           const r = shapeRadius(shape, dx, dy, dz);
-          const h = (heights[p] = this.terrain!(detailedTerrain(dx * r, dy * r, dz * r, seed), color) + (r - SHAPE_FLOOR) / this.relief);
+          const h = (heights[p] = this.terrain!(detailedTerrain(dx * r, dy * r, dz * r, seed), color, dx, dy, dz) + (r - SHAPE_FLOOR) / this.relief);
           if (i > 0 && j > 0 && heights[p - 1]! >= 0 && heights[p - width]! >= 0) {
             const slope = heights[p - 1]! + heights[p - width]! - 2 * h;
             color.multiplyScalar(THREE.MathUtils.clamp(1 - slope * shadeGain, 0.55, 1.45));
           }
         } else {
           const n = detailedTerrain(dx, dy, dz, seed);
-          const h = (heights[p] = this.terrain!(n, color));
+          const h = (heights[p] = this.terrain!(n, color, dx, dy, dz));
           if (this.lava && n < this.config.style.seaLevel) alpha = 0;
           // Lit from the upper left: darker where the ground falls away towards the lower right.
           if (h > 0 && i > 0 && j > 0 && heights[p - 1]! >= 0 && heights[p - width]! >= 0) {

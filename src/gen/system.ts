@@ -7,6 +7,7 @@ import type { NebulaData } from './nebulas';
 import { hexToRgb, hslToHex, rgbToHex } from './color';
 import { romanNumeral } from './names';
 import type { Orbit } from './orbit';
+import type { ShapeData } from './shape';
 import {
   EARTH_GAME_RADIUS,
   MOON_COUNT_WEIGHTS,
@@ -25,6 +26,7 @@ import {
   type SizeClass,
 } from './planets';
 import { Rng } from './rng';
+import { isSol, solSystem } from './sol';
 import {
   ROGUE_HEAT,
   ROGUE_MOON_WEIGHTS,
@@ -59,6 +61,8 @@ export interface MoonData {
   /** Glow colour from the climate's atmosphere, or null when there's too little air to see. */
   atmosphere: string | null;
   climate: ClimateData;
+  /** An irregular small moon's shape (gen/shape.ts; Mars's Phobos and Deimos); `radius` is its longest reach. Absent: round. */
+  shape?: ShapeData | null;
 }
 
 export interface RingData {
@@ -66,6 +70,12 @@ export interface RingData {
   outer: number;
   color: string;
   opacity: number;
+  /**
+   * A real ring system's structure (Saturn's B ring, the Cassini division, ...):
+   * opacity and brightness factors evenly spaced from the inner to the outer
+   * edge. Without it the view draws seeded gaps.
+   */
+  profile?: readonly { alpha: number; light: number }[];
 }
 
 export interface PlanetData {
@@ -123,6 +133,7 @@ const REFERENCE_PERIOD = 50;
 
 /** Generates a star's full system. Pure and deterministic: same ref, same system. */
 export function generateSystem(ref: StarRef): SystemData {
+  if (isSol(ref)) return solSystem(ref);
   if (isRogue(ref)) return generateRogueSystem(ref);
   const rng = new Rng(ref.seed);
   const stars = placeStars(rng.fork('stars'), ref.stars);
@@ -369,7 +380,8 @@ function climateAtmosphere(prng: Rng, type: PlanetType, climate: ClimateData | n
 export function findHomeSystem(galaxy: GalaxyData): StarRef {
   for (const ref of galaxy.stars) {
     const [star, companion] = ref.stars;
-    if (companion || star!.kind !== 'mainSequence' || !['G', 'K'].includes(star!.spectralClass)) continue;
+    // The real Sol system is somewhere to visit, not where the game starts.
+    if (isSol(ref) || companion || star!.kind !== 'mainSequence' || !['G', 'K'].includes(star!.spectralClass)) continue;
     const d = Math.hypot(ref.position.x, ref.position.z) / galaxy.radius;
     if (d < 0.35 || d > 0.75) continue;
     const system = generateSystem(ref);
@@ -483,7 +495,8 @@ export function generateMoons(
   return moons;
 }
 
-function keplerPeriod(orbitRadius: number, mass: number): number {
+/** Seconds per orbit at `orbitRadius` round `mass` (G star = 1): Kepler's third law from the reference orbit. */
+export function keplerPeriod(orbitRadius: number, mass: number): number {
   return (REFERENCE_PERIOD * Math.pow(orbitRadius / REFERENCE_ORBIT, 1.5)) / Math.sqrt(Math.max(mass, 0.2));
 }
 

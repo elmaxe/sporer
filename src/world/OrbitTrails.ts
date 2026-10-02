@@ -169,6 +169,7 @@ export class OrbitTrails implements Entity {
         angle: { value: 0 },
         radius: { value: config.orbit.radius },
         inclination: { value: config.orbit.inclination },
+        node: { value: config.orbit.node ?? 0 },
         headWidth: { value: 1 },
         tailWidth: { value: 1 },
         // Live reference: the smoke thins out where it meets its body (and rings).
@@ -219,6 +220,7 @@ const TRAIL_VERTEX = /* glsl */ `
   uniform float span;
   uniform float radius;
   uniform float inclination;
+  uniform float node;
   uniform float headWidth;
   uniform float tailWidth;
   uniform float minWidth;
@@ -235,6 +237,10 @@ const TRAIL_VERTEX = /* glsl */ `
     float ci = cos(inclination);
     vec3 local = radius * vec3(cos(a), sin(a) * si, sin(a) * ci);
     vec3 tangent = vec3(-sin(a), cos(a) * si, cos(a) * ci);
+    // Turned about +Y by the node (Orbit.node).
+    mat3 turn = mat3(cos(node), 0.0, -sin(node), 0.0, 1.0, 0.0, sin(node), 0.0, cos(node));
+    local = turn * local;
+    tangent = turn * tangent;
     vec4 world = modelMatrix * vec4(local, 1.0);
 
     // Face the camera: spread across the orbit, perpendicular to the view.
