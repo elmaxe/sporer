@@ -3,7 +3,7 @@ import type { Entity } from '../core/Entity';
 import { atmosphereLook } from '../gen/atmosphere';
 import { orbitPosition } from '../gen/orbit';
 import { createAtmosphere } from '../world/atmosphereShell';
-import { COARSE_VENT_RADIUS, TERRAIN_SEGMENTS, type Planet } from '../world/Planet';
+import { COARSE_VENT_RADIUS, LAVA_SEGMENTS, TERRAIN_SEGMENTS, type Planet } from '../world/Planet';
 import { createLavaLook, type LavaLook } from '../world/lavaMaterial';
 import { createTerrainGeometry } from '../world/planetGeometry';
 import type { PlanetFrame } from './PlanetFrame';
@@ -35,10 +35,10 @@ export class LocalMoons implements Entity {
       const { radius, seed, style } = moon.config;
       const lava = this.lava[i] ?? null;
       const mesh = new THREE.Mesh(
-        createTerrainGeometry(radius * frame.scale, seed, style, { segments: TERRAIN_SEGMENTS, seaFloor: lava !== null }),
+        createTerrainGeometry(radius * frame.scale, seed, style, { segments: lava ? LAVA_SEGMENTS : TERRAIN_SEGMENTS }),
         new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9 }),
       );
-      if (lava) mesh.add(lava.createSeaSphere(radius * frame.scale));
+      lava?.paintTerrain(mesh.material, radius * frame.scale);
       mesh.name = moon.name;
       const { atmosphere, climate } = moon.config;
       const look = atmosphere && climate ? atmosphereLook(climate, radius) : null;

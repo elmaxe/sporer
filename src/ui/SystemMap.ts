@@ -345,7 +345,7 @@ export class SystemMap implements Entity {
         d.rows = 0;
       }
       const { config } = d.body;
-      const gas = isGas(config) ? gasPainter(config.seed, config.bands) : null;
+      const gas = isGas(config) ? gasPainter(config.seed, config.bands, config.size === 'iceGiant') : null;
       const terrain = gas ? null : terrainPainter(config.style);
       const tilt = config.tilt ?? 0;
       const cos = Math.cos(tilt);

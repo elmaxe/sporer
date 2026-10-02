@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { terrainNoise } from '../gen/noise';
 import { hashSeed, Rng } from '../gen/rng';
+import { gasTone, generateGasLayout } from '../gen/gasGiants';
+import { paletteAt } from './gasLook';
 import { SHAPE_FLOOR, shapeRadius, type ShapeData } from '../gen/shape';
 import type { PlanetStyle, RingData } from '../gen/system';
 import { createCubeSphere } from './cubeSphere';
@@ -140,54 +142,32 @@ function sampledSphere(geometry: THREE.BufferGeometry, sample: SurfaceSampler, d
 }
 
 /**
- * Colours a gas giant at unit direction (x, y, z) into `out`: stripes by
- * latitude, their edges wobbled by noise, plus thin wavy cloud streaks with
- * `streaks`. Shared by the globe meshes and the planet level's map.
+ * Colours a gas giant at unit direction (x, y, z) into `out`: its bands
+ * (gen/gasGiants.ts) without the churning clouds and storms the shader adds
+ * (world/gasLook.ts). For small pictures, like the system map's discs.
  */
 export type GasPainter = (x: number, y: number, z: number, out: THREE.Color) => void;
 
-export function gasPainter(seed: number, bands: readonly string[], streaks = false): GasPainter {
+export function gasPainter(seed: number, bands: readonly string[], ice: boolean): GasPainter {
+  const layout = generateGasLayout(seed, ice);
   const palette = bands.map((b) => new THREE.Color(b));
-  // Which band colour each stripe uses, seeded so a planet always looks the same.
-  const rng = new Rng(hashSeed(seed, 'stripes'));
-  const stripes = rng.int(7, 12);
-  const order = Array.from({ length: stripes + 1 }, () => palette[rng.int(0, palette.length - 1)]!);
-  return (x, y, z, out) => {
-    const lat = y + 0.05 * terrainNoise(x * 1.2, y * 2, z * 1.2, seed);
-    const s = THREE.MathUtils.clamp((lat + 1) / 2, 0, 0.9999) * stripes;
-    const k = Math.floor(s);
-    out.lerpColors(order[k]!, order[k + 1]!, THREE.MathUtils.smoothstep(s - k, 0.7, 1));
-    if (streaks) {
-      const wave = terrainNoise(x * 4, y * 6, z * 4, seed + 1);
-      const swirl = terrainNoise(x * 12, y * 40, z * 12, seed + 2);
-      out.multiplyScalar(1 + 0.08 * Math.sin(lat * 90 + 4 * wave) + 0.06 * swirl);
-    }
+  return (_x, y, _z, out) => {
+    paletteAt(palette, gasTone(layout, Math.asin(THREE.MathUtils.clamp(y, -1, 1))), out);
   };
 }
 
-/** A gas giant's cloud tops: a sphere of `radius` striped by `gasPainter`. */
-export function gasSampler(radius: number, seed: number, bands: readonly string[], streaks = false): SurfaceSampler {
-  const paint = gasPainter(seed, bands, streaks);
+/** A gas giant's cloud tops: a sphere of `radius` coloured by `gasPainter` (the shader paints over it). */
+export function gasSampler(radius: number, seed: number, bands: readonly string[], ice: boolean): SurfaceSampler {
+  const paint = gasPainter(seed, bands, ice);
   return (dir, color) => {
     paint(dir.x, dir.y, dir.z, color);
     return radius;
   };
 }
 
-/**
- * Smooth sphere striped by latitude, the stripe edges wobbled by noise.
- * `streaks` adds thin, wavy cloud streaks for close-up views.
- */
-export function createGasGeometry(
-  radius: number,
-  seed: number,
-  bands: readonly string[],
-  segments: number,
-  streaks = false,
-): THREE.BufferGeometry {
-  // Stripe edges follow triangle edges, so this wants a finer sphere than terrain.
-  // The cube sphere's normals already point straight out: smooth shading.
-  return sampledSphere(createCubeSphere(1, segments), gasSampler(radius, seed, bands, streaks), false);
+/** A smooth sphere for a gas giant (the cube sphere's normals already point straight out). */
+export function createGasGeometry(radius: number, seed: number, bands: readonly string[], segments: number, ice: boolean): THREE.BufferGeometry {
+  return sampledSphere(createCubeSphere(1, segments), gasSampler(radius, seed, bands, ice), false);
 }
 
 /**

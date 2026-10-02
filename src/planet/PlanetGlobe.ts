@@ -9,6 +9,7 @@ import { createRings, floorRadius, gasSampler, peakRadius, terrainSampler, type 
 import { createCubeSphere } from '../world/cubeSphere';
 import { GROUND_LAYER, GroundDepth } from '../world/groundDepth';
 import { createWeatherLook, type WeatherLook } from '../world/weatherLook';
+import { createGasLook, type GasLook } from '../world/gasLook';
 import type { Debug } from '../core/Debug';
 import { PLANET_SCALE, RELIEF_SCALE, globeRadius } from './frame';
 import { groundHit } from './ground';
@@ -51,6 +52,8 @@ export class PlanetGlobe implements Entity {
   readonly sunStrength = { value: 1 };
   /** Lava worlds and moons: the animated sea and its eruptions' schedule. */
   readonly lava: LavaLook | null;
+  /** Gas and ice giants: the cloud tops (the map draws them too). */
+  readonly gas: GasLook | null;
   /** Bodies with weather: the cloud layer's look, its storms and lightning (planet/Weather.ts draws the rain and bolts). */
   readonly weather: WeatherLook | null;
 
@@ -81,14 +84,12 @@ export class PlanetGlobe implements Entity {
 
     this.sea = seaFloor;
     this.sample = gas
-      ? gasSampler(R, seed, config.bands, true)
+      ? gasSampler(R, seed, config.bands, config.size === 'iceGiant')
       : terrainSampler(R, seed, style, { noise: detailedTerrain, reliefScale: RELIEF_SCALE, seaFloor, shape: config.shape });
-    this.surface = new LodSurface(
-      gas ? R : floorRadius(R, style, RELIEF_SCALE, seaFloor, config.shape != null),
-      this.top,
-      this.sample,
-      new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: !gas, roughness: 0.9 }),
-    );
+    const material = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: !gas, roughness: 0.9 });
+    this.gas = createGasLook(config);
+    this.gas?.apply(material);
+    this.surface = new LodSurface(gas ? R : floorRadius(R, style, RELIEF_SCALE, seaFloor, config.shape != null), this.top, this.sample, material);
     this.object.add(this.surface.object);
     addLodDebug(debug);
     if (seaFloor) this.object.add(createSea(config.type, style.sea!, R, this.lava ? this.lava.createSeaMaterial(this.sun, this.sunLight, this.ambientLight) : null));
@@ -137,11 +138,13 @@ export class PlanetGlobe implements Entity {
 
   update(frameDt: number): void {
     this.lava?.animate(this.frame.renderTime);
+    this.gas?.animate(this.frame.renderTime);
     this.weather?.animate(this.frame.renderTime);
     this.surface.update(this.object.worldToLocal(this.camera.getWorldPosition(this.cameraPosition)), frameDt);
   }
 
   dispose(): void {
+    this.gas?.dispose();
     this.surface.dispose();
     this.ground?.dispose();
     this.scene.remove(this.object);

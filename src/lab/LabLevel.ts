@@ -20,6 +20,7 @@ import { PlanetPicker } from '../planet/PlanetPicker';
 import { PlanetShip } from '../planet/PlanetShip';
 import { maxViewDistance, travelScale } from '../planet/frame';
 import { OrbitCamera } from '../player/OrbitCamera';
+import { zoomCurveParams } from '../player/zoomCurve';
 import { SurfaceChanges } from '../surface/changes';
 import { plantSetup } from '../surface/plantSetup';
 import { SurfaceEntities } from '../surface/SurfaceEntities';
@@ -329,7 +330,9 @@ export class LabLevel extends Level {
         target,
         input,
         { ...planetCameraParams, minDistance: min, maxDistance: max },
-        up ? { distance, up, minPitch: THREE.MathUtils.degToRad(5), pitch: THREE.MathUtils.degToRad(40) } : { distance },
+        up
+          ? { distance, up, minPitch: THREE.MathUtils.degToRad(5), pitch: THREE.MathUtils.degToRad(40), lookUp: zoomCurveParams.lookUp }
+          : { distance },
         debug,
         'Lab camera',
       ),

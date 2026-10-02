@@ -24,7 +24,7 @@ import { PlanetPicker } from '../planet/PlanetPicker';
 import { PlanetShip } from '../planet/PlanetShip';
 import { maxViewDistance, travelScale } from '../planet/frame';
 import { OrbitCamera, type OrbitParams } from '../player/OrbitCamera';
-import { flightAltitude, minPitchAt, zoomFraction } from '../player/zoomCurve';
+import { flightAltitude, maxLookUpAt, minPitchAt, zoomCurveParams, zoomFraction } from '../player/zoomCurve';
 import type { SurfaceChanges } from '../surface/changes';
 import { PlantTooltip } from '../surface/PlantTooltip';
 import { plantSetup } from '../surface/plantSetup';
@@ -209,6 +209,8 @@ export class PlanetLevel extends Level {
           // Stay above the ship's horizon, so the camera never dips into the ground.
           minPitch: THREE.MathUtils.degToRad(5),
           pitch: THREE.MathUtils.degToRad(40),
+          // Dragging on down tips the view up to the sky.
+          lookUp: zoomCurveParams.lookUp,
           onZoomPastLimit: (dir) => dir > 0 && onZoomOut(),
         },
         debug,
@@ -291,7 +293,9 @@ export class PlanetLevel extends Level {
     // Scrolling lifts or lowers the ship, and high up the camera tips over to look down on the globe.
     const { minDistance, maxDistance } = this.cameraParams;
     this.setFlight(this.orbit.zoom);
-    this.orbit.setMinPitch(minPitchAt(zoomFraction(this.orbit.zoom, minDistance, maxDistance)));
+    const f = zoomFraction(this.orbit.zoom, minDistance, maxDistance);
+    this.orbit.setMinPitch(minPitchAt(f));
+    this.orbit.setMaxLookUp(maxLookUpAt(f));
   }
 
   /** System time here; the system level catches up to it on return. */
