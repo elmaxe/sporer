@@ -40,6 +40,7 @@ A browser game inspired by the space stage of *Spore*. Fly a UFO through a proce
 | Shift | Boost |
 | N / M | Map / mute |
 | Esc | Menu |
+| F8 | Debug dump (also in the menu): mark the problem on the screenshot, add a note, save or share one file to send |
 
 ## Planet lab
 
@@ -64,7 +65,8 @@ npm run dev        # http://localhost:5173 (debug panel on)
 | `npm test` | Unit tests (Vitest) |
 | `npm run build` / `npm run preview` | Production build and a local preview of it |
 | `npm run smoke` | Headless browser check of the whole game (needs the dev server running) |
-| `npm run shot` | Scripted in-game screenshots |
+| `npm run shot` | Scripted in-game screenshots (`-- --dump <file>` restores a debug dump's moment) |
+| `npm run dump -- <file>` | Unpacks a debug dump: its pictures and a readable summary |
 
 URL parameters: `?seed=<number or text>` picks the galaxy, `?star=<id>` starts in a given system, `?debug` shows the debug panel in production builds, `?quality=low` renders at half resolution.
 
@@ -81,6 +83,7 @@ Every push to `main` runs the typecheck, tests and build in GitHub Actions and d
 | `src/galaxy/`, `src/world/`, `src/planet/`, `src/surface/` | What each level draws (`surface/`: plants on the ground) |
 | `src/player/` | Ship, autopilot, orbit camera, picking |
 | `src/audio/`, `src/ui/` | Sound, HUD, maps, menu |
+| `src/debug/` | The debug dump: capture, restore and the file format |
 | `src/lab/`, `src/plantlab/` | The planet lab and the plant lab |
 | `docs/research/` | Real-world references behind the numbers |
 

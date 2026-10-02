@@ -27,6 +27,7 @@ npm run shot -- --out <dir> --clean [--sheet] [--star <id>] <steps...>
 - **`--star <id>` / `--seed <s>`**: which system/galaxy to start in (`--url` for anything else, e.g. a preview build on :4173). Default page size is 1280×720 (`--size`).
 - **`--steps <file>`**: steps from a file, one per line, `#` comments. Use it when the JS gets long or needs quotes; put the file in the scratchpad.
 - **`--phone`**: an emulated phone (390×844, mobile, real touch events), so the game (and the lab) run in touch mode with the on-screen controls; use `tap:<element id>` to press its buttons.
+- **`--dump <file>`**: restore a debug dump's state (the player's `sporer-dump-*.json`, see `debug-dump`) at its page size and quality, then run the steps (default `shot:restored`). The game is left paused there.
 - **`--lab [<query>]`**: shoot the planet lab (`lab.html`) instead of the game, e.g. `--lab "gen=7&type=ice&kind=moon"` or `--lab "seed=1337&star=5&planet=2"`. See *The planet lab* below.
 - **`--plants [<query>]`**: shoot the plant lab (`plants.html`), e.g. `--plants "gen=4&kind=tree&arch=palm&view=lineup"` or `--plants "seed=1337&star=6&planet=0"`. See *The plant lab* below.
 
@@ -49,7 +50,7 @@ Steps run in order. With no steps, you get `shot:view`.
 | `fps` | frames per second over 120 frames (headless SwiftShader: expect ~5–25) |
 | `goto:<url or ?params>` | load another page, e.g. `goto:?star=2`, and wait for the game |
 
-The page has the dev globals: `game`, `levels` (the `SceneManager`), `galaxy`, `ship`, `world` (the `StarSystem`), `system` (its data), `planet` (the planet level or null), `audio`, `menu` (the Esc menu: `menu.open()`, `menu.hide()`; open, the game is paused), `generateSystem`. See `threejs-game-conventions` for what the classes offer.
+The page has the dev globals: `game`, `levels` (the `SceneManager`), `galaxy`, `ship`, `world` (the `StarSystem`), `system` (its data), `planet` (the planet level or null), `audio`, `menu` (the Esc menu: `menu.open()`, `menu.hide()`; open, the game is paused), `debugDump` (`data()`: the dump's data without pictures; `restore(state)`; `open()`: the dump dialog), `generateSystem`. See `threejs-game-conventions` for what the classes offer.
 
 ## 3. Look, and report
 

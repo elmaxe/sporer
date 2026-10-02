@@ -246,6 +246,11 @@ export class PlanetLevel extends Level {
       .name('Open this planet in the lab');
   }
 
+  /** True when the globe has every chunk of terrain the camera wants (automation, e.g. restoring a debug dump). */
+  get globeSettled(): boolean {
+    return this.globe.settled;
+  }
+
   /** The ground's radius (terrain as drawn, or the sea) in unit direction `dir` of the body frame. */
   groundRadius(dir: THREE.Vector3): number {
     return this.globe.groundRadius(dir);

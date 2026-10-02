@@ -634,6 +634,150 @@ html.touch #menu .menu-keys {
   user-select: text;
 }
 
+/* The debug dump's dialog (menu → Save debug dump, F8): over the menu. */
+#dump {
+  position: fixed;
+  inset: 0;
+  z-index: 1020;
+  display: grid;
+  place-items: center;
+  padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom))
+    max(12px, env(safe-area-inset-left));
+  background: rgba(0, 4, 12, 0.7);
+}
+
+#dump[hidden] {
+  display: none;
+}
+
+#dump-panel {
+  width: min(760px, 100%);
+  max-height: 100%;
+  overflow: auto;
+  box-sizing: border-box;
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(8, 14, 28, 0.97);
+  border: 1px solid rgba(102, 255, 204, 0.35);
+  font-size: 13px;
+}
+
+#dump h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+#dump p {
+  margin: 0;
+  line-height: 1.4;
+  opacity: 0.8;
+}
+
+#dump-close {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: #cfe3ff;
+  cursor: pointer;
+}
+
+/* The screenshot, as big as fits with the note and buttons still on screen; marks sit on it in % of its box. */
+#dump-picture {
+  position: relative;
+  justify-self: center;
+  line-height: 0;
+  cursor: crosshair;
+  touch-action: manipulation;
+}
+
+#dump-image {
+  display: block;
+  max-width: 100%;
+  max-height: min(60vh, calc(100vh - 260px));
+  min-height: 120px;
+  border: 1px solid rgba(102, 255, 204, 0.25);
+  -webkit-user-drag: none;
+}
+
+#dump-marks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.dump-mark {
+  position: absolute;
+  width: 30px;
+  height: 30px;
+  margin: -17px 0 0 -17px;
+  border: 2px solid #ffe14d;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.7);
+}
+
+/* The number above right of the ring, off the marked spot. */
+.dump-mark span {
+  position: absolute;
+  left: 80%;
+  bottom: 80%;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: #ffe14d;
+  color: #000;
+  font: bold 12px/1.2 system-ui, sans-serif;
+}
+
+#dump-note {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(102, 255, 204, 0.35);
+  background: rgba(0, 0, 0, 0.35);
+  color: #e8f1ff;
+  /* At least 16px, or iOS zooms the page in on focus. */
+  font: 16px/1.35 system-ui, sans-serif;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.dump-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.dump-actions .menu-button {
+  flex: 1 1 8em;
+}
+
+.dump-actions .menu-button[hidden] {
+  display: none;
+}
+
+.dump-actions .menu-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+#dump .dump-status {
+  color: #ffe14d;
+  opacity: 1;
+}
+
+#dump .dump-status[hidden] {
+  display: none;
+}
+
 /* Touch play (html.touch, set by TouchControls): on-screen ship controls, HUD moved to the top. */
 #touch-controls {
   display: none;

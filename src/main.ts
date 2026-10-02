@@ -14,6 +14,11 @@ import { FullscreenButton } from './ui/FullscreenButton';
 import { GameMenu } from './ui/GameMenu';
 import { FpsCounter } from './ui/FpsCounter';
 import { GraphicsSettingsControl, loadGraphicsSettings } from './ui/GraphicsSettings';
+import { installConsoleLog } from './debug/consoleLog';
+import { DebugDumpControl } from './debug/DebugDump';
+
+// First, so the debug dump has the console's errors from start-up on.
+const consoleLog = installConsoleLog();
 
 const DEFAULT_SEED = '1337';
 
@@ -35,6 +40,7 @@ async function main(): Promise<void> {
   const menu = new GameMenu(game, levels);
   game.add(new FpsCounter());
   game.add(new TouchControls(game));
+  const debugDump = game.add(new DebugDumpControl(game, levels, consoleLog, debug));
 
   document.getElementById('loading')?.remove();
   game.start();
@@ -42,7 +48,7 @@ async function main(): Promise<void> {
   // Handles for poking at the game from the browser console / automation.
   // ship / world / system follow the current system level, planet the planet level (or null).
   if (import.meta.env.DEV) {
-    Object.assign(window, { game, galaxy, levels, audio, menu, generateSystem, geyserKind, weatherKind, volcanicLightning });
+    Object.assign(window, { game, galaxy, levels, audio, menu, debugDump, generateSystem, geyserKind, weatherKind, volcanicLightning });
     Object.defineProperties(window, {
       ship: { get: () => levels.systemLevel.ship, configurable: true },
       world: { get: () => levels.systemLevel.world, configurable: true },

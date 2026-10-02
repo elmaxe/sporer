@@ -19,6 +19,10 @@
 //                      checks where a soft picture will do)
 //   --sheet            also write sheet.png: every screenshot in a labelled grid (one Read for a sequence)
 //   --steps <file>     read more steps from a file, one per line (# comments), handy for long JS
+//   --dump <file>      a debug dump (menu → Save debug dump, F8): load its galaxy and system at its page size
+//                      (a phone's in --phone mode) and quality, then restore its state (level, body, clocks,
+//                      ship, camera, graphics switches) and leave the game paused there; the notes on what
+//                      couldn't be matched are the first result. With no steps: shot:restored. See debug-dump.
 //
 // Steps, run in order (with no steps: shot:view):
 //   shot:<name>                  screenshot → <name>.png
@@ -41,7 +45,7 @@
 //   fps                          measure frames per second over 120 frames
 //   goto:<url or ?params>        load another page (e.g. goto:?star=2) and wait for the game
 //
-// Page globals (dev build): game, levels, galaxy, ship, world, system, planet, audio, menu, generateSystem.
+// Page globals (dev build): game, levels, galaxy, ship, world, system, planet, audio, menu, debugDump, generateSystem.
 // In the lab: game and lab (src/lab/PlanetLab.ts: lab.set, setView, generate, load, look, setTime, ...);
 // settle there waits for lab.ready (the latest edit built and drawn). In the plant lab: game and plantLab
 // (src/plantlab/PlantLab.ts: plantLab.set, setForm, select, setView, generate, load, look, ...), settle waits for plantLab.ready.
@@ -82,12 +86,23 @@ for (let i = 0; i < args.length; i++) {
       const s = line.trim();
       if (s && !s.startsWith('#')) steps.push(s);
     }
-  } else if (a.startsWith('--')) throw new Error(`Unknown option ${a}`);
+  } else if (a === '--dump') opts.dump = JSON.parse(readFileSync(value(), 'utf8'));
+  else if (a.startsWith('--')) throw new Error(`Unknown option ${a}`);
   else steps.push(a);
 }
-if (steps.length === 0) steps.push('shot:view');
+if (opts.dump) {
+  const { state, device, url: dumpUrl } = opts.dump;
+  if (!state) throw new Error(`The dump has no game state (${opts.dump.stateError ?? 'unknown why'})`);
+  if (state.seed !== null) opts.params.seed ??= state.seed;
+  opts.params.star ??= String(state.star);
+  if (new URL(dumpUrl).searchParams.get('quality') === 'low') opts.params.quality = 'low';
+  if (device.touch) opts.phone = true;
+  if (!args.includes('--size')) opts.size = device.viewport.join('x');
+  steps.unshift('restore');
+}
+if (steps.length === (opts.dump ? 1 : 0)) steps.push(opts.dump ? 'shot:restored' : 'shot:view');
 
-if (opts.phone && !args.includes('--size')) opts.size = '390x844';
+if (opts.phone && !args.includes('--size') && !opts.dump) opts.size = '390x844';
 const [width, height] = opts.size.split('x').map(Number);
 const page_ = opts.plants
   ? `plants.html${opts.plantsQuery ? `?${opts.plantsQuery.replace(/^\?/, '')}` : ''}`
@@ -269,6 +284,9 @@ async function run(step) {
         value: await page.evaluate(`new Promise((r) => { let n = 0; const t0 = performance.now();
           (function f() { if (++n === 120) r(Math.round(120000 / (performance.now() - t0))); else requestAnimationFrame(f); })(); })`),
       });
+      return;
+    case 'restore':
+      results.push({ step, value: await page.evaluate(`debugDump.restore(${JSON.stringify(opts.dump.state)})`, 300000) });
       return;
     case 'goto': {
       const next = new URL(rest, url);
