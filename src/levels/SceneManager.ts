@@ -542,10 +542,12 @@ export class SceneManager implements Entity {
       () => this.toGalaxy(),
       () => this.toPlanet(),
     );
-    // Busted bodies stay busted.
+    // Busted bodies stay busted, and raised volcanoes stand.
     for (const body of [...level.world.planets, ...level.world.moons, ...level.world.nuclei, ...level.world.asteroids]) {
+      const key = bodyKey(body.config);
       // A new system's clock starts afresh: its debris has long settled.
-      if (this.busted.isBusted(bodyKey(body.config))) body.bust(level.world.time - SETTLED_DEBRIS);
+      if (this.busted.isBusted(key)) body.bust(level.world.time - SETTLED_DEBRIS);
+      else for (const site of this.surfaceChanges.find(key)?.volcanoes ?? []) body.addVolcano(site, null);
     }
     // Remember the system in the URL, so a reload comes back here.
     const url = new URL(location.href);

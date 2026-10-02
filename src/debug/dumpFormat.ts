@@ -1,3 +1,4 @@
+import type { VolcanoSite } from '../combat/volcano';
 import type { LogEntry } from './consoleLog';
 import type { FrameStats } from './frameTimes';
 
@@ -71,6 +72,8 @@ export interface GameState {
    * blast's system time, and how many there are in the whole game. Also whether one was going off.
    */
   busted?: { bodies: { body: BodyRef; time: number }[]; total: number; firing: boolean; elapsed: number | null };
+  /** Volcanoes raised by volcano bombs on this system's bodies (missing in dumps from before them), oldest first. */
+  volcanoes?: { body: BodyRef; sites: VolcanoSite[] }[];
   /** What the DOM overlays showed (text the screenshot's game picture leaves out). */
   ui: {
     touchMode: boolean;

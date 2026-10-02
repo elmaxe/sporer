@@ -56,8 +56,8 @@
 // star in the sky) and every zoom on the way crossfades and never goes black; FPS in its system.
 // Volcano bomb: pressing 2 in the system says where to use it; in low orbit over a solid planet a real 2 arms it and a
 // real click on the ground fires it: a volcano rises there (the ground under it is higher, the ship flies over it), the
-// cues go fire → rise, the bomb stays armed for another; over a gas giant it can't be used; the volcano is still there
-// (risen) when the planet is visited again.
+// cues go fire → rise, the bomb stays armed for another; over a gas giant it can't be used; the system view's globe
+// shows it, it's still there (risen) when the planet is visited again, and on the globe after a trip to the galaxy.
 // Planet buster (last, as it leaves a moon of the home system busted): the item bar shows in the system with the
 // buster unusable (pressing 1 says where to use it); in low orbit over a moon, a real 1 arms it and a real click on the
 // globe fires it (once); scrolling out is refused until it's over; the screen flashes, the globe gives way to debris,
@@ -1937,13 +1937,21 @@ await section('volcano', async () => {
   const heard = (await evaluate(`__cues`)).filter((c) => c.startsWith('volcano'));
   await evaluate(`levels.leavePlanet()`);
   await until(`levels.mode === 'system' && !levels.transitioning`, 60000);
+  // The system view's globe shows it too.
+  const systemView = await evaluate(`__volcanic.volcanoSites.length`);
   await evaluate(`(() => { ship.parkAt(__volcanic); levels.toPlanet(__volcanic); })()`);
   await until(`levels.mode === 'planet' && !levels.transitioning`, 60000);
   await drawFrames(5);
   const revisit = await evaluate(`({ count: planet.volcanoes?.count, growth: planet.volcanoes?.shapes[0]?.growth })`);
   await evaluate(`levels.leavePlanet()`);
   await until(`levels.mode === 'system' && !levels.transitioning`, 60000);
-  volcano = { inSpace, gas, armed, fired, landed, risen, after, heard, revisit };
+  // Out to the galaxy and back: the system is built afresh, the volcano still on its globe.
+  await evaluate(`levels.toGalaxy()`);
+  await until(`levels.mode === 'galaxy' && !levels.transitioning`, 60000);
+  await evaluate(`levels.toSystem()`);
+  await until(`levels.mode === 'system' && !levels.transitioning`, 60000);
+  const rebuilt = await evaluate(`[...world.planets, ...world.moons].find((b) => b.name === __volcanic.name)?.volcanoSites.length`);
+  volcano = { inSpace, gas, armed, fired, landed, risen, after, heard, systemView, revisit, rebuilt };
   volcano.ok =
     inSpace.slots === 2 &&
     /down to a planet or moon/.test(inSpace.hint) &&
@@ -1963,8 +1971,10 @@ await section('volcano', async () => {
     after.available &&
     after.saved === 1 &&
     heard.join(',') === 'volcanoFire,volcanoRise' &&
+    systemView === 1 &&
     revisit.count === 1 &&
-    revisit.growth === 1;
+    revisit.growth === 1 &&
+    rebuilt === 1;
   return volcano.ok;
 });
 await section('buster', async () => {

@@ -395,6 +395,8 @@ export class PlanetLevel extends Level implements ItemUser {
     const site = { x: dir.x, y: dir.y, z: dir.z, seed: hashSeed(this.body.config.seed, 'volcano', this.changes.volcanoes.length) };
     this.changes.addVolcano(site);
     this.volcanoes.add(site, time);
+    // The system view's globe shows it too (rising with the same clock).
+    this.body.addVolcano(site, time);
     this.buryPlants();
   }
 

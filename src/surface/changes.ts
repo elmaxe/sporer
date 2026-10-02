@@ -63,4 +63,9 @@ export class SurfaceChangeStore {
     if (!list) this.lists.set(key, (list = new SurfaceChanges()));
     return list;
   }
+
+  /** The planet's list if anything was ever done there, without making one. */
+  find(key: string): SurfaceChanges | null {
+    return this.lists.get(key) ?? null;
+  }
 }

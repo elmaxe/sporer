@@ -1,13 +1,14 @@
 import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
-import { VolcanoShape, eruptionStrength, lavaFront, volcanoGrowth, volcanoParams, type VolcanoSite } from '../combat/volcano';
+import { VolcanoShape, eruptionStrength, volcanoGrowth, volcanoParams, type VolcanoSite } from '../combat/volcano';
 import { GLOBE_SIZE_FACTOR } from '../gen/planets';
 import { Rng } from '../gen/rng';
 import { MarkerRing } from '../player/MarkerRing';
 import { CLOUD_RENDER_ORDER } from '../world/weatherLook';
 import { createGlowTexture } from '../world/glowTexture';
 import { GROUND_LAYER } from '../world/groundDepth';
+import { VolcanoMesh } from '../world/volcanoMesh';
 import type { GroundRelief } from './PlanetGlobe';
 import type { RenderClock } from './PlanetFrame';
 
@@ -39,9 +40,6 @@ const ASH_MAX_LIGHT = 1.4;
 /** Scratch for the particles' pixel sizes. */
 const drawingSize = new THREE.Vector2();
 
-const ROCK = new THREE.Color('#3b322d');
-const ASH = new THREE.Color('#5d5651');
-const CRATER = new THREE.Color('#221a16');
 
 /** What the volcanoes need from the globe they stand on (see PlanetGlobe). */
 export interface VolcanoGround {
@@ -176,14 +174,10 @@ class VolcanoView {
   private readonly glow: THREE.Sprite;
   private readonly flash: THREE.Sprite;
   private readonly ring: MarkerRing;
-  private readonly dirs: Float32Array;
-  private readonly base: Float32Array;
-  private readonly rise: Float32Array;
-  /** The ground's radius at the summit, and the growth the mesh was last written at. */
+  private readonly cone: VolcanoMesh;
+  /** The ground's radius at the summit. */
   private readonly summit: number;
-  private written = -1;
   private readonly ringPoint = new THREE.Vector3();
-  private readonly lavaUniforms = { uFront: { value: 0 }, uHeat: { value: 0 }, uTime: { value: 0 }, uLava: { value: 1 } };
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -193,88 +187,18 @@ class VolcanoView {
     ground: VolcanoGround,
     glowTexture: THREE.Texture,
   ) {
-    const color = new THREE.Color();
     const terrain = new THREE.Color();
-    const dir = new THREE.Vector3();
     this.summit = ground.terrainRadius(shape.centre, terrain);
-    const count = 1 + RINGS * SEGMENTS;
-    this.dirs = new Float32Array(count * 3);
-    this.base = new Float32Array(count);
-    this.rise = new Float32Array(count);
-    const colors = new Float32Array(count * 3);
-    const glow = new Float32Array(count);
-    const along = new Float32Array(count);
-    const rng = new Rng(shape.site.seed ^ 0x5bd1);
+    this.cone = new VolcanoMesh(shape, RINGS, SEGMENTS, {
+      ground: (dir, color) => ground.terrainRadius(dir, color),
+      rise: (_dir, s, azimuth) => shape.height * shape.profile(s, azimuth),
+      footSink: FOOT_SINK,
+    });
+    this.mesh = this.cone.mesh;
+    const rng = new Rng(shape.site.seed ^ 0x3c6e);
     const c = volcanoParams.craterShare;
-    for (let k = 0; k < count; k++) {
-      const ring = k === 0 ? 0 : Math.floor((k - 1) / SEGMENTS) + 1;
-      const seg = k === 0 ? 0 : (k - 1) % SEGMENTS;
-      const s = ring / RINGS;
-      const azimuth = (seg / SEGMENTS) * Math.PI * 2;
-      shape.direction(s, azimuth, dir);
-      this.dirs.set([dir.x, dir.y, dir.z], k * 3);
-      this.base[k] = ground.terrainRadius(dir, terrain) - FOOT_SINK * THREE.MathUtils.smoothstep(s, 0.75, 1);
-      this.rise[k] = shape.height * shape.profile(s, azimuth);
-      // Dark basalt, ashier up high, the crater darker still, into the ground's own colour at the foot.
-      color.copy(ROCK).lerp(ASH, THREE.MathUtils.smoothstep(1 - s, 0.4, 0.85) * 0.7);
-      if (s < c) color.lerp(CRATER, 0.8);
-      color.multiplyScalar(rng.range(0.85, 1.1)).lerp(terrain, THREE.MathUtils.smoothstep(s, 0.8, 0.98));
-      colors.set([color.r, color.g, color.b], k * 3);
-      glow[k] = s < c * 0.85 ? 1 : shape.channel(s, azimuth);
-      along[k] = s;
-    }
-    // Triangles facing out of the ground (azimuth turns anticlockwise seen from above).
-    const index: number[] = [];
-    const at = (ring: number, seg: number) => (ring === 0 ? 0 : 1 + (ring - 1) * SEGMENTS + (seg % SEGMENTS));
-    for (let seg = 0; seg < SEGMENTS; seg++) index.push(0, at(1, seg), at(1, seg + 1));
-    for (let ring = 1; ring < RINGS; ring++) {
-      for (let seg = 0; seg < SEGMENTS; seg++) {
-        const a = at(ring, seg);
-        const b = at(ring, seg + 1);
-        const c = at(ring + 1, seg);
-        const d = at(ring + 1, seg + 1);
-        index.push(a, c, d, a, d, b);
-      }
-    }
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(count * 3), 3));
-    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    geometry.setAttribute('aGlow', new THREE.BufferAttribute(glow, 1));
-    geometry.setAttribute('aAlong', new THREE.BufferAttribute(along, 1));
-    geometry.setIndex(index);
-    const material = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9 });
-    const uniforms = this.lavaUniforms;
-    material.onBeforeCompile = (shader) => {
-      Object.assign(shader.uniforms, uniforms);
-      shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nattribute float aGlow;\nattribute float aAlong;\nvarying float vGlow;\nvarying float vAlong;')
-        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGlow = aGlow;\nvAlong = aAlong;');
-      shader.fragmentShader = shader.fragmentShader
-        .replace(
-          '#include <common>',
-          '#include <common>\nuniform float uFront;\nuniform float uHeat;\nuniform float uTime;\nuniform float uLava;\nvarying float vGlow;\nvarying float vAlong;',
-        )
-        .replace(
-          '#include <color_fragment>',
-          /* glsl */ `#include <color_fragment>
-          // The lava that has run as far as the front, cooling to a dark crust behind a glowing skin.
-          float lava = vGlow * (1.0 - smoothstep(uFront - 0.05, uFront, vAlong));
-          diffuseColor.rgb *= 1.0 - 0.7 * lava;`,
-        )
-        .replace(
-          '#include <emissivemap_fragment>',
-          /* glsl */ `#include <emissivemap_fragment>
-          float flicker = 0.8 + 0.12 * sin(uTime * 3.1 + vAlong * 37.0) + 0.08 * sin(uTime * 7.3 - vAlong * 61.0);
-          float heat = lava * uHeat * flicker;
-          totalEmissiveRadiance += mix(vec3(0.75, 0.09, 0.01), vec3(1.0, 0.45, 0.1), heat) * heat * 1.5 * uLava;`,
-        );
-    };
-    material.customProgramCacheKey = () => 'volcano';
-    this.mesh = new THREE.Mesh(geometry, material);
-    this.mesh.name = 'Volcano';
     // The air's haze stops at it, as at the ground.
     this.mesh.layers.enable(GROUND_LAYER);
-    this.write(shape.growth);
 
     // The vent: its frame has y up out of the summit (the particles work in it).
     this.vent.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), shape.centre);
@@ -381,17 +305,12 @@ class VolcanoView {
     const age = time - this.bornAt;
     const shape = this.shape;
     shape.growth = volcanoGrowth(age);
-    if (shape.growth !== this.written) this.write(shape.growth);
+    this.cone.setGrowth(shape.growth);
+    this.cone.animate(time, age, volcanoLookParams.lava);
     const strength = eruptionStrength(Number.isFinite(age) ? age : 1e9);
-    const front = Number.isFinite(age) ? lavaFront(age) : volcanoParams.flowReach;
     const H = shape.height;
     // The vent sits on the crater floor, rising with the cone.
     this.vent.position.copy(shape.centre).multiplyScalar(this.summit + shape.growth * H * (1 - volcanoParams.craterDepth));
-    const u = this.lavaUniforms;
-    u.uFront.value = front;
-    u.uHeat.value = 0.45 + 0.55 * strength;
-    u.uTime.value = time;
-    u.uLava.value = volcanoLookParams.lava;
 
     const blobs = this.blobs.material.uniforms;
     blobs.uTime!.value = time;
@@ -426,25 +345,9 @@ class VolcanoView {
     } else this.ring.hide();
   }
 
-  /** Raises the mesh to `growth` of its height. */
-  private write(growth: number): void {
-    const pos = this.mesh.geometry.attributes.position as THREE.BufferAttribute;
-    const p = pos.array as Float32Array;
-    for (let k = 0; k < this.base.length; k++) {
-      const r = this.base[k]! + growth * this.rise[k]!;
-      p[k * 3] = this.dirs[k * 3]! * r;
-      p[k * 3 + 1] = this.dirs[k * 3 + 1]! * r;
-      p[k * 3 + 2] = this.dirs[k * 3 + 2]! * r;
-    }
-    pos.needsUpdate = true;
-    this.mesh.geometry.computeBoundingSphere();
-    this.written = growth;
-  }
-
   dispose(): void {
-    this.scene.remove(this.mesh, this.vent, this.flash);
-    this.mesh.geometry.dispose();
-    this.mesh.material.dispose();
+    this.scene.remove(this.vent, this.flash);
+    this.cone.dispose();
     for (const points of [this.blobs, this.ash]) {
       points.geometry.dispose();
       points.material.dispose();

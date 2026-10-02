@@ -95,12 +95,14 @@ export class VolcanoShape {
     groundAtCentre: number,
     /** The sea's radius, or null with no sea. */
     sea: number | null,
+    /** Drawn this much wider and higher than it is (the system view's, so it shows from afar). */
+    exaggerate = 1,
     p: VolcanoParams = volcanoParams,
   ) {
     const rng = new Rng(site.seed);
     this.centre = new THREE.Vector3(site.x, site.y, site.z).normalize();
     const size = rng.range(0.8, 1.2);
-    this.baseRadius = Math.min(p.baseRadius, p.maxBaseShare * globeRadius) * size;
+    this.baseRadius = Math.min(p.baseRadius, p.maxBaseShare * globeRadius) * size * exaggerate;
     this.angle = this.baseRadius / globeRadius;
     this.cosAngle = Math.cos(this.angle);
     let height = this.baseRadius * p.heightRatio * rng.range(0.85, 1.15);
