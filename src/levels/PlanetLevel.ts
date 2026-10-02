@@ -39,7 +39,7 @@ import { renderScene } from '../world/wireframe';
 import type { SoundEffects } from '../audio/sfx';
 import { PlanetBuster } from '../combat/PlanetBuster';
 import type { ItemId, ItemStatus, ItemUser } from '../combat/items';
-import { DEBRIS_REACH } from '../gen/debris';
+import { DEBRIS_REACH, debrisLookFor } from '../gen/debris';
 import { DEBRIS_NEAR, DebrisField } from '../world/DebrisField';
 
 /**
@@ -360,10 +360,8 @@ export class PlanetLevel extends Level implements ItemUser {
   private addDebris(blastTime: number): void {
     const { config } = this.body;
     this.blastTime = blastTime;
-    this.debris = new DebrisField(config.seed, config.style, config.bands, this.globe.radius, DEBRIS_NEAR, {
-      vector: this.globe.sun,
-      point: false,
-    });
+    const sun = { vector: this.globe.sun, point: false };
+    this.debris = new DebrisField(config.seed, config.style, config.bands, this.globe.radius, DEBRIS_NEAR, sun, debrisLookFor(config));
     this.scene.add(this.debris.object);
     this.poseDebris();
   }

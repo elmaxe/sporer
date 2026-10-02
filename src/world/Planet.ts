@@ -14,7 +14,7 @@ import type { SizeClass } from '../gen/planets';
 import { createGasGeometry, createRings, createTerrainGeometry } from './planetGeometry';
 import { createWeatherLook, type WeatherLook } from './weatherLook';
 import { globeRadius } from '../planet/frame';
-import { DEBRIS_REACH } from '../gen/debris';
+import { DEBRIS_REACH, debrisLookFor } from '../gen/debris';
 import { DEBRIS_FAR, DebrisField } from './DebrisField';
 
 /** What the renderer needs; generated PlanetData and MoonData both satisfy it. */
@@ -192,10 +192,11 @@ export class Planet implements Entity, CelestialBody {
   bust(blastTime: number): void {
     if (this.debris) return;
     this.blastTime = blastTime;
-    this.surface.visible = false;
+    // Nothing of it is left, not even its rings: the debris ploughs through them at escape speed, with ~10⁸ times their mass.
+    for (const child of this.tilted.children) child.visible = false;
     if (this.atmosphere) this.atmosphere.visible = false;
     const { config } = this;
-    this.debris = new DebrisField(config.seed, config.style, config.bands, config.radius, DEBRIS_FAR, this.sun);
+    this.debris = new DebrisField(config.seed, config.style, config.bands, config.radius, DEBRIS_FAR, this.sun, debrisLookFor(config));
     this.tilted.add(this.debris.object);
   }
 

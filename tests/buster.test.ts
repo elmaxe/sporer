@@ -15,10 +15,21 @@ import {
 import { BustedBodies, bodyKey } from '../src/combat/busted';
 import { ITEMS, ITEM_TABS } from '../src/combat/items';
 import {
+  DRAPER_POINT,
+  ROCK,
+  blastHeat,
+  blastParams,
+  debrisLook,
+  debrisLookFor,
+  dropletTemperature,
+  generateVapour,
+  glowBrightness,
+  glowColor,
+  hotArea,
+  vapourState,
   DEBRIS_CHUNKS,
   DEBRIS_REACH,
   DUST_REACH,
-  debrisHeat,
   debrisPalette,
   debrisParams,
   debrisPosition,
@@ -176,13 +187,11 @@ describe('debris', () => {
     for (const m of data.motes) expect(m.to).toBeLessThanOrEqual(DUST_REACH + 1e-9);
   });
 
-  it('is thrown out fast and brakes, and cools', () => {
+  it('is thrown out fast and brakes', () => {
     expect(debrisThrow(0, 1)).toBe(0);
     expect(debrisThrow(-1, 1)).toBe(0);
     expect(debrisThrow(debrisParams.throwTime, 1)).toBeCloseTo(1 - Math.exp(-1));
     expect(debrisThrow(10, 1)).toBeGreaterThan(0.99);
-    expect(debrisHeat(0.01)).toBeGreaterThan(0.99);
-    expect(debrisHeat(debrisParams.coolTime * 5)).toBeLessThan(0.01);
   });
 
   it('flattens towards the old equator', () => {
@@ -203,5 +212,90 @@ describe('debris', () => {
     expect(debrisPalette(style, null)).toEqual(['#3b3532', '#447733', '#998866', '#2255aa']);
     expect(debrisPalette({ ...style, sea: null }, null)[3]).toBe('#447733');
     expect(debrisPalette(style, ['#111111', '#222222', '#333333', '#444444'])).toEqual(['#111111', '#222222', '#333333', '#444444']);
+  });
+});
+
+// See docs/research/shattered-planets.md: escape velocities from the NASA fact sheets.
+describe('how hot the blast leaves a body', () => {
+  it('puts the dispersal energy of the reference bodies where it is', () => {
+    // (3/10) v² is the uniform sphere's binding energy per kg: Earth 37.5 MJ/kg (Wikipedia: 37.5 for a uniform Earth).
+    expect(blastHeat(11.186) / blastParams.heatShare / 1e6).toBeCloseTo(37.5, 0);
+  });
+
+  it('melts and partly vaporises an Earth, half melts Mars, barely warms the Moon, leaves Ceres cold', () => {
+    const earth = debrisLook(11.19, false);
+    expect(earth.melt).toBe(1);
+    expect(earth.vapour).toBeGreaterThan(0.25);
+    expect(earth.vapour).toBeLessThan(0.45);
+    const mars = debrisLook(5.03, false);
+    expect(mars.melt).toBeGreaterThan(0.4);
+    expect(mars.melt).toBeLessThan(0.75);
+    expect(mars.vapour).toBe(0);
+    const moon = debrisLook(2.38, false);
+    expect(moon.melt).toBeGreaterThan(0.05);
+    expect(moon.melt).toBeLessThan(0.25);
+    expect(debrisLook(0.51, false).melt).toBeLessThan(0.02);
+    // Bigger is hotter.
+    let last = -1;
+    for (const v of [0.5, 2, 5, 8, 11, 15, 25]) {
+      const l = debrisLook(v, false);
+      expect(l.melt + l.vapour).toBeGreaterThanOrEqual(last);
+      last = l.melt + l.vapour;
+    }
+  });
+
+  it('turns giants to gas, and keeps vapour between the triple and critical points', () => {
+    const jupiter = debrisLook(59.5, true);
+    expect(jupiter.gas).toBe(true);
+    expect(jupiter.vapour).toBe(1);
+    for (const v of [9, 11, 20, 40]) {
+      const T = debrisLook(v, false).vapourTemperature;
+      expect(T).toBeGreaterThanOrEqual(ROCK.triplePoint);
+      expect(T).toBeLessThanOrEqual(ROCK.criticalPoint);
+    }
+    // From game bodies: a gas giant (bands, no climate) is gas; an Earth-like climate is what its escape velocity says.
+    expect(debrisLookFor({ radius: 30, type: 'gas', size: 'gasGiant', bands: ['#aa8866', '#ccbb99'] }).gas).toBe(true);
+    expect(debrisLookFor({ radius: 8, type: 'terran', climate: { escapeVelocity: 11.19 } })).toEqual(debrisLook(11.19, false));
+  });
+
+  it('crusts the melt over within seconds to a few per cent of glowing fissures', () => {
+    expect(hotArea(0, 1)).toBe(0);
+    expect(hotArea(0.01, 1)).toBeGreaterThan(0.99);
+    expect(hotArea(blastParams.crustTime * 10, 1)).toBeCloseTo(blastParams.hotArea, 3);
+    expect(hotArea(blastParams.crustTime * 10, 0.5)).toBeCloseTo(blastParams.hotArea * 0.5, 3);
+  });
+
+  it('cools droplets below the glow within seconds', () => {
+    expect(dropletTemperature(0)).toBe(ROCK.triplePoint);
+    expect(dropletTemperature(blastParams.dropletTime)).toBeCloseTo(ROCK.triplePoint * 2 ** (-1 / 3));
+    expect(dropletTemperature(60)).toBeLessThan(DRAPER_POINT);
+  });
+
+  it('spreads, cools and condenses the vapour away; a giant\u2019s gas lingers', () => {
+    const earth = debrisLook(11.19, false);
+    const early = vapourState(0.5, earth);
+    const later = vapourState(5, earth);
+    expect(later.size).toBeGreaterThan(early.size);
+    expect(later.temperature).toBeLessThan(early.temperature);
+    expect(later.density).toBeLessThan(early.density);
+    expect(vapourState(60, earth).density).toBe(0);
+    expect(vapourState(1, debrisLook(5, false)).density).toBe(0);
+    expect(vapourState(600, debrisLook(59.5, true)).density).toBeGreaterThan(0);
+  });
+
+  it('colours the glow from the blackbody table and brightens it steeply with temperature', () => {
+    expect(glowColor(2000)).toEqual([1, 0.2484, 0.0061]);
+    const mid = glowColor(2100);
+    expect(mid[1]).toBeGreaterThan(0.2484);
+    expect(mid[1]).toBeLessThan(0.293);
+    expect(glowBrightness(DRAPER_POINT)).toBe(0);
+    expect(glowBrightness(ROCK.triplePoint)).toBeCloseTo(1);
+    expect(glowBrightness(1200)).toBeLessThan(glowBrightness(1500));
+    expect(glowBrightness(4000)).toBeGreaterThan(2);
+  });
+
+  it('makes the same vapour from the same seed', () => {
+    expect(generateVapour(5, 50)).toEqual(generateVapour(5, 50));
+    for (const p of generateVapour(5, 200)) expect(p.distance).toBeLessThanOrEqual(1);
   });
 });

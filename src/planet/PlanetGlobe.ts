@@ -66,8 +66,6 @@ export class PlanetGlobe implements Entity {
   /** Bodies with an atmosphere: where the ground is, so the haze stops there (see renderDepth). */
   private readonly ground: GroundDepth | null;
   private readonly cameraPosition = new THREE.Vector3();
-  /** The rings, which outlast a planet buster. */
-  private readonly rings: THREE.Object3D | null = null;
   /** Once busted: the radius of the debris field, which is the ground from then on. */
   private bustedRadius: number | null = null;
 
@@ -97,7 +95,7 @@ export class PlanetGlobe implements Entity {
     this.object.add(this.surface.object);
     addLodDebug(debug);
     if (seaFloor) this.object.add(createSea(config.type, style.sea!, R, this.lava ? this.lava.createSeaMaterial(this.sun, this.sunLight, this.ambientLight) : null));
-    if (config.rings) this.object.add((this.rings = createRings(config.rings, seed, PLANET_SCALE)));
+    if (config.rings) this.object.add(createRings(config.rings, seed, PLANET_SCALE));
     // The same look as in the system view (in planet radii), so the two match across the zoom.
     const look = config.atmosphere && config.climate ? atmosphereLook(config.climate, config.radius) : null;
     this.ground = look ? new GroundDepth() : null;
@@ -142,13 +140,13 @@ export class PlanetGlobe implements Entity {
   }
 
   /**
-   * Blown apart by a planet buster: everything but the rings goes, and the
+   * Blown apart by a planet buster: everything goes, rings and all, and the
    * ground is a sphere `radius` out from then on (the debris field's edge),
    * which the ship flies over and clicks land on.
    */
   bust(radius: number): void {
     this.bustedRadius = this.top = radius;
-    for (const child of this.object.children) child.visible = child === this.rings;
+    for (const child of this.object.children) child.visible = false;
   }
 
   /** Draws the ground's depth for the atmosphere: call before drawing the scene with `camera`. */
