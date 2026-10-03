@@ -80,7 +80,7 @@ import { globeRadius } from './src/planet/frame';
 **Cover drawn.** `drawnCover` is the share of the sphere under the puffs' opaque cores (3/4 of each radius, thinner while a cluster forms or evaporates).
 - At the first guess of `CLUSTER_FILL` = 0.6, it came out at a third of what the footprints promised. The puffs bunch towards a cluster's middle, and clusters spend a third of their lives thin.
 - Measured, the fill is 0.15: drawn / (CUMULUS_SHARE · coverage) = 0.84 / 0.92 / 0.99.
-- Water worlds' drawn cover is **0.17 / 0.19 / 0.24 of the globe**.
+- Water worlds' drawn cover is **0.17 / 0.19 / 0.24 of the globe**. That counts the puffs at their own size. From orbit the view softens them and draws them up to 1.5× bigger (see Game mapping), so the patches there look somewhat cloudier than this. That was judged by eye, not measured.
 - The old sheet drew the whole `coverage` (median 0.37) as opaque cloud, plus soft fringes beyond it. Its density was a threshold at 1 − cover on uniform noise, softened 0.1 below. So the clusters cover about half as much, and that half is gathered into fronts with clear sky between.
 
 ## Game mapping
@@ -93,6 +93,10 @@ import { globeRadius } from './src/planet/frame';
   - lightning glow from the weather's flashes.
   
   Per pixel, the sprite is lit as the near half of a ball. Clusters are sorted back to front each frame by distance to the camera, and puffs within a cluster bottom-up (seen from above) or top-down (from below). Puffs fade out as the camera flies into them. Night-side puffs are partly see-through so they don't blot out the air's glow at the limb.
+
+  Seen from orbit, two more adjustments:
+  - Puffs that are small on screen (under ~2–9% of the view's half-height) are drawn softer and up to 1.5× bigger, so a cluster merges into one patch instead of a scatter of white dots.
+  - Puffs seen edge-on at the limb thin out when the camera is more than ~1.25–1.8 radii from the centre, so the clouds don't stand round the planet as a fuzzy rim (the old sheet's look). Low orbit keeps its towering clouds on the horizon.
 - **Clusters** (`cumulusCluster`):
   - **Channels.** A body has `clusters` channels, each holding one cluster per time slot of 1.5–3 × the weather's `change` time. A cluster billows up over the first quarter of its slot and evaporates over the last third, so the sky renews itself without popping.
   - **Placement.** Clusters are born where a slowly drifting front field is high. On water worlds the field is also weighted to the cloudy equator and ±60° and the clear ±30° (weather.md's zonal pattern).
