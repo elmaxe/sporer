@@ -7,6 +7,7 @@ Status: **design only, nothing built yet.** This document is the plan to impleme
 - **Magic rays first, real methods after.** The first tools built are magic rays (heat, cool, air, vacuum, water) that push the climate directly. They get the whole pipeline working and testable (the model over time, the chart, the planet changing, milestones) before any real tool exists, and afterwards they stay as debug tools.
 - **Real methods, played at game speed.** Every lasting tool is a real terraforming idea (orbital mirrors, sunshades, aerosols, greenhouse-gas factories, comet impacts, importing gas, seeding life), and each one moves exactly one lever of the climate model the game already has. The player still gets a heat ray and a cooling spray, but they are a mirror beam focused from orbit and an aerosol haze, and they behave like those things.
 - **A forecast you can read, matter you have to fetch.** The player always sees where the planet is, where it is heading and what each tool would do to it (that's what keeps it from being too hard). Air and water aren't conjured: they are scooped from other bodies, which lose what you take, or brought in on comets, which are used up (that's what keeps it from being too easy).
+- **Energy is the currency.** Every tool costs energy from the ship's energy bar. It starts out infinite (the bar is there, the costs show, nothing runs out); recharging and running dry come later.
 - **Sandbox, Relaxed or Real.** One menu setting: Sandbox adds the magic rays and drops the limits, Relaxed (the default) is quicker and forgiving (no leaks, faster settling, higher limits), Real is as described here. Same physics, different tunables.
 - **The planet answers back.** Changes settle over tens of seconds to minutes, cross tipping points (ice caps that release air when warmed, oceans that freeze over or boil off) and can leak away on small worlds. The world visibly changes as it goes: the sky thickens and changes colour, clouds and rain arrive, seas thaw, and forests spread from the plants you brought.
 
@@ -199,6 +200,7 @@ A new **Terraform** tab in the item bar (step 33's bar, next to Weapons and Inve
 - *Use*: the beam and hold from step 33, unchanged. What changes is that plants which take root now matter: they turn CO₂ into O₂, darken the ground a little, and **spread** to nearby land if the climate suits them.
 - *The puzzle*: the fates already decide whether a plant survives (temperature window, air, water). So the player has to find a species that can live on the half-made world, on other planets (a T1 world's tough species before a T3 world's soft ones), and warm the world enough for it first.
 - When a terraformed body reaches T1+, the plant generator fills its cells with the **species the player brought** (not new native ones), at the cover its tier gives. The forests you see are yours.
+- **Native life later** (decided): a terraformed world growing species of its own (from the generator, once it's habitable enough) is a later step, on top of the player's species.
 
 ### Reaching T3, step by step (Haikrai III)
 
@@ -269,25 +271,59 @@ A **Terraforming: Sandbox / Relaxed / Real** setting in the menu (a new Gameplay
 
 Targets (*tunable*, checked in the balance phase): Haikrai III in ~15–20 minutes on Relaxed and ~30–45 on Real.
 
+## Energy (decided: the currency)
+
+Terraforming is paid for in **energy**, held by the ship and shown as a bar. It's the start of a ship-wide energy system that other things (weapons, the beam, travel) can draw on later.
+
+### The bar
+
+- A horizontal bar on the HUD next to the item bar, with the amount as a number. Every tool shows its cost on its slot and in its tooltip; the forecast arrow on the climate chart shows the cost of the move it previews.
+- Spending shows as the bar draining (a quick drop with a lighter "about to spend" segment while a ray is held); not enough energy greys the slot out and says how much is missing.
+- The ship's energy lives in a pure `ShipEnergy` store kept by the `SceneManager` (JSON-able, in the debug dump, like the cargo hold).
+
+### Step one: infinite (decided)
+
+At first the bar is **infinite**: the costs are computed, shown and logged, but the bar never drains (drawn full, with an ∞). That gets the costs on screen and tunable from the start, so the numbers are already in place when energy becomes finite. The debug panel has a toggle to make it finite for testing.
+
+### What things cost
+
+Costs come from the physics where there is some, so bigger jobs cost more for the right reasons (*tunable* scale factors on top):
+
+- **Moving matter off a world** costs its escape energy, ½ m v_esc² per mass: scooping air from a super-Earth costs more than from a Titan. Releasing it on the target is free (it falls in).
+- **Tugging** a comet or asteroid costs the Δv to send it to the target (from its orbit and the target's; the system's Kepler law already gives both). Bigger and further costs more.
+- **Building** mirrors, shades and factories costs a fixed amount each (bigger mirrors, more energy), refunded in part when recalled.
+- **Running**: factories and carbon sinks cost energy per second while they run; the mirror lance and the aerosol spray per second held.
+- **Magic rays**: per second held, more for bigger changes. In Sandbox they're free.
+
+### Later: finite energy
+
+When energy becomes finite (its own step, after the real tools):
+
+- **Recharge from starlight**: the ship's collectors charge with the light it's in, ∝ 1/d² from the star (the same `insolation` the climate uses), so a ship parked near a hot star charges fast and one at a rogue planet barely at all. A sensible real-world anchor, and it makes where you wait a choice.
+- **Fuel from gas giants**: scooping a giant gives energy as well as H₂ (fusion fuel, as in proposals to mine helium-3 from the giants; to research).
+- **Capacity** sets the size of a single job (one big comet may need a full bar); upgrades later.
+- Per mode: Sandbox infinite; Relaxed a bigger bar and faster charge; Real as tuned.
+
 ## Fit with the rest of the game
 
 - **Stores**: a `TerraformLog` per body (action log, JSON-able, kept by the `SceneManager` like `BustedBodies`, `SurfaceChangeStore` and the cargo hold); the debug dump records and restores it.
 - **The planet buster**: a busted body can't be terraformed; busting a terraformed one is allowed (with an "are you sure").
 - **The planet lab**: a Terraform section to apply any action, scrub time and watch the chart; `?terraform=<log>` in the hash. It is where every tool and feedback is tuned.
 - **Smoke test**: a `terraform` section (the magic rays first; later deploy a mirror, run a factory, release a canister, tug a comet, watch the tier change, leave and come back, the chart and arrows).
-- **Later**: colonies and the spice economy can make terraformed worlds worth something (more colonists per tier) and put a price on tools. Rival empires could terraform too.
+- **Later**: colonies and the spice economy can make terraformed worlds worth something (more colonists per tier); spice could buy energy or bigger bars. Rival empires could terraform too.
 
 ## Phases
 
 Each phase is a roadmap step that leaves the game playable and is verified (`typecheck`, `test`, `build`, `smoke`) before pushing.
 
 1. **Model**: the six fixes above (`starlight`, low-pressure CO₂, the cloud ramp, partial pressures, leaks, aerosol), the action log and its integration over time, pure and tested. Every generated body unchanged (0 differences over 1500 systems). Research notes in `docs/research/terraforming.md`.
-2. **Magic rays, chart and live looks**: the Terraform tab with the five magic rays; the climate chart in low orbit and the lab; seas, ice, ground, atmosphere and weather following the live climate in both views; leaks; milestones; the Sandbox / Relaxed / Real setting. The first playable version of terraforming.
+2. **Magic rays, chart and live looks**: the Terraform tab with the five magic rays; the energy bar (infinite, costs shown); the climate chart in low orbit and the lab; seas, ice, ground, atmosphere and weather following the live climate in both views; leaks; milestones; the Sandbox / Relaxed / Real setting. The first playable version of terraforming.
 3. **Heat and light**: mirrors, the mirror lance, the sunshade, aerosols.
 4. **Greenhouse**: factories and carbon sinks (placed with the beam).
 5. **Air and water**: scoop and release, tugging comets and asteroids, impacts and craters.
 6. **Life and feedbacks**: plants making O₂ and spreading, the player's species filling a terraformed world, frozen volatiles, ice–albedo, the runaway greenhouse, the difficulty rating and hints.
-7. **Balance pass**: measure over 1500 systems how many bodies reach each tier with what, time a full Haikrai III run in both modes, and tune the limits and rates against the targets above. The magic rays leave Relaxed and Real and stay in Sandbox and the Debug tab.
+7. **Finite energy**: recharge from starlight and fuel from gas giants, the bar running dry, the per-mode capacities.
+8. **Balance pass**: measure over 1500 systems how many bodies reach each tier with what, time a full Haikrai III run in both modes, and tune the limits and rates against the targets above. The magic rays leave Relaxed and Real and stay in Sandbox and the Debug tab.
 
 ## Leads to read (research skill, before building)
 
@@ -312,8 +348,7 @@ Decided:
 - A **Sandbox / Relaxed / Real** setting, **Relaxed by default** for now.
 - **Leaky worlds stay leaky** in Real (no leak-slowing tool); Relaxed has no leaks.
 - **Robbing living worlds is allowed**, with the trade-off (the source loses pressure, maybe its tier and its plants), flagged before you commit.
+- **Energy is the currency**: a ship energy bar, infinite at first (costs shown, nothing drains), finite later.
+- **Only the player's species** on a terraformed world for now; **native life later**.
 
-Still open:
-
-1. **A currency**: matter, limits and travel as the only cost for now, or wait for the spice economy to put prices on tools?
-2. **Native life**: only the player's species on a terraformed world (proposed), or the generator's own species once it reaches T3?
+Nothing is open at the moment.

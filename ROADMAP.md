@@ -489,7 +489,7 @@ Status: ⬜ todo · 🟨 in progress · ✅ done
 - **Cloud shadows** (weather, step 22): the clouds darken the ground under them in low orbit, and the system view's globes too. The cloud field is a pure function of direction and time, so the terrain and sea shaders could sample the same noise (offset along the sun direction by the layer's height) instead of a shadow map. Measure the cost; it's another full-screen texture read.
 - **Weather on gas giants** (step 22 leaves them out, as they have no climate): banded storms, long-lived ovals like Jupiter's Great Red Spot, and lightning on the night side (Juno saw it on Jupiter; Saturn's storms flash too). Research the rates with the `research` skill first.
 - **A moon's clouds in low orbit's sky** (step 22): a planet's moons are drawn as meshes in its low-orbit level (`LocalMoons`) without their cloud layer, so a moon with weather looks clear from its planet while the system view shows its clouds. Give `LocalMoons` the moon's `WeatherLook` cloud layer.
-- **Terraforming**: designed in `docs/design/terraforming.md` (real methods at game speed: mirrors and a sunshade, aerosols, greenhouse factories, scooping and releasing gas, tugging comets, seeding plants; a climate chart with a forecast; seven phases). Not started.
+- **Terraforming**: designed in `docs/design/terraforming.md` (magic rays first, then real methods at game speed: mirrors and a sunshade, aerosols, greenhouse factories, scooping and releasing gas, tugging comets, seeding plants; a climate chart with a forecast; Sandbox / Relaxed / Real; paid for with ship energy; eight phases). Not started.
 - Spice economy, colonising planets
 - Other empires and diplomacy
 - Save/load (only the seed + player state are needed)
