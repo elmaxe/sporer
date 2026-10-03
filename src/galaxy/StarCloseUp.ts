@@ -52,6 +52,16 @@ export class StarCloseUp {
     });
   }
 
+  /** Where each star is drawn, in the parent's (galaxy) coordinates; call after `update`. */
+  memberPositions(out: THREE.Vector3[]): THREE.Vector3[] {
+    this.object.updateMatrix();
+    this.looks.forEach((look, i) => {
+      out[i] = (out[i] ?? new THREE.Vector3()).copy(look.object.position).applyMatrix4(this.object.matrix);
+    });
+    out.length = this.looks.length;
+    return out;
+  }
+
   dispose(): void {
     this.parent.remove(this.object);
     for (const look of this.looks) look.dispose();
