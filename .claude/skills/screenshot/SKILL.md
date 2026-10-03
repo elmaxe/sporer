@@ -154,7 +154,7 @@ For how plants look (branching, leaves, palms, the levels of detail and where th
 | `plantLab.set({ height: 9, crown: 'tiers', form: { branches: 20 } })`, `plantLab.setForm({ tropism: -0.6 })` | edit the selected species (its envelope, or its form) |
 | `plantLab.setArchitecture('palm')`, `plantLab.reroll()` | grow it another way, or another form of the same way |
 | `plantLab.setView({ view: 'specimen' \| 'lineup' \| 'grove', lod: 'auto' \| 0..3, showLods, wireframe, skeleton, sunAzimuth, sunElevation })` | what to show; `lod: 'auto'` is the game's choice by distance, `showLods` tints each level |
-| `plantLab.look(yaw, pitch, distance)` | camera (degrees; distance in the plant's heights, the grove's in units) |
+| `plantLab.look(yaw, pitch, distance)` | camera (degrees; distance in the plant's heights, the grove's in units round the spot it's over: `look(0, 90, 880)` is the whole planet from straight above) |
 | `plantLab.level.lods`, `.skeleton`, `.lodNow()`, `.grove.stats()` | what got built: triangles per level and where the game draws it, the stems and leaves, the level at the camera now, the grove's counts |
 
 ```bash

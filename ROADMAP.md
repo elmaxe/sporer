@@ -468,7 +468,7 @@ Status: ⬜ todo · 🟨 in progress · ✅ done
 - *The plant lab, `plants.html` (`src/plantlab/`).* A set of species, generated for a tier (`?gen=&tier=&kind=&arch=`) or a game planet's (`?seed=&star=&planet=`), with one selected and every property editable in the panel: envelope (name, kind, height, bare trunk, trunk width, crown radius and shape, colours, temperature window, abundance) and form. Architecture switches, rerolls, copy and paste JSON. Three views:
   - *One plant*: with the level of detail on *auto*, the game's own fade material per level, so zooming out shows the real crossfade; the readout names the level at the camera. Or a fixed level.
   - *Levels side by side*, labelled with their triangles.
-  - *A grove* planted by the game's own `SurfaceEntities` on a 1500-radius sphere, seen from the UFO's height.
+  - *A grove* planted by the game's own `SurfaceEntities` on a whole Earth-sized (400-radius) green planet without seas, seen from the UFO's height; zooming out rises to the whole globe, dragging then turns it, and WASD walks over it (`GroveCamera`, issue #71).
   - Toggles for tinting the levels, the wireframe and the skeleton (stem centre lines by order and leaf-mass centres). The readout gives the skeleton, each level's triangles and where the game draws it, and the grove's counts.
   - The `#hash` is the exact set, and `window.plantLab` drives it. The planet lab's readout has a **Plants** link to its planet's species; the plant lab links back to the planet lab and the game. `npm run shot -- --plants` shoots it.
 - *Cost in the game.* Haikrai I (home system, T3), ship over a forest, `?quality=low` in headless Chrome:

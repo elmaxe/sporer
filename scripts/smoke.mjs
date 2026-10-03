@@ -82,7 +82,7 @@
 // and a game asteroid load, the panel works.
 // Plant lab (plants.html): every architecture grows and draws at every level of detail, each level cheaper than the
 // last, zooming out on one plant goes through the levels (the game's crossfade) and past the last one, the line-up and
-// the grove (the game's own plant system) draw, a game planet's plants load, the planet lab links to its plants.
+// the grove (the game's own plant system) draw, close up and as a whole planet, a game planet's plants load, the planet lab links to its plants.
 // Prints JSON with FPS, console errors and screenshot paths. Exit 1 on failure.
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -1799,6 +1799,11 @@ async function plantLabChecks(page) {
   })()`);
   r.screenshot = join(outDir, 'plant-lab.png');
   writeFileSync(r.screenshot, await page.screenshot());
+  // The grove is a whole planet: zoomed out, the globe lit in the middle of the view, in space.
+  r.globe = await evaluate(`(async () => {
+    await plantLab.look(0, 90, 880);
+    return { brightness: ${brightness}, sky: plantLab.level.scene.background.getHSL({}).l };
+  })()`);
   await evaluate(`plantLab.setView({ view: 'specimen', showLods: false })`);
   r.loaded = await evaluate(`(async () => {
     await plantLab.load('1337', ${PLANT_STAR}, ${PLANT_PLANET});
@@ -1825,6 +1830,8 @@ async function plantLabChecks(page) {
     r.grove.plants > 1000 &&
     r.grove.lods.every((n) => n > 0) &&
     r.grove.brightness > 20 &&
+    r.globe.brightness > 20 &&
+    r.globe.sky < 0.05 &&
     r.loaded.species > 0 &&
     r.loaded.source?.star === PLANT_STAR &&
     r.loaded.hash > 100 &&
