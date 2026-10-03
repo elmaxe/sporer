@@ -1,0 +1,36 @@
+{
+  "versions": [
+    {
+      "id": "release",
+      "label": "Release v2026.10.03.3",
+      "path": "",
+      "ref": "v2026.10.03.3",
+      "commit": "1ef99c7",
+      "date": "2026-10-03T15:13:18Z"
+    },
+    {
+      "id": "preview",
+      "label": "Preview (main)",
+      "path": "preview/",
+      "ref": "main",
+      "commit": "c41c92b",
+      "date": "2026-10-03T15:27:47Z"
+    },
+    {
+      "id": "pr-102",
+      "label": "PR #102: Debug dumps in the planet and plant labs",
+      "path": "pr/102/",
+      "ref": "claude/funny-faraday-l0k4e6",
+      "commit": "786dab5",
+      "date": "2026-10-03T16:24:14Z"
+    },
+    {
+      "id": "pr-101",
+      "label": "PR #101: Star lab: edit and randomise stars, roll and tune their systems (#74)",
+      "path": "pr/101/",
+      "ref": "claude/optimistic-einstein-k3jubl",
+      "commit": "66e320b",
+      "date": "2026-10-03T15:34:37Z"
+    }
+  ]
+}
