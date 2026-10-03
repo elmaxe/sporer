@@ -1094,7 +1094,7 @@ html.items:not(.touch) #hud {
   clip-path: inset(50%);
 }
 
-/* On touch: above the stick (its two tabs are wider than the gap between the stick and the buttons), only the filled slots, no key labels. */
+/* On touch: above the stick (on a phone held upright its two tabs are wider than the gap between the stick and the buttons), only the filled slots, no key labels. */
 html.touch #item-bar {
   bottom: calc(max(24px, env(safe-area-inset-bottom)) + 128px);
 }
@@ -1107,6 +1107,17 @@ html.touch .item-key {
 html.touch .item-slot {
   width: 52px;
   height: 52px;
+}
+
+/*
+ * A phone on its side or a tablet: the fullest bar (six 52px slots, 356px) fits between the stick (144px from the
+ * left edge, 167px past a notch) and the menu buttons (104px from the right), so it sits at the bottom as with a
+ * mouse; lifted above the stick, it would float in the middle of a short screen.
+ */
+@media (min-width: 660px) {
+  html.touch #item-bar {
+    bottom: max(16px, env(safe-area-inset-bottom));
+  }
 }
 
 html.touch #item-hint {

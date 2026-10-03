@@ -14,10 +14,14 @@ import type { PlanetConfig } from '../world/Planet';
 export const beamParams = {
   /** Farthest the beam reaches from the ship, planet units. */
   range: 70,
-  /** Units per second along the beam, up and down. */
+  /** The abduction beam's radius where it meets the ground: plants under it (trunk, or half the crown) are caught. */
+  radius: 3,
+  /** Units per second up the beam, and the shortest time a trip up takes, s. */
   speed: 9,
-  /** Shortest time a trip up or down the beam takes, s. */
   minTime: 0.9,
+  /** The same for setting cargo down: slower, so it's lowered gently to the ground. */
+  lowerSpeed: 4,
+  lowerMinTime: 2,
   /** How tall something is when it reaches the ship (its full height shrinks to this). */
   carriedHeight: 1.2,
   /**
@@ -30,9 +34,9 @@ export const beamParams = {
   maxFallTime: 20,
 };
 
-/** Seconds a trip along a beam `length` units long takes. */
-export function tripTime(length: number, p = beamParams): number {
-  return Math.max(p.minTime, length / p.speed);
+/** Seconds a trip along a beam `length` units long takes, up it or (`lowering`) down it. */
+export function tripTime(length: number, lowering = false, p = beamParams): number {
+  return lowering ? Math.max(p.lowerMinTime, length / p.lowerSpeed) : Math.max(p.minTime, length / p.speed);
 }
 
 /** Eased 0–1 position along the beam for trip progress `t` (0–1): it starts and ends gently. */

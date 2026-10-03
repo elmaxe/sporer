@@ -6,7 +6,7 @@ import type { PlantedPlant, SurfaceChanges } from './changes';
 import { PLANT_LODS, createPlantGeometry, createPlantMaterial, setLodTint, type PlantFadeUniforms } from './plantLook';
 import { PLANT_LOD_COUNT } from './plantMesh';
 import { plantParams } from './plantParams';
-import { plantMatrix, type LivePlant } from './SurfaceEntities';
+import { plantMatrix, underDisc, type LivePlant } from './SurfaceEntities';
 
 /** The planted plant a ray hit. The same object every time: read it before the next `pick`. */
 export interface PlantedHit {
@@ -109,6 +109,21 @@ export class Plantings implements Entity {
       hit.distance = distance;
     }
     return found ? hit : null;
+  }
+
+  /** As `SurfaceEntities.within`: each standing planted plant under a disc `radius` wide round `point` (`hit` reused; `visit` may promote it). */
+  within(point: THREE.Vector3, radius: number, visit: (hit: PlantedHit) => void): void {
+    if (!plantParams.enabled) return;
+    const { middle, hit } = this;
+    for (const p of this.changes.plantedPlants) {
+      if (this.promoted.has(p.id)) continue;
+      const distance = middle.set(p.x, p.y, p.z).multiplyScalar(p.radius).distanceTo(point);
+      if (!underDisc(distance, p.species.crownRadius * p.scale, radius)) continue;
+      hit.id = p.id;
+      hit.plant = p;
+      hit.distance = distance;
+      visit(hit);
+    }
   }
 
   /** A planted plant by id (null if there's none, or it's gone). */
