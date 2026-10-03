@@ -1,9 +1,24 @@
 import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
 import { gasDrift, gasShear, gasTone, generateGasLayout, type GasLayout, type GasStormKind } from '../gen/gasGiants';
+import {
+  GAS_EVENT_SHAPE,
+  GasStormSchedule,
+  MAX_GAS_EVENTS,
+  collectGasFlashes,
+  gasStormCentre,
+  gasStormStrength,
+  gasStormTail,
+  gasWeatherOf,
+  type GasStormEvent,
+  type GasWeather,
+} from '../gen/gasWeather';
 import { hashSeed, Rng } from '../gen/rng';
+import type { Vec3Tuple } from '../gen/starActivity';
+import { createFlash, flashBrightness, type Flash } from '../gen/weather';
 import { cloudNoiseTexture } from './noiseTexture';
 import type { PlanetConfig } from './Planet';
+import { weatherParams } from './weatherParams';
 
 /** Global multipliers over every gas giant (debug tuning). */
 export const gasParams = {
@@ -18,6 +33,8 @@ export const gasParams = {
   period: 40,
   /** Finer detail as the camera comes closer (octaves; 0 = only the broadest). */
   detail: 1,
+  /** Brightness of lightning glowing through the night side's clouds. */
+  lightning: 1,
 };
 
 export function addGasDebug(debug: Debug): void {
@@ -26,6 +43,7 @@ export function addGasDebug(debug: Debug): void {
   f?.add(gasParams, 'turbulence', 0, 3);
   f?.add(gasParams, 'period', 5, 200);
   f?.add(gasParams, 'detail', 0, 2);
+  f?.add(gasParams, 'lightning', 0, 5);
 }
 
 /** Storms drawn at once (the shader's slots). */
@@ -33,6 +51,16 @@ const MAX_STORMS = 12;
 /** Rows of the latitude table, south pole to north pole. */
 const TABLE_ROWS = 512;
 const KIND_CODE: Record<GasStormKind, number> = { red: 0, white: 1, dark: 2, streak: 3 };
+/** Flashes lit at once (the shader's slots). */
+export const MAX_GAS_FLASHES = 8;
+/**
+ * A flash lights the clouds this far round (radians, the glow's 1/e width):
+ * stylised, ~15× the real patches (30–80 km on Jupiter, 200 km on Saturn), so
+ * one shows from the system view (docs/research/gas-weather.md).
+ */
+const GAS_FLASH_WIDTH = 0.012;
+/** A flash's glow at its centre at full brightness (emitted light, added after the sun's). */
+const GAS_FLASH_PEAK = 1.6;
 
 /**
  * GLSL for a giant's cloud tops at a unit direction `dir` of its body frame
@@ -58,6 +86,13 @@ export const GAS_GLSL = /* glsl */ `
   uniform vec3 uGasLight;         // the palette's brightest
   uniform float uGasTurn;         // how far the polar cyclones have turned
   uniform vec2 uGasHood;          // an ice giant's polar hood: |latitude| (0: none), which pole (±1)
+  uniform vec4 uGasEvent[${MAX_GAS_EVENTS}];     // passing storms (gen/gasWeather.ts): head centre, half-length
+  uniform vec4 uGasEventInfo[${MAX_GAS_EVENTS}]; // strength (0: none), kind, trail (signed radians of longitude), trail's shift in latitude
+  uniform float uGasEventAspect[${MAX_GAS_EVENTS}];
+  uniform int uGasEventCount;
+  uniform vec3 uGasDark;          // a dark spot's colour
+  uniform vec4 uGasFlash[${MAX_GAS_FLASHES}];    // direction, brightness
+  uniform int uGasFlashCount;
 
   const float GAS_PI = 3.14159265;
 
@@ -204,7 +239,72 @@ export const GAS_GLSL = /* glsl */ `
         col = mix(col, scol, clamp(body * 1.2, 0.0, 1.0));
       }
     }
+
+    // The passing storms: a head bursting up and the turbulent trail the jets draw out of it along its band.
+    float lon = atan(dir.x, dir.z);
+    vec3 white = mix(uGasLight, vec3(1.0), 0.6);
+    for (int i = 0; i < ${MAX_GAS_EVENTS}; i++) {
+      if (i >= uGasEventCount) break;
+      vec4 e = uGasEvent[i];
+      vec4 info = uGasEventInfo[i];
+      if (info.x <= 0.0) continue;
+      float elat = asin(clamp(e.y, -1.0, 1.0));
+      float elon = atan(e.x, e.z);
+      // The trail: behind the head along its latitude, widening and fraying as it goes into
+      // clumps of bright cloud with darker gaps between.
+      float trail = 0.0;
+      float gaps = 0.0;
+      float len = abs(info.z);
+      if (len > 0.0) {
+        float along = mod((lon - elon) * sign(info.z), 2.0 * GAS_PI);
+        float t = along / len;
+        if (t < 1.0) {
+          float w = e.w / uGasEventAspect[i] * (0.7 + 0.6 * t);
+          float dl = (lat - elat - info.w * smoothstep(0.0, 0.3, t)) / w;
+          float ends = smoothstep(0.0, 0.03, t) * (1.0 - smoothstep(0.7, 1.0, t));
+          // Encircled: the trail meets the head and the band is disturbed all the way round.
+          ends = mix(ends, 1.0, step(6.2, len));
+          float env = exp(-dl * dl) * ends;
+          float clump = smoothstep(-0.05, 0.2, n + 0.7 * fine + 0.2 * (1.0 - t));
+          trail = env * clump;
+          gaps = env * (1.0 - clump);
+        }
+      }
+      vec3 east = normalize(cross(vec3(0.0, 1.0, 0.0), e.xyz));
+      vec3 north = cross(e.xyz, east);
+      vec2 uv = vec2(dot(dir, east), dot(dir, north) * uGasEventAspect[i]) / e.w;
+      float d = dot(dir, e.xyz) > 0.0 ? length(uv) : 1e3;
+      float kind = info.y;
+      if (kind < 2.5) {
+        // Plumes, great storms and methane outbursts: bright, billowing white, its edge in shadow.
+        float edge = d + 0.45 * n - 0.3 * fine;
+        float head = 1.0 - smoothstep(0.35, 1.0, edge);
+        float rim = smoothstep(0.75, 1.0, edge) * (1.0 - smoothstep(1.0, 1.35, edge));
+        col *= 1.0 - (0.3 * rim + 0.3 * gaps) * info.x;
+        float a = clamp(max(head, trail * (kind < 1.5 ? 0.9 : 0.6)) * info.x, 0.0, 1.0);
+        col = mix(col, white * (1.15 + 0.25 * n + 0.4 * fine), a);
+      } else {
+        // A dark spot, with its bright companion cloud over its poleward edge.
+        float body = 1.0 - smoothstep(0.45, 1.0, d + 0.3 * n);
+        col = mix(col, uGasDark * (1.0 + 0.4 * n), body * info.x * 0.9);
+        vec2 c = (uv - vec2(0.0, 0.95 * sign(elat))) / vec2(0.55, 0.3);
+        float companion = 1.0 - smoothstep(0.3, 1.0, length(c) + 0.5 * n);
+        col = mix(col, white, companion * info.x * 0.8);
+      }
+    }
     return max(col, vec3(0.0));
+  }
+
+  // Lightning glowing up through the clouds (the night side's: by day it's lost in the sunlit cloud tops).
+  float gasFlashGlow(vec3 dir) {
+    float glow = 0.0;
+    for (int i = 0; i < ${MAX_GAS_FLASHES}; i++) {
+      if (i >= uGasFlashCount) break;
+      vec4 f = uGasFlash[i];
+      if (f.w <= 0.0) continue;
+      glow += f.w * exp(-(1.0 - dot(dir, f.xyz)) / ${((GAS_FLASH_WIDTH * GAS_FLASH_WIDTH) / 2).toFixed(7)});
+    }
+    return glow;
   }
 `;
 
@@ -216,14 +316,27 @@ export const GAS_GLSL = /* glsl */ `
  */
 export class GasLook {
   readonly layout: GasLayout;
+  /** The passing storms and lightning (gen/gasWeather.ts). */
+  readonly weather: GasWeather;
+  readonly schedule: GasStormSchedule;
+  /** The passing storms drawn at the last `animate` (at most MAX_GAS_EVENTS). */
+  readonly shown: GasStormEvent[] = [];
+  /** The flashes lit at the last `animate` (the first `flashCount`). */
+  readonly flashes: Flash[] = Array.from({ length: MAX_GAS_FLASHES }, createFlash);
+  flashCount = 0;
   readonly uniforms: Record<string, THREE.IUniform>;
   private readonly table: THREE.DataTexture;
   private readonly palette: THREE.Color[];
   private readonly spin: number;
   private readonly storms: THREE.Vector4[];
+  private readonly centre: Vec3Tuple = [0, 0, 0];
+  private time = 0;
+  private rate = 0;
 
   constructor(seed: number, bands: readonly string[], spin: number, ice: boolean) {
     this.layout = generateGasLayout(seed, ice);
+    this.weather = gasWeatherOf(this.layout, seed);
+    this.schedule = new GasStormSchedule(this.weather, this.layout);
     this.palette = bands.map((b) => new THREE.Color(b));
     this.spin = spin;
     this.table = bakeTable(this.layout, this.palette, seed);
@@ -255,6 +368,14 @@ export class GasLook {
       uGasLight: { value: light },
       uGasTurn: { value: 0 },
       uGasHood: { value: new THREE.Vector2(layout.hood ? Math.abs(layout.hood) : 0, Math.sign(layout.hood ?? 1)) },
+      uGasEvent: { value: Array.from({ length: MAX_GAS_EVENTS }, () => new THREE.Vector4()) },
+      uGasEventInfo: { value: Array.from({ length: MAX_GAS_EVENTS }, () => new THREE.Vector4()) },
+      uGasEventAspect: { value: Array.from({ length: MAX_GAS_EVENTS }, () => 1) },
+      uGasEventCount: { value: 0 },
+      uGasDark: { value: stormColor('dark', this.palette, new THREE.Color()) },
+      uGasFlash: { value: Array.from({ length: MAX_GAS_FLASHES }, () => new THREE.Vector4()) },
+      uGasFlashCount: { value: 0 },
+      uGasFlashGain: { value: 1 },
     };
     this.animate(0);
   }
@@ -276,6 +397,55 @@ export class GasLook {
       const c = Math.cos(s.lat);
       this.storms[i]!.set(c * Math.sin(lon), Math.sin(s.lat), c * Math.cos(lon), s.radius);
     });
+    this.time = time;
+    this.rate = rate;
+    this.animateWeather(time, rate);
+  }
+
+  /** The system time last shown. */
+  get renderTime(): number {
+    return this.time;
+  }
+
+  /** Drift rate last shown: radians per second per unit of drift (the spin times the pace). */
+  get driftRate(): number {
+    return this.rate;
+  }
+
+  /** The passing storms and the lightning at `time` (none with the menu's Weather off). */
+  private animateWeather(time: number, rate: number): void {
+    const u = this.uniforms;
+    const shown = this.shown;
+    shown.length = 0;
+    if (weatherParams.enabled) {
+      this.schedule.advance(time);
+      for (const e of this.schedule.events) if (gasStormStrength(e, time) > 0 && shown.length < MAX_GAS_EVENTS) shown.push(e);
+    }
+    const events = u.uGasEvent!.value as THREE.Vector4[];
+    const info = u.uGasEventInfo!.value as THREE.Vector4[];
+    const aspect = u.uGasEventAspect!.value as number[];
+    for (let i = 0; i < MAX_GAS_EVENTS; i++) {
+      const e = shown[i];
+      if (!e) {
+        info[i]!.x = 0;
+        continue;
+      }
+      gasStormCentre(e, time, rate, this.centre);
+      events[i]!.set(this.centre[0], this.centre[1], this.centre[2], e.size);
+      info[i]!.set(gasStormStrength(e, time), GAS_EVENT_SHAPE[e.kind], gasStormTail(e, time), e.tailShift);
+      aspect[i] = e.aspect;
+    }
+    u.uGasEventCount!.value = shown.length;
+
+    this.flashCount = shown.length ? collectGasFlashes(shown, time, rate, this.flashes) : 0;
+    const slots = u.uGasFlash!.value as THREE.Vector4[];
+    for (let i = 0; i < MAX_GAS_FLASHES; i++) {
+      const f = i < this.flashCount ? this.flashes[i]! : null;
+      if (f) slots[i]!.set(f.dir[0], f.dir[1], f.dir[2], flashBrightness(f, time));
+      else slots[i]!.w = 0;
+    }
+    u.uGasFlashCount!.value = this.flashCount;
+    u.uGasFlashGain!.value = gasParams.lightning * weatherParams.lightning;
   }
 
   /** Paints the clouds onto `material` (a lit, smooth sphere in the body frame: the system view's or the globe's). */
@@ -286,13 +456,23 @@ export class GasLook {
         .replace('#include <common>', '#include <common>\nvarying vec3 vGasDir;')
         .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGasDir = position;');
       shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', `#include <common>\n${GAS_GLSL}\nvarying vec3 vGasDir;`)
+        .replace('#include <common>', `#include <common>\n${GAS_GLSL}\nvarying vec3 vGasDir;\nuniform float uGasFlashGain;`)
         .replace(
           '#include <color_fragment>',
           `#include <color_fragment>
           {
             float r = length(vGasDir);
             diffuseColor.rgb = gasColor(vGasDir / r, length(fwidth(vGasDir)) / r);
+          }`,
+        )
+        .replace(
+          '#include <lights_fragment_end>',
+          `#include <lights_fragment_end>
+          if (uGasFlashCount > 0) {
+            // How strongly the sun lights this pixel (its direct light over the cloud's own colour): lightning
+            // shows on the night side and through the dusk, and is lost in the sunlit cloud tops.
+            float gasSun = dot(reflectedLight.directDiffuse, vec3(1.0)) / max(dot(diffuseColor.rgb, vec3(1.0)), 0.02);
+            totalEmissiveRadiance += vec3(0.8, 0.87, 1.0) * gasFlashGlow(normalize(vGasDir)) * uGasFlashGain * ${GAS_FLASH_PEAK.toFixed(2)} * (1.0 - smoothstep(0.0, 0.1, gasSun));
           }`,
         );
     };

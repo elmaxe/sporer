@@ -23,25 +23,11 @@ import type { AtmosphereSun } from './atmosphereShell';
 import { createCubeSphere } from './cubeSphere';
 import { CumulusClouds, cumulusParams } from './cumulusLook';
 import { cloudNoiseTexture } from './noiseTexture';
+import { weatherParams } from './weatherParams';
 import { terrainSampler } from './planetGeometry';
 import type { PlanetConfig } from './Planet';
 
-/**
- * Global switches and multipliers over every body's weather. `enabled` is the
- * menu's Weather setting (see ui/GraphicsSettings.ts): off hides the clouds,
- * rain and lightning, and they cost nothing.
- */
-export const weatherParams = {
-  enabled: true,
-  /** Scales every body's cloud cover. */
-  coverage: 1,
-  /** Brightness of the clouds. */
-  brightness: 1,
-  /** Brightness of lightning on the clouds. */
-  lightning: 1,
-  /** Scales the winds. */
-  wind: 1,
-};
+export { weatherParams };
 
 export function addWeatherDebug(debug: Debug): void {
   const f = debug.folder('Weather');

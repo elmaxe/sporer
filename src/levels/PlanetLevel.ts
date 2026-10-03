@@ -10,6 +10,7 @@ import { GLOBE_SIZE_FACTOR } from '../gen/planets';
 import { bodyLabLink } from '../lab/bodyLink';
 import { describeGeysers, geyserActivity } from '../gen/geysers';
 import { describeWeather } from '../gen/weather';
+import { describeGasStorms, describeGasWeather } from '../gen/gasWeather';
 import { CometActivity } from '../planet/CometActivity';
 import { Meteors } from '../planet/Meteors';
 import { atmosphereLook } from '../gen/atmosphere';
@@ -354,11 +355,13 @@ export class PlanetLevel extends Level implements ItemUser {
           (geysers ? ` · ${describeGeysers(geysers.kind)}` : '') +
           (weatherLine ? ` · ${weatherLine}` : '') +
           (config.life ? ` · ${describeLife(config.life)}` : '')
-        : config.small === 'comet' && config.shape
-          ? describeNucleus(config.shape, activity())
-          : config.shape
-            ? describeShape(config.shape)
-            : null;
+        : globe.gas
+          ? describeGasWeather(globe.gas.weather)
+          : config.small === 'comet' && config.shape
+            ? describeNucleus(config.shape, activity())
+            : config.shape
+              ? describeShape(config.shape)
+              : null;
     // Meteor showers where the body's orbit (a moon's: its planet's) crosses a comet's dust stream.
     const heliocentric = body.parent?.config ?? config;
     const showers =
@@ -389,11 +392,15 @@ export class PlanetLevel extends Level implements ItemUser {
           ),
         )
       : null;
-    const showerLine = () =>
-      this.meteors?.shower
-        ? describeShower(this.meteors.shower, airless) + (this.meteors.radiantUp ? '' : ' (radiant below the horizon)')
-        : '';
-    this.hud = this.add(new PlanetHud(this.ship, `${body.name} · ${body.description}`, input, detail, showerLine));
+    // What comes and goes on the climate line: a meteor shower, a giant's great white storm.
+    const nowLine = () =>
+      [
+        this.meteors?.shower ? describeShower(this.meteors.shower, airless) + (this.meteors.radiantUp ? '' : ' (radiant below the horizon)') : '',
+        !this.busted && globe.gas ? describeGasStorms(globe.gas.shown) : '',
+      ]
+        .filter(Boolean)
+        .join(' · ');
+    this.hud = this.add(new PlanetHud(this.ship, `${body.name} · ${body.description}`, input, detail, nowLine));
     this.map = this.add(new PlanetMap(config, body.name, this.ship, globe, input, debug));
     debug
       .folder('Planet lab')

@@ -120,9 +120,9 @@ For anything about how a planet or moon looks (terrain, seas, gas bands, atmosph
 | `lab.setView({ view: 'system', camera: 'fly', star: 'redDwarf', sunAzimuth: 90, sunElevation: 10, paused: true, wireframe: true })` | view, camera (orbit the planet or follow the UFO), light, clock |
 | `lab.look(lon, lat, zoom)` | camera over longitude/latitude (degrees) at `zoom` planet radii |
 | `lab.lookAtVent()` | the next geyser, lava or comet-jet vent, from the side so plumes stand against the sky |
-| `lab.lookAtStorm(kind?, zoom?)` | globe view: the camera over the biggest storm under way (`'cell'`, `'cyclone'`, `'dust'`, `'global'`, `'ash'`), or with the fly camera the UFO beside it; resolves false if none (step the clock with `setTime` until one is) |
+| `lab.lookAtStorm(kind?, zoom?)` | globe view: the camera over the biggest storm under way (`'cell'`, `'cyclone'`, `'dust'`, `'global'`, `'ash'`; on a giant `'plume'`, `'great'`, `'outburst'`, `'spot'`), or with the fly camera the UFO beside it; resolves false if none (step the clock with `setTime` until one is) |
 | `lab.setTime(t)` | jump the clock (eruptions, geysers, storms and lightning are pure functions of it) |
-| `lab.climate`, `lab.level.geysers`, `lab.level.eruptions`, `lab.level.comet` (jets: `vents`, `strength`), `lab.level.globe`, `lab.level.globe.weather` (storms `shown`, `flashes`/`flashCount`), `lab.level.weather` (rain, bolts), `lab.level.triangles` | what got built |
+| `lab.climate`, `lab.level.geysers`, `lab.level.eruptions`, `lab.level.comet` (jets: `vents`, `strength`), `lab.level.globe`, `lab.level.globe.weather` (storms `shown`, `flashes`/`flashCount`), `lab.level.globe.gas` (a giant's passing storms `shown`, `flashCount`, `weather`; their times come from `gen/gasWeather.ts`'s `gasStormEvent`, so `lab.setTime` can jump straight to one), `lab.level.weather` (rain, bolts), `lab.level.triangles` | what got built |
 
 ```bash
 # A cryo-geyser moon: airless, some heat, look at a plume
