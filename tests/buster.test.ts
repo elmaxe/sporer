@@ -1,7 +1,5 @@
-import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import {
-  arcPoint,
   blastAt,
   busterParams,
   busterPhase,
@@ -13,7 +11,7 @@ import {
   shockRing,
 } from '../src/combat/buster';
 import { BustedBodies, bodyKey } from '../src/combat/busted';
-import { ITEMS, ITEM_TABS } from '../src/combat/items';
+import { ITEMS, ITEM_TABS, cargoItem, cargoKey, slotKey } from '../src/combat/items';
 import {
   DRAPER_POINT,
   ROCK,
@@ -62,11 +60,20 @@ describe('busted bodies', () => {
 });
 
 describe('items', () => {
-  it('puts every item in a tab, with its own key', () => {
+  it('puts every item in a tab, the buster in Weapons and the beam in the Inventory', () => {
     const tabs = new Set(ITEM_TABS.map((t) => t.id));
     for (const item of ITEMS) expect(tabs.has(item.tab)).toBe(true);
-    expect(new Set(ITEMS.map((i) => i.key)).size).toBe(ITEMS.length);
+    expect(new Set(ITEMS.map((i) => i.id)).size).toBe(ITEMS.length);
     expect(ITEMS.find((i) => i.id === 'planetBuster')?.tab).toBe('weapons');
+    expect(ITEMS.find((i) => i.id === 'abduct')?.tab).toBe('inventory');
+  });
+
+  it('keys the slots of the tab on show 1 to 9, and names cargo stacks by key', () => {
+    expect(slotKey(0)).toEqual({ code: 'Digit1', label: '1' });
+    expect(slotKey(8)?.code).toBe('Digit9');
+    expect(slotKey(9)).toBeNull();
+    expect(cargoKey(cargoItem('home#2'))).toBe('home#2');
+    expect(cargoKey('abduct')).toBeNull();
   });
 });
 
@@ -126,34 +133,6 @@ describe('the buster timeline', () => {
     expect(shockRing(blastAt() + 3).radius).toBeGreaterThan(shockRing(blastAt() + 1).radius);
     expect(shockRing(blastAt() + 3).radius).toBeLessThan(busterParams.ringSize);
     expect(shockRing(blastAt() + busterParams.ringTime).glow).toBe(0);
-  });
-});
-
-describe('arcPoint', () => {
-  const out = new THREE.Vector3();
-
-  it('starts at the ship and ends at the target', () => {
-    const from = new THREE.Vector3(0, 450, 0);
-    const to = new THREE.Vector3(400, 0, 0);
-    expect(arcPoint(from, to, 0, 0.35, out).distanceTo(from)).toBeLessThan(1e-6);
-    expect(arcPoint(from, to, 1, 0.35, out).distanceTo(to)).toBeLessThan(1e-6);
-  });
-
-  it('drops straight down onto the point beneath the ship', () => {
-    const from = new THREE.Vector3(0, 450, 0);
-    const to = new THREE.Vector3(0, 400, 0);
-    for (let u = 0; u <= 1; u += 0.1) {
-      arcPoint(from, to, u, 0.35, out);
-      expect(Math.abs(out.x) + Math.abs(out.z)).toBeLessThan(1e-6);
-      expect(out.y).toBeCloseTo(450 - 50 * u);
-    }
-  });
-
-  it('stays above the ground on the way to the far side of the globe', () => {
-    const R = 400;
-    const from = new THREE.Vector3(0, R + 5, 0);
-    const to = new THREE.Vector3(Math.sin(2.5), Math.cos(2.5), 0).multiplyScalar(R);
-    for (let u = 0.02; u < 1; u += 0.02) expect(arcPoint(from, to, u, 0.35, out).length()).toBeGreaterThan(R);
   });
 });
 

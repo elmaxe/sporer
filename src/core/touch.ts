@@ -35,6 +35,7 @@ export class TouchGestures {
   private startY = 0;
   private tapPossible = false;
   private _dragging = false;
+  private _pinched = false;
   private spread = 0;
 
   constructor(private readonly sink: GestureSink) {}
@@ -42,6 +43,11 @@ export class TouchGestures {
   /** Fingers currently down. */
   get count(): number {
     return this.touches.size;
+  }
+
+  /** True once a second finger came down (a pinch), until all lift. */
+  get pinched(): boolean {
+    return this._pinched;
   }
 
   /** True once the fingers have moved past the tap threshold, or a second one came down, until all lift. */
@@ -56,9 +62,11 @@ export class TouchGestures {
       this.startY = y;
       this.tapPossible = true;
       this._dragging = false;
+      this._pinched = false;
     } else {
       this.tapPossible = false;
       this._dragging = true;
+      this._pinched = true;
       this.spread = this.measureSpread();
     }
   }
@@ -92,6 +100,7 @@ export class TouchGestures {
       if (this.tapPossible && !cancelled) this.sink.tap(x, y);
       this.tapPossible = false;
       this._dragging = false;
+      this._pinched = false;
     } else if (this.touches.size >= 2) {
       this.spread = this.measureSpread();
     }
@@ -102,6 +111,7 @@ export class TouchGestures {
     this.touches.clear();
     this.tapPossible = false;
     this._dragging = false;
+    this._pinched = false;
   }
 
   /** Distance between the first two fingers down. */

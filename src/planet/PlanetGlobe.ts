@@ -13,6 +13,7 @@ import { createGasLook, type GasLook } from '../world/gasLook';
 import type { Debug } from '../core/Debug';
 import { PLANET_SCALE, RELIEF_SCALE, globeRadius } from './frame';
 import { groundHit } from './ground';
+import type { Landing } from '../cargo/plantFate';
 import { LodSurface, addLodDebug } from './LodSurface';
 import type { RenderClock } from './PlanetFrame';
 
@@ -28,6 +29,11 @@ const ATMOSPHERE_SEGMENTS = 37;
 const CLOUD_SEGMENTS = 48;
 /** A vent's glow on the lava sea, radians. */
 const VENT_RADIUS = 0.05;
+
+/** Something raised on the ground since the planet was made (a volcano, combat/volcano.ts): how far it lifts it in a direction. */
+export interface GroundRelief {
+  lift(dir: THREE.Vector3): number;
+}
 
 /**
  * The visited planet or moon, at its true size (see globeRadius) and detailed: the
@@ -62,12 +68,16 @@ export class PlanetGlobe implements Entity {
   private readonly sample: SurfaceSampler;
   /** Worlds with a sea: the ground is never lower than its surface. */
   private readonly sea: boolean;
+  /** Gas and ice giants: the ground is their cloud tops. */
+  private readonly gasGiant: boolean;
   private readonly groundColor = new THREE.Color();
   /** Bodies with an atmosphere: where the ground is, so the haze stops there (see renderDepth). */
   private readonly ground: GroundDepth | null;
   private readonly cameraPosition = new THREE.Vector3();
   /** Once busted: the radius of the debris field, which is the ground from then on. */
   private bustedRadius: number | null = null;
+  /** Raised on the ground since (volcanoes): drawn by their owners, counted in the ground here. */
+  private readonly reliefs: GroundRelief[] = [];
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -85,6 +95,7 @@ export class PlanetGlobe implements Entity {
     this.lava = gas ? null : createLavaLook(config, VENT_RADIUS);
 
     this.sea = seaFloor;
+    this.gasGiant = gas;
     this.sample = gas
       ? gasSampler(R, seed, config.bands, config.size === 'iceGiant')
       : terrainSampler(R, seed, style, { noise: detailedTerrain, reliefScale: RELIEF_SCALE, seaFloor, shape: config.shape });
@@ -112,8 +123,42 @@ export class PlanetGlobe implements Entity {
    */
   groundRadius(dir: THREE.Vector3): number {
     if (this.bustedRadius !== null) return this.bustedRadius;
-    const r = this.sample(dir, this.groundColor);
+    const r = this.sample(dir, this.groundColor) + this.liftAt(dir);
     return this.sea ? Math.max(r, this.radius) : r;
+  }
+
+  /** How far what was raised on the ground since (volcanoes) lifts it in unit direction `dir`. */
+  private liftAt(dir: THREE.Vector3): number {
+    let lift = 0;
+    for (const relief of this.reliefs) lift = Math.max(lift, relief.lift(dir));
+    return lift;
+  }
+
+  /** The terrain as generated (under any sea, without what was raised on it since) in unit direction `dir`; its colour into `color`. */
+  terrainRadius(dir: THREE.Vector3, color: THREE.Color): number {
+    return this.sample(dir, color);
+  }
+
+  /** The sea's radius, or null for a world without one (or a gas giant). */
+  get seaRadius(): number | null {
+    return this.sea ? this.radius : null;
+  }
+
+  /**
+   * Counts `relief` in the ground from now on (the ship flies over it, clicks
+   * land on it); its highest point is `peak` (radius), which raises `top` if
+   * it's higher.
+   */
+  addRelief(relief: GroundRelief, peak: number): void {
+    this.reliefs.push(relief);
+    if (this.bustedRadius === null) this.top = Math.max(this.top, peak);
+  }
+
+  /** What something falling at unit direction `dir` lands on: a giant's clouds, the sea (or the lava sea) where it covers the terrain (and any volcano raised there), or land. */
+  landingAt(dir: THREE.Vector3): Landing {
+    if (this.gasGiant) return 'clouds';
+    if (this.busted || !this.sea || this.sample(dir, this.groundColor) + this.liftAt(dir) >= this.radius) return 'land';
+    return this.lava ? 'lava' : 'sea';
   }
 
   /** Where `ray` (in the globe's frame) meets the ground, written into `out`; the distance along the ray, or null on a miss. */

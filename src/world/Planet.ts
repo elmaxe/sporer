@@ -11,9 +11,14 @@ import { createAtmosphere, type AtmosphereSun } from './atmosphereShell';
 import { createLavaLook, type LavaLook } from './lavaMaterial';
 import { createGasLook, type GasLook } from './gasLook';
 import type { SizeClass } from '../gen/planets';
-import { createGasGeometry, createRings, createTerrainGeometry } from './planetGeometry';
+import { createGasGeometry, createRings, createTerrainGeometry, terrainSampler } from './planetGeometry';
 import { createWeatherLook, type WeatherLook } from './weatherLook';
-import { globeRadius } from '../planet/frame';
+import { PLANET_SCALE, RELIEF_SCALE, globeRadius } from '../planet/frame';
+import { detailedTerrain } from '../gen/noise';
+import { VolcanoShape, eruptionStrength, volcanoGrowth, type VolcanoSite } from '../combat/volcano';
+import { VolcanoMesh } from './volcanoMesh';
+import { createGlowTexture } from './glowTexture';
+import { CLOUD_RENDER_ORDER } from './weatherLook';
 import { DEBRIS_REACH, debrisLookFor } from '../gen/debris';
 import { DEBRIS_FAR, DebrisField } from './DebrisField';
 import { realSurface } from '../gen/realSurface';
@@ -62,6 +67,29 @@ export const LAVA_SEGMENTS = 12;
 export const COARSE_VENT_RADIUS = 0.15;
 /** Cube sphere segments of the system view's cloud layers (4800 triangles; the drift is worked out per vertex). */
 export const CLOUD_SEGMENTS = 20;
+/** Rings and segments of a volcano's cone in the system view. */
+const VOLCANO_RINGS = 12;
+const VOLCANO_SEGMENTS = 24;
+/** A volcano's cone sinks this far under the globe at its foot, system units. */
+const VOLCANO_FOOT_SINK = 0.01;
+/** Ash puffs over each volcano in the system view, and the seconds each takes to rise. */
+const VOLCANO_PUFFS = 4;
+const PUFF_PERIOD = 6;
+
+/** A volcano raised on the body (by a volcano bomb in low orbit), as the system view draws it. */
+interface SystemVolcano {
+  readonly cone: VolcanoMesh;
+  /** The crater's glow and a few puffs of ash over it, which show it from afar. */
+  readonly glow: THREE.Sprite;
+  readonly puffs: THREE.Sprite[];
+  /** A unit tangent at the summit, the way the wind takes the ash. */
+  readonly downwind: THREE.Vector3;
+  /** System time it was raised (-Infinity: long settled). */
+  readonly bornAt: number;
+  /** The ground's radius under the summit, and how far the crater floor rises over it at full height. */
+  readonly ground: number;
+  readonly rise: number;
+}
 
 /** True for gas giants, which are drawn as banded spheres instead of terrain. */
 export function isGas(config: PlanetConfig): config is PlanetConfig & { bands: string[] } {
@@ -105,6 +133,11 @@ export class Planet implements Entity, CelestialBody {
   /** Once busted by a planet buster: its debris and the system time of the blast. */
   private debris: DebrisField | null = null;
   private blastTime = 0;
+  /** Volcanoes raised on it, and their glows' texture (made with the first). */
+  private readonly volcanoes: SystemVolcano[] = [];
+  private volcanoGlow: THREE.Texture | null = null;
+  /** The system time it was last shown at. */
+  private lastTime = 0;
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -207,6 +240,100 @@ export class Planet implements Entity, CelestialBody {
     return this.object.position;
   }
 
+  /** The volcanoes raised on it by volcano bombs, oldest first (none once busted). */
+  get volcanoSites(): VolcanoSite[] {
+    return this.debris ? [] : this.volcanoes.map((v) => v.cone.shape.site);
+  }
+
+  /**
+   * Shows a volcano raised at `site` (by a volcano bomb in low orbit) at
+   * system time `bornAt`, rising and erupting with the clock; null for one
+   * long settled. The same cone as low orbit's (planet/Volcanoes.ts), true
+   * to scale in this view's units, standing on this globe's coarse facets,
+   * with its crater's glow and a few ash puffs.
+   * Nothing on a gas giant or once busted.
+   */
+  addVolcano(site: VolcanoSite, bornAt: number | null): void {
+    if (this.debris || isGas(this.config)) return;
+    const { config } = this;
+    // Its shape comes from low orbit's ground, in planet units, exactly as there.
+    const R = globeRadius(config.radius);
+    const sea = config.style.sea !== null;
+    const near = terrainSampler(R, config.seed, config.style, { noise: detailedTerrain, reliefScale: RELIEF_SCALE, seaFloor: sea, shape: config.shape });
+    const paint = terrainSampler(config.radius, config.seed, config.style, { shape: config.shape });
+    const color = new THREE.Color();
+    const centre = new THREE.Vector3(site.x, site.y, site.z).normalize();
+    const shape = new VolcanoShape(site, R, near(centre, color), sea ? R : null);
+    const ground = facetGround(this.surface.geometry, shape);
+    const cone = new VolcanoMesh(shape, VOLCANO_RINGS, VOLCANO_SEGMENTS, {
+      ground: (dir, out) => {
+        paint(dir, out);
+        return ground(dir);
+      },
+      // How far it stands over the ground (or the sea) in low orbit, in this view's units.
+      rise: (dir, s, azimuth) => {
+        const floor = near(dir, color);
+        return (floor + shape.height * shape.profile(s, azimuth) - (sea ? Math.max(floor, R) : floor)) / PLANET_SCALE;
+      },
+      footSink: VOLCANO_FOOT_SINK,
+    });
+    this.volcanoGlow ??= createGlowTexture();
+    const glow = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: this.volcanoGlow,
+        color: '#ff6a1e',
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        transparent: true,
+        toneMapped: false,
+      }),
+    );
+    // Over the clouds, like low orbit's: you can see where it is under them.
+    glow.renderOrder = CLOUD_RENDER_ORDER + 0.5;
+    glow.position.copy(centre);
+    const puffs = Array.from({ length: VOLCANO_PUFFS }, () => {
+      const puff = new THREE.Sprite(
+        new THREE.SpriteMaterial({ map: this.volcanoGlow, color: '#4e4844', depthWrite: false, transparent: true }),
+      );
+      puff.renderOrder = CLOUD_RENDER_ORDER + 0.6;
+      return puff;
+    });
+    const downwind = shape.tangent.clone().multiplyScalar(Math.cos(site.seed)).addScaledVector(shape.bitangent, Math.sin(site.seed));
+    this.surface.add(cone.mesh, glow, ...puffs);
+    this.volcanoes.push({ cone, glow, puffs, downwind, bornAt: bornAt ?? -Infinity, ground: ground(centre), rise: cone.summitRise });
+    this.poseVolcanoes(this.lastTime);
+  }
+
+  /** Volcanoes risen and erupting as at system time `time`. */
+  private poseVolcanoes(time: number): void {
+    for (const v of this.volcanoes) {
+      const age = time - v.bornAt;
+      const growth = volcanoGrowth(age);
+      v.cone.shape.growth = growth;
+      v.cone.setGrowth(growth);
+      v.cone.animate(time, age);
+      const strength = eruptionStrength(Number.isFinite(age) ? age : 1e9);
+      const flicker = 0.85 + 0.1 * Math.sin(time * 11.3) + 0.05 * Math.sin(time * 23.9 + 0.7);
+      const size = v.cone.shape.baseRadius / PLANET_SCALE;
+      const vent = v.ground + growth * v.rise;
+      v.glow.position.setLength(vent);
+      v.glow.scale.setScalar(size * (0.6 + 0.8 * strength) * Math.min(1, growth * 2));
+      v.glow.material.opacity = Math.min(1, (0.5 + 0.5 * strength) * flicker);
+      // Ash rising out of the crater, spreading and drifting downwind as it fades.
+      const centre = v.cone.shape.centre;
+      for (let k = 0; k < v.puffs.length; k++) {
+        const puff = v.puffs[k]!;
+        const a = (((time / PUFF_PERIOD + k / v.puffs.length) % 1) + 1) % 1;
+        puff.position
+          .copy(centre)
+          .multiplyScalar(vent + size * (0.2 + 1.6 * a))
+          .addScaledVector(v.downwind, size * 0.9 * a * a);
+        puff.scale.setScalar(size * (0.35 + 0.9 * a));
+        puff.material.opacity = Math.min(1, growth * 2) * (0.35 + 0.65 * strength) * Math.min(1, a / 0.15) * (1 - a) * 0.9;
+      }
+    }
+  }
+
   /** How far the surface has turned about the (tilted) axis, in radians. */
   get spinAngle(): number {
     return this.surface.rotation.y;
@@ -248,8 +375,9 @@ export class Planet implements Entity, CelestialBody {
     this.surface.rotation.y += this.config.spin * frameDt;
   }
 
-  /** Animated surfaces (lava seas, gas giants' clouds) and weather at system time `time`. */
+  /** Animated surfaces (lava seas, gas giants' clouds), weather and volcanoes at system time `time`. */
   animate(time: number): void {
+    this.lastTime = time;
     if (this.debris) {
       // Turning with the old surface, as low orbit's field does in the body frame.
       this.debris.object.rotation.y = this.surface.rotation.y;
@@ -259,9 +387,12 @@ export class Planet implements Entity, CelestialBody {
     this.lava?.animate(time);
     this.gas?.animate(time);
     this.weather?.animate(time);
+    if (this.volcanoes.length > 0) this.poseVolcanoes(time);
   }
 
   dispose(): void {
+    for (const v of this.volcanoes) for (const sprite of [v.glow, ...v.puffs]) sprite.material.dispose();
+    this.volcanoGlow?.dispose();
     this.debris?.dispose();
     this.gas?.dispose();
     this.scene.remove(this.object);
@@ -273,4 +404,49 @@ export class Planet implements Entity, CelestialBody {
     });
     this.physics.world.removeRigidBody(this.body);
   }
+}
+
+/**
+ * The radius of a globe's surface as drawn (its coarse facets) in unit
+ * directions round a volcano, for its cone to stand on: a ray from outside
+ * against the triangles of `geometry` near it. Falls back to the nearest
+ * vertex's radius if a ray misses.
+ */
+function facetGround(geometry: THREE.BufferGeometry, shape: VolcanoShape): (dir: THREE.Vector3) => number {
+  const pos = geometry.attributes.position as THREE.BufferAttribute;
+  const index = geometry.index;
+  const count = index ? index.count : pos.count;
+  const vertex = (i: number) => (index ? index.getX(i) : i);
+  // Triangles with a corner within reach of the footprint (a facet spans at most ~0.3 rad).
+  const reach = Math.cos(Math.min(Math.PI, shape.angle + 0.35));
+  const near: THREE.Triangle[] = [];
+  const v = new THREE.Vector3();
+  for (let t = 0; t < count; t += 3) {
+    const corners = [0, 1, 2].map((k) => new THREE.Vector3().fromBufferAttribute(pos, vertex(t + k)));
+    if (corners.some((c) => v.copy(c).normalize().dot(shape.centre) > reach)) near.push(new THREE.Triangle(corners[0], corners[1], corners[2]));
+  }
+  let outer = 0;
+  for (const tri of near) outer = Math.max(outer, tri.a.length(), tri.b.length(), tri.c.length());
+  const ray = new THREE.Ray();
+  const hit = new THREE.Vector3();
+  return (dir) => {
+    ray.origin.copy(dir).multiplyScalar(outer * 2);
+    ray.direction.copy(dir).negate();
+    let best = -Infinity;
+    for (const tri of near) {
+      if (ray.intersectTriangle(tri.a, tri.b, tri.c, false, hit)) best = Math.max(best, hit.length());
+    }
+    if (best > 0) return best;
+    let closest = -2;
+    for (const tri of near) {
+      for (const c of [tri.a, tri.b, tri.c]) {
+        const d = v.copy(c).normalize().dot(dir);
+        if (d > closest) {
+          closest = d;
+          best = c.length();
+        }
+      }
+    }
+    return best;
+  };
 }

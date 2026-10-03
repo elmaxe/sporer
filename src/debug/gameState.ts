@@ -6,6 +6,7 @@ import { bodyKey } from '../combat/busted';
 import { bodyLabLink } from '../lab/bodyLink';
 import { lodParams } from '../planet/LodSurface';
 import type { OrbitCamera } from '../player/OrbitCamera';
+import { SurfaceChanges } from '../surface/changes';
 import { plantParams } from '../surface/plantParams';
 import type { CelestialBody } from '../world/CelestialBody';
 import type { Planet } from '../world/Planet';
@@ -185,6 +186,15 @@ export function captureGameState(game: Game, levels: SceneManager): GameState {
       firing: !!planet?.busy,
       elapsed: planet?.buster.elapsed ?? null,
     },
+    volcanoes: spinning(world).flatMap((b) =>
+      b.volcanoSites.length === 0 ? [] : [{ body: bodyRef(world, b) ?? { kind: 'planet' as const, index: -1, name: b.name }, sites: b.volcanoSites }],
+    ),
+    cargo: {
+      inventory: levels.inventory.toJSON(),
+      surface: planet ? levels.surfaceChanges.forPlanet(bodyKey(planet.body.config)).toJSON() : null,
+      selected: planet?.cargo?.selected ?? null,
+      inFlight: planet?.cargo?.inFlight ?? [],
+    },
     ui: {
       touchMode: game.input.touchMode,
       hud,
@@ -260,6 +270,24 @@ export async function restoreGameState(game: Game, levels: SceneManager, state: 
     body.bust(time);
     levels.busted.bust(bodyKey(body.config), time);
   }
+  // Volcanoes before low orbit is built: it raises those in the body's change list.
+  for (const { body: ref, sites } of state.volcanoes ?? []) {
+    const body = resolveBody(world, ref) as Planet | null;
+    if (!body) {
+      notes.push(`no body ${ref.name} to raise volcanoes on`);
+      continue;
+    }
+    const changes = levels.surfaceChanges.forPlanet(bodyKey(body.config));
+    for (const site of sites) {
+      if (changes.volcanoes.some((v) => v.seed === site.seed)) continue;
+      changes.addVolcano(site);
+      body.addVolcano(site, null);
+    }
+  }
+  if (state.cargo) {
+    levels.inventory.load(state.cargo.inventory);
+    if (state.cargo.inFlight.length > 0) notes.push(`${state.cargo.inFlight.length} plant(s) were on the beam or meeting their fate: left out`);
+  }
   if (state.busted?.firing) notes.push(`a planet buster was going off (${state.busted.elapsed?.toFixed(1)} s after firing): restored as busted`);
   const shipState = state.system.ship;
   const target = shipState.target ? resolveBody(world, shipState.target) : null;
@@ -276,6 +304,8 @@ export async function restoreGameState(game: Game, levels: SceneManager, state: 
     const body = resolveBody(world, state.planet.body) as Planet | null;
     if (!body) throw new Error(`No body ${state.planet.body.name} to descend to`);
     setSystemClock(system, state.system, state.system.time);
+    // The plants taken and set down there, before the level is built from them.
+    if (state.cargo?.surface) levels.surfaceChanges.set(bodyKey(body.config), SurfaceChanges.fromJSON(state.cargo.surface));
     ship.parkAt(body, shipState.viewDistance);
     await frames(2);
     levels.toPlanet(body);
