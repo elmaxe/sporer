@@ -68,10 +68,11 @@ npm run dev        # http://localhost:5173 (debug panel on)
 | `npm run smoke` | Headless browser check of the whole game (needs the dev server running) |
 | `npm run shot` | Scripted in-game screenshots (`-- --dump <file>` restores a debug dump's moment) |
 | `npm run dump -- <file>` | Unpacks a debug dump: its pictures and a readable summary |
+| `npm run offline` | Builds, then checks in a headless browser that the game starts with the server gone and the menu's Refresh brings in a new version |
 
 URL parameters: `?seed=<number or text>` picks the galaxy, `?star=<id>` starts in a given system, `?debug` shows the debug panel in production builds, `?quality=low` renders at half resolution.
 
-GitHub Actions runs the typecheck, tests and build and deploys to GitHub Pages: the latest release (a `v*` tag) at https://elmaxe.github.io/sporer/, `main` at https://elmaxe.github.io/sporer/preview/, and each open pull request at `https://elmaxe.github.io/sporer/pr/<n>/`. The menu's **Version** picker switches between them; an app added to the home screen opens the version picked.
+GitHub Actions runs the typecheck, tests and build and deploys to GitHub Pages: the latest release (a `v*` tag) at https://elmaxe.github.io/sporer/, `main` at https://elmaxe.github.io/sporer/preview/, and each open pull request at `https://elmaxe.github.io/sporer/pr/<n>/`. The menu's **Version** picker switches between them; an app added to the home screen opens the version picked. Each version saves itself on the device (a service worker, `src/pwa/sw.ts`), so the game starts without internet once it's been played; a new version downloads in the background and the menu's **Refresh** button (the only way to reload in the full-screen app) switches to it.
 
 ## Tech
 

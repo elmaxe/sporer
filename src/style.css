@@ -354,6 +354,23 @@ html.touch #fps {
   display: block;
 }
 
+/* A dot on the menu button while a new version waits for the menu's Refresh (ui/RefreshControl.ts). */
+#menu-toggle .update-badge {
+  display: none;
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid #08101c;
+  background: #66ffcc;
+}
+
+#menu-toggle.update .update-badge {
+  display: block;
+}
+
 /* Left of the menu button. */
 #fullscreen-toggle {
   position: fixed;
@@ -622,6 +639,11 @@ select.menu-button {
 select.menu-button option {
   background: #080e1c;
   color: #cfe3ff;
+}
+
+.menu-button:disabled {
+  opacity: 0.6;
+  cursor: progress;
 }
 
 .menu-button.primary {

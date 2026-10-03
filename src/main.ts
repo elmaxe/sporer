@@ -20,6 +20,7 @@ import { GraphicsSettingsControl, loadGraphicsSettings } from './ui/GraphicsSett
 import { installConsoleLog } from './debug/consoleLog';
 import { DebugDumpControl } from './debug/DebugDump';
 import { openChosenVersion } from './ui/versions';
+import { registerServiceWorker } from './pwa/serviceWorker';
 
 // First, so the debug dump has the console's errors from start-up on.
 const consoleLog = installConsoleLog();
@@ -27,6 +28,8 @@ const consoleLog = installConsoleLog();
 const DEFAULT_SEED = '1337';
 
 async function main(): Promise<void> {
+  // Saves the game on the device so it starts without internet (production builds).
+  void registerServiceWorker();
   // An installed app starts at the release: on to the version picked in the menu, if another.
   if (await openChosenVersion()) return;
   // ?seed=<number or any text> picks the galaxy, ?star=<id> jumps to a system (or a rogue planet).

@@ -1,3 +1,4 @@
+import { forgetRemovedVersions } from '../pwa/serviceWorker';
 import { buildInfo } from './buildInfo';
 import { currentSiteRoot, loadVersions, saveChosenVersion, versionId, versionUrl, type SiteVersion } from './versions';
 
@@ -7,7 +8,8 @@ import { currentSiteRoot, loadVersions, saveChosenVersion, versionId, versionUrl
  * Picking one goes there, keeping the galaxy and system in the URL, and
  * remembers it so an installed app opens it from then on. Hidden outside the
  * Pages site (dev server, local builds) or when the list can't be had.
- * GameMenu refreshes it each time the menu opens.
+ * GameMenu refreshes it at start and each time the menu opens, which also
+ * forgets the offline copies of versions gone from the site.
  */
 export class VersionPicker {
   private readonly section = document.getElementById('menu-version-section')!;
@@ -24,6 +26,7 @@ export class VersionPicker {
     if (this.root === null || buildInfo.pagesPath === null) return;
     const versions = await loadVersions(this.root);
     if (versions === null) return;
+    void forgetRemovedVersions(this.root, [...versions.map((v) => v.path), buildInfo.pagesPath]).catch(() => {});
     const current = versionId(buildInfo.pagesPath);
     // This build, should the list not have caught up with it yet.
     if (!versions.some((v) => v.id === current)) {
