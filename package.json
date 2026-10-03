@@ -7,12 +7,13 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.sw.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "smoke": "node scripts/smoke.mjs",
     "shot": "node scripts/shot.mjs",
-    "dump": "node scripts/dump.mjs"
+    "dump": "node scripts/dump.mjs",
+    "offline": "node scripts/offline.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.21.0",
