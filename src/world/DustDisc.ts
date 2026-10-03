@@ -103,6 +103,7 @@ const FRAGMENT = /* glsl */ `
   uniform float uDepth;               // optical depth at the inner edge, face on
   uniform float uSlantCap;
   uniform float uGrazeFade;
+  uniform float uInside;
   uniform float uContrast;
   uniform float uOpaque;
   uniform float uShade;               // how much light this sheet gets
@@ -135,7 +136,7 @@ const FRAGMENT = /* glsl */ `
     float slant = 1.0 / max(abs(v.y), uSlantCap);
     // A debris disc's sheets hand over to its band near edge-on (the band fades in as they fade out), so the
     // gap between sheets doesn't show as a dark wedge along the plane.
-    slant *= mix(1.0, smoothstep(0.06, 0.35, abs(v.y)), uGrazeFade);
+    slant *= mix(1.0, smoothstep(0.06, 0.35, abs(v.y)), uGrazeFade * uInside);
     float tau = uDepth * pow(vBase * rel, uTauPower) * uLayerWeight * slant;
     // Thinning out towards both edges (the disc is thick right up to them otherwise): edge-on or from a little
     // above, the stacked sheets' hard edges showed as steps.
@@ -180,6 +181,7 @@ const BAND_VERTEX = /* glsl */ `
 
 const BAND_FRAGMENT = /* glsl */ `
   uniform float uBandDepth;
+  uniform float uInside;              // 1 with the camera inside the dust layer (where the band shows), 0 above it
   uniform float uBrightness;
   uniform float uForward;
   uniform vec3 uColor;
@@ -193,11 +195,12 @@ const BAND_FRAGMENT = /* glsl */ `
     vec3 toEye = cameraPosition - vWorld;
     float dist = length(toEye);
     vec3 v = toEye / dist;
-    // Near edge-on only, as the sheets fade out there (their uGrazeFade): the two hand over.
+    // Only from inside the dust layer, and there near edge-on, as the sheets fade out (their uGrazeFade): the two
+    // hand over. From above the layer a far wall would stand up behind the star like a screen.
     float edgeOn = 1.0 - smoothstep(0.06, 0.35, abs(v.y));
     // And fading out where the wall turns away to its outline (seen along the wall), so the band has no hard ends.
     float facing = abs(dot(normalize(vec3(vRound.x, 0.0, vRound.y)), v));
-    float fade = smoothstep(uFade.x, uFade.y, dist) * edgeOn * smoothstep(0.0, 0.5, facing);
+    float fade = smoothstep(uFade.x, uFade.y, dist) * edgeOn * smoothstep(0.0, 0.5, facing) * uInside;
     if (fade <= 0.0) discard;
     float s = vAcross;
     // The column along the plane: Gaussian in height.
@@ -278,6 +281,7 @@ export class DustDisc implements Entity {
       uContrast: { value: young ? dustDiscParams.contrast : 0 },
       uOpaque: { value: young ? 1 : 0 },
       uGrazeFade: { value: young ? 0 : 1 },
+      uInside: { value: 0 },
       uBrightness: { value: 1 },
       // The habitable radius is where the light is Earth's, whatever the star.
       uHabitable: { value: habitableRadius },
@@ -374,6 +378,7 @@ export class DustDisc implements Entity {
           uLightAt: { value: this.shared.uHabitable!.value as number },
           uStar: this.shared.uStar!,
           uBandDepth: { value: dustDiscParams.debrisBandDepth },
+          uInside: this.shared.uInside!,
           uBrightness: this.shared.uBrightness!,
           uForward: this.shared.uForward!,
           uColor: { value: color },
@@ -390,10 +395,26 @@ export class DustDisc implements Entity {
       }),
     );
     band.renderOrder = -0.02;
+    // Drawn first: it settles where the camera is for the sheets too.
+    band.onBeforeRender = (_r, _s, camera) => this.measureInside(camera);
     band.frustumCulled = false;
     band.name = 'Debris disc band';
     this.object.add(band);
     return band;
+  }
+
+  /**
+   * How far inside the dust layer the camera is, 1 within ±0.3 of its scale
+   * height at the camera's distance from the star, 0 beyond ±0.8: a debris
+   * disc's band (and its sheets fading out edge-on) belong to a view from
+   * inside, as the zodiacal light is seen from Earth.
+   */
+  private measureInside(camera: THREE.Camera): void {
+    this.object.worldToLocal(camera.getWorldPosition(this.local));
+    const { data } = this;
+    const r = Math.min(Math.max(Math.hypot(this.local.x, this.local.z), data.inner), data.outer);
+    const height = data.aspect * data.outer * (r / data.outer) ** data.flare;
+    this.shared.uInside!.value = 1 - THREE.MathUtils.smoothstep(Math.abs(this.local.y) / height, 0.3, 0.8);
   }
 
   private prepareSheet(sheet: THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial>, i: number, camera: THREE.Camera, weights: readonly number[], total: number): void {
