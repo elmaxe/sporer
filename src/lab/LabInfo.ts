@@ -4,7 +4,8 @@ import { celsius, describeAtmosphere } from '../gen/climate';
 import { EARTH_RADIUS_KM, atmosphereLook, scaleHeight } from '../gen/atmosphere';
 import { shapeExtents } from '../gen/shape';
 import { plantLabLink } from '../plantlab/labPlants';
-import { describeLab, isSmallKind, labClimateData, labEarthRadii } from './labPlanet';
+import { describeLab, isSmallKind, labClimateData, labEarthRadii, labLife } from './labPlanet';
+import { formatChance, type LifeEstimate } from '../gen/life';
 import type { PlanetLab } from './PlanetLab';
 
 /** Seconds between refreshes of the live values. */
@@ -137,6 +138,8 @@ export class LabInfo implements Entity {
         `${fmt(climate.heatFlow)} W/m² · ${GEOTHERMAL[Math.min(4, Math.floor(climate.geothermal * 5))]} (${fmt(climate.geothermal)})`,
       ]);
       rows.push(['Habitability', `T${climate.habitability}`]);
+      const life = labLife(planet, view.star);
+      if (life) rows.push(['Life', describeLifeDetail(life)]);
       const look = planet.atmosphere ? atmosphereLook(climate, planet.radius) : null;
       if (look) {
         rows.push(['Haze', `${fmt(scaleHeight(climate))} km scale height → shell ${fmt((look.top - 1) * 100)}% of R · depth ${fmt(look.depth)}`]);
@@ -218,4 +221,27 @@ function signed(v: number): string {
 
 function escape(s: string): string {
   return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+}
+
+/** The chance of life and what it's made of, e.g. "52% · surface 0% (no liquid water) · ocean under 12 km of ice: 54% · star's age 95%". */
+function describeLifeDetail(life: LifeEstimate): string {
+  const { surface: s, subsurface: u } = life;
+  const parts = [life.plants ? `${formatChance(life.chance)} (plants grow here)` : formatChance(life.chance)];
+  const dose = `${fmt(s.dose)} mGy/day${s.flare > 0 ? ` + flares ${fmt(s.flare)} Sv` : ''} (×${fmt(s.radiation)})`;
+  parts.push(
+    s.area > 0
+      ? `surface ${formatChance(s.chance)}: liquid water on ${fmt(s.area * 100)}% · radiation ${dose} · energy ×${fmt(s.energy)}`
+      : `surface 0% (no liquid water) · radiation ${dose}`,
+  );
+  if (u.kind !== 'none') {
+    const where = u.kind === 'ocean' ? 'ice' : 'rock';
+    const depth = Number.isFinite(u.depth) ? `${fmt(u.depth)} km` : 'no heat';
+    parts.push(
+      u.liquid
+        ? `${u.kind} under ${depth} of ${where}: ${formatChance(u.chance)} (energy ×${fmt(u.energy)})`
+        : `no ${u.kind}: melts at ${depth}, water reaches ${fmt(u.reach)} km`,
+    );
+  }
+  parts.push(`star's age ×${fmt(life.time)}`);
+  return parts.join(' · ');
 }

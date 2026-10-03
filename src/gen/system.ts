@@ -64,6 +64,8 @@ export interface MoonData {
   climate: ClimateData;
   /** An irregular small moon's shape (gen/shape.ts; Mars's Phobos and Deimos); `radius` is its longest reach. Absent: round. */
   shape?: ShapeData | null;
+  /** A real moon's orbit in its planet's radii (Sol's); generated moons' follow from `orbit` (gen/life.ts moonDistance). */
+  hostDistance?: number;
 }
 
 export interface RingData {

@@ -42,6 +42,10 @@
 //   tap:<element id>             tap (--phone) or click the middle of that element, then wait two frames
 //   hover:<x>,<y> | hover:<expression>
 //                                move the mouse there (CSS px; or an expression giving {x, y}), wait a few frames
+//   press:<x>,<y> | press:<expression>
+//                                press and hold the mouse button (a finger with --phone) there (CSS px; or an
+//                                expression giving {x, y}), wait a few frames; `release` lets go (the beam)
+//   release                      let go of a press, wait a few frames
 //   fps                          measure frames per second over 120 frames
 //   goto:<url or ?params>        load another page (e.g. goto:?star=2) and wait for the game
 //
@@ -131,6 +135,8 @@ if (opts.phone) {
 const shots = [];
 const results = [];
 let last = null;
+/** Where a `press` step holds the mouse (or finger) down, until `release`. */
+let pressed = null;
 let failure = null;
 
 const HIDE_DEBUG = `(() => { const s = document.createElement('style');
@@ -275,6 +281,30 @@ async function run(step) {
       const at = xy ? { x: Number(xy[1]), y: Number(xy[2]) } : await page.evaluate(rest);
       if (!at || !Number.isFinite(at.x) || !Number.isFinite(at.y)) throw new Error(`no point to hover: ${JSON.stringify(at)}`);
       await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at.x, y: at.y });
+      await page.evaluate(`new Promise((r) => { let n = 0; (function f() { if (++n === 4) r(); else requestAnimationFrame(f); })(); })`);
+      return;
+    }
+    case 'press': {
+      const xy = /^\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*$/.exec(rest);
+      const at = xy ? { x: Number(xy[1]), y: Number(xy[2]) } : await page.evaluate(rest);
+      if (!at || !Number.isFinite(at.x) || !Number.isFinite(at.y)) throw new Error(`no point to press: ${JSON.stringify(at)}`);
+      pressed = at;
+      if (opts.phone) {
+        // Emulated touch sometimes keeps a finger down (from the page's own start-up); end it, or the new one is ignored.
+        await page.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] });
+        await page.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...at, id: 0 }] });
+      } else {
+        await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at.x, y: at.y });
+        await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: at.x, y: at.y, button: 'left', buttons: 1, clickCount: 1 });
+      }
+      await page.evaluate(`new Promise((r) => { let n = 0; (function f() { if (++n === 4) r(); else requestAnimationFrame(f); })(); })`);
+      return;
+    }
+    case 'release': {
+      const at = pressed ?? { x: 0, y: 0 };
+      pressed = null;
+      if (opts.phone) await page.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      else await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: at.x, y: at.y, button: 'left', buttons: 0, clickCount: 1 });
       await page.evaluate(`new Promise((r) => { let n = 0; (function f() { if (++n === 4) r(); else requestAnimationFrame(f); })(); })`);
       return;
     }

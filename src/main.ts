@@ -16,10 +16,12 @@ import { FullscreenButton } from './ui/FullscreenButton';
 import { GameMenu } from './ui/GameMenu';
 import { FpsCounter } from './ui/FpsCounter';
 import { ItemBar } from './ui/ItemBar';
+import { PlantIcons } from './ui/plantIcons';
 import { GraphicsSettingsControl, loadGraphicsSettings } from './ui/GraphicsSettings';
 import { installConsoleLog } from './debug/consoleLog';
 import { DebugDumpControl } from './debug/DebugDump';
 import { openChosenVersion } from './ui/versions';
+import { registerServiceWorker } from './pwa/serviceWorker';
 
 // First, so the debug dump has the console's errors from start-up on.
 const consoleLog = installConsoleLog();
@@ -27,6 +29,8 @@ const consoleLog = installConsoleLog();
 const DEFAULT_SEED = '1337';
 
 async function main(): Promise<void> {
+  // Saves the game on the device so it starts without internet (production builds).
+  void registerServiceWorker();
   // An installed app starts at the release: on to the version picked in the menu, if another.
   if (await openChosenVersion()) return;
   // ?seed=<number or any text> picks the galaxy, ?star=<id> jumps to a system (or a rogue planet).
@@ -49,7 +53,7 @@ async function main(): Promise<void> {
   const menu = new GameMenu(game, levels);
   game.add(new FpsCounter());
   game.add(new TouchControls(game));
-  game.add(new ItemBar(levels, game.input, levels.tooltip));
+  game.add(new ItemBar(levels, game.input, levels.tooltip, new PlantIcons(game.renderer)));
   const debugDump = game.add(new DebugDumpControl(game, levels, consoleLog, debug));
 
   document.getElementById('loading')?.remove();

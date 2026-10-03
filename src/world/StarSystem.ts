@@ -3,6 +3,7 @@ import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
 import { FIXED_DT } from '../core/Game';
 import { hashSeed } from '../gen/rng';
+import { bodyLife } from '../gen/life';
 import { describePlanet, describeSized, keplerPeriod, type PlanetData, type SystemData } from '../gen/system';
 import { skyScale } from '../planet/frame';
 import type { Physics } from '../physics/Physics';
@@ -103,9 +104,17 @@ export class StarSystem implements Entity {
       scene.add(this.galacticLight);
     }
     this.planets = data.planets.map((p) => {
-      const planet = new Planet(scene, physics, p, describe(p, data.dust?.kind === 'protoplanetary'), p.extent + PLANET_STANDOFF_MARGIN, sun);
+      const planet = new Planet(
+        scene,
+        physics,
+        { ...p, life: bodyLife(data, p) },
+        describe(p, data.dust?.kind === 'protoplanetary'),
+        p.extent + PLANET_STANDOFF_MARGIN,
+        sun,
+      );
       for (const m of p.moons) {
-        const moon = new Planet(scene, physics, m, `${describePlanet(m.type)} · moon`, m.radius + MOON_STANDOFF_MARGIN, sun, planet);
+        const config = { ...m, life: bodyLife(data, p, m) };
+        const moon = new Planet(scene, physics, config, `${describePlanet(m.type)} · moon`, m.radius + MOON_STANDOFF_MARGIN, sun, planet);
         this.moons.push(moon);
       }
       return planet;

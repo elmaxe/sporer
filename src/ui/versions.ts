@@ -1,3 +1,4 @@
+import { availableOffline, registrationStarted } from '../pwa/serviceWorker';
 import { buildInfo } from './buildInfo';
 
 /**
@@ -10,6 +11,8 @@ import { buildInfo } from './buildInfo';
  *
  * The version picked is remembered, and an installed app (which always starts
  * at the root, the release) goes straight on to it: openChosenVersion().
+ * Offline, the list is the last one seen (the service worker keeps it) and
+ * the app goes on only to a version saved on the device.
  */
 export interface SiteVersion {
   /** 'release', 'preview' or 'pr-<n>'. */
@@ -107,7 +110,8 @@ function isInstalledApp(): boolean {
  * Started as an installed app on the release with another version picked:
  * goes to that version and returns true (the page is leaving, don't start the
  * game). A version that's gone (its pull request closed) is forgotten and the
- * release plays.
+ * release plays, as it does offline when the version picked isn't saved on
+ * the device.
  */
 export async function openChosenVersion(): Promise<boolean> {
   const chosen = loadChosenVersion();
@@ -120,6 +124,9 @@ export async function openChosenVersion(): Promise<boolean> {
     saveChosenVersion('release');
     return false;
   }
+  if (!navigator.onLine && !(await availableOffline(root + version.path))) return false;
+  // The release's own worker, which the app needs to start offline, must get going before the page leaves.
+  await registrationStarted();
   location.replace(versionUrl(root, version, location.search));
   return true;
 }

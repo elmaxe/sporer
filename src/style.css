@@ -118,6 +118,25 @@ html.touch #fps {
   color: #9fd8ff;
 }
 
+/* The item bar's tooltips, in its tabs' colours (ItemBar). */
+#tooltip[data-tone='weapons'] {
+  border-color: rgba(255, 92, 66, 0.7);
+}
+
+#tooltip[data-tone='weapons'] #tooltip-name,
+#tooltip[data-tone='weapons'] #tooltip-details {
+  color: #ffb199;
+}
+
+#tooltip[data-tone='inventory'] {
+  border-color: rgba(182, 192, 206, 0.7);
+}
+
+#tooltip[data-tone='inventory'] #tooltip-name,
+#tooltip[data-tone='inventory'] #tooltip-details {
+  color: #e2e8f0;
+}
+
 /* The galaxy map's star tooltip: the system's planets, one row each, with their moons. */
 #tooltip-extra {
   margin-top: 5px;
@@ -332,6 +351,23 @@ html.touch #fps {
 }
 
 #menu-toggle.muted .muted-badge {
+  display: block;
+}
+
+/* A dot on the menu button while a new version waits for the menu's Refresh (ui/RefreshControl.ts). */
+#menu-toggle .update-badge {
+  display: none;
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid #08101c;
+  background: #66ffcc;
+}
+
+#menu-toggle.update .update-badge {
   display: block;
 }
 
@@ -603,6 +639,11 @@ select.menu-button {
 select.menu-button option {
   background: #080e1c;
   color: #cfe3ff;
+}
+
+.menu-button:disabled {
+  opacity: 0.6;
+  cursor: progress;
 }
 
 .menu-button.primary {
@@ -893,7 +934,22 @@ html:not([data-ship='surface']):not([data-ship='space']) #touch-map {
   display: none;
 }
 
-/* The item bar (ItemBar): tabs of item slots at the bottom centre, a hint line above it. */
+/*
+ * The item bar (ItemBar): tabs of item slots at the bottom centre, a hint line above it.
+ * Each tab has its colour (Weapons red, Inventory grey); the whole bar takes the one on show.
+ */
+#item-bar,
+.item-tab[data-tab='weapons'] {
+  --bar: 255, 92, 66;
+  --bar-text: #ffb199;
+}
+
+#item-bar[data-tab='inventory'],
+.item-tab[data-tab='inventory'] {
+  --bar: 182, 192, 206;
+  --bar-text: #e2e8f0;
+}
+
 #item-bar {
   position: fixed;
   left: 50%;
@@ -921,7 +977,7 @@ html.items:not(.touch) #hud {
   padding: 3px 10px;
   border-radius: 4px;
   background: rgba(8, 14, 28, 0.7);
-  color: #ffb199;
+  color: var(--bar-text);
   font-size: 13px;
   white-space: nowrap;
   text-shadow: 0 0 4px #000;
@@ -930,21 +986,22 @@ html.items:not(.touch) #hud {
 .item-panel {
   pointer-events: auto;
   border-radius: 8px;
-  border: 1px solid rgba(102, 255, 204, 0.35);
+  border: 1px solid rgba(var(--bar), 0.45);
   background: rgba(8, 14, 28, 0.72);
   overflow: hidden;
+  transition: border-color 0.2s;
 }
 
 #item-tabs {
   display: flex;
-  border-bottom: 1px solid rgba(102, 255, 204, 0.2);
+  border-bottom: 1px solid rgba(var(--bar), 0.25);
 }
 
 .item-tab {
   padding: 3px 12px;
   border: 0;
   background: none;
-  color: rgba(207, 227, 255, 0.6);
+  color: rgba(var(--bar), 0.6);
   font: 600 11px system-ui, sans-serif;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -952,8 +1009,9 @@ html.items:not(.touch) #hud {
 }
 
 .item-tab.active {
-  color: #66ffcc;
-  box-shadow: inset 0 -2px 0 #66ffcc;
+  color: rgb(var(--bar));
+  background: rgba(var(--bar), 0.12);
+  box-shadow: inset 0 -2px 0 rgb(var(--bar));
 }
 
 #item-slots {
@@ -970,19 +1028,19 @@ html.items:not(.touch) #hud {
   height: 46px;
   padding: 0;
   border-radius: 6px;
-  border: 1px solid rgba(102, 255, 204, 0.3);
+  border: 1px solid rgba(var(--bar), 0.3);
   background: rgba(20, 30, 50, 0.7);
   color: #cfe3ff;
   cursor: pointer;
 }
 
 .item-slot:hover {
-  border-color: rgba(102, 255, 204, 0.7);
+  border-color: rgba(var(--bar), 0.7);
 }
 
 .item-slot.empty {
   border-style: dashed;
-  border-color: rgba(102, 255, 204, 0.15);
+  border-color: rgba(var(--bar), 0.15);
   background: rgba(20, 30, 50, 0.35);
   cursor: default;
 }
@@ -992,10 +1050,31 @@ html.items:not(.touch) #hud {
 }
 
 .item-slot.selected {
-  border-color: #ff6a40;
-  background: rgba(255, 90, 40, 0.28);
+  border-color: rgb(var(--bar));
+  background: rgba(var(--bar), 0.28);
   color: #fff;
-  box-shadow: 0 0 10px rgba(255, 106, 64, 0.6);
+  box-shadow: 0 0 10px rgba(var(--bar), 0.6);
+}
+
+.item-slot.unavailable .item-picture {
+  opacity: 0.45;
+}
+
+/* A cargo stack's plant, drawn from its own mesh (PlantIcons). */
+.item-picture {
+  width: 40px;
+  height: 40px;
+  pointer-events: none;
+}
+
+/* How many of it are in the hold. */
+.item-count {
+  position: absolute;
+  right: 3px;
+  bottom: 1px;
+  font: 700 11px system-ui, sans-serif;
+  color: #fff;
+  text-shadow: 0 0 3px #000, 0 0 2px #000;
 }
 
 .item-key {
@@ -1015,9 +1094,9 @@ html.items:not(.touch) #hud {
   clip-path: inset(50%);
 }
 
-/* On touch: above the FPS counter, between the stick and the buttons, only the filled slots, no key labels. */
+/* On touch: above the stick (its two tabs are wider than the gap between the stick and the buttons), only the filled slots, no key labels. */
 html.touch #item-bar {
-  bottom: calc(max(8px, env(safe-area-inset-bottom)) + 26px);
+  bottom: calc(max(24px, env(safe-area-inset-bottom)) + 128px);
 }
 
 html.touch .item-slot.empty,
@@ -1048,6 +1127,7 @@ html.touch #item-hint {
 }
 
 /* Aiming the planet buster. */
-body.aiming #app canvas {
+body.aiming #app canvas,
+body.beaming #app canvas {
   cursor: crosshair;
 }

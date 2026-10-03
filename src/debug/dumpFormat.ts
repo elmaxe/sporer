@@ -1,3 +1,5 @@
+import type { InventoryData } from '../cargo/inventory';
+import type { SurfaceChangesData } from '../surface/changes';
 import type { LogEntry } from './consoleLog';
 import type { FrameStats } from './frameTimes';
 
@@ -71,6 +73,16 @@ export interface GameState {
    * blast's system time, and how many there are in the whole game. Also whether one was going off.
    */
   busted?: { bodies: { body: BodyRef; time: number }[]; total: number; firing: boolean; elapsed: number | null };
+  /**
+   * The cargo hold and, in low orbit, what the player has done to the body's surface (plants taken, plants
+   * set down), what the beam is armed with and what's in the air (missing in dumps from before the beam).
+   */
+  cargo?: {
+    inventory: InventoryData;
+    surface: SurfaceChangesData | null;
+    selected: string | null;
+    inFlight: { state: string; fate: string | null; species: string }[];
+  };
   /** What the DOM overlays showed (text the screenshot's game picture leaves out). */
   ui: {
     touchMode: boolean;
@@ -196,6 +208,13 @@ export function summaryLines(dump: Omit<DebugDump, 'images'>): string[] {
     lines.push(`Where: ${where(s)} · seed ${s.seed ?? 'default'} · star ${s.star} · t=${time.toFixed(2)} s${moving}`);
     const g = s.graphics;
     lines.push(`Camera: distance ${s.orbit.distance.toFixed(1)} · fov ${s.camera.fov} · weather ${g.weather ? 'on' : 'off'} · plants ${g.plants ? 'on' : 'off'}${g.wireframe ? ' · wireframe' : ''}`);
+    const c = s.cargo;
+    if (c && (c.inventory.stacks.length > 0 || c.selected || c.inFlight.length > 0 || c.surface?.planted?.length || c.surface?.removed.length)) {
+      const hold = c.inventory.stacks.map((st) => `${st.species.name} ×${st.count}`).join(', ') || 'empty';
+      const here = c.surface ? ` · here: ${c.surface.removed.length} taken, ${c.surface.planted?.length ?? 0} set down` : '';
+      const air = c.inFlight.length > 0 ? ` · in the air: ${c.inFlight.map((l) => `${l.species} (${l.fate ?? l.state})`).join(', ')}` : '';
+      lines.push(`Cargo: ${hold}${c.selected ? ` · armed: ${c.selected}` : ''}${here}${air}`);
+    }
   } else if (dump.stateError) {
     lines.push(`State unavailable: ${dump.stateError}`);
   }
