@@ -57,9 +57,30 @@ The numbers above are at the original scale, an Earth-sized globe of radius 100.
 
 Measured, same view as the table above (Earth-sized desert gen=8, the UFO's view, 1280×720 headless): 80k triangles at 1×, 108k at 2×, 123k at 3× and 143k at 4×, all 4–5 FPS in SwiftShader. More of the screen is ground, and that ground is detailed. In the game on desktop Chrome with a real GPU (the home system's super-Earth, 1767×1041), triangles per frame including the sky and the sea: 108k → 102k at the default zoom, 114k → 120k at the lowest, 88k → 72k at the top of the zoom, all at the display's 100 FPS.
 
+## Smooth surfaces: the sea and gas giants (issue #73)
+
+The water used to be a fixed 46-segment cube sphere (25,392 triangles), one mesh whose bounding sphere is the whole planet, so neither frustum nor horizon culling ever dropped any of it, and it's on the ground layer, so it was drawn twice a frame (the scene and the haze's depth pass): 50,784 triangles from anywhere. The lab's frozen view (PR #85) shows it plainly.
+
+Now the water is a `LodSurface` of its own (a constant sampler at sea level, drawn first with `SEA_RENDER_ORDER`), so it gets the terrain's horizon culling and per-chunk frustum culling. A smooth surface has no facets whose size matters, so its chunks split by **geometric error** instead (Ulrich's measure, as above): a flat cell spanning θ of arc sags R·(1 − cos θ/2) ≈ θ/8 of its width inside the sphere, so seen from the camera the gap is `chordError` = cellAngle · θ / 8, and a chunk splits when that passes a threshold. Gas giants split the same way.
+
+- **Outline** (`lodParams.outlineError` = 0.0018 rad, ~1 px at 720p by `cellAngle`'s measure: 0.05 rad ≈ 28 px): a giant's cloud tops are painted per pixel, so the sag only shows in the outline. From the UFO in the lab, a gas giant (gen=5) went from 57k triangles built and 99 chunks to 16k and 19, and the picture is the same.
+- **Coast** (`lodParams.coastError` = 0.00045 rad, ¼ px): the sea shows the sag at every coast too, where the sea floor rises through it (the floor's height is 0 at the coast, so ground just under sea level pokes through a sagging chord, as faceted sea-coloured floor in shallow basins). Measured against the fixed sphere on an Earth-sized terran world (gen=8) at 1.6, 1.15 and 3 R, counting pixels more than 6% off (`compare -fuzz 6%`): at 1 px, 718 / 213 / 700, with the coastlines a pixel off all round and a shallow basin showing its floor; at ½ px 356 / 200 / 699; at ¼ px 213 / 175 / 234, about the noise of two runs (the map's ship marker, a few edge pixels).
+
+Under an opaque sea, a terrain chunk whose every vertex (in both its own and its parent's shape, which it blends between; the seams only move vertices within those) is below sea level can't be seen, so `LodSurfaceOptions.hiddenBelow` leaves it undrawn (`ChunkBounds.top`). It still splits and merges as before, so an islet too small for a coarse chunk to catch comes up when the finer chunks are built.
+
+Measured in the lab (Earth-sized ocean world gen=5, 1280×720, triangles a frame including the sky, clouds and haze; the water's share drawn twice):
+
+| View | Before: total (water) | After: total (water) |
+|---|---|---|
+| 3 R | 111.5k (50.8k) | 75.1k (15.4k) |
+| 1.3 R | 180.6k (50.8k) | 119.6k (28.7k) |
+| 1.03 R | 181.4k (50.8k) | 103.0k (24.6k) |
+
+And a gas giant (gen=5), whole frame: 21.3k → 17.2k, 38.4k → 17.9k, 29.2k → 20.0k at the same views (most of what's left is its 16k-triangle atmosphere shell).
+
 ## Open questions
 
 - Where a chunk's edge collapses onto a coarser neighbour, the cells along that edge are triangulated differently from the parent's, so when a neighbour's level changes that one row of facets can shift slightly.
 - The blending is timed, not tied to distance, so a chunk built late (flying fast) still blends in over 0.4 s rather than popping, but lags behind the camera a little.
-- The sea, lava sea and atmosphere are still fixed cube spheres (water 46 segments = 25,392 triangles, lava 37 = 16,428, atmosphere 37 = 16,428). Up close that's cheap next to the terrain, but zoomed out the terrain is only a few thousand triangles (an ice dwarf from 4 R: 8 chunks, ~4k), so the water is ~6× it. The cost is mostly vertex work (the back half is culled, and the pixels are the same however many triangles). Nothing stops the water using a `LodSurface` of its own (a flat sampler; the same horizon culling and blending keep the coastline steady as its detail changes), at one more draw call per chunk; or a few prebuilt resolutions swapped by distance, cheaper but with a small silhouette change at each swap. The lava sea computes its flow and glow per vertex, so its pattern would change as chunks split: it needs that moved per pixel first, or keeps its fixed sphere. Measure triangles and FPS at a few zooms before and after. Listed in ROADMAP.md under Later / ideas.
+- The lava sea, the atmosphere shell and the cloud layer are still fixed cube spheres (16,428, 16,428 and 27,648 triangles), drawn whole from anywhere. The lava sea computes its flow and glow per vertex, so its pattern would change as chunks split: it needs that moved per pixel first, or keeps its fixed sphere. The water now has its own `LodSurface` (see *Smooth surfaces* above).
 - Neighbours more than 4 levels apart would be snapped only to every 16th vertex (the whole chunk edge); with the split metric changing by at most 2× per level between neighbours this hasn't been seen.

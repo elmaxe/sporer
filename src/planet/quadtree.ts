@@ -44,6 +44,18 @@ export function cellAngle(radius: number, depth: number, distance: number, bound
   return cell / Math.max(distance - bound, radius * 1e-4);
 }
 
+/**
+ * How large (radians) the gap looks between a smooth sphere and a node's flat
+ * cells, whose cells look `cells` radians wide (see cellAngle): a cell spanning
+ * θ of arc sags R·(1 − cos θ/2) ≈ θ/8 of its width inside the sphere. For a
+ * smooth surface that's the only error that shows (in its outline, against the
+ * sky), so it, not the cells' size, decides the split (Ulrich's screen-space
+ * geometric error).
+ */
+export function chordError(cells: number, depth: number): number {
+  return (cells * nodeArc(depth)) / CHUNK_CELLS / 8;
+}
+
 /** Where a chunk's surface is (see chunkBounds). */
 export interface ChunkBounds {
   /** A sphere holding every vertex: its centre and radius. */
@@ -53,6 +65,8 @@ export interface ChunkBounds {
   radius: number;
   /** The vertices' mean distance from the planet's centre (how wide the chunk's cells are, with nodeArc). */
   reach: number;
+  /** The farthest any vertex gets from the planet's centre, in any of the sets. */
+  top: number;
 }
 
 /**
@@ -83,12 +97,15 @@ export function chunkBounds(sets: readonly Float32Array[], out: ChunkBounds): Ch
   out.y = (minY + maxY) / 2;
   out.z = (minZ + maxZ) / 2;
   let radiusSq = 0;
+  let topSq = 0;
   for (const p of sets) {
     for (let v = 0; v < p.length; v += 3) {
       radiusSq = Math.max(radiusSq, (p[v]! - out.x) ** 2 + (p[v + 1]! - out.y) ** 2 + (p[v + 2]! - out.z) ** 2);
+      topSq = Math.max(topSq, p[v]! ** 2 + p[v + 1]! ** 2 + p[v + 2]! ** 2);
     }
   }
   out.radius = Math.sqrt(radiusSq);
+  out.top = Math.sqrt(topSq);
   const own = sets[0]!;
   let reach = 0;
   for (let v = 0; v < own.length; v += 3) reach += Math.hypot(own[v]!, own[v + 1]!, own[v + 2]!);
