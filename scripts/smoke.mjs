@@ -56,7 +56,8 @@
 // star in the sky) and every zoom on the way crossfades and never goes black; FPS in its system.
 // Cargo beam: the item bar's Inventory tab (grey; the bar and its tooltips take the tab's colour) holds the beam;
 // over a forest on the home planet a real 1 arms it, holding the mouse on a tree beams it up (the ship stays) into the
-// hold (a stack with the plant's picture and count), letting go halfway drops it again, a real 2 selects the stack and
+// hold (a stack with the plant's picture and count), letting go halfway drops it again, holding on bare ground fires
+// the beam there too (and the ship stays), sweeping it over the forest catches several plants, a real 2 selects the stack and
 // holding on the ground sets it down to take root; one dropped with a click falls from the ship (which stays), one set
 // down in the sea drowns; what was taken
 // and planted is still so after leaving and coming back; the cues abductStart, abductBeam, abductSuccess, exportBeam
@@ -1943,42 +1944,82 @@ await section('cargo', async () => {
   // A real 1 arms the beam (the Inventory tab's first slot).
   await key('Digit1', '1');
   const armed = await evaluate(`({ selected: planet.selected, cursor: document.body.classList.contains('beaming'), hint: document.getElementById('item-hint').textContent })`);
-  // Hold on a tree: it rises to the ship and into the hold.
+  const removedCount = () => evaluate(`levels.surfaceChanges.forPlanet(planet.cargo.body.key).removedCount`);
+  // Hold on a tree: it (and anything else under the beam) rises to the ship and into the hold; the beam stays on while held.
   const beamUp = async () => {
     const tree = await evaluate(`__tree(12, 50)`);
     if (!tree) return null;
-    const removed = await evaluate(`levels.surfaceChanges.forPlanet(planet.cargo.body.key).removedCount`);
+    const removed = await removedCount();
+    const total = await evaluate(`levels.inventory.total`);
     await mouse('mouseMoved', tree);
     await mouse('mousePressed', tree);
-    const during = await evaluate(`({ beaming: planet.cargo.beaming, ship: planet.ship.enRoute })`);
-    await until(`!planet.cargo.beaming`, 30000);
+    const during = await evaluate(`({ beaming: planet.cargo.beaming, lifting: planet.cargo.lifting, ship: planet.ship.enRoute })`);
+    await until(`levels.inventory.total > ${total} && planet.cargo.lifting === 0`, 30000);
+    const still = await evaluate(`planet.cargo.beaming`);
     await mouse('mouseReleased', tree);
-    return { ...during, removed: (await evaluate(`levels.surfaceChanges.forPlanet(planet.cargo.body.key).removedCount`)) - removed, total: await evaluate(`levels.inventory.total`) };
+    return { ...during, still, removed: (await removedCount()) - removed, total: (await evaluate(`levels.inventory.total`)) - total };
   };
   const up = await beamUp();
   await drawFrames(3);
-  const hold = await evaluate(`({ slots: [...document.querySelectorAll('.item-slot[data-item^="cargo:"]')].map((s) => ({ img: s.querySelector('img')?.src.slice(0, 22), count: s.querySelector('.item-count')?.textContent })) })`);
+  const hold = await evaluate(`({ total: levels.inventory.total, slots: [...document.querySelectorAll('.item-slot[data-item^="cargo:"]')].map((s) => ({ img: s.querySelector('img')?.src.slice(0, 22), count: s.querySelector('.item-count')?.textContent })) })`);
   // Let go halfway: it falls back down (put back, or rooted where it lands), and nothing goes in the hold.
   const tree2 = await evaluate(`__tree(12, 50)`);
+  const heldBefore = await evaluate(`levels.inventory.total`);
+  // Every load that starts falling is noted (a short fall can be over before the test looks).
+  await evaluate(`(() => { const c = planet.cargo; window.__falls = 0; const fall = c.startFall; c.startFall = function (load) { __falls++; return fall.call(this, load); }; })()`);
   await mouse('mouseMoved', tree2);
   await mouse('mousePressed', tree2);
-  await until(`planet.cargo.beam && planet.cargo.beam.t > 0.3`, 20000);
+  await until(`planet.cargo.loads.some((l) => l.state === 'up' && l.t > 0.3)`, 20000);
   await mouse('mouseReleased', tree2);
-  const falling = await evaluate(`planet.cargo.inFlight.map((l) => l.state)`);
   await until(`planet.cargo.inFlight.length === 0`, 20000);
-  const letGo = { falling, total: await evaluate(`levels.inventory.total`) };
+  const falling = await evaluate(`(() => { delete planet.cargo.startFall; return __falls; })()`);
+  const letGo = { falling, beaming: await evaluate(`planet.cargo.beaming`), kept: (await evaluate(`levels.inventory.total`)) === heldBefore };
+  // Hold on bare ground: the beam fires there all the same (nothing to lift right under it) and the ship doesn't fly off.
+  const bare = await evaluate(`__ground('land', 8, 35)`);
+  let empty = null;
+  if (bare) {
+    await mouse('mouseMoved', bare);
+    await mouse('mousePressed', bare);
+    await drawFrames(5);
+    empty = await evaluate(`({ beaming: planet.cargo.beaming, cone: planet.cargo.look.cone.visible })`);
+    await until(`planet.cargo.lifting === 0`, 30000);
+    await mouse('mouseReleased', bare);
+    await until(`planet.cargo.inFlight.length === 0`, 20000);
+    empty.shipStayed = !(await evaluate(`planet.ship.enRoute`));
+  }
+  // Sweep the held beam across the forest: it catches several plants on the way.
+  const sweepFrom = await evaluate(`__tree(12, 50)`);
+  let sweep = null;
+  if (sweepFrom) {
+    const removed = await removedCount();
+    await mouse('mouseMoved', sweepFrom);
+    await mouse('mousePressed', sweepFrom);
+    let most = 0;
+    for (let i = 1; i <= 24; i++) {
+      const at = { x: sweepFrom.x + Math.sin(i * 0.5) * 18 * Math.sqrt(i), y: sweepFrom.y + Math.cos(i * 0.5) * 18 * Math.sqrt(i) };
+      await send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...at, button: 'left', buttons: 1 });
+      await drawFrames(2);
+      most = Math.max(most, await evaluate(`planet.cargo.lifting`));
+    }
+    await until(`planet.cargo.lifting === 0`, 30000);
+    await mouse('mouseReleased', sweepFrom);
+    await until(`planet.cargo.inFlight.length === 0`, 20000);
+    sweep = { most, removed: (await removedCount()) - removed };
+  }
   // Select the stack (2) and hold on the ground: it's set down and takes root.
   await key('Digit2', '2');
   const exportArmed = await evaluate(`planet.selected`);
+  const stackBefore = await evaluate(`levels.inventory.stacks[0].count`);
+  const totalBefore = await evaluate(`levels.inventory.total`);
   const plantedBefore = await evaluate(`planet.plantings.count`);
   const land = await evaluate(`__ground('land', 8, 35)`);
   await mouse('mouseMoved', land);
   await mouse('mousePressed', land);
   const lowering = await evaluate(`planet.cargo.beaming`);
-  await until(`!planet.cargo.beaming`, 30000);
+  await until(`!planet.cargo.beaming`, 60000);
   await mouse('mouseReleased', land);
   await until(`planet.cargo.inFlight.length === 0`, 20000);
-  const setDown = { exportArmed, lowering, planted: (await evaluate(`planet.plantings.count`)) - plantedBefore, total: await evaluate(`levels.inventory.total`),
+  const setDown = { exportArmed, stackBefore, lowering, planted: (await evaluate(`planet.plantings.count`)) - plantedBefore, taken: totalBefore - (await evaluate(`levels.inventory.total`)),
     selected: await evaluate(`planet.selected`), hint: await evaluate(`document.getElementById('item-hint').textContent`) };
   // Two more up. One dropped with a click (no hold): it falls from the ship and the ship stays put.
   await key('Digit1', '1');
@@ -1999,7 +2040,7 @@ await section('cargo', async () => {
   if (sea) {
     await mouse('mouseMoved', sea);
     await mouse('mousePressed', sea);
-    await until(`!planet.cargo.beaming`, 30000);
+    await until(`!planet.cargo.beaming`, 60000);
     await mouse('mouseReleased', sea);
     await until(`planet.cargo.inFlight.some((l) => l.state === 'fate')`, 20000);
     drown = await evaluate(`planet.cargo.inFlight.map((l) => l.fate)`);
@@ -2014,7 +2055,7 @@ await section('cargo', async () => {
     await mouse('mouseMoved', flungTree);
     await mouse('mousePressed', flungTree);
     await send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'KeyD', key: 'd' });
-    await until(`planet.cargo.beam && planet.cargo.beam.t > 0.4 && planet.ship.speed > 15`, 20000);
+    await until(`planet.cargo.loads.some((l) => l.state === 'up' && l.t > 0.4) && planet.ship.speed > 15`, 20000);
     await mouse('mouseReleased', flungTree);
     await send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'KeyD', key: 'd' });
     fling = await evaluate(`(() => { const l = planet.cargo.loads.find((l) => l.state === 'fall'); if (!l) return null;
@@ -2036,7 +2077,7 @@ await section('cargo', async () => {
   await evaluate(`levels.leavePlanet()`);
   await until(`levels.mode === 'system' && !levels.transitioning`, 60000);
   const cues = (await evaluate(`__cues`)).filter((c) => /^(abduct|export|drop)/.test(c));
-  cargo = { tabs, weaponsBorder, tooltip, forest, armed, up, hold, letGo, setDown, dropped, drown, fling, planted, revisit, cues };
+  cargo = { tabs, weaponsBorder, tooltip, forest, armed, up, hold, letGo, empty, sweep, setDown, dropped, drown, fling, planted, revisit, cues };
   cargo.ok =
     tabs.tab === 'inventory' &&
     tabs.border !== weaponsBorder &&
@@ -2045,21 +2086,26 @@ await section('cargo', async () => {
     forest &&
     armed.selected === 'abduct' &&
     armed.cursor &&
-    /hold on a plant/.test(armed.hint) &&
+    /hold to fire the beam/.test(armed.hint) &&
     up?.beaming === true &&
+    up.lifting >= 1 &&
+    up.still === true &&
     !up.ship &&
-    up.removed === 1 &&
-    up.total === 1 &&
-    hold.slots.length === 1 &&
-    hold.slots[0].img === 'data:image/png;base64,' &&
-    hold.slots[0].count === '1' &&
-    letGo.falling.includes('fall') &&
-    letGo.total === 1 &&
+    up.removed >= 1 &&
+    up.total === up.removed &&
+    hold.slots.length >= 1 &&
+    hold.slots.every((s) => s.img === 'data:image/png;base64,') &&
+    hold.slots.reduce((n, s) => n + Number(s.count), 0) === hold.total &&
+    letGo.falling > 0 &&
+    !letGo.beaming &&
+    letGo.kept &&
+    (empty === null || (empty.beaming && empty.cone && empty.shipStayed)) &&
+    (sweep === null || (sweep.most >= 2 && sweep.removed >= 2)) &&
     /^cargo:/.test(setDown.exportArmed) &&
     setDown.lowering &&
     setDown.planted === 1 &&
-    setDown.total === 0 &&
-    setDown.selected === null &&
+    setDown.taken === 1 &&
+    setDown.selected === (setDown.stackBefore === 1 ? null : setDown.exportArmed) &&
     /took root/.test(setDown.hint) &&
     dropped.states.includes('fall') &&
     dropped.shipStayed &&
