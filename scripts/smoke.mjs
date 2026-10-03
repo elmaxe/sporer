@@ -2016,7 +2016,7 @@ await section('cargo', async () => {
   await mouse('mouseMoved', land);
   await mouse('mousePressed', land);
   const lowering = await evaluate(`planet.cargo.beaming`);
-  await until(`!planet.cargo.beaming`, 30000);
+  await until(`!planet.cargo.beaming`, 60000);
   await mouse('mouseReleased', land);
   await until(`planet.cargo.inFlight.length === 0`, 20000);
   const setDown = { exportArmed, stackBefore, lowering, planted: (await evaluate(`planet.plantings.count`)) - plantedBefore, taken: totalBefore - (await evaluate(`levels.inventory.total`)),
@@ -2040,7 +2040,7 @@ await section('cargo', async () => {
   if (sea) {
     await mouse('mouseMoved', sea);
     await mouse('mousePressed', sea);
-    await until(`!planet.cargo.beaming`, 30000);
+    await until(`!planet.cargo.beaming`, 60000);
     await mouse('mouseReleased', sea);
     await until(`planet.cargo.inFlight.some((l) => l.state === 'fate')`, 20000);
     drown = await evaluate(`planet.cargo.inFlight.map((l) => l.fate)`);

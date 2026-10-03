@@ -210,6 +210,8 @@ export class CargoBeam implements Entity {
     f?.add(beamParams, 'radius', 0.5, 15);
     f?.add(beamParams, 'speed', 1, 40);
     f?.add(beamParams, 'minTime', 0, 3);
+    f?.add(beamParams, 'lowerSpeed', 1, 40);
+    f?.add(beamParams, 'lowerMinTime', 0, 5);
     f?.add(beamParams, 'carriedHeight', 0.2, 4);
     f?.add(beamParams, 'gravity', 1, 100)
       .name('gravity (1 g)')
@@ -417,7 +419,7 @@ export class CargoBeam implements Entity {
       rest: object.quaternion.clone(),
       restUp,
       t: 0,
-      duration: tripTime(foot.distanceTo(this.hold)),
+      duration: tripTime(foot.distanceTo(this.hold), state === 'down'),
       full,
       small,
       scale: full,

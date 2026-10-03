@@ -163,6 +163,12 @@ describe('the beam\'s motion', () => {
   it('takes longer the longer the beam, never less than the minimum', () => {
     expect(tripTime(0)).toBe(beamParams.minTime);
     expect(tripTime(90)).toBeCloseTo(90 / beamParams.speed);
+    expect(tripTime(0, true)).toBe(beamParams.lowerMinTime);
+    expect(tripTime(90, true)).toBeCloseTo(90 / beamParams.lowerSpeed);
+  });
+
+  it('sets cargo down slower than it lifts it', () => {
+    for (const length of [0, 10, 30, 70]) expect(tripTime(length, true)).toBeGreaterThan(tripTime(length));
   });
 
   /** Drops a fall onto a flat ball of radius 1000 from 20 up with `velocity`; where and when it lands. */
