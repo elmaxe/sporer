@@ -198,9 +198,9 @@ export class PlantLab {
     return this.whenReady();
   }
 
-  /** Replaces the whole state (a pasted JSON or link). */
+  /** Replaces the whole state (a pasted link, a debug dump's). The view is copied into the one the panel is bound to. */
   replace(state: PlantLabState): Promise<void> {
-    this.state = state;
+    this.state = { ...state, view: Object.assign(this.state.view, state.view) };
     this.onReplaced?.();
     this.rebuild();
     return this.whenReady();

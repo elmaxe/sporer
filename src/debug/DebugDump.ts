@@ -2,24 +2,43 @@ import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
 import type { Game } from '../core/Game';
-import type { SceneManager } from '../levels/SceneManager';
 import { DebugDumpDialog, type DumpChoice } from '../ui/DebugDumpDialog';
 import { buildInfo } from '../ui/buildInfo';
 import { drawAnnotated } from './annotate';
 import type { LogRing } from './consoleLog';
-import { DUMP_FORMAT, DUMP_VERSION, dumpFileName, summaryLines, type DebugDump, type DeviceInfo, type GameState, type RendererInfo } from './dumpFormat';
+import {
+  DUMP_FORMAT,
+  DUMP_VERSION,
+  dumpFileName,
+  summaryLines,
+  type DebugDump,
+  type DeviceInfo,
+  type DumpApp,
+  type GameState,
+  type LabDumpState,
+  type RendererInfo,
+} from './dumpFormat';
 import { FrameTimes } from './frameTimes';
-import { captureGameState, restoreGameState } from './gameState';
 
-/** Overlays left out of the screen picture: the dialogs over it, the debug panel (its values are in `tunables`). */
+/** Overlays left out of the screen picture: the dialogs over it, the debug panel in the game (its values are in `tunables`). */
 const NOT_IN_PICTURE = new Set(['app', 'menu', 'dump', 'loading', 'stats']);
 const KEY = 'F8';
+
+/**
+ * What the dump records about where the page is, and how to put it back
+ * there: the game's levels (gameState.ts) or a lab (src/lab/labDump.ts,
+ * src/plantlab/plantLabDump.ts).
+ */
+export type DumpSource =
+  | { readonly app: 'game'; capture(): GameState; restore(state: GameState): Promise<string[]> }
+  | { readonly app: 'planet-lab' | 'plant-lab'; capture(): LabDumpState; restore(state: LabDumpState): Promise<string[]> };
 
 /** What `capture` took, before the player marks it up. */
 interface Capture {
   createdAt: Date;
   url: string;
   state: GameState | null;
+  lab: LabDumpState | null;
   stateError?: string;
   game: HTMLCanvasElement | null;
   screen: HTMLCanvasElement | null;
@@ -32,26 +51,31 @@ interface Capture {
 }
 
 /**
- * The debug dump (menu → "Save debug dump", or F8): freezes the game,
+ * The debug dump (menu → "Save debug dump", or F8; the Report button in the
+ * labs): freezes the game,
  * captures the frame (the game's own picture and the screen with its HUD and
  * maps), lets the player mark the problem and write a note (DebugDumpDialog),
  * then saves or shares one JSON file with the pictures, a marked-up copy
  * with a summary strip, the game state to reproduce it (gameState.ts), the
  * device and renderer, frame times and the console's errors (see
- * dumpFormat.ts). A global entity: it times every frame for the dump.
+ * dumpFormat.ts). A global entity: it times every frame for the dump. The
+ * `source` says what the page is (the game or a lab) and records its state.
  */
 export class DebugDumpControl implements Entity {
   private readonly dialog = new DebugDumpDialog();
   private readonly frames = new FrameTimes();
-  private readonly button = document.getElementById('menu-dump') as HTMLButtonElement | null;
+  private readonly button: HTMLElement | null;
   private busy = false;
 
   constructor(
     private readonly game: Game,
-    private readonly levels: SceneManager,
+    private readonly source: DumpSource,
     private readonly log: LogRing,
     private readonly debug: Debug,
+    /** The button that opens it (the game menu's; the labs' Report). */
+    buttonId = 'menu-dump',
   ) {
+    this.button = document.getElementById(buttonId);
     this.button?.addEventListener('click', this.onButton);
     window.addEventListener('keydown', this.onKey);
   }
@@ -99,9 +123,25 @@ export class DebugDumpControl implements Entity {
     return rest;
   }
 
-  /** Puts the game back into a dump's state (see gameState.ts). */
-  restore(state: GameState): Promise<string[]> {
-    return restoreGameState(this.game, this.levels, state);
+  /** Which page this is. */
+  get app(): DumpApp {
+    return this.source.app;
+  }
+
+  /**
+   * Puts the page back into a dump's state: the game's (`dump.state`, see
+   * gameState.ts) or a lab's (`dump.lab`, which must be this lab's).
+   */
+  restore(state: GameState | LabDumpState): Promise<string[]> {
+    const source = this.source;
+    const lab = 'page' in state ? state : null;
+    if (source.app === 'game') {
+      if (lab) return Promise.reject(new Error(`This dump was taken in the ${lab.page}: open ${lab.page === 'planet-lab' ? 'lab.html' : 'plants.html'}`));
+      return source.restore(state as GameState);
+    }
+    if (!lab) return Promise.reject(new Error('This dump was taken in the game: open the game'));
+    if (lab.page !== source.app) return Promise.reject(new Error(`This dump was taken in the ${lab.page}, not the ${source.app}`));
+    return source.restore(lab);
   }
 
   dispose(): void {
@@ -112,9 +152,11 @@ export class DebugDumpControl implements Entity {
 
   private captureData(): Capture {
     let state: GameState | null = null;
+    let lab: LabDumpState | null = null;
     let stateError: string | undefined;
     try {
-      state = captureGameState(this.game, this.levels);
+      if (this.source.app === 'game') state = this.source.capture();
+      else lab = this.source.capture();
     } catch (err) {
       stateError = err instanceof Error ? err.message : String(err);
     }
@@ -122,6 +164,7 @@ export class DebugDumpControl implements Entity {
       createdAt: new Date(),
       url: location.href,
       state,
+      lab,
       stateError,
       game: null,
       screen: null,
@@ -143,7 +186,8 @@ export class DebugDumpControl implements Entity {
     game.getContext('2d')!.drawImage(canvas, 0, 0);
     capture.game = game;
     try {
-      capture.screen = await screenPicture(game, canvas);
+      // In a lab its panel is part of what's shown (and what may be wrong), so it's in the picture.
+      capture.screen = await screenPicture(game, canvas, this.source.app !== 'game');
     } catch (err) {
       capture.screenError = err instanceof Error ? err.message : String(err);
     }
@@ -161,6 +205,7 @@ export class DebugDumpControl implements Entity {
       url: capture.url,
       note: choice.note,
       marks: choice.marks,
+      app: this.source.app,
       build: { ...buildInfo },
       device: capture.device,
       renderer: capture.renderer,
@@ -171,6 +216,7 @@ export class DebugDumpControl implements Entity {
         jsHeapMb: memory ? Math.round(memory.usedJSHeapSize / 1e5) / 10 : null,
       },
       state: capture.state,
+      ...(capture.lab ? { lab: capture.lab } : {}),
       ...(capture.stateError ? { stateError: capture.stateError } : {}),
       log: { entries: this.log.entries(), dropped: this.log.dropped },
       tunables: this.debug.panel?.save() ?? null,
@@ -235,9 +281,9 @@ export class DebugDumpControl implements Entity {
  * The screen as seen: the game's picture with the page's overlays (HUD,
  * tooltip, maps, buttons) drawn over it by html-to-image (SVG
  * foreignObject; loaded only when a dump is taken), at the game canvas's
- * resolution.
+ * resolution. `withPanel`: the debug panel (lil-gui) too.
  */
-async function screenPicture(game: HTMLCanvasElement, canvas: HTMLCanvasElement): Promise<HTMLCanvasElement> {
+async function screenPicture(game: HTMLCanvasElement, canvas: HTMLCanvasElement, withPanel: boolean): Promise<HTMLCanvasElement> {
   const { toCanvas } = await import('html-to-image');
   const width = window.innerWidth;
   const height = window.innerHeight;
@@ -249,7 +295,7 @@ async function screenPicture(game: HTMLCanvasElement, canvas: HTMLCanvasElement)
     pixelRatio: ratio,
     style: { background: 'transparent' },
     skipFonts: true,
-    filter: (node) => !(node instanceof HTMLElement) || (!NOT_IN_PICTURE.has(node.id) && !node.classList.contains('lil-gui')),
+    filter: (node) => !(node instanceof HTMLElement) || (!NOT_IN_PICTURE.has(node.id) && (withPanel || !node.classList.contains('lil-gui'))),
   });
   const out = document.createElement('canvas');
   out.width = Math.round(width * ratio);

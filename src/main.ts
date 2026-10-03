@@ -21,6 +21,7 @@ import { PlantIcons } from './ui/plantIcons';
 import { GraphicsSettingsControl, loadGraphicsSettings } from './ui/GraphicsSettings';
 import { installConsoleLog } from './debug/consoleLog';
 import { DebugDumpControl } from './debug/DebugDump';
+import { gameDumpSource } from './debug/gameState';
 import { openChosenVersion } from './ui/versions';
 import { registerServiceWorker } from './pwa/serviceWorker';
 
@@ -56,7 +57,7 @@ async function main(): Promise<void> {
   const freeze = game.add(new ViewFreezeControl(game));
   game.add(new TouchControls(game));
   game.add(new ItemBar(levels, game.input, levels.tooltip, new PlantIcons(game.renderer)));
-  const debugDump = game.add(new DebugDumpControl(game, levels, consoleLog, debug));
+  const debugDump = game.add(new DebugDumpControl(game, gameDumpSource(game, levels), consoleLog, debug));
 
   document.getElementById('loading')?.remove();
   game.start();
