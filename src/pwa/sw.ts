@@ -64,7 +64,9 @@ async function saveAll(): Promise<void> {
       const url = new URL(file, SCOPE).href;
       if (await cache.match(url)) return; // an install that was cut short and started again
       const copy = isHashed(file) ? await findCopy(file) : undefined;
-      if (copy) return cache.put(url, copy);
+      // A new response, not the copy itself: that keeps the other build's URL, which a module script would
+      // then load its imports relative to (from the other build's folder).
+      if (copy) return cache.put(url, new Response(copy.body, { status: copy.status, statusText: copy.statusText, headers: copy.headers }));
       // Unhashed files (the pages, icons, maps) skip the HTTP cache, so they match the hashed ones.
       const response = await fetch(url, { cache: isHashed(file) ? 'default' : 'no-cache' });
       if (!response.ok) throw new Error(`${file}: HTTP ${response.status}`);

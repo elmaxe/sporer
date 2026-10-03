@@ -63,7 +63,7 @@ const check = (ok, what) => {
 };
 const started = `!document.getElementById('loading')`;
 /** Where the page is, for a failed check. */
-const where = () => browser.tryEvaluate(`JSON.stringify([location.href, document.title, document.getElementById('loading')?.textContent ?? null])`, 5000);
+const where = async () => [await browser.tryEvaluate(`JSON.stringify([location.href, document.getElementById('loading')?.textContent ?? null])`, 5000), ...browser.errors.slice(-5)].join('\n  ');
 const status = () => evaluate(`document.getElementById('menu-refresh-status').textContent`);
 const cacheNames = () => evaluate(`caches.keys()`);
 const savedCount = (scope) =>
@@ -96,8 +96,10 @@ try {
     return [r.status, (await r.arrayBuffer()).byteLength, r.headers.get('Content-Range')];
   })()`);
   check(range[0] === 206 && range[1] === 100, `audio range requests are answered from the copy: ${JSON.stringify(range)}`);
-  check(await goto(`${site}lab.html?gen=3&type=terran`, `window.lab`, 60000), 'the planet lab opens offline') || console.log('  at', await where());
+  check(await goto(`${site}lab.html?gen=3&type=terran`, `!!window.lab`, 60000), 'the planet lab opens offline') || console.log('  at', await where());
   check(await goto(`${site}preview/?quality=low`, started, 60000), 'the preview starts offline') || console.log('  at', await where());
+  const outside = await evaluate(`performance.getEntriesByType('resource').map((e) => e.name).filter((n) => n.startsWith('${site}assets/'))`);
+  check(outside.length === 0, `loading only its own files (copies from the release's cache keep no URL): ${outside.join(', ')}`);
 
   await listen(port);
   swVersionSuffix = 'b';
