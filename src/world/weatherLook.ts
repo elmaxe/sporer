@@ -54,6 +54,8 @@ export function addWeatherDebug(debug: Debug): void {
   f?.add(cumulusParams, 'nearFade', 1, 6).name('puff near fade');
   f?.add(cumulusParams, 'silver', 0, 3).name('puff silver lining');
   f?.add(cumulusParams, 'sun', 0, 3).name('puff sunlight');
+  f?.add(cumulusParams, 'lodNear', 0.01, 0.5).name('puffs all from (rad)');
+  f?.add(cumulusParams, 'lodFar', 0.001, 0.05).name('puffs fewest at (rad)');
 }
 
 /**

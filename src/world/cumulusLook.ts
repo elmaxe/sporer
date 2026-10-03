@@ -29,6 +29,13 @@ export const cumulusParams = {
   silver: 1.1,
   /** Sunlight on the puffs: over 1 so sunlit tops come out white through the tone mapping. */
   sun: 1.35,
+  /**
+   * Level of detail by a cluster's angular size from the camera (its span
+   * over its distance, radians): every puff from `lodNear` up, down to two
+   * bigger ones at `lodFar` and below.
+   */
+  lodNear: 0.08,
+  lodFar: 0.008,
 };
 
 /** Flashes the puff shader reads (the weather look's slots). */
@@ -336,17 +343,23 @@ export class CumulusClouds {
       const mid = base + c.depth * 0.5 * rise;
       const below = cam.x * x + cam.y * y + cam.z * z < mid;
       const puffs = c.puffs;
-      for (let k = 0; k < puffs.length && n < MAX_PUFFS; k++) {
+      // Level of detail: a cluster small on screen is a few bigger puffs spread over it (it reads the same, for far less drawing).
+      const detail = Math.min(1, Math.max(0, (c.span / Math.sqrt(this.keys[i]!) - cumulusParams.lodFar) / (cumulusParams.lodNear - cumulusParams.lodFar)));
+      const count = Math.min(puffs.length, Math.max(2, Math.ceil(puffs.length * detail)));
+      const bigger = Math.min(2.5, Math.sqrt(puffs.length / count));
+      const spread = grow * (0.7 + 0.3 * detail);
+      for (let j = 0; j < count && n < MAX_PUFFS; j++) {
         // Far to near within the cluster: bottom up seen from above, top down from below.
-        const p = puffs[below ? puffs.length - 1 - k : k]!;
-        const e = p.east * grow;
-        const no = p.north * grow;
+        const k = Math.floor(((below ? count - 1 - j : j) * puffs.length) / count);
+        const p = puffs[k]!;
+        const e = p.east * spread;
+        const no = p.north * spread;
         const r = base + p.up * rise;
         const o = n * 4;
         P[o] = x * r + ex * e + nx * no;
         P[o + 1] = y * r + ny * no;
         P[o + 2] = z * r + ez * e + nz * no;
-        P[o + 3] = p.radius * grow;
+        P[o + 3] = p.radius * grow * bigger;
         I[o] = s;
         I[o + 1] = p.height;
         I[o + 2] = p.shape % PUFF_SHAPES;
