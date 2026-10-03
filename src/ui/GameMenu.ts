@@ -1,5 +1,7 @@
 import type { Game } from '../core/Game';
+import { DEFAULT_GALAXY_SEED } from '../gen/galaxy';
 import { bodyLabLink } from '../lab/bodyLink';
+import { starLabLink } from '../starlab/labStars';
 import type { SceneManager } from '../levels/SceneManager';
 import { Planet } from '../world/Planet';
 import { buildInfo, formatBuildInfo } from './buildInfo';
@@ -14,7 +16,8 @@ import { VersionPicker } from './VersionPicker';
  * Freeze view switch (ViewFreezeControl), a link
  * to the planet lab, for the planet you're at: in low orbit the one below,
  * in a system the one the autopilot is headed for (else the first planet),
- * from the galaxy an empty lab, the Save debug dump button (#menu-dump, run
+ * from the galaxy an empty lab, a link to the star lab at the system
+ * you're in (or were last, from the galaxy), the Save debug dump button (#menu-dump, run
  * by debug/DebugDump.ts), the Refresh button (RefreshControl.ts: reloads,
  * with the newest version, and says whether the game is saved for offline
  * play), the Version picker (VersionPicker.ts: the release,
@@ -28,6 +31,7 @@ export class GameMenu {
   private readonly resume = document.getElementById('menu-resume') as HTMLButtonElement;
   private readonly close = document.getElementById('menu-close') as HTMLButtonElement;
   private readonly lab = document.getElementById('menu-lab') as HTMLAnchorElement;
+  private readonly stars = document.getElementById('menu-stars') as HTMLAnchorElement;
   private readonly refresh = new RefreshControl();
   private readonly versions = new VersionPicker();
 
@@ -53,6 +57,12 @@ export class GameMenu {
     const body = this.labBody();
     this.lab.href = body ? bodyLabLink(body) : new URL('lab.html', location.href).href;
     this.lab.textContent = body ? `Open ${body.name} in the planet lab` : 'Open the planet lab';
+    // The star lab at this system's star(s); a rogue planet has none.
+    const ref = this.levels.systemLevel.ref;
+    const seed = new URLSearchParams(location.search).get('seed') ?? DEFAULT_GALAXY_SEED;
+    const hasStar = ref.stars.length > 0;
+    this.stars.href = hasStar ? starLabLink(seed, ref.real ? 'sol' : ref.id, location.href) : new URL('stars.html', location.href).href;
+    this.stars.textContent = hasStar ? `Open ${ref.name} in the star lab` : 'Open the star lab';
     void this.versions.refresh();
     this.refresh.check();
     this.root.hidden = false;

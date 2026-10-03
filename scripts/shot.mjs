@@ -11,6 +11,8 @@
 //                      "seed=1337&star=5&planet=2" (a game planet); drive it with js:lab.set(...) and the like
 //   --plants [<query>] the plant lab (plants.html), e.g. --plants "gen=4&kind=tree&arch=palm&view=lineup" or
 //                      --plants "seed=1337&star=5&planet=1&species=2"; drive it with js:plantLab.set(...) and the like
+//   --stars [<query>]  the star lab (stars.html), e.g. --stars "gen=4&kind=redGiant&view=system" or --stars
+//                      "seed=1337&star=5" (a game system; star=sol our own); drive it with js:starLab.setStar(...) and the like
 //   --out <dir>        where PNGs go (default: a new temp dir); created if missing
 //   --size <w>x<h>     page size in CSS pixels (default 1280x720)
 //   --phone            an emulated phone: 390x844 (unless --size), mobile, touch events (the game's touch mode)
@@ -53,6 +55,8 @@
 // In the lab: game and lab (src/lab/PlanetLab.ts: lab.set, setView, generate, load, look, setTime, ...);
 // settle there waits for lab.ready (the latest edit built and drawn). In the plant lab: game and plantLab
 // (src/plantlab/PlantLab.ts: plantLab.set, setForm, select, setView, generate, load, look, ...), settle waits for plantLab.ready.
+// In the star lab: game and starLab (src/starlab/StarLab.ts: starLab.setStar, setActivity, setTuning, setView, generate,
+// load, focus, look, setTime, ...), settle waits for starLab.ready.
 // Prints JSON: { ok, failure, out, shots, results, errors } (errors: console errors/warnings/exceptions).
 // A failing step stops the run, saves failure.png and exits 1.
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -81,6 +85,9 @@ for (let i = 0; i < args.length; i++) {
   } else if (a === '--plants') {
     opts.plants = true;
     if (i + 1 < args.length && !args[i + 1].startsWith('--') && !/^[a-z]+(:|$)/.test(args[i + 1])) opts.plantsQuery = args[++i];
+  } else if (a === '--stars') {
+    opts.stars = true;
+    if (i + 1 < args.length && !args[i + 1].startsWith('--') && !/^[a-z]+(:|$)/.test(args[i + 1])) opts.starsQuery = args[++i];
   } else if (a === '--phone') opts.phone = true;
   else if (a === '--clean') opts.clean = true;
   else if (a === '--low') opts.params.quality = 'low';
@@ -108,7 +115,9 @@ if (steps.length === (opts.dump ? 1 : 0)) steps.push(opts.dump ? 'shot:restored'
 
 if (opts.phone && !args.includes('--size') && !opts.dump) opts.size = '390x844';
 const [width, height] = opts.size.split('x').map(Number);
-const page_ = opts.plants
+const page_ = opts.stars
+  ? `stars.html${opts.starsQuery ? `?${opts.starsQuery.replace(/^\?/, '')}` : ''}`
+  : opts.plants
   ? `plants.html${opts.plantsQuery ? `?${opts.plantsQuery.replace(/^\?/, '')}` : ''}`
   : opts.lab
     ? `lab.html${opts.labQuery ? `?${opts.labQuery.replace(/^\?/, '')}` : ''}`
@@ -116,9 +125,9 @@ const page_ = opts.plants
 const url = new URL(page_, opts.url);
 for (const [k, v] of Object.entries(opts.params)) url.searchParams.set(k, v);
 /** True once the page's game (or the lab) is running. */
-const STARTED = `typeof window.lab !== 'undefined' || typeof window.plantLab !== 'undefined' || (typeof window.levels !== 'undefined' && typeof window.ship !== 'undefined')`;
+const STARTED = `typeof window.lab !== 'undefined' || typeof window.plantLab !== 'undefined' || typeof window.starLab !== 'undefined' || (typeof window.levels !== 'undefined' && typeof window.ship !== 'undefined')`;
 /** True when nothing is changing: no level transition in the game, the latest edit built and drawn in the lab. */
-const SETTLED = `typeof window.plantLab !== 'undefined' ? plantLab.ready : typeof window.lab !== 'undefined' ? lab.ready : !levels.transitioning`;
+const SETTLED = `typeof window.starLab !== 'undefined' ? starLab.ready : typeof window.plantLab !== 'undefined' ? plantLab.ready : typeof window.lab !== 'undefined' ? lab.ready : !levels.transitioning`;
 const out = resolve(opts.out ?? mkdtempSync(join(tmpdir(), 'spore2-shots-')));
 mkdirSync(out, { recursive: true });
 

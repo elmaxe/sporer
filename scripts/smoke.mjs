@@ -5,7 +5,7 @@
 //                      and from inside), rogues (fly to a rogue planet and down to it), dust (a young star's disc,
 //                      a debris disc, comet dust trails, meteor showers and impact flashes in low orbit), audio, planet (the home planet
 //                      loop, held zoom, seamless zooms), types (every planet type and geyser kind), lab, plants
-//                      (the plant lab), touch, cargo (the abduction beam and the hold), volcano (the volcano bomb), buster
+//                      (the plant lab), stars (the star lab), touch, cargo (the abduction beam and the hold), volcano (the volcano bomb), buster
 //                      (the planet buster, last: it blows up a moon of the home system)
 //   --quick            everything but types
 //   --timeout <s>      give up after this long (default 900), reporting the section it was in
@@ -91,7 +91,7 @@ import { launch, sleep, StallError } from './lib/browser.mjs';
 
 const args = process.argv.slice(2);
 const option = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
-const SECTIONS = ['core', 'galaxy', 'nebulas', 'rogues', 'dust', 'audio', 'planet', 'types', 'lab', 'plants', 'touch', 'cargo', 'volcano', 'buster'];
+const SECTIONS = ['core', 'galaxy', 'nebulas', 'rogues', 'dust', 'audio', 'planet', 'types', 'lab', 'plants', 'stars', 'touch', 'cargo', 'volcano', 'buster'];
 const only = option('--only')?.split(',');
 if (only?.some((name) => !SECTIONS.includes(name))) {
   console.error(`--only takes some of: ${SECTIONS.join(', ')}`);
@@ -151,6 +151,7 @@ let buster = null;
 let cargo = null;
 let volcano = null;
 let plantLab = null;
+let starLab = null;
 let touch = null;
 let touchLab = null;
 
@@ -1841,6 +1842,129 @@ async function plantLabChecks(page) {
 await section('plants', async () => (plantLab = await runPlantLab()).ok);
 
 /**
+ * The star lab (stars.html): every kind of star draws lit and alive (storms under way) close up, a game system
+ * loads by galaxy and star and draws whole with every planet, the system tuner changes it (planets, comets),
+ * following a planet frames it, time stops at speed 0, Sol loads with its real planets, a link
+ * round-trips the exact state, and the planet lab's Star link opens its planet's system here. In a browser of
+ * its own, like the plant lab.
+ */
+async function runStarLab() {
+  const own = await launch({ width: 1280, height: 720 });
+  try {
+    return await starLabChecks(own);
+  } finally {
+    errors.push(...own.errors.map((e) => `star lab: ${e}`));
+    await own.close();
+  }
+}
+
+async function starLabChecks(page) {
+  const evaluate = page.tryEvaluate;
+  const r = { kinds: [] };
+  if (!(await page.goto(pageUrl('stars.html?gen=3'), `typeof window.starLab !== 'undefined' && starLab.ready`, 30000))) return { ok: false, started: false };
+  // Mean brightness of the middle of the picture (0–255).
+  const brightness = `(() => {
+    game.redraw();
+    const gl = game.renderer.getContext(), w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
+    const px = new Uint8Array(w * h * 4);
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    let sum = 0, n = 0;
+    for (let y = Math.floor(h * 0.4); y < h * 0.6; y += 2) for (let x = Math.floor(w * 0.45); x < w * 0.55; x += 2) {
+      const i = 4 * (y * w + x); sum += px[i] + px[i + 1] + px[i + 2]; n++;
+    }
+    return +(sum / (3 * n)).toFixed(1);
+  })()`;
+  for (const kind of ['mainSequence', 'redDwarf', 'whiteDwarf', 'redGiant', 'blueGiant']) {
+    r.kinds.push(
+      await evaluate(`(async () => {
+        await starLab.generate(21, { kind: '${kind}', binary: false });
+        await starLab.setView({ view: 'star' });
+        await starLab.setTime(300);
+        await new Promise((ok) => setTimeout(ok, 600));
+        const star = starLab.level.world.stars[0];
+        return { kind: star.data.kind, brightness: ${brightness}, particles: star.storms.liveParticles };
+      })()`),
+    );
+  }
+  r.screenshot = join(outDir, 'star-lab.png');
+  writeFileSync(r.screenshot, await page.screenshot());
+  r.system = await evaluate(`(async () => {
+    await starLab.load('1337', ${PLANT_STAR});
+    await starLab.setView({ view: 'system', speed: 1 });
+    const w = starLab.level.world;
+    return { planets: w.planets.length, expected: starLab.system.planets.length, source: starLab.state.source, links: document.querySelectorAll('#lab-info .lab-planets a').length };
+  })()`);
+  r.tuned = await evaluate(`(async () => {
+    await starLab.setTuning({ planets: 9, comets: 4 });
+    const w = starLab.level.world;
+    const out = { planets: w.planets.length, comets: w.comets.length };
+    await starLab.setTuning({ planets: null, comets: null });
+    return { ...out, back: starLab.level.world.planets.length };
+  })()`);
+  r.focus = await evaluate(`(async () => {
+    const name = starLab.system.planets[1].name;
+    await starLab.focus(name);
+    await new Promise((ok) => setTimeout(ok, 1500));
+    const level = starLab.level;
+    return { followed: level.focus?.name === name, distance: +level.orbit.zoom.toFixed(1), radius: level.focus.radius };
+  })()`);
+  r.stopped = await evaluate(`(async () => {
+    await starLab.setView({ speed: 0 });
+    const t = starLab.level.world.time;
+    await new Promise((ok) => setTimeout(ok, 500));
+    const still = starLab.level.world.time === t;
+    await starLab.setView({ speed: 1 });
+    await new Promise((ok) => setTimeout(ok, 500));
+    return still && starLab.level.world.time > t;
+  })()`);
+  r.sol = await evaluate(`(async () => {
+    await starLab.load('1337', 'sol');
+    return { real: starLab.state.real, earth: starLab.system.planets.some((p) => p.name === 'Earth'), planets: starLab.level.world.planets.length };
+  })()`);
+  r.link = await evaluate(`(async () => {
+    await starLab.generate(8, { binary: true });
+    await starLab.setActivity({ spots: 0.9 });
+    const link = starLab.link, star = JSON.stringify(starLab.state.stars);
+    return { link, star };
+  })()`);
+  // A fresh page (only the #hash differs, which the browser wouldn't load again).
+  r.linkOk =
+    !!r.link &&
+    (await page.goto(r.link.link.replace('#', '?fresh=1#'), `typeof window.starLab !== 'undefined' && starLab.ready`, 30000)) &&
+    (await evaluate(`JSON.stringify(starLab.state.stars)`)) === r.link.star;
+  // The planet lab at a game planet links to its system here.
+  if (!(await page.goto(pageUrl(`lab.html?seed=1337&star=${PLANT_STAR}&planet=${PLANT_PLANET}`), `typeof window.lab !== 'undefined' && lab.ready`, 30000))) return { ...r, ok: false };
+  const link = await evaluate(`(() => { const a = [...document.querySelectorAll('#lab-info a')].find((x) => x.textContent === 'Star'); return a && !a.hidden ? a.href : null; })()`);
+  r.linked = link
+    ? (await page.goto(link, `typeof window.starLab !== 'undefined' && starLab.ready`, 30000)) &&
+      (await evaluate(`({ source: starLab.state.source, view: starLab.view.view, planets: starLab.level.world.planets.length })`))
+    : null;
+  r.ok =
+    r.kinds.length === 5 &&
+    r.kinds.every((k, i) => k.kind === ['mainSequence', 'redDwarf', 'whiteDwarf', 'redGiant', 'blueGiant'][i] && k.brightness > 60) &&
+    r.kinds.some((k) => k.particles > 0) &&
+    r.system.planets > 0 &&
+    r.system.planets === r.system.expected &&
+    r.system.links === r.system.expected &&
+    r.system.source?.star === PLANT_STAR &&
+    r.tuned.planets === 9 &&
+    r.tuned.comets === 4 &&
+    r.tuned.back === r.system.planets &&
+    r.focus.followed &&
+    r.focus.distance < r.focus.radius * 10 &&
+    r.stopped === true &&
+    r.sol.real === 'sol' &&
+    r.sol.earth &&
+    r.sol.planets > 0 &&
+    r.linkOk === true &&
+    r.linked?.source?.star === PLANT_STAR &&
+    r.linked.view === 'system' &&
+    r.linked.planets === r.system.planets;
+  return r;
+}
+await section('stars', async () => (starLab = await runStarLab()).ok);
+
+/**
  * Touch play on an emulated phone (390x844, real CDP touch events): hold a finger on the star (tooltip), lift
  * (autopilot to it), drag (rotates, no tap), pinch (zoom), Boost (no stick in space), then
  * pinch in at a planet to descend, tap the globe, and pinch out to the system and on to the galaxy, checking which
@@ -1911,7 +2035,7 @@ async function runTouch() {
   await touch('touchStart', [await center('menu-toggle')]);
   await touch('touchEnd', []);
   await frames();
-  r.menu = await evaluate(`({ opened: menu.isOpen && game.paused, lab: document.getElementById('menu-lab').href.includes('lab.html') })`);
+  r.menu = await evaluate(`({ opened: menu.isOpen && game.paused, lab: document.getElementById('menu-lab').href.includes('lab.html'), stars: /stars\\.html\\?seed=.+&star=\\d+/.test(document.getElementById('menu-stars').href) })`);
   r.menu.shot = join(outDir, 'touch-menu.png');
   writeFileSync(r.menu.shot, await page.screenshot());
   await touch('touchStart', [await center('menu-resume')]);
@@ -2012,6 +2136,7 @@ async function runTouch() {
     r.boost.released &&
     r.menu.opened &&
     r.menu.lab &&
+    r.menu.stars &&
     r.menu.closed &&
     r.systemMap.closed &&
     r.systemMap.button &&
@@ -2592,7 +2717,7 @@ const ok = started && !stalled && Object.keys(sections).length > 0 && Object.val
 console.error(`[smoke] ${ok ? 'ok' : 'FAILED'} in ${Math.round((Date.now() - T0) / 1000)} s${errors.length ? `, ${errors.length} console errors` : ''}`);
 console.log(
   JSON.stringify(
-    { ok, started, stalled, sections, before, after, autopilot, pick, systemMap, sky, living, comet, belt, galaxyLoop, nebulas, rogues, dust, seamless, audio, planetLoop, heldZoom, cometLoop, asteroidLoops, planetTypes, touch, touchLab, cargo, volcano, buster, lab, plantLab, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
+    { ok, started, stalled, sections, before, after, autopilot, pick, systemMap, sky, living, comet, belt, galaxyLoop, nebulas, rogues, dust, seamless, audio, planetLoop, heldZoom, cometLoop, asteroidLoops, planetTypes, touch, touchLab, cargo, volcano, buster, lab, plantLab, starLab, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
     null,
     2,
   ),

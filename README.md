@@ -2,7 +2,7 @@
 
 A browser game inspired by the space stage of *Spore*. Fly a UFO through a procedurally generated spiral galaxy, zoom from the galaxy map into a star system and all the way down to low orbit over a planet, in one continuous scroll.
 
-**Play it:** https://elmaxe.github.io/sporer/ · **Planet lab:** https://elmaxe.github.io/sporer/lab.html · **Plant lab:** https://elmaxe.github.io/sporer/plants.html
+**Play it:** https://elmaxe.github.io/sporer/ · **Planet lab:** https://elmaxe.github.io/sporer/lab.html · **Plant lab:** https://elmaxe.github.io/sporer/plants.html · **Star lab:** https://elmaxe.github.io/sporer/stars.html
 
 ![A star system: the sun, planets on their orbits, comets and the UFO, with the system map in the corner](docs/screenshots/system.png)
 
@@ -51,6 +51,10 @@ A browser game inspired by the space stage of *Spore*. Fly a UFO through a proce
 
 [`plants.html`](https://elmaxe.github.io/sporer/plants.html) grows plant species with the game's own generator and draws them with its own renderer. Every species is generated: conifers, broadleaf trees, palms and shrubs, branching by Leonardo's rule and the golden angle, at four levels of detail. You can edit everything: size, crown, colours, climate, branching, leaves and flowers. Look at one plant (zoom out to watch the game's level-of-detail crossfade), all its levels side by side, or a grove planted by the game's own plant system on a whole planet you can zoom out from and turn, with the levels tinted. Use `?gen=<seed>&kind=<tree|largeBush|smallBush>&arch=<conifer|broadleaf|palm|shrub>` to make a set, or `?seed=<galaxy>&star=<id>&planet=<i>` to load a game planet's plants. The planet lab's **Plants** link opens its planet's species.
 
+## Star lab
+
+[`stars.html`](https://elmaxe.github.io/sporer/stars.html) draws a star, or a binary pair, and the system round it with the game's own code. You can edit the star's kind, class, colour, size, light and mass, and how it lives: surface churn, granulation, sunspots, rotation, the corona's pulse, prominences and flares. Roll a new star, another look for the same one, or another system round it, and tune that system: how many planets, how far apart, moons each, comets, a main asteroid belt, a debris disc. Look at the star close up, or at the whole system (hover a body for its name, click it to follow it, open any planet in the planet lab). Use `?gen=<seed>&kind=<kind>&class=<class>&binary=1` to make one, or `?seed=<galaxy>&star=<id>` (`star=sol` for our own) to load a game system. The game's menu opens the current system in it, and the planet lab's **Star** link opens its planet's.
+
 ## Running it
 
 Needs Node.js.
@@ -86,7 +90,7 @@ GitHub Actions runs the typecheck, tests and build and deploys to GitHub Pages: 
 | `src/player/` | Ship, autopilot, orbit camera, picking |
 | `src/audio/`, `src/ui/` | Sound, HUD, maps, menu |
 | `src/debug/` | The debug dump: capture, restore and the file format |
-| `src/lab/`, `src/plantlab/` | The planet lab and the plant lab |
+| `src/lab/`, `src/plantlab/`, `src/starlab/` | The planet lab, the plant lab and the star lab |
 | `docs/research/` | Real-world references behind the numbers |
 
 ## Roadmap
