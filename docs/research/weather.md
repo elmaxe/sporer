@@ -100,6 +100,8 @@ Water worlds' cloud cover p10/p50/p90: 0.29 / 0.37 / 0.46; their temperatures 27
 - **Lightning** (`collectFlashes`): per storm, a flash in each 0.1 s slot with probability rate · strength · 0.1: 1.5/s for thunderstorms and 0.5/s for cyclones at full strength, both × convection = 1.12^(T − 288.15) (Romps), clamped to 0.05–3, so a world 10 K warmer flashes 3× as often and a frozen one rarely. Each flash has 2–6 strokes 35–100 ms apart, each decaying with τ = 50 ms; a quarter strike the ground (IC:CG ≈ 3). Acid decks: one flash in ~40 s anywhere (Venus's real rate would be one every ~15 minutes of game time at the game's scale, i.e. never seen; deliberate). None on Titans or dusty worlds.
 - **Rain**: 22 units/s for 9.2 m/s drops, the other kinds in proportion (methane 3.8, snow 2.4). Acid rain gets 37.5% of the way down and evaporates.
 
+**Drawing the clouds** (issue #68): water and methane worlds' cloud cover is drawn as separate cumulus clusters and their thunderstorms as cumulonimbus towers, not as one sheet; see `clouds.md`. The sheet keeps the acid decks, dust, ash and cyclones.
+
 ## Open questions
 
 - **TROPICAL_OFFSET = 13 K** (how much warmer the tropical sea is than the global mean surface; Earth's 15 °C vs ~28 °C warm pools) is **unverified (from memory)**. It only gates which worlds get cyclones.
