@@ -21,8 +21,7 @@ import { RingRocks } from './RingRocks';
 // Mountains' exaggeration up close lives in frame.ts (the system view's clouds need it too); re-exported here.
 export { RELIEF_SCALE };
 
-/** Cube sphere segments of the sea surface, and of the lava sea, whose shader works out its flow per vertex. */
-const SEA_SEGMENTS = 46;
+/** Cube sphere segments of the lava sea, whose shader works out its flow per vertex (so it can't change detail; water is a LodSurface). */
 const LAVA_SEA_SEGMENTS = 37;
 /** Cube sphere segments of the atmosphere shell. */
 const ATMOSPHERE_SEGMENTS = 37;
@@ -67,6 +66,8 @@ export class PlanetGlobe implements Entity {
   readonly rings: RingRocks | null;
 
   private readonly surface: LodSurface;
+  /** A water (or ice) sea, refined and culled like the ground. */
+  private readonly water: LodSurface | null = null;
   /** The surface as drawn: radius (and colour) in a direction. */
   private readonly sample: SurfaceSampler;
   /** Worlds with a sea: the ground is never lower than its surface. */
@@ -105,10 +106,19 @@ export class PlanetGlobe implements Entity {
     const material = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: !gas, roughness: 0.9 });
     this.gas = createGasLook(config);
     this.gas?.apply(material);
-    this.surface = new LodSurface(gas ? R : floorRadius(R, style, RELIEF_SCALE, seaFloor, config.shape != null), this.top, this.sample, material);
+    this.surface = new LodSurface(gas ? R : floorRadius(R, style, RELIEF_SCALE, seaFloor, config.shape != null), this.top, this.sample, material, {
+      smooth: gas ? 'outline' : null,
+      // The opaque sea hides the sea floor's chunks that lie wholly under it.
+      hiddenBelow: seaFloor ? R : -Infinity,
+    });
     this.object.add(this.surface.object);
     addLodDebug(debug);
-    if (seaFloor) this.object.add(createSea(config.type, style.sea!, R, this.lava ? this.lava.createSeaMaterial(this.sun, this.sunLight, this.ambientLight) : null));
+    if (seaFloor && this.lava) {
+      this.object.add(createLavaSea(R, this.lava.createSeaMaterial(this.sun, this.sunLight, this.ambientLight)));
+    } else if (seaFloor) {
+      this.water = createWater(config.type, style.sea!, R);
+      this.object.add(this.water.object);
+    }
     if (config.rings) {
       const sheet = createRings(config.rings, seed, PLANET_SCALE);
       this.rings = new RingRocks(config.rings, seed, config.spin, PLANET_SCALE, debug);
@@ -182,12 +192,17 @@ export class PlanetGlobe implements Entity {
   /** True when the surface has every chunk the camera wants (for automation). */
   get settled(): boolean {
     // A busted globe builds nothing more.
-    return this.busted || this.surface.settled;
+    return this.busted || (this.surface.settled && (this.water?.settled ?? true));
   }
 
   /** The surface's chunks drawn now and their depths (the lab's readout). */
   lodStats(): { chunks: number; minDepth: number; maxDepth: number } {
     return this.surface.stats();
+  }
+
+  /** The same for the water's chunks (null without a water sea). */
+  waterStats(): { chunks: number; minDepth: number; maxDepth: number } | null {
+    return this.water?.stats() ?? null;
   }
 
   /** True once a planet buster has blown it apart. */
@@ -216,12 +231,15 @@ export class PlanetGlobe implements Entity {
     this.gas?.animate(this.frame.renderTime);
     this.weather?.animate(this.frame.renderTime);
     this.rings?.animate(this.frame.renderTime);
-    this.surface.update(this.object.worldToLocal(this.camera.getWorldPosition(this.cameraPosition)), frameDt);
+    const camera = this.object.worldToLocal(this.camera.getWorldPosition(this.cameraPosition));
+    this.surface.update(camera, frameDt);
+    this.water?.update(camera, frameDt);
   }
 
   dispose(): void {
     this.gas?.dispose();
     this.surface.dispose();
+    this.water?.dispose();
     this.ground?.dispose();
     this.rings?.dispose();
     this.scene.remove(this.object);
@@ -235,24 +253,23 @@ export class PlanetGlobe implements Entity {
 }
 
 /**
- * A smooth sphere at sea level: glossy water, matte ice, or the animated lava
- * (`lava`, see world/lavaMaterial.ts). Opaque: the sky is drawn first, so
- * see-through water would show stars through the planet.
+ * A water or ice sea: a smooth sphere at sea level, glossy or matte, refined
+ * where the camera looks and culled behind the horizon like the ground (a
+ * LodSurface of its own, split only as far as its outline and coasts need).
+ * Opaque: the sky is drawn first, so see-through water would show stars
+ * through the planet.
  */
-function createSea(type: PlanetConfig['type'], color: string, radius: number, lava: THREE.Material | null): THREE.Mesh {
-  // The lava shader works out its flow per vertex, so it gets fewer (still smooth at the horizon).
-  const geometry = createCubeSphere(radius, lava ? LAVA_SEA_SEGMENTS : SEA_SEGMENTS);
-  let material: THREE.Material;
-  if (lava) {
-    material = lava;
-  } else if (type === 'ice') {
-    material = new THREE.MeshStandardMaterial({ color, roughness: 0.55 });
-  } else {
-    material = new THREE.MeshStandardMaterial({ color, roughness: 0.25 });
-  }
-  const sea = new THREE.Mesh(geometry, material);
-  sea.name = 'Sea';
+function createWater(type: PlanetConfig['type'], color: string, radius: number): LodSurface {
+  const material = new THREE.MeshStandardMaterial({ color, roughness: type === 'ice' ? 0.55 : 0.25 });
   // Drawn first, so the sea floor under it is rejected by the depth test rather than shaded.
+  return new LodSurface(radius, radius, () => radius, material, { smooth: 'coast', renderOrder: SEA_RENDER_ORDER, name: 'Sea' });
+}
+
+/** The lava sea: a fixed smooth sphere at sea level with the animated lava (see world/lavaMaterial.ts). */
+function createLavaSea(radius: number, material: THREE.Material): THREE.Mesh {
+  // The lava shader works out its flow per vertex, so a fixed sphere (with fewer segments: still smooth at the horizon).
+  const sea = new THREE.Mesh(createCubeSphere(radius, LAVA_SEA_SEGMENTS), material);
+  sea.name = 'Sea';
   sea.renderOrder = SEA_RENDER_ORDER;
   sea.layers.enable(GROUND_LAYER);
   return sea;
