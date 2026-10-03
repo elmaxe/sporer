@@ -35,6 +35,10 @@ export class GalaxyMap implements Entity {
   private readonly bufferSize = new THREE.Vector2();
   private readonly steady = new THREE.Vector2(-1, -1);
   private readonly faded = new THREE.Vector2(-1, 0);
+  /** Where the faded star's members are drawn in its close-up (galaxy coordinates)... */
+  private readonly closeUp = [new THREE.Vector3(), new THREE.Vector3()];
+  /** ...and how far its dots have moved there, 0–1. */
+  private readonly converge = { value: 0 };
   private readonly cameraLocal = new THREE.Vector3();
   private readonly inverse = new THREE.Matrix4();
   private time = 0;
@@ -90,6 +94,9 @@ export class GalaxyMap implements Entity {
         steady: { value: this.steady },
         // A star (id) whose dots fade out by the given amount, 0–1.
         faded: { value: this.faded },
+        // ...and move this far (0–1) to its members' places in the close-up.
+        closeUp: { value: this.closeUp },
+        converge: this.converge,
         // The camera in galaxy coordinates, and the dark nebulas between it and each star.
         cameraLocal: { value: this.cameraLocal },
         ...starDimmingUniforms(galaxy.nebulas),
@@ -107,6 +114,8 @@ export class GalaxyMap implements Entity {
         uniform float twinkleSpeed;
         uniform vec2 steady;
         uniform vec2 faded;
+        uniform vec3 closeUp[2];
+        uniform float converge;
         uniform vec3 cameraLocal;
         varying vec3 vColor;
         varying float vDim;
@@ -116,6 +125,12 @@ export class GalaxyMap implements Entity {
           // Binary members turn about their centre of mass in the view plane.
           float a = orbit.y + time * orbit.z;
           mv.xy += vec2(cos(a), sin(a)) * orbit.x;
+          // The faded star's dots move to where its close-up draws its members (member 1 has the negative offset).
+          bool fading = abs(starId - faded.x) < 0.5;
+          if (fading && converge > 0.0) {
+            vec4 target = modelViewMatrix * vec4(orbit.x < 0.0 ? closeUp[1] : closeUp[0], 1.0);
+            mv = mix(mv, target, converge);
+          }
           float px = size * scale / -mv.z;
           gl_PointSize = clamp(px, minSize, maxSize);
           // Dots clamped up to the minimum size get dimmer instead of bigger.
@@ -129,7 +144,7 @@ export class GalaxyMap implements Entity {
           float small = 1.0 - smoothstep(minSize, minSize * 4.0, px);
           bool held = abs(starId - steady.x) < 0.5 || abs(starId - steady.y) < 0.5;
           vDim *= held ? 1.0 : 1.0 + twinkle * (1.0 + 0.6 * small) * wave;
-          if (abs(starId - faded.x) < 0.5) vDim *= 1.0 - faded.y;
+          if (fading) vDim *= 1.0 - faded.y;
           // Hidden behind dark nebulas.
           vDim *= starDimming(cameraLocal, position);
 
@@ -191,6 +206,19 @@ export class GalaxyMap implements Entity {
   /** Fades `star`'s dot(s) out by `amount` (0–1), e.g. while a close-up of it takes over. */
   fade(star: StarRef | null, amount: number): void {
     this.faded.set(star && amount > 0 ? star.id : -1, amount);
+  }
+
+  /**
+   * Moves the faded star's dots `amount` (0–1) of the way from their places
+   * on the map to `members`, where its close-up draws its star(s) (galaxy
+   * coordinates), so a binary's two dots become the close-up's two stars
+   * instead of being seen beside them.
+   */
+  convergeTo(members: readonly THREE.Vector3[], amount: number): void {
+    members.forEach((m, i) => this.closeUp[i]?.copy(m));
+    // A single star's one dot: both slots the same.
+    if (members.length === 1) this.closeUp[1]!.copy(members[0]!);
+    this.converge.value = members.length > 0 ? amount : 0;
   }
 
   update(frameDt: number): void {
