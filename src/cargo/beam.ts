@@ -14,6 +14,8 @@ import type { PlanetConfig } from '../world/Planet';
 export const beamParams = {
   /** Farthest the beam reaches from the ship, planet units. */
   range: 70,
+  /** The abduction beam's radius where it meets the ground: plants under it (trunk, or half the crown) are caught. */
+  radius: 3,
   /** Units per second along the beam, up and down. */
   speed: 9,
   /** Shortest time a trip up or down the beam takes, s. */

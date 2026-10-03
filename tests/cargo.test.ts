@@ -10,6 +10,7 @@ import { Rng } from '../src/gen/rng';
 import { generateSystem, type PlanetData } from '../src/gen/system';
 import { weatherKind } from '../src/gen/weather';
 import { SurfaceChanges } from '../src/surface/changes';
+import { underDisc } from '../src/surface/SurfaceEntities';
 
 const sol = generateSystem(solRef(generateGalaxy(1337))!);
 const body = (name: string): PlanetData => [...sol.planets, ...sol.planets.flatMap((p) => p.moons)].find((p) => p.name === name)! as PlanetData;
@@ -89,6 +90,24 @@ describe('the cargo hold', () => {
     expect(inv.total).toBe(STACK_SIZE + CARGO_STACKS - 1);
   });
 
+  it('counts the plants still on their way up when the beam catches several at once', () => {
+    const inv = new Inventory();
+    const a = speciesKey('home', 0);
+    for (let i = 0; i < STACK_SIZE - 2; i++) inv.add(a, tree, 'Home');
+    // Two more of a fit; a third on the way would overflow its stack.
+    expect(inv.canAddAfter(a, [])).toBe(true);
+    expect(inv.canAddAfter(a, [a])).toBe(true);
+    expect(inv.canAddAfter(a, [a, a])).toBe(false);
+    // New species each take a stack, counted once however many are on the way.
+    const fresh = Array.from({ length: CARGO_STACKS - 2 }, (_, i) => speciesKey('home', i + 1));
+    expect(inv.canAddAfter(speciesKey('far', 0), [...fresh, ...fresh])).toBe(true);
+    const all = [...fresh, speciesKey('home', 9)];
+    expect(inv.canAddAfter(speciesKey('far', 0), all)).toBe(false);
+    // A species already on its way has its stack: more fit until it would be full.
+    expect(inv.canAddAfter(fresh[0]!, all)).toBe(true);
+    expect(inv.canAddAfter(fresh[0]!, [...all, ...Array<string>(STACK_SIZE - 1).fill(fresh[0]!)])).toBe(false);
+  });
+
   it('takes one at a time, drops an empty stack, and round-trips through JSON', () => {
     const inv = new Inventory();
     const k = speciesKey('home', 3);
@@ -123,6 +142,13 @@ describe('the cargo hold', () => {
 });
 
 describe('the beam\'s motion', () => {
+  it('catches a plant under the beam by its trunk or half its crown', () => {
+    expect(underDisc(0, 2, 3)).toBe(true);
+    expect(underDisc(3, 0, 3)).toBe(true);
+    expect(underDisc(3.9, 2, 3)).toBe(true);
+    expect(underDisc(4.1, 2, 3)).toBe(false);
+  });
+
   it('shrinks a tree to fit the ship on the way up and grows it back on the way down', () => {
     const small = carriedScale(10, 1);
     expect(10 * small).toBeCloseTo(beamParams.carriedHeight);

@@ -124,9 +124,9 @@ export const cueParams: Record<SoundCue, CueSpec> = {
   busterImpact: oneShot(),
   // The planet blowing apart (the blinding flash).
   planetExplode: oneShot(),
-  // The abduction beam holding something, from the press until it's let go or reaches the ship.
+  // The abduction beam on, from the press until it's let go.
   abductBeam: { ...travel(), fadeIn: 0.1, fadeOut: 0.3 },
-  // The beam catching something to lift (the press on it).
+  // The beam catching something to lift (as it comes under the beam).
   abductStart: oneShot(),
   // Something reaching the ship and going into the inventory.
   abductSuccess: oneShot(),
