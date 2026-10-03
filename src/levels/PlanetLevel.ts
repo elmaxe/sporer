@@ -41,6 +41,7 @@ import { PlanetBuster } from '../combat/PlanetBuster';
 import type { ItemId, ItemStatus, ItemUser } from '../combat/items';
 import { bodyKey } from '../combat/busted';
 import { CargoBeam } from '../cargo/CargoBeam';
+import { bodyGravity } from '../cargo/beam';
 import type { Inventory } from '../cargo/inventory';
 import { weatherKind } from '../gen/weather';
 import { Plantings } from '../surface/Plantings';
@@ -288,7 +289,7 @@ export class PlanetLevel extends Level implements ItemUser {
             this.plants,
             this.plantings,
             inventory,
-            { key: bodyKey(config), name: body.name, world },
+            { key: bodyKey(config), name: body.name, world, gravity: bodyGravity(config) },
             sfx,
             () => (this.busy ? 'Not while the planet buster goes off' : null),
             debug,

@@ -1916,6 +1916,14 @@ await section('cargo', async () => {
   await evaluate(`planet.orbit.zoomTo(30)`);
   await sleep(1500);
   await until(`planet.plants.settled`, 30000);
+  // The ship sinks to its new height (slowly under software rendering): the trees found on screen must stay where they were found.
+  await until(`Math.abs(planet.ship.radius - planet.ship.goalRadius) < 0.02`, 30000);
+  for (let i = 0, last = null; i < 60; i++) {
+    const cam = await evaluate(`game.camera.position.toArray()`);
+    if (last && Math.hypot(cam[0] - last[0], cam[1] - last[1], cam[2] - last[2]) < 0.005) break;
+    last = cam;
+    await drawFrames(5);
+  }
   await drawFrames(5);
   await evaluate(`(() => {
     // A tree on screen within the beam's reach (screen point), and ground of a kind (land or sea) without a plant on it.
@@ -1997,6 +2005,27 @@ await section('cargo', async () => {
     drown = await evaluate(`planet.cargo.inFlight.map((l) => l.fate)`);
     await until(`planet.cargo.inFlight.length === 0`, 20000);
   }
+  // Let go while the ship flies sideways: it keeps the ship's and the beam's motion and lands ahead of where it was let go, not straight below.
+  await key('Digit1', '1');
+  const flungTree = await evaluate(`__tree(12, 35)`);
+  let fling = null;
+  if (flungTree) {
+    await evaluate(`(() => { const c = planet.cargo; window.__landed = null; const land = c.land; c.land = function (load, quiet) { window.__landed = load.dir.clone(); return land.call(this, load, quiet); }; })()`);
+    await mouse('mouseMoved', flungTree);
+    await mouse('mousePressed', flungTree);
+    await send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'KeyD', key: 'd' });
+    await until(`planet.cargo.beam && planet.cargo.beam.t > 0.4 && planet.ship.speed > 15`, 20000);
+    await mouse('mouseReleased', flungTree);
+    await send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'KeyD', key: 'd' });
+    fling = await evaluate(`(() => { const l = planet.cargo.loads.find((l) => l.state === 'fall'); if (!l) return null;
+      const up = l.fall.position.clone().normalize(); const across = l.fall.velocity.clone().addScaledVector(up, -l.fall.velocity.dot(up));
+      window.__fling = { from: l.fall.position.clone(), across: across.clone().normalize() }; return { speedAcross: across.length() }; })()`);
+    await until(`planet.cargo.inFlight.length === 0`, 30000);
+    if (fling) {
+      // How far it landed from right below where it was let go, along the way it was going (units over the ground).
+      fling.ahead = await evaluate(`(() => { const r = __fling.from.length(); return __landed.clone().sub(__fling.from.clone().normalize()).multiplyScalar(r).dot(__fling.across); })()`);
+    }
+  }
   // What was planted and taken stays when the planet is left and visited again.
   const planted = await evaluate(`planet.plantings.count`);
   await evaluate(`levels.leavePlanet()`);
@@ -2007,7 +2036,7 @@ await section('cargo', async () => {
   await evaluate(`levels.leavePlanet()`);
   await until(`levels.mode === 'system' && !levels.transitioning`, 60000);
   const cues = (await evaluate(`__cues`)).filter((c) => /^(abduct|export|drop)/.test(c));
-  cargo = { tabs, weaponsBorder, tooltip, forest, armed, up, hold, letGo, setDown, dropped, drown, planted, revisit, cues };
+  cargo = { tabs, weaponsBorder, tooltip, forest, armed, up, hold, letGo, setDown, dropped, drown, fling, planted, revisit, cues };
   cargo.ok =
     tabs.tab === 'inventory' &&
     tabs.border !== weaponsBorder &&
@@ -2035,6 +2064,7 @@ await section('cargo', async () => {
     dropped.states.includes('fall') &&
     dropped.shipStayed &&
     (drown === null || drown.includes('drown')) &&
+    (fling === null || (fling.speedAcross > 3 && fling.ahead > 1)) &&
     revisit.planted === planted &&
     revisit.removed >= 2 &&
     cues.includes('abductStart') &&
