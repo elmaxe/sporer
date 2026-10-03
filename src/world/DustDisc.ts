@@ -166,9 +166,11 @@ const BAND_VERTEX = /* glsl */ `
   uniform float uLightAt;             // lit as dust this far from the star is, not the wall itself
   varying vec3 vWorld;
   varying float vAcross;              // height over the scale height
+  varying vec2 vRound;                // the wall's outward direction (x, z), unnormalised
   varying float vLight;
   void main() {
     vAcross = position.y / uHeight;
+    vRound = position.xz;
     vec4 world = modelMatrix * vec4(position, 1.0);
     vWorld = world.xyz;
     vLight = min(pow(uHabitable / max(uLightAt, 1.0), 2.0 * uLightPower), uMaxLight);
@@ -185,6 +187,7 @@ const BAND_FRAGMENT = /* glsl */ `
   uniform vec2 uFade;
   varying vec3 vWorld;
   varying float vAcross;
+  varying vec2 vRound;
   varying float vLight;
   void main() {
     vec3 toEye = cameraPosition - vWorld;
@@ -192,7 +195,9 @@ const BAND_FRAGMENT = /* glsl */ `
     vec3 v = toEye / dist;
     // Near edge-on only, as the sheets fade out there (their uGrazeFade): the two hand over.
     float edgeOn = 1.0 - smoothstep(0.06, 0.35, abs(v.y));
-    float fade = smoothstep(uFade.x, uFade.y, dist) * edgeOn;
+    // And fading out where the wall turns away to its outline (seen along the wall), so the band has no hard ends.
+    float facing = abs(dot(normalize(vec3(vRound.x, 0.0, vRound.y)), v));
+    float fade = smoothstep(uFade.x, uFade.y, dist) * edgeOn * smoothstep(0.0, 0.5, facing);
     if (fade <= 0.0) discard;
     float s = vAcross;
     // The column along the plane: Gaussian in height.
