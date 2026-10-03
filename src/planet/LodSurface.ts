@@ -10,6 +10,7 @@ import {
   beyondHorizon,
   cellAngle,
   cellDiagonal,
+  chordError,
   chunkBounds,
   childAt,
   edgeNeighbour,
@@ -30,6 +31,18 @@ export const lodParams = {
    */
   cellAngle: 0.05,
   /**
+   * Smooth surfaces split instead when their flat cells look this far inside
+   * the sphere (radians, see chordError). A giant's cloud tops only show it in
+   * their outline: 0.0018 is ~1 px at 720p, by the same measure as cellAngle.
+   */
+  outlineError: 0.0018,
+  /**
+   * The sea shows it at every coast too, where the sea floor rises through
+   * it: a sag of 1 px moved the coastlines by about that much, a quarter
+   * pixel matched the fixed 46-segment sphere the sea used to be.
+   */
+  coastError: 0.00045,
+  /**
    * Deepest split. At the original scale (Earth radius 100) depth 4 gave an
    * Earth-sized globe ~0.6-unit cells, a few per wiggle of detailedTerrain's
    * finest octave (deeper only smooths it); one more level per doubling of
@@ -47,6 +60,8 @@ export const lodParams = {
 export function addLodDebug(debug: Debug): void {
   const f = debug.folder('Planet LOD');
   f?.add(lodParams, 'cellAngle', 0.01, 0.2, 0.005);
+  f?.add(lodParams, 'outlineError', 0.0001, 0.01, 0.0001);
+  f?.add(lodParams, 'coastError', 0.0001, 0.01, 0.0001);
   f?.add(lodParams, 'maxDepth', 0, 9, 1);
   f?.add(lodParams, 'budgetMs', 0.5, 16, 0.5);
   f?.add(lodParams, 'morphSeconds', 0, 3, 0.05);
@@ -67,6 +82,8 @@ interface LodNode {
   readonly angle: number;
   /** Where its vertices are, once built (see chunkBounds). */
   readonly bounds: ChunkBounds;
+  /** Wholly below LodSurfaceOptions.hiddenBelow, so never drawn. */
+  submerged: boolean;
   children: LodNode[] | null;
   /** The children are drawn instead of this node. */
   split: boolean;
@@ -92,6 +109,27 @@ interface LodNode {
 }
 
 const byPriority = (a: LodNode, b: LodNode) => b.priority - a.priority;
+
+/** How a surface differs from the terrain's (the defaults). */
+export interface LodSurfaceOptions {
+  /**
+   * A smooth sphere: no facets to keep the size of, so chunks split by how
+   * far their cells sag inside the sphere rather than by their size, up to
+   * lodParams.outlineError (a giant's cloud tops: only the outline shows it)
+   * or coastError (the sea: its coasts show it too). Up close that's far
+   * coarser than the terrain.
+   */
+  smooth?: 'outline' | 'coast' | null;
+  /** The chunks' render order (the sea draws first, see SEA_RENDER_ORDER). */
+  renderOrder?: number;
+  /**
+   * Chunks lying wholly below this radius aren't drawn: the sea floor under
+   * an opaque sea. They still split and merge as usual, so an islet too small
+   * for a coarse chunk to catch comes up when its finer chunks are built.
+   */
+  hiddenBelow?: number;
+  name?: string;
+}
 
 /**
  * The low-orbit globe's surface as a quadtree of chunks per cube face (see
@@ -125,6 +163,9 @@ export class LodSurface {
   private readonly color = new THREE.Color();
   private readonly facePoint: FacePoint = { face: 0, s: 0, t: 0 };
   private readonly edgeMorph = new Float32Array(4);
+  private readonly smooth: 'outlineError' | 'coastError' | null;
+  private readonly renderOrder: number;
+  private readonly hiddenBelow: number;
 
   constructor(
     /** The lowest and highest the surface goes (for the horizon). */
@@ -132,14 +173,18 @@ export class LodSurface {
     private readonly top: number,
     private readonly sample: SurfaceSampler,
     private readonly material: THREE.Material,
+    { smooth = null, renderOrder = 0, hiddenBelow = -Infinity, name = 'Surface' }: LodSurfaceOptions = {},
   ) {
-    this.object.name = 'Surface';
+    this.smooth = smooth && `${smooth}Error`;
+    this.renderOrder = renderOrder;
+    this.hiddenBelow = hiddenBelow;
+    this.object.name = name;
     for (let face = 0; face < 6; face++) {
       const root = this.createNode(null, face, 0, 0, 0);
       this.build(root);
       root.morph = 1;
       root.shown = true;
-      root.mesh!.visible = true;
+      root.mesh!.visible = !root.submerged;
       this.roots.push(root);
     }
     this.shownChanged = true;
@@ -204,7 +249,10 @@ export class LodSurface {
     const b = node.bounds;
     const distance = Math.hypot(this.camera.x - b.x, this.camera.y - b.y, this.camera.z - b.z);
     const cells = cellAngle(b.reach, node.depth, distance, b.radius);
-    const wants = !hidden && node.depth < lodParams.maxDepth && wantsSplit(cells, lodParams.cellAngle, node.split);
+    const looks = this.smooth
+      ? wantsSplit(chordError(cells, node.depth), lodParams[this.smooth], node.split)
+      : wantsSplit(cells, lodParams.cellAngle, node.split);
+    const wants = !hidden && node.depth < lodParams.maxDepth && looks;
 
     if (node.split) {
       const kids = node.children!;
@@ -281,7 +329,7 @@ export class LodSurface {
       node.shown = shown;
       this.shownChanged = true;
     }
-    node.mesh!.visible = shown && !hidden;
+    node.mesh!.visible = shown && !hidden && !node.submerged;
   }
 
   private createNode(parent: LodNode | null, face: number, depth: number, x: number, y: number): LodNode {
@@ -305,7 +353,8 @@ export class LodSurface {
       y,
       centre,
       angle: Math.acos(minDot),
-      bounds: { x: 0, y: 0, z: 0, radius: 0, reach: 0 },
+      bounds: { x: 0, y: 0, z: 0, radius: 0, reach: 0, top: 0 },
+      submerged: false,
       children: null,
       split: false,
       mesh: null,
@@ -368,6 +417,8 @@ export class LodSurface {
       node.targetColors = node.baseColors;
     }
     chunkBounds([node.base, node.target], node.bounds);
+    // Blending and the seams only ever move a vertex between these, so it stays under too.
+    node.submerged = node.bounds.top < this.hiddenBelow;
     const geometry = new THREE.BufferGeometry();
     geometry.setIndex(new THREE.BufferAttribute(chunkIndices(diagonals), 1));
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
@@ -377,6 +428,7 @@ export class LodSurface {
     const mesh = new THREE.Mesh(geometry, this.material);
     mesh.visible = false;
     mesh.matrixAutoUpdate = false;
+    mesh.renderOrder = this.renderOrder;
     mesh.layers.enable(GROUND_LAYER);
     node.mesh = mesh;
     this.object.add(mesh);

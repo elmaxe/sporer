@@ -176,6 +176,8 @@ export class LabInfo implements Entity {
       if (w.precipitation) parts.push(w.precipitation);
       if (w.volcanic) parts.push('volcanic lightning');
       parts.push(`${weather.shown.length} storms · ${weather.flashCount} flashes`);
+      const puffs = weather.puffs[0];
+      if (puffs) parts.push(`${puffs.clusterCount} clouds · ${puffs.puffCount} puffs drawn`);
       rows.push(['Weather', parts.join(' · ')]);
     } else if (planet.type !== 'gas' && !planet.shape) {
       rows.push(['Weather', 'none']);
@@ -198,7 +200,8 @@ export class LabInfo implements Entity {
     if (planet.kind !== 'moon' && !isSmallKind(planet.kind)) rows.push(['Moons', `${planet.moons.length}${planet.moons.length ? ' (system view)' : ''}`]);
     if (level) rows.push(['Build', `${Math.round(level.triangles / 1000)}k triangles · ${Math.round(level.buildMs)} ms`]);
     const lod = level?.globe?.lodStats();
-    if (lod) rows.push(['Detail', `${lod.chunks} chunks drawn · depth ${lod.minDepth}–${lod.maxDepth}`]);
+    const sea = level?.globe?.waterStats();
+    if (lod) rows.push(['Detail', `${lod.chunks} chunks drawn · depth ${lod.minDepth}–${lod.maxDepth}${sea ? ` · sea ${sea.chunks}${sea.chunks ? ` · depth ${sea.minDepth}–${sea.maxDepth}` : ''}` : ''}`]);
     const clock = this.lab.clock;
     rows.push(['Time', `${clock.time.toFixed(1)} s${clock.paused ? ' · paused' : clock.speed !== 1 ? ` · ×${clock.speed}` : ''}`]);
 

@@ -1,3 +1,4 @@
+import type { VolcanoSite } from '../combat/volcano';
 import type { InventoryData } from '../cargo/inventory';
 import type { SurfaceChangesData } from '../surface/changes';
 import type { LogEntry } from './consoleLog';
@@ -73,6 +74,8 @@ export interface GameState {
    * blast's system time, and how many there are in the whole game. Also whether one was going off.
    */
   busted?: { bodies: { body: BodyRef; time: number }[]; total: number; firing: boolean; elapsed: number | null };
+  /** Volcanoes raised by volcano bombs on this system's bodies (missing in dumps from before them), oldest first. */
+  volcanoes?: { body: BodyRef; sites: VolcanoSite[] }[];
   /**
    * The cargo hold and, in low orbit, what the player has done to the body's surface (plants taken, plants
    * set down), what the beam is armed with and what's in the air (missing in dumps from before the beam).

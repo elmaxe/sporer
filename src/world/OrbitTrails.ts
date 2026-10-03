@@ -22,12 +22,19 @@ export const orbitTrailParams = {
   minPixels: 3,
   /** Trails closer to the camera than this fade out (system units), so they never fill the view. */
   nearFade: 40,
+  /**
+   * Where a trail runs within this angle's sine of the line of sight it fades
+   * out (gone at a quarter of it): seen end-on, a camera-facing ribbon fans out.
+   */
+  endOn: 0.5,
   /** Moon trails show when the camera is within this many of their planet's standoff distances. */
   moonRange: 5,
 };
 
 /** Segments along a trail; the geometry is shared, each trail's shape comes from its uniforms. */
 const SEGMENTS = 128;
+/** A trail fades out where its side turns by more than this from one segment to the next (degrees). */
+const MAX_TWIST = 10;
 /** How fast a trail eases to its new opacity (per second). */
 const EASE_RATE = 8;
 /** The smoke is mostly this neutral blue-grey, tinted by its body's colour. */
@@ -62,6 +69,7 @@ export class OrbitTrails implements Entity {
     /** World units per pixel at distance 1, times the minimum width in pixels. */
     minWidth: { value: 0 },
     nearFade: { value: orbitTrailParams.nearFade },
+    endOn: { value: orbitTrailParams.endOn },
     span: { value: orbitTrailParams.length * Math.PI * 2 },
   };
   private readonly scratch = new THREE.Vector3();
@@ -89,6 +97,7 @@ export class OrbitTrails implements Entity {
     f?.add(orbitTrailParams, 'tailWidth', 0.1, 10);
     f?.add(orbitTrailParams, 'minPixels', 0, 10);
     f?.add(orbitTrailParams, 'nearFade', 0, 200);
+    f?.add(orbitTrailParams, 'endOn', 0, 1);
     f?.add(orbitTrailParams, 'moonRange', 1, 20);
     f?.add(this.root, 'visible').name('show');
   }
@@ -118,6 +127,7 @@ export class OrbitTrails implements Entity {
     const s = this.shared;
     s.time.value += frameDt;
     s.nearFade.value = p.nearFade;
+    s.endOn.value = p.endOn;
     s.span.value = p.length * Math.PI * 2;
     s.minWidth.value = (p.minPixels * 2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2)) / innerHeight;
 
@@ -228,35 +238,60 @@ const TRAIL_VERTEX = /* glsl */ `
   varying float vAngle;
   varying float vWidth;
   varying float vThin;
+  varying float vAcross;
+  varying float vSteady;
   varying vec3 vWorld;
+
+  // A point on the orbit at angle a, in world space, and the orbit's direction there.
+  vec3 orbitPoint(float a, out vec3 tangent) {
+    float si = sin(inclination);
+    float ci = cos(inclination);
+    // Turned about +Y by the node (Orbit.node).
+    mat3 turn = mat3(cos(node), 0.0, -sin(node), 0.0, 1.0, 0.0, sin(node), 0.0, cos(node));
+    tangent = normalize(mat3(modelMatrix) * (turn * vec3(-sin(a), cos(a) * si, cos(a) * ci)));
+    return (modelMatrix * vec4(turn * (radius * vec3(cos(a), sin(a) * si, sin(a) * ci)), 1.0)).xyz;
+  }
+
+  // Across the orbit at angle a, perpendicular to the view; its length is the
+  // sine of the angle between the orbit and the line of sight.
+  vec3 acrossAt(float a) {
+    vec3 tangent;
+    vec3 p = orbitPoint(a, tangent);
+    return cross(tangent, normalize(cameraPosition - p));
+  }
+
   void main() {
     float t = trail.x;
     // Back along the orbit from the body (orbits run towards increasing angle).
     float a = angle - t * span;
-    float si = sin(inclination);
-    float ci = cos(inclination);
-    vec3 local = radius * vec3(cos(a), sin(a) * si, sin(a) * ci);
-    vec3 tangent = vec3(-sin(a), cos(a) * si, cos(a) * ci);
-    // Turned about +Y by the node (Orbit.node).
-    mat3 turn = mat3(cos(node), 0.0, -sin(node), 0.0, 1.0, 0.0, sin(node), 0.0, cos(node));
-    local = turn * local;
-    tangent = turn * tangent;
-    vec4 world = modelMatrix * vec4(local, 1.0);
+    vec3 tangent;
+    vec3 world = orbitPoint(a, tangent);
 
     // Face the camera: spread across the orbit, perpendicular to the view.
-    vec3 toCamera = cameraPosition - world.xyz;
-    vec3 side = normalize(cross(mat3(modelMatrix) * tangent, toCamera));
+    vec3 toCamera = cameraPosition - world;
+    vec3 across = cross(tangent, normalize(toCamera));
+    vAcross = length(across);
+    // No width where it points straight at the camera.
+    vec3 side = across / max(vAcross, 1e-6);
+    // Where the orbit runs along the line of sight the side turns over within
+    // a few segments, and the quads fan out into a star or cross over each
+    // other: fade the ribbon wherever it twists that fast.
+    float segment = span / ${SEGMENTS}.0;
+    vec3 before = acrossAt(a + segment);
+    vec3 after = acrossAt(a - segment);
+    float turn = min(dot(side, before / max(length(before), 1e-6)), dot(side, after / max(length(after), 1e-6)));
+    vSteady = smoothstep(${Math.cos(THREE.MathUtils.degToRad(MAX_TWIST)).toFixed(4)}, ${Math.cos(THREE.MathUtils.degToRad(MAX_TWIST / 3)).toFixed(4)}, turn);
     float w = mix(headWidth, tailWidth, t);
     float width = max(w, minWidth * length(toCamera));
-    world.xyz += side * trail.y * width * 0.5;
+    world += side * trail.y * width * 0.5;
 
     vTrail = trail;
     vAngle = a;
     vWidth = width;
     // Trails widened to the minimum on-screen width are fainter, like a thin wisp.
     vThin = sqrt(w / width);
-    vWorld = world.xyz;
-    gl_Position = projectionMatrix * viewMatrix * world;
+    vWorld = world;
+    gl_Position = projectionMatrix * viewMatrix * vec4(world, 1.0);
   }`;
 
 const TRAIL_FRAGMENT = /* glsl */ `
@@ -269,10 +304,13 @@ const TRAIL_FRAGMENT = /* glsl */ `
   uniform vec3 body;
   uniform float reach;
   uniform float nearFade;
+  uniform float endOn;
   varying vec2 vTrail;
   varying float vAngle;
   varying float vWidth;
   varying float vThin;
+  varying float vAcross;
+  varying float vSteady;
   varying vec3 vWorld;
   ${VALUE_NOISE_GLSL}
 
@@ -295,8 +333,9 @@ const TRAIL_FRAGMENT = /* glsl */ `
     float fade = smoothstep(0.0, 0.04, t) * pow(1.0 - t, 1.4);
     float gap = smoothstep(reach * 0.9, reach * 1.6, distance(vWorld, body));
     float near = smoothstep(nearFade * 0.2, nearFade, distance(vWorld, cameraPosition));
+    float sideways = smoothstep(endOn * 0.25, endOn, vAcross) * vSteady;
 
-    float a = opacity * edge * density * fade * gap * near * vThin;
+    float a = opacity * edge * density * fade * gap * near * sideways * vThin;
     gl_FragColor = vec4(color, a);
     #include <colorspace_fragment>
   }`;
