@@ -15,7 +15,6 @@ import { createGlowTexture } from '../world/glowTexture';
 import { SIMPLEX_GLSL } from '../world/noiseGlsl';
 import { CLOUD_RENDER_ORDER } from '../world/weatherLook';
 import {
-  arcPoint,
   blastAt,
   busterParams,
   busterPhase,
@@ -26,6 +25,7 @@ import {
   projectileProgress,
   shockRing,
 } from './buster';
+import { pathControl, pathPoint } from './path';
 import type { ItemStatus } from './items';
 
 /** The aiming ring's size on the ground, planet units. */
@@ -168,11 +168,13 @@ export class PlanetBuster implements Entity {
   private readonly normal = new THREE.Vector3();
   private readonly from = new THREE.Vector3();
   private readonly to = new THREE.Vector3();
+  /** The path's control point: see pathControl. */
+  private readonly control = new THREE.Vector3();
   private readonly at = new THREE.Vector3();
   private flight: SoundHandle | null = null;
   /** The projectile's path at `u` seconds after firing (for the trail; reuses one vector). */
   private readonly pathAt = (u: number): THREE.Vector3 =>
-    arcPoint(this.from, this.to, projectileProgress(u), busterParams.arcLift, this.point);
+    pathPoint(this.from, this.control, this.to, projectileProgress(u), this.point);
   /** Made when it's fired. */
   private fx: BusterEffects | null = null;
 
@@ -196,7 +198,6 @@ export class PlanetBuster implements Entity {
     f?.add(busterParams, 'flightTime', 0.5, 6);
     f?.add(busterParams, 'fuse', 0, 5);
     f?.add(busterParams, 'settle', 0, 15);
-    f?.add(busterParams, 'arcLift', 0, 1);
     f?.add(busterParams, 'impactFlash', 0, 1);
     f?.add(busterParams, 'blastFlash', 0, 1);
     f?.add(busterParams, 'fireballSize', 0.5, 6);
@@ -256,6 +257,7 @@ export class PlanetBuster implements Entity {
     this.fireTime = this.clock.renderTime;
     this.from.copy(this.ship.position);
     this.to.copy(point);
+    pathControl(this.from, this.to, this.target.groundHeight, this.control);
     this.fx = new BusterEffects(this.scene, this.target, point);
     this.sfx.play('busterFire');
     this.flight = this.sfx.start('busterFlight');
@@ -284,7 +286,7 @@ export class PlanetBuster implements Entity {
       this.events.done();
     }
     const distance = this.camera.position.distanceTo(this.ship.position);
-    arcPoint(this.from, this.to, projectileProgress(t), busterParams.arcLift, this.at);
+    pathPoint(this.from, this.control, this.to, projectileProgress(t), this.at);
     fx.pose(t, this.at, this.pathAt, distance);
     this.setFlash(flashAt(t));
     if (t > doneAt() + busterParams.ringTime) {

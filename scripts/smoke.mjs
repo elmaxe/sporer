@@ -4,8 +4,8 @@
 //                      living stars, comets, sky), galaxy (the galaxy loop), nebulas (every kind on the map
 //                      and from inside), rogues (fly to a rogue planet and down to it), audio, planet (the home planet
 //                      loop, held zoom, seamless zooms), types (every planet type and geyser kind), lab, plants
-//                      (the plant lab), touch, cargo (the abduction beam and the hold), buster (the planet buster, last:
-//                      it blows up a moon of the home system)
+//                      (the plant lab), touch, cargo (the abduction beam and the hold), volcano (the volcano bomb), buster
+//                      (the planet buster, last: it blows up a moon of the home system)
 //   --quick            everything but types
 //   --timeout <s>      give up after this long (default 900), reporting the section it was in
 //   --full-quality     render as players see it (default: ?quality=low, half resolution without antialiasing,
@@ -62,6 +62,10 @@
 // down in the sea drowns; what was taken
 // and planted is still so after leaving and coming back; the cues abductStart, abductBeam, abductSuccess, exportBeam
 // and dropImpact are asked for.
+// Volcano bomb: pressing 2 in the system says where to use it; in low orbit over a solid planet a real 2 arms it and a
+// real click on the ground fires it: a volcano rises there (the ground under it is higher, the ship flies over it), the
+// cues go fire → rise, the bomb stays armed for another; over a gas giant it can't be used; the system view's globe
+// shows it, it's still there (risen) when the planet is visited again, and on the globe after a trip to the galaxy.
 // Planet buster (last, as it leaves a moon of the home system busted): the item bar shows in the system with the
 // buster unusable (pressing 1 says where to use it); in low orbit over a moon, a real 1 arms it and a real click on the
 // globe fires it (once); scrolling out is refused until it's over; the screen flashes, the globe gives way to debris,
@@ -81,7 +85,7 @@ import { launch, sleep, StallError } from './lib/browser.mjs';
 
 const args = process.argv.slice(2);
 const option = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
-const SECTIONS = ['core', 'galaxy', 'nebulas', 'rogues', 'audio', 'planet', 'types', 'lab', 'plants', 'touch', 'cargo', 'buster'];
+const SECTIONS = ['core', 'galaxy', 'nebulas', 'rogues', 'audio', 'planet', 'types', 'lab', 'plants', 'touch', 'cargo', 'volcano', 'buster'];
 const only = option('--only')?.split(',');
 if (only?.some((name) => !SECTIONS.includes(name))) {
   console.error(`--only takes some of: ${SECTIONS.join(', ')}`);
@@ -137,6 +141,7 @@ const planetTypes = [];
 let lab = null;
 let buster = null;
 let cargo = null;
+let volcano = null;
 let plantLab = null;
 let touch = null;
 let touchLab = null;
@@ -1868,8 +1873,15 @@ async function runTouchLab() {
   }
 }
 await section('touch', async () => {
-  touch = await runTouch();
-  touchLab = await runTouchLab();
+  try {
+    touch = await runTouch();
+    touchLab = await runTouchLab();
+  } finally {
+    // Back to the desktop tab for the sections after it: left an emulated phone, the game would start in touch mode
+    // with its plants off, and clicks meant for the planet land on the item bar.
+    await send('Emulation.setTouchEmulationEnabled', { enabled: false });
+    await send('Emulation.clearDeviceMetricsOverride');
+  }
   return touch.ok && touchLab.ok;
 });
 await section('cargo', async () => {
@@ -2121,6 +2133,116 @@ await section('cargo', async () => {
   return cargo.ok;
 });
 
+await section('volcano', async () => {
+  // A fresh game (the lab sections leave the page elsewhere).
+  if (!(await page.goto(url, READY, 60000))) return false;
+  await drawFrames(20);
+  for (let i = 0; i < 40 && (await evaluate(`levels.transitioning || levels.mode !== 'system'`)); i++) {
+    if (await evaluate(`levels.mode === 'planet' && !levels.transitioning`)) await evaluate(`levels.leavePlanet()`);
+    if (await evaluate(`levels.mode === 'galaxy' && !levels.transitioning`)) await evaluate(`levels.toSystem()`);
+    await sleep(500);
+  }
+  const press = async (code, key) => {
+    for (const type of ['keyDown', 'keyUp']) {
+      await send('Input.dispatchKeyEvent', { type, code, key });
+      await drawFrames(2);
+    }
+  };
+  await press('Digit2', '2');
+  const inSpace = await evaluate(`({ slots: document.querySelectorAll('.item-slot[data-item]').length, hint: document.getElementById('item-hint').textContent })`);
+  // A gas giant has no ground for it.
+  const giant = await evaluate(`world.planets.some((p) => p.config.type === 'gas')`);
+  let gas = null;
+  if (giant) {
+    await evaluate(`(() => { const b = world.planets.find((p) => p.config.type === 'gas'); ship.parkAt(b); levels.toPlanet(b); })()`);
+    await until(`levels.mode === 'planet' && !levels.transitioning`, 60000);
+    await press('Digit2', '2');
+    gas = await evaluate(`({ selected: planet.selected, status: planet.status('volcanoBomb'), volcanoes: planet.volcanoes })`);
+    await evaluate(`levels.leavePlanet()`);
+    await until(`levels.mode === 'system' && !levels.transitioning`, 60000);
+  }
+  // Down to a solid planet, one with plants if there is one.
+  await evaluate(`(() => {
+    const solid = world.planets.filter((p) => p.config.type !== 'gas');
+    const b = solid.find((p) => (p.config.climate?.habitability ?? 0) > 0) ?? solid[0] ?? world.moons[0];
+    window.__volcanic = b; ship.parkAt(b); levels.toPlanet(b);
+  })()`);
+  await until(`levels.mode === 'planet' && !levels.transitioning`, 60000);
+  await drawFrames(5);
+  await press('Digit2', '2');
+  const armed = await evaluate(`({ selected: planet.selected, aiming: document.body.classList.contains('aiming'), hint: document.getElementById('item-hint').textContent })`);
+  // A real click on the ground under the ship.
+  const target = await evaluate(`(() => {
+    const d = planet.ship.object.position.clone().normalize();
+    const g = d.clone().multiplyScalar(planet.groundRadius(d));
+    const v = g.project(game.camera);
+    const r = game.renderer.domElement.getBoundingClientRect();
+    return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height };
+  })()`);
+  await evaluate(`(() => {
+    window.__cues = [];
+    const play = audio.play.bind(audio), start = audio.start.bind(audio);
+    audio.play = (c) => (__cues.push(c), play(c));
+    audio.start = (c) => (__cues.push(c), start(c));
+  })()`);
+  for (const type of ['mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, ...target, button: 'left', clickCount: 1 });
+  await drawFrames(2);
+  const fired = await evaluate(`({ inFlight: planet.volcanoBomb.inFlight, enRoute: planet.ship.enRoute, selected: planet.selected })`);
+  const landed = await until(`planet.volcanoes.count === 1`, 30000);
+  const risen = await until(`planet.volcanoes.shapes[0].growth === 1`, 60000);
+  await drawFrames(10);
+  const after = await evaluate(`(() => {
+    const v = planet.volcanoes.shapes[0];
+    const c = v.centre;
+    const ship = planet.ship.object.position;
+    return { selected: planet.selected, available: planet.status('volcanoBomb').available, height: v.height,
+      raised: planet.groundRadius(c) - planet.globe.terrainRadius(c, planet.globe.sunLight.clone()),
+      aboveSea: planet.groundRadius(c) > (planet.globe.seaRadius ?? 0),
+      shipAbove: ship.length() - planet.groundRadius(ship.clone().normalize()), saved: levels.surfaceChanges.forPlanet(__volcanic.name + ':' + __volcanic.config.seed).volcanoes.length };
+  })()`);
+  const heard = (await evaluate(`__cues`)).filter((c) => c.startsWith('volcano'));
+  await evaluate(`levels.leavePlanet()`);
+  await until(`levels.mode === 'system' && !levels.transitioning`, 60000);
+  // The system view's globe shows it too.
+  const systemView = await evaluate(`__volcanic.volcanoSites.length`);
+  await evaluate(`(() => { ship.parkAt(__volcanic); levels.toPlanet(__volcanic); })()`);
+  await until(`levels.mode === 'planet' && !levels.transitioning`, 60000);
+  await drawFrames(5);
+  const revisit = await evaluate(`({ count: planet.volcanoes?.count, growth: planet.volcanoes?.shapes[0]?.growth })`);
+  await evaluate(`levels.leavePlanet()`);
+  await until(`levels.mode === 'system' && !levels.transitioning`, 60000);
+  // Out to the galaxy and back: the system is built afresh, the volcano still on its globe.
+  await evaluate(`levels.toGalaxy()`);
+  await until(`levels.mode === 'galaxy' && !levels.transitioning`, 60000);
+  await evaluate(`levels.toSystem()`);
+  await until(`levels.mode === 'system' && !levels.transitioning`, 60000);
+  const rebuilt = await evaluate(`[...world.planets, ...world.moons].find((b) => b.name === __volcanic.name)?.volcanoSites.length`);
+  volcano = { inSpace, gas, armed, fired, landed, risen, after, heard, systemView, revisit, rebuilt };
+  volcano.ok =
+    inSpace.slots === 2 &&
+    /down to a planet or moon/.test(inSpace.hint) &&
+    (!giant || (gas.selected === null && !gas.status.available && /No ground/.test(gas.status.reason) && gas.volcanoes === null)) &&
+    armed.selected === 'volcanoBomb' &&
+    armed.aiming &&
+    /raise a volcano/.test(armed.hint) &&
+    fired.inFlight &&
+    !fired.enRoute &&
+    fired.selected === 'volcanoBomb' &&
+    landed &&
+    risen &&
+    after.raised > 0.5 * after.height &&
+    after.aboveSea &&
+    after.shipAbove > 0 &&
+    after.selected === 'volcanoBomb' &&
+    after.available &&
+    after.saved === 1 &&
+    heard.join(',') === 'volcanoFire,volcanoRise' &&
+    systemView === 1 &&
+    revisit.count === 1 &&
+    revisit.growth === 1 &&
+    rebuilt === 1;
+  return volcano.ok;
+});
 await section('buster', async () => {
   // A fresh game (the lab section leaves the page on lab.html).
   if (!(await page.goto(url, READY, 60000))) return false;
@@ -2205,7 +2327,7 @@ await section('buster', async () => {
   buster = { inSpace, armed, fired, stayed, maxFlash, blasted, sounds: heardOrder, after, system, revisit, rebuilt, bustedName };
   buster.ok =
     inSpace.bar &&
-    inSpace.slots === 1 &&
+    inSpace.slots === 2 &&
     /down to a planet or moon/.test(inSpace.hint) &&
     armed.selected === 'planetBuster' &&
     armed.aiming &&
@@ -2242,7 +2364,7 @@ const ok = started && !stalled && Object.keys(sections).length > 0 && Object.val
 console.error(`[smoke] ${ok ? 'ok' : 'FAILED'} in ${Math.round((Date.now() - T0) / 1000)} s${errors.length ? `, ${errors.length} console errors` : ''}`);
 console.log(
   JSON.stringify(
-    { ok, started, stalled, sections, before, after, autopilot, pick, systemMap, sky, living, comet, belt, galaxyLoop, nebulas, rogues, seamless, audio, planetLoop, heldZoom, cometLoop, asteroidLoops, planetTypes, touch, touchLab, cargo, buster, lab, plantLab, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
+    { ok, started, stalled, sections, before, after, autopilot, pick, systemMap, sky, living, comet, belt, galaxyLoop, nebulas, rogues, seamless, audio, planetLoop, heldZoom, cometLoop, asteroidLoops, planetTypes, touch, touchLab, cargo, volcano, buster, lab, plantLab, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
     null,
     2,
   ),

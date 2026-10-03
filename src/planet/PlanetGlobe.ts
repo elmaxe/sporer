@@ -30,6 +30,11 @@ const CLOUD_SEGMENTS = 48;
 /** A vent's glow on the lava sea, radians. */
 const VENT_RADIUS = 0.05;
 
+/** Something raised on the ground since the planet was made (a volcano, combat/volcano.ts): how far it lifts it in a direction. */
+export interface GroundRelief {
+  lift(dir: THREE.Vector3): number;
+}
+
 /**
  * The visited planet or moon, at its true size (see globeRadius) and detailed: the
  * terrain from the same noise as the system view plus finer octaves, a sea
@@ -75,6 +80,8 @@ export class PlanetGlobe implements Entity {
   private readonly cameraPosition = new THREE.Vector3();
   /** Once busted: the radius of the debris field, which is the ground from then on. */
   private bustedRadius: number | null = null;
+  /** Raised on the ground since (volcanoes): drawn by their owners, counted in the ground here. */
+  private readonly reliefs: GroundRelief[] = [];
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -136,14 +143,41 @@ export class PlanetGlobe implements Entity {
    */
   groundRadius(dir: THREE.Vector3): number {
     if (this.bustedRadius !== null) return this.bustedRadius;
-    const r = this.sample(dir, this.groundColor);
+    const r = this.sample(dir, this.groundColor) + this.liftAt(dir);
     return this.sea ? Math.max(r, this.radius) : r;
   }
 
-  /** What something falling at unit direction `dir` lands on: a giant's clouds, the sea (or the lava sea) where it covers the terrain, or land. */
+  /** How far what was raised on the ground since (volcanoes) lifts it in unit direction `dir`. */
+  private liftAt(dir: THREE.Vector3): number {
+    let lift = 0;
+    for (const relief of this.reliefs) lift = Math.max(lift, relief.lift(dir));
+    return lift;
+  }
+
+  /** The terrain as generated (under any sea, without what was raised on it since) in unit direction `dir`; its colour into `color`. */
+  terrainRadius(dir: THREE.Vector3, color: THREE.Color): number {
+    return this.sample(dir, color);
+  }
+
+  /** The sea's radius, or null for a world without one (or a gas giant). */
+  get seaRadius(): number | null {
+    return this.sea ? this.radius : null;
+  }
+
+  /**
+   * Counts `relief` in the ground from now on (the ship flies over it, clicks
+   * land on it); its highest point is `peak` (radius), which raises `top` if
+   * it's higher.
+   */
+  addRelief(relief: GroundRelief, peak: number): void {
+    this.reliefs.push(relief);
+    if (this.bustedRadius === null) this.top = Math.max(this.top, peak);
+  }
+
+  /** What something falling at unit direction `dir` lands on: a giant's clouds, the sea (or the lava sea) where it covers the terrain (and any volcano raised there), or land. */
   landingAt(dir: THREE.Vector3): Landing {
     if (this.gasGiant) return 'clouds';
-    if (this.busted || !this.sea || this.sample(dir, this.groundColor) >= this.radius) return 'land';
+    if (this.busted || !this.sea || this.sample(dir, this.groundColor) + this.liftAt(dir) >= this.radius) return 'land';
     return this.lava ? 'lava' : 'sea';
   }
 

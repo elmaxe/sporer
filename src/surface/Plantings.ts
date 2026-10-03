@@ -77,6 +77,14 @@ export class Plantings implements Entity {
     return record;
   }
 
+  /** Removes for good the standing plants where `under(dir)` (a plant's unit direction) says the ground was covered over, e.g. by a volcano rising. */
+  bury(under: (dir: THREE.Vector3) => boolean): void {
+    const dir = new THREE.Vector3();
+    const buried = [...this.changes.plantedPlants].filter((p) => !this.promoted.has(p.id) && under(dir.set(p.x, p.y, p.z)));
+    for (const p of buried) this.changes.remove(p.id);
+    if (buried.length > 0) this.rebuild();
+  }
+
   update(): void {
     this.object.visible = plantParams.enabled;
     for (const b of this.bySpecies.values()) {

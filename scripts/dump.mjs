@@ -105,6 +105,7 @@ if (s) {
     const here = s.busted.bodies.map((b) => `${b.body.name} (blast at t=${b.time.toFixed(1)} s)`).join(', ') || 'none here';
     say(`Busted: ${here} · ${s.busted.total} in the game${s.busted.firing ? ` · a planet buster going off, ${s.busted.elapsed?.toFixed(1)} s after firing` : ''}`);
   }
+  if (s.volcanoes?.length) say(`Volcanoes: ${s.volcanoes.map((v) => `${v.body.name} ${v.sites.length}`).join(', ')}`);
   const hud = Object.values(s.ui.hud);
   if (hud.length > 0) say(`HUD: ${hud.join(' | ')}`);
   if (s.ui.tooltip) say(`Tooltip: ${s.ui.tooltip}`);
