@@ -52,8 +52,9 @@ export interface GalaxyData {
 }
 
 /**
- * A soft, glowing dust/gas cloud along a spiral arm (visual only): an
- * ellipsoid stretched along the arm, flat like the disc.
+ * A soft dust/gas cloud along a spiral arm (visual only): an ellipsoid
+ * stretched along the arm, flatter than it is wide. Glowing gas, haze, or
+ * (generateDustLanes) dark dust.
  */
 export interface DustCloud {
   position: { x: number; y: number; z: number };
@@ -64,6 +65,8 @@ export interface DustCloud {
   /** Rotation about +Y (radians) that turns the cloud's length (+X) along the arm. */
   angle: number;
   color: string;
+  /** Dust lanes only: how thick the dust is, relative to the others (about 1). */
+  opacity?: number;
 }
 
 export function generateGalaxy(seed: number, count = DEFAULT_STAR_COUNT): GalaxyData {
@@ -146,8 +149,10 @@ export function systemRef(galaxy: Pick<GalaxyData, 'stars' | 'rogues'>, id: numb
 }
 
 /**
- * Dust clouds that trace the spiral arms, using the same arm layout as the
- * stars. Generated from its own stream, so it never changes the stars.
+ * Glowing gas clouds that trace the spiral arms, using the same arm layout as
+ * the stars. Puffy (about half as thick as they are wide), so they still read
+ * as clouds seen edge-on. Generated from its own stream, so it never changes
+ * the stars.
  */
 export function generateDust(galaxy: GalaxyData, count = DEFAULT_DUST_COUNT): DustCloud[] {
   const rng = new Rng(hashSeed(galaxy.seed, 'dust'));
@@ -165,9 +170,81 @@ export function generateDust(galaxy: GalaxyData, count = DEFAULT_DUST_COUNT): Du
       position,
       length: width * rng.range(1.6, 3.2),
       width,
-      thickness: rng.range(6, 16),
+      thickness: width * rng.range(0.4, 0.75),
       angle: armAngle(galaxy, position) + rng.gaussian(0, 0.2),
       color: hslToHex(hue, rng.range(0.5, 0.7), rng.range(0.5, 0.62)),
+    });
+  }
+  return clouds;
+}
+
+export const DEFAULT_HAZE_COUNT = 260;
+
+/**
+ * Faint haze round the arms: big, soft clouds a few times the size of the
+ * gas clouds and much thicker, so each arm has a glowing envelope that keeps
+ * its depth from any side (edge-on it puffs up above and below the disc).
+ */
+export function generateHaze(galaxy: GalaxyData, count = DEFAULT_HAZE_COUNT): DustCloud[] {
+  const rng = new Rng(hashSeed(galaxy.seed, 'haze'));
+  const clouds: DustCloud[] = [];
+  for (let i = 0; i < count; i++) {
+    const position = armPosition(rng, galaxy.arms, galaxy.twist, galaxy.armOffset);
+    // Puffed up above and below the disc.
+    position.y += rng.gaussian(0, GALAXY_RADIUS * 0.025);
+    const width = rng.range(110, 200);
+    const hue = rng.weighted<number>([
+      [rng.range(215, 240), 3],
+      [rng.range(250, 275), 2],
+    ]);
+    clouds.push({
+      position,
+      length: width * rng.range(1.4, 2.4),
+      width,
+      thickness: width * rng.range(0.65, 1),
+      angle: armAngle(galaxy, position) + rng.gaussian(0, 0.15),
+      color: hslToHex(hue, rng.range(0.4, 0.6), rng.range(0.55, 0.65)),
+    });
+  }
+  return clouds;
+}
+
+export const DEFAULT_DUST_LANE_COUNT = 520;
+
+/**
+ * Dark dust lanes: thin, absorbing filaments along the inner (concave) edge
+ * of each arm, where real spirals' dust gathers, as in M51. Face-on they
+ * darken the arms' inner edges; edge-on they line up into a dark lane along
+ * the middle of the disc. Kept tight to the arm (little scatter), so they
+ * form threads rather than a uniform veil, of uneven thickness (`opacity`).
+ * `color` is unused (they absorb).
+ */
+export function generateDustLanes(galaxy: GalaxyData, count = DEFAULT_DUST_LANE_COUNT): DustCloud[] {
+  const rng = new Rng(hashSeed(galaxy.seed, 'dustLanes'));
+  const clouds: DustCloud[] = [];
+  for (let i = 0; i < count; i++) {
+    // Not in the bulge, where the arms start.
+    const t = 0.1 + 0.9 * Math.pow(rng.next(), 0.8);
+    const d = GALAXY_RADIUS * (0.08 + 0.92 * t);
+    const arm = rng.int(0, galaxy.arms - 1);
+    // A little towards the centre of curvature: the arm at angle θ + δ lies further out.
+    const inside = rng.range(30, 70) / d;
+    const angle = galaxy.armOffset + (arm / galaxy.arms) * Math.PI * 2 + t * galaxy.twist + inside + rng.gaussian(0, 0.07);
+    const position = {
+      x: Math.cos(angle) * d,
+      y: rng.gaussian(0, GALAXY_RADIUS * 0.003),
+      z: Math.sin(angle) * d,
+    };
+    const width = rng.range(22, 45);
+    clouds.push({
+      position,
+      length: width * rng.range(3, 6),
+      width,
+      thickness: width * rng.range(0.3, 0.5),
+      angle: armAngle(galaxy, position) + rng.gaussian(0, 0.08),
+      color: '#000000',
+      // Clumpy: mostly thin dust, some dense knots.
+      opacity: 0.3 + 1.4 * Math.pow(rng.next(), 1.5),
     });
   }
   return clouds;

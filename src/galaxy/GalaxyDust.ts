@@ -1,47 +1,129 @@
 import * as THREE from 'three';
+import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
 import type { DustCloud } from '../gen/galaxy';
 import { GAUSSIAN_K, GAUSSIAN_PATH_GLSL } from './glowVolume';
 
-/** Brightness of a single cloud at its centre, seen face-on; overlapping clouds add up. */
-const CLOUD_INTENSITY = 0.04;
+export const galaxyDustParams = {
+  /** Brightness of a single gas cloud at its centre, seen face-on; overlapping clouds add up. */
+  cloudIntensity: 0.04,
+  /** The same for the arms' haze (big, faint clouds). */
+  hazeIntensity: 0.02,
+  /** Optical depth through a dust lane's centre, seen face-on; edge-on it's several times more. */
+  laneDepth: 0.45,
+};
+
 /**
- * Soft limit on how much brighter a cloud gets along a long path through it
- * (edge-on, or end-on along the arm): at most 1 / (1 - e^-SATURATION) ≈ 1.16×
- * its face-on brightness. Along the disc many clouds line up and add, so
- * each one must not brighten much on its own.
+ * Soft limit on how much brighter a glowing cloud gets along a long path
+ * through it (edge-on, or end-on along the arm): at most 1 / (1 - e^-SATURATION)
+ * ≈ 1.16× its face-on brightness. Along the disc many clouds line up and add,
+ * so each one must not brighten much on its own.
  */
 const SATURATION = 2;
+/**
+ * The arms' gas as a whole is a slab that absorbs some of its own light:
+ * seen at a slant (|μ| = sine of the angle to the disc), each cloud is
+ * dimmed by (1 - e^(-τ/|μ|))·|μ|/τ (relative to face-on), so the many
+ * clouds that line up edge-on level off instead of piling up into white.
+ * |μ| stops at MIN_MU, about the arms' thickness over their length, as a
+ * finite disc only lines up so many.
+ */
+const SLAB_TAU = 0.5;
+const MIN_MU = 0.1;
+const slab = (mu: number) => ((1 - Math.exp(-SLAB_TAU / mu)) * mu) / SLAB_TAU;
+/** A single dust lane never takes away more than this share of the light behind it. */
+const MAX_DARKENING = 0.85;
 /** Clouds fade out between these camera distances, so nearby space stays clear. */
 const FADE_NEAR = 150;
 const FADE_FAR = 350;
 /**
- * Dust fades in between these fractions of the galaxy radius: the arms are
- * packed tightly near the bulge, where overlapping clouds would pile up.
+ * Glowing gas fades in between these fractions of the galaxy radius: the arms
+ * are packed tightly near the bulge, where overlapping clouds would pile up.
  */
 const INNER_FADE: readonly [number, number] = [0.08, 0.4];
 /** The low-poly hull is a bit bigger than the ellipsoid, so it contains its Gaussian (~1% at the ellipsoid). */
 const HULL_SCALE = 1.15;
+/** √(π/K): the Gaussian's column through its centre, per unit of radius. */
+const UNIT_COLUMN = Math.sqrt(Math.PI / GAUSSIAN_K).toFixed(6);
+
+type Layer = 'gas' | 'haze' | 'lanes';
 
 /**
- * Glowing gas along the spiral arms. Each cloud is a real 3D Gaussian
- * ellipsoid (long along its arm, flat like the disc) drawn as one instance of
- * a low-poly hull; the fragment shader integrates the gas along the view ray
- * in closed form, so clouds change shape as the camera moves around them and
- * overlap in depth. All clouds are one instanced draw. Clouds near the camera
- * fade out and are culled once invisible.
+ * The spiral arms' gas and dust, three layers of Gaussian ellipsoids (long
+ * along their arm, flatter than wide): glowing gas clouds, a faint haze of
+ * big clouds round them, and dark dust lanes along the arms' inner edges
+ * that dim the light behind them (the disc's glow, the gas and the haze;
+ * the stars are drawn later and dim themselves, see discDust.ts). Each
+ * layer is one instanced draw of a low-poly hull; the fragment shader
+ * integrates the gas along the view ray in closed form, so clouds change
+ * shape as the camera moves round them and overlap in depth. Clouds near
+ * the camera fade out and are culled once invisible. The gas is drawn with
+ * the scene; the haze and lanes, soft and big on screen, in the nebulas'
+ * reduced-resolution pass.
  */
 export class GalaxyDust implements Entity {
-  private readonly mesh: THREE.Mesh<THREE.InstancedBufferGeometry, THREE.ShaderMaterial>;
+  private readonly meshes: THREE.Mesh<THREE.InstancedBufferGeometry, THREE.ShaderMaterial>[];
   /** The camera in the parent's (galaxy) coordinates, where the clouds are defined. */
   private readonly cameraLocal = new THREE.Vector3();
   private readonly inverse = new THREE.Matrix4();
 
   constructor(
     private readonly parent: THREE.Object3D,
+    layers: { gas: readonly DustCloud[]; haze: readonly DustCloud[]; lanes: readonly DustCloud[] },
+    galaxyRadius: number,
+    /**
+     * Galaxy coordinates in a reduced-resolution pass (GalaxyNebulas.frame)
+     * for the haze and the lanes: at full resolution they cost ~100 ms a
+     * frame under SwiftShader, half the whole galaxy view.
+     */
+    private readonly lowRes: THREE.Object3D,
+    debug: Debug,
+  ) {
+    this.meshes = (['gas', 'haze', 'lanes'] as const).map((layer) => this.createLayer(layer, layers[layer], galaxyRadius));
+    const f = debug.folder('Galaxy dust');
+    f?.add(galaxyDustParams, 'cloudIntensity', 0, 0.15).name('gas');
+    f?.add(galaxyDustParams, 'hazeIntensity', 0, 0.06).name('haze');
+    f?.add(galaxyDustParams, 'laneDepth', 0, 2).name('dust lanes');
+    f?.add(this, 'visible');
+  }
+
+  /** Shown or hidden (to measure what they cost). */
+  set visible(v: boolean) {
+    for (const m of this.meshes) m.visible = v;
+  }
+
+  get visible(): boolean {
+    return this.meshes[0]!.visible;
+  }
+
+  /** Clouds in each layer. */
+  get counts(): { gas: number; haze: number; lanes: number } {
+    const [gas, haze, lanes] = this.meshes.map((m) => m.geometry.instanceCount);
+    return { gas: gas!, haze: haze!, lanes: lanes! };
+  }
+
+  update(): void {
+    const [gas, haze, lanes] = this.meshes;
+    gas!.material.uniforms.strength!.value = galaxyDustParams.cloudIntensity;
+    haze!.material.uniforms.strength!.value = galaxyDustParams.hazeIntensity;
+    lanes!.material.uniforms.strength!.value = galaxyDustParams.laneDepth;
+  }
+
+  dispose(): void {
+    for (const m of this.meshes) {
+      m.removeFromParent();
+      m.geometry.dispose();
+      m.material.dispose();
+    }
+  }
+
+  private createLayer(
+    layer: Layer,
     clouds: readonly DustCloud[],
     galaxyRadius: number,
-  ) {
+  ): THREE.Mesh<THREE.InstancedBufferGeometry, THREE.ShaderMaterial> {
+    const dark = layer === 'lanes';
+    const lowRes = layer !== 'gas';
     const n = clouds.length;
     const centers = new Float32Array(n * 3);
     const radii = new Float32Array(n * 3);
@@ -55,7 +137,10 @@ export class GalaxyDust implements Entity {
       angles[i] = c.angle;
       const r = Math.hypot(c.position.x, c.position.z) / galaxyRadius;
       const inner = THREE.MathUtils.smoothstep(r, INNER_FADE[0], INNER_FADE[1]);
-      color.set(c.color).multiplyScalar(0.15 + 0.85 * inner).toArray(colors, i * 3);
+      // Dark lanes: how strongly each absorbs, in red.
+      if (dark) color.setRGB(c.opacity ?? 1, 0, 0);
+      else color.set(c.color).multiplyScalar(0.15 + 0.85 * inner);
+      color.toArray(colors, i * 3);
     });
 
     const hull = new THREE.IcosahedronGeometry(1, 1);
@@ -66,9 +151,28 @@ export class GalaxyDust implements Entity {
     geometry.setAttribute('angle', new THREE.InstancedBufferAttribute(angles, 1));
     geometry.setAttribute('cloudColor', new THREE.InstancedBufferAttribute(colors, 3));
     geometry.instanceCount = n;
+    hull.dispose();
+
+    // Glowing gas: its light, softly saturating along long paths. Dust: the share of the light behind it let through.
+    const shade = dark
+      ? /* glsl */ `
+          // Never quite black, even along a lane end-on: soft, and the overlaps still darken further.
+          float dark = ${MAX_DARKENING.toFixed(2)} * (1.0 - exp(-vColor.r * strength * n));
+          gl_FragColor = vec4(1.0 - dark * vFade);`
+      : /* glsl */ `
+          float brightness = (1.0 - exp(-n * ${SATURATION.toFixed(1)})) / ${(1 - Math.exp(-SATURATION)).toFixed(6)};
+          float mu = max(abs(normalize(vLocal - cameraLocal).y), ${MIN_MU.toFixed(2)});
+          brightness *= (1.0 - exp(-${SLAB_TAU.toFixed(2)} / mu)) * mu / ${(SLAB_TAU * slab(1)).toFixed(6)};
+          gl_FragColor = vec4(vColor * strength * vFade * brightness, 1.0);
+          ${
+            lowRes
+              ? // Into a linear target that's laid over the canvas as it is: encode for the canvas here.
+                'gl_FragColor.rgb = sRGBTransferOETF(gl_FragColor).rgb;'
+              : '#include <colorspace_fragment>'
+          }`;
 
     const material = new THREE.ShaderMaterial({
-      uniforms: { cameraLocal: { value: this.cameraLocal } },
+      uniforms: { cameraLocal: { value: this.cameraLocal }, strength: { value: 0 } },
       vertexShader: /* glsl */ `
         uniform vec3 cameraLocal;
         attribute vec3 center;
@@ -80,8 +184,11 @@ export class GalaxyDust implements Entity {
         varying vec3 vRadii;
         varying vec2 vRot;
         varying vec3 vColor;
+        varying float vFade;
         void main() {
-          float fade = smoothstep(${FADE_NEAR.toFixed(1)}, ${FADE_FAR.toFixed(1)}, distance(center, cameraLocal));
+          // Gas fades by the distance to its centre; the big haze clouds once the camera nears their edge.
+          float reach = max(distance(center, cameraLocal) - ${layer === 'gas' ? '0.0' : 'max(radii.x, radii.z)'}, 0.0);
+          float fade = smoothstep(${FADE_NEAR.toFixed(1)}, ${FADE_FAR.toFixed(1)}, reach);
           if (fade <= 0.0) {
             gl_Position = vec4(2.0, 2.0, 2.0, 1.0); // outside the clip volume: nothing drawn
             return;
@@ -95,16 +202,19 @@ export class GalaxyDust implements Entity {
           vCenter = center;
           vRadii = radii;
           vRot = vec2(c, s);
-          vColor = cloudColor * ${CLOUD_INTENSITY} * fade;
+          vColor = cloudColor;
+          vFade = fade;
           gl_Position = projectionMatrix * modelViewMatrix * vec4(galaxy, 1.0);
         }`,
       fragmentShader: /* glsl */ `
         uniform vec3 cameraLocal;
+        uniform float strength;
         varying vec3 vLocal;
         varying vec3 vCenter;
         varying vec3 vRadii;
         varying vec2 vRot;
         varying vec3 vColor;
+        varying float vFade;
         ${GAUSSIAN_PATH_GLSL}
 
         // Galaxy → the cloud's frame (the inverse of the rotation in the vertex shader).
@@ -117,31 +227,47 @@ export class GalaxyDust implements Entity {
           vec3 d = toLocal(normalize(vLocal - cameraLocal)) / vRadii;
           float path = gaussianPath(o, d, ${GAUSSIAN_K.toFixed(1)}, 0.0);
           // 1 through the centre seen face-on (along y), more along longer paths.
-          float n = path / (vRadii.y * ${Math.sqrt(Math.PI / GAUSSIAN_K).toFixed(6)});
-          float brightness = (1.0 - exp(-n * ${SATURATION.toFixed(1)})) / ${(1 - Math.exp(-SATURATION)).toFixed(6)};
-          gl_FragColor = vec4(vColor * brightness, 1.0);
-          #include <colorspace_fragment>
+          float n = path / (vRadii.y * ${UNIT_COLUMN});
+          ${shade}
         }`,
       // Back faces cover the cloud even if the camera gets inside it.
       side: THREE.BackSide,
-      blending: THREE.AdditiveBlending,
       transparent: true,
       depthWrite: false,
     });
+    if (lowRes) {
+      // The pass holds light in rgb and the transmittance of what's in it in alpha, which the
+      // canvas behind is multiplied by when the pass is laid over it (see applyNebulaBlending).
+      material.blending = THREE.CustomBlending;
+      material.blendEquation = THREE.AddEquation;
+      if (dark) {
+        // Dims the haze already in the pass, and (through alpha) the disc's glow and the gas on the canvas.
+        material.blendSrc = THREE.ZeroFactor;
+        material.blendDst = THREE.SrcColorFactor;
+        material.blendSrcAlpha = THREE.ZeroFactor;
+        material.blendDstAlpha = THREE.SrcAlphaFactor;
+      } else {
+        // Adds light, letting everything through.
+        material.blendSrc = THREE.OneFactor;
+        material.blendDst = THREE.OneFactor;
+        material.blendSrcAlpha = THREE.ZeroFactor;
+        material.blendDstAlpha = THREE.OneFactor;
+      }
+    } else {
+      material.blending = THREE.AdditiveBlending;
+    }
 
-    this.mesh = new THREE.Mesh(geometry, material);
-    this.mesh.frustumCulled = false;
-    this.mesh.renderOrder = -1;
-    this.mesh.onBeforeRender = (_renderer, _scene, camera) => {
-      this.inverse.copy(this.mesh.matrixWorld).invert();
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.name = `Galaxy ${layer}`;
+    mesh.frustumCulled = false;
+    // The gas with the disc's glows (-1). In the low-resolution pass, the haze, then the lanes dimming it,
+    // then the nebulas (0) dimming both behind their dust.
+    mesh.renderOrder = dark ? -0.5 : -1;
+    mesh.onBeforeRender = (_renderer, _scene, camera) => {
+      this.inverse.copy(mesh.matrixWorld).invert();
       this.cameraLocal.setFromMatrixPosition(camera.matrixWorld).applyMatrix4(this.inverse);
     };
-    parent.add(this.mesh);
-  }
-
-  dispose(): void {
-    this.parent.remove(this.mesh);
-    this.mesh.geometry.dispose();
-    this.mesh.material.dispose();
+    (lowRes ? this.lowRes : this.parent).add(mesh);
+    return mesh;
   }
 }

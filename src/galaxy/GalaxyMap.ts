@@ -4,6 +4,7 @@ import type { Entity } from '../core/Entity';
 import type { GalaxyData, StarRef } from '../gen/galaxy';
 import { STAR_DIMMING_GLSL, starDimmingUniforms } from '../world/nebulaLook';
 import { GLOW_NEAR, binaryLayout, galaxyGlows, galaxyMemberSize, type GalaxyGlow } from './appearance';
+import { discDustGlsl } from './discDust';
 import { createGlowVolume } from './glowVolume';
 
 /** Dots never get smaller or bigger than this on screen, in CSS pixels. */
@@ -20,7 +21,8 @@ export const galaxyMapParams = {
 /**
  * The galaxy as seen from outside: every star as one soft, additive dot
  * (a single Points draw), plus glowing volumes for the disc and the bulge
- * (so the glow reads from any angle, including edge-on).
+ * (so the glow reads from any angle, including edge-on). Dots are dimmed
+ * behind dark nebulas and the plane's dust lanes (see discDust.ts).
  * Dots have a size in galaxy units, so nearby stars look bigger. Stars
  * twinkle subtly, except the ones held steady (the current and hovered star).
  * A binary is two dots turning about their centre of mass in the view plane
@@ -120,6 +122,7 @@ export class GalaxyMap implements Entity {
         varying vec3 vColor;
         varying float vDim;
         ${STAR_DIMMING_GLSL}
+        ${discDustGlsl(galaxy.radius)}
         void main() {
           vec4 mv = modelViewMatrix * vec4(position, 1.0);
           // Binary members turn about their centre of mass in the view plane.
@@ -145,8 +148,8 @@ export class GalaxyMap implements Entity {
           bool held = abs(starId - steady.x) < 0.5 || abs(starId - steady.y) < 0.5;
           vDim *= held ? 1.0 : 1.0 + twinkle * (1.0 + 0.6 * small) * wave;
           if (fading) vDim *= 1.0 - faded.y;
-          // Hidden behind dark nebulas.
-          vDim *= starDimming(cameraLocal, position);
+          // Hidden behind dark nebulas, and dimmed behind the dust lanes.
+          vDim *= starDimming(cameraLocal, position) * discDustTransmittance(cameraLocal, position);
 
           vColor = color;
           gl_Position = projectionMatrix * mv;
