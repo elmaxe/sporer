@@ -7,7 +7,7 @@ Status: **design only, nothing built yet.** This document is the plan to impleme
 - **Magic rays first, real methods after.** The first tools built are magic rays (heat, cool, air, vacuum, water) that push the climate directly. They get the whole pipeline working and testable (the model over time, the chart, the planet changing, milestones) before any real tool exists, and afterwards they stay as debug tools.
 - **Real methods, played at game speed.** Every lasting tool is a real terraforming idea (orbital mirrors, sunshades, aerosols, greenhouse-gas factories, comet impacts, importing gas, seeding life), and each one moves exactly one lever of the climate model the game already has. The player still gets a heat ray and a cooling spray, but they are a mirror beam focused from orbit and an aerosol haze, and they behave like those things.
 - **A forecast you can read, matter you have to fetch.** The player always sees where the planet is, where it is heading and what each tool would do to it (that's what keeps it from being too hard). Air and water aren't conjured: they are scooped from other bodies, which lose what you take, or brought in on comets, which are used up (that's what keeps it from being too easy).
-- **Relaxed or Real.** One menu setting: Relaxed is quicker and forgiving (no leaks, faster settling, higher limits), Real is as described here. Same physics, different tunables.
+- **Sandbox, Relaxed or Real.** One menu setting: Sandbox adds the magic rays and drops the limits, Relaxed (the default) is quicker and forgiving (no leaks, faster settling, higher limits), Real is as described here. Same physics, different tunables.
 - **The planet answers back.** Changes settle over tens of seconds to minutes, cross tipping points (ice caps that release air when warmed, oceans that freeze over or boil off) and can leak away on small worlds. The world visibly changes as it goes: the sky thickens and changes colour, clouds and rain arrive, seas thaw, and forests spread from the plants you brought.
 
 ## Why real methods rather than magic rays
@@ -142,7 +142,7 @@ The first tools built (phase 2). They push the climate state directly, ignore wh
 - **The heat rays aren't a temperature slider**: they add or remove energy, so a world with thick air or big oceans still responds slowly, and a greenhouse world still runs away. That keeps them honest enough to test the feedbacks.
 - **Rates** (*tunable*): a few seconds of holding moves a world one chart cell; a debug multiplier speeds it up.
 - **Testing**: the smoke test's `terraform` section uses the rays (one key and a held click each), and the planet lab gets the same rays plus a time scrubber.
-- **After the real tools exist**: the rays move to a **Debug** tab of the item bar, shown only with `?debug` or the dev server, and stay in the planet lab. Open decision: also offer them to players as a *Sandbox* setting.
+- **After the real tools exist**: the rays stay in the Terraform tab in **Sandbox** mode (decided: a player setting, see [Sandbox, Relaxed and Real](#sandbox-relaxed-and-real-decided)), in a **Debug** tab with `?debug` or the dev server in any mode, and in the planet lab. Until then they are the only tools, in every mode.
 
 ## Tools
 
@@ -182,7 +182,7 @@ A new **Terraform** tab in the item bar (step 33's bar, next to Weapons and Inve
 **Gas scoop** (takes air) and **gas release** (gives it)
 - *Real basis*: importing nitrogen from Titan, or ammonia from icy bodies, to give Mars a buffer gas (Zubrin & McKay 1993; Fogg 1995).
 - *Use*: in low orbit over a body with air (or a gas giant), hold the scoop: canisters fill with that body's air (its mix of gases) and the source loses the mass. Canisters stack in the hold like plants. Over the target, set one down: the gas is released and spreads.
-- *The trade-off*: robbing a living world (an ocean world's N₂–O₂ is the quickest breathable air there is) costs it pressure and maybe its tier and its plants. A Venus is the best CO₂ source there is, and taking from it is also how you terraform it.
+- *The trade-off* (allowed, decided): robbing a living world (an ocean world's N₂–O₂ is the quickest breathable air there is) costs it pressure and maybe its tier and its plants. A Venus is the best CO₂ source there is, and taking from it is also how you terraform it.
 - *Looks*: a funnel of streaming gas into the ship; a canister bursting into a spreading front.
 
 **Tug** (comets and asteroids)
@@ -246,12 +246,12 @@ Moments get a banner and a sound cue (silent until their files exist, like step 
 - **Limits per body**: 4 mirrors, 1 shade, 3 factories, a few comets per system.
 - **Order matters**: greenhouse gas needs air to work in; plants die if you seed them before it's warm; impacts kill plants, so bring comets in first; a Venus needs shade before its CO₂ goes or its new oceans boil.
 - **Tipping points**: overshoot and the oceans boil or the world freezes over; the forest draws CO₂ down and cools the world.
-- **Leaks**: small worlds can be done, but need topping up; out-of-reach worlds stay out of reach.
+- **Leaks** (Real only): small worlds can be done, but need topping up for good; out-of-reach worlds stay out of reach.
 - **Irreversible things are flagged** (comet impacts, robbing a living world's air) before you commit.
 
-### Relaxed and Real (decided)
+### Sandbox, Relaxed and Real (decided)
 
-A **Terraforming: Relaxed / Real** setting in the menu (a new Gameplay section, saved in localStorage like the Display settings; Real by default, open decision). It can be switched at any time; the body's action log is the same, and only the tunables used to play it forward change. Both use the same physics: the tiers, temperatures and what each tool does per unit are identical, so the chart means the same in both.
+A **Terraforming: Sandbox / Relaxed / Real** setting in the menu (a new Gameplay section, saved in localStorage like the Display settings; **Relaxed by default**, decided; revisit once the balance pass has played Real through). It can be switched at any time; the body's action log is the same, and only the tunables used to play it forward change. Both use the same physics: the tiers, temperatures and what each tool does per unit are identical, so the chart means the same in both.
 
 | | Relaxed | Real |
 |---|---|---|
@@ -262,6 +262,10 @@ A **Terraforming: Relaxed / Real** setting in the menu (a new Gameplay section, 
 | Gas per canister | 2× | as measured |
 | Tipping points | a warning on the chart before each is crossed, and the forecast arrow includes it | the forecast arrow includes it, no extra warning |
 | Impacts | kill no plants outside the crater itself | kill plants in a radius |
+
+**Sandbox** is Relaxed's tunables plus the magic rays in the Terraform tab and no limits per body: for playing with planets rather than solving them. The real tools still work in it, and still take what they move from their source, so robbing a world in Sandbox still robs it.
+
+**Leaky worlds in Real** stay leaky for good (decided): no tool slows leaks; they need topping up, or Relaxed. A stylised leak-slowing tool (a magnetic shield as proposed for Mars at its L1 point, which in reality only stops solar-wind stripping) was considered and dropped.
 
 Targets (*tunable*, checked in the balance phase): Haikrai III in ~15–20 minutes on Relaxed and ~30–45 on Real.
 
@@ -278,12 +282,12 @@ Targets (*tunable*, checked in the balance phase): Haikrai III in ~15–20 minut
 Each phase is a roadmap step that leaves the game playable and is verified (`typecheck`, `test`, `build`, `smoke`) before pushing.
 
 1. **Model**: the six fixes above (`starlight`, low-pressure CO₂, the cloud ramp, partial pressures, leaks, aerosol), the action log and its integration over time, pure and tested. Every generated body unchanged (0 differences over 1500 systems). Research notes in `docs/research/terraforming.md`.
-2. **Magic rays, chart and live looks**: the Terraform tab with the five magic rays; the climate chart in low orbit and the lab; seas, ice, ground, atmosphere and weather following the live climate in both views; leaks; milestones; the Relaxed / Real setting. The first playable version of terraforming.
+2. **Magic rays, chart and live looks**: the Terraform tab with the five magic rays; the climate chart in low orbit and the lab; seas, ice, ground, atmosphere and weather following the live climate in both views; leaks; milestones; the Sandbox / Relaxed / Real setting. The first playable version of terraforming.
 3. **Heat and light**: mirrors, the mirror lance, the sunshade, aerosols.
 4. **Greenhouse**: factories and carbon sinks (placed with the beam).
 5. **Air and water**: scoop and release, tugging comets and asteroids, impacts and craters.
 6. **Life and feedbacks**: plants making O₂ and spreading, the player's species filling a terraformed world, frozen volatiles, ice–albedo, the runaway greenhouse, the difficulty rating and hints.
-7. **Balance pass**: measure over 1500 systems how many bodies reach each tier with what, time a full Haikrai III run in both modes, and tune the limits and rates against the targets above. The magic rays move to the Debug tab.
+7. **Balance pass**: measure over 1500 systems how many bodies reach each tier with what, time a full Haikrai III run in both modes, and tune the limits and rates against the targets above. The magic rays leave Relaxed and Real and stay in Sandbox and the Debug tab.
 
 ## Leads to read (research skill, before building)
 
@@ -303,11 +307,13 @@ None of these has been read and checked for this game yet; they are where to sta
 
 ## Open decisions for the user
 
-Decided: magic rays first, as the starting tools and then for debugging, with real methods as the lasting tools; a Relaxed / Real setting.
+Decided:
+- Magic rays first, as the starting tools; afterwards they stay as the **Sandbox** mode's tools and as debug tools; real methods are the lasting tools.
+- A **Sandbox / Relaxed / Real** setting, **Relaxed by default** for now.
+- **Leaky worlds stay leaky** in Real (no leak-slowing tool); Relaxed has no leaks.
+- **Robbing living worlds is allowed**, with the trade-off (the source loses pressure, maybe its tier and its plants), flagged before you commit.
 
-1. **Robbing living worlds**: allowed (with the trade-off), or only from dead ones?
-2. **Leaky worlds in Real mode** (see [Leaky worlds](#leaky-worlds)): leaky for good, so they need topping up, or a late tool that slows leaks (a magnetic shield as proposed for Mars at its L1 point; it only stops solar-wind stripping, so it would be a stylised stand-in for the cosmic shoreline)?
-3. **Default mode**: Real or Relaxed for a new player?
-4. **Magic rays for players**: debug-only once the real tools exist, or also a Sandbox setting?
-5. **A currency**: matter, limits and travel as the only cost for now, or wait for the spice economy to put prices on tools?
-6. **Native life**: only the player's species on a terraformed world (proposed), or the generator's own species once it reaches T3?
+Still open:
+
+1. **A currency**: matter, limits and travel as the only cost for now, or wait for the spice economy to put prices on tools?
+2. **Native life**: only the player's species on a terraformed world (proposed), or the generator's own species once it reaches T3?
