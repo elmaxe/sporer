@@ -38,7 +38,7 @@
 // Plants: bodies of tier 1 and up have plants around the ship (none on tier 0 or gas giants), hovering one shows it in the
 // tooltip, the menu's Plants button turns them off and on, and a removed plant stays in the change list.
 // Weather: every body in the planet loop has the weather its climate says (or none), as clouds in the system view and
-// low orbit, with storms and flashes coming and going over time; the loop also visits an acid-deck (Venus-like, with
+// low orbit (water and methane worlds' as puffy clusters, some in view), with storms and flashes coming and going over time; the loop also visits an acid-deck (Venus-like, with
 // volcanic lightning), a methane (Titan-like) and a dusty (Mars-like) world. The menu's Weather toggle switches it.
 // Seamless zooms: through the galaxy and planet loops, every frame of every level transition records the crossfade
 // weight and canvas brightness; each transition must crossfade and never go black (screenshots mid-handover).
@@ -275,16 +275,19 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null, during = n
   r.weather = await evaluate(`planet.weather && new Promise((resolve) => {
     const look = planet.weather.look;
     const start = planet.frame.renderTime, wall = performance.now();
-    let storms = 0, flashes = 0, shafts = 0;
+    let storms = 0, flashes = 0, shafts = 0, puffs = 0;
     const clouds = planet.scene.getObjectByName('Clouds');
     (function f() {
       storms = Math.max(storms, look.shown.length);
+      puffs = Math.max(puffs, look.puffs[0] ? look.puffs[0].puffCount : 0);
       flashes = Math.max(flashes, look.flashCount);
       shafts = Math.max(shafts, planet.weather.shaftCount);
       // 4 s of the level's clock (bounded in wall time, should the clock stall).
       if (planet.frame.renderTime - start < 4 && performance.now() - wall < 20000) return requestAnimationFrame(f);
       resolve({ kind: look.data.kind, volcanic: look.data.volcanic, lightning: look.data.storms.some((s) => s.lightning > 0) || look.data.backgroundLightning > 0,
         storms, flashes, shafts, clouds: !!clouds && clouds.visible, systemView: !!__body.weather && __body.weather.data.kind === look.data.kind,
+        // Water and methane worlds' clouds are puffy clusters (gen/cumulus.ts), some of them in view.
+        puffy: !!look.cumulus, puffs,
         cloudRadius: +(look.data.cloudRadius / look.data.radius).toFixed(3) });
     })();
   })`);
@@ -436,6 +439,8 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null, during = n
         r.weather.volcanic === r.expectedWeather.volcanic &&
         r.weather.clouds &&
         r.weather.systemView &&
+        r.weather.puffy === (r.weather.kind === 'water' || r.weather.kind === 'methane') &&
+        (!r.weather.puffy || r.weather.puffs > 0) &&
         r.weather.cloudRadius > 1)) &&
     r.modeAfter === 'system' &&
     r.parkedAt === r.name &&

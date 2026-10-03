@@ -176,6 +176,8 @@ export class LabInfo implements Entity {
       if (w.precipitation) parts.push(w.precipitation);
       if (w.volcanic) parts.push('volcanic lightning');
       parts.push(`${weather.shown.length} storms · ${weather.flashCount} flashes`);
+      const puffs = weather.puffs[0];
+      if (puffs) parts.push(`${puffs.clusterCount} clouds · ${puffs.puffCount} puffs drawn`);
       rows.push(['Weather', parts.join(' · ')]);
     } else if (planet.type !== 'gas' && !planet.shape) {
       rows.push(['Weather', 'none']);
