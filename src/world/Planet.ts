@@ -72,11 +72,6 @@ const VOLCANO_RINGS = 12;
 const VOLCANO_SEGMENTS = 24;
 /** A volcano's cone sinks this far under the globe at its foot, system units. */
 const VOLCANO_FOOT_SINK = 0.01;
-/**
- * The system view draws volcanoes this much wider and higher than low orbit
- * does: true to scale one is a few pixels across a globe seen whole.
- */
-const VOLCANO_EXAGGERATION = 2.5;
 /** Ash puffs over each volcano in the system view, and the seconds each takes to rise. */
 const VOLCANO_PUFFS = 4;
 const PUFF_PERIOD = 6;
@@ -253,8 +248,9 @@ export class Planet implements Entity, CelestialBody {
   /**
    * Shows a volcano raised at `site` (by a volcano bomb in low orbit) at
    * system time `bornAt`, rising and erupting with the clock; null for one
-   * long settled. The same cone as low orbit's (planet/Volcanoes.ts), scaled
-   * down, standing on this globe's coarse facets, with its crater's glow.
+   * long settled. The same cone as low orbit's (planet/Volcanoes.ts), true
+   * to scale in this view's units, standing on this globe's coarse facets,
+   * with its crater's glow and a few ash puffs.
    * Nothing on a gas giant or once busted.
    */
   addVolcano(site: VolcanoSite, bornAt: number | null): void {
@@ -267,7 +263,7 @@ export class Planet implements Entity, CelestialBody {
     const paint = terrainSampler(config.radius, config.seed, config.style, { shape: config.shape });
     const color = new THREE.Color();
     const centre = new THREE.Vector3(site.x, site.y, site.z).normalize();
-    const shape = new VolcanoShape(site, R, near(centre, color), sea ? R : null, VOLCANO_EXAGGERATION);
+    const shape = new VolcanoShape(site, R, near(centre, color), sea ? R : null);
     const ground = facetGround(this.surface.geometry, shape);
     const cone = new VolcanoMesh(shape, VOLCANO_RINGS, VOLCANO_SEGMENTS, {
       ground: (dir, out) => {

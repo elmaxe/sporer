@@ -114,14 +114,6 @@ describe('a volcano', () => {
     expect(small.baseRadius).toBeLessThanOrEqual(40 * volcanoParams.maxBaseShare * 1.2 + 1e-9);
   });
 
-  it('can be drawn exaggerated (the system view), wider and higher in proportion', () => {
-    const v = new VolcanoShape(site, R, R, null);
-    const big = new VolcanoShape(site, R, R, null, 2.5);
-    expect(big.baseRadius).toBeCloseTo(2.5 * v.baseRadius, 9);
-    expect(big.height).toBeCloseTo(2.5 * v.height, 9);
-    expect(big.angle).toBeCloseTo(2.5 * v.angle, 9);
-  });
-
   it('rising from the sea floor, breaks the surface with its crater floor above the sea', () => {
     const floor = R - 40;
     const v = new VolcanoShape(site, R, floor, R);
