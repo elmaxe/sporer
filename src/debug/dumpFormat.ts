@@ -5,9 +5,10 @@ import type { LogEntry } from './consoleLog';
 import type { FrameStats } from './frameTimes';
 
 /**
- * The debug dump file (the menu's "Save debug dump", F8): one JSON file with
- * what the player saw, what they marked and wrote about it, and the state
- * needed to reproduce it. `scripts/dump.mjs` (npm run dump) unpacks it and
+ * The debug dump file (the menu's "Save debug dump", F8; in the planet and
+ * plant labs the Report button or F8): one JSON file with what the player
+ * saw, what they marked and wrote about it, and the state needed to
+ * reproduce it. `scripts/dump.mjs` (npm run dump) unpacks it and
  * `npm run shot -- --dump <file>` restores it (see the `debug-dump` skill).
  * Pure types and helpers: no DOM or THREE.
  */
@@ -98,6 +99,36 @@ export interface GameState {
   };
 }
 
+/** Which page the dump was taken on: the game, the planet lab (lab.html) or the plant lab (plants.html). */
+export type DumpApp = 'game' | 'planet-lab' | 'plant-lab';
+
+/** A lab's state when the dump was taken (see src/lab/labDump.ts, src/plantlab/plantLabDump.ts). */
+export interface LabDumpState {
+  page: 'planet-lab' | 'plant-lab';
+  /** The page's #hash: the exact planet (or plant set, selection) and view, as the lab's own links have it. */
+  hash: string;
+  /** The lab's link to it. */
+  link: string;
+  /** What was shown, in a line (name, what it is, the view). */
+  title: string;
+  /**
+   * Where the camera was: direction from its centre (the planet's, the UFO with the planet lab's fly camera, the
+   * plant's or the grove's pivot) and distance from it, in planet radii (plant heights; units in the grove).
+   */
+  camera: { direction: Vec3; zoom: number; position: Vec3; fov: number };
+  /** The planet lab's UFO, as a direction from the planet's centre (globe view), else null. */
+  ship: Vec3 | null;
+  /** The planet lab's system clock (s), else null. */
+  time: number | null;
+  /** The latest edit was built and drawn (false: mid-rebuild, the picture may be of the one before). */
+  ready: boolean;
+  ui: {
+    touchMode: boolean;
+    /** Visible overlay elements and where they are (CSS px), the lab's panel among them. */
+    overlays: { id: string; rect: [number, number, number, number] }[];
+  };
+}
+
 export interface DeviceInfo {
   userAgent: string;
   platform: string;
@@ -142,11 +173,16 @@ export interface DebugDump {
   /** What the player wrote. */
   note: string;
   marks: DumpMark[];
+  /** The page it was taken on (missing in dumps from before the labs had them: the game). */
+  app?: DumpApp;
   build: { branch: string | null; build: string | null; commit: string | null; dev: boolean };
   device: DeviceInfo;
   renderer: RendererInfo | null;
   performance: { uptime: number; frames: FrameStats | null; frameTimesMs: number[]; jsHeapMb: number | null };
+  /** The game's state (null in a lab, or if it couldn't be read). */
   state: GameState | null;
+  /** A lab's state (dumps taken in the planet or plant lab). */
+  lab?: LabDumpState | null;
   /** Why the state couldn't be read, if it couldn't. */
   stateError?: string;
   log: { entries: LogEntry[]; dropped: number };
@@ -205,7 +241,13 @@ export function summaryLines(dump: Omit<DebugDump, 'images'>): string[] {
   if (dump.note.trim()) lines.push(...dump.note.trim().split('\n').map((l, i) => (i === 0 ? `Note: ${l}` : l)));
   if (dump.marks.length > 0) lines.push(`Marks: ${dump.marks.map((m, i) => `${i + 1} (${Math.round(m.x * 100)}%, ${Math.round(m.y * 100)}%)`).join(' · ')}`);
   const s = dump.state;
-  if (s) {
+  const lab = dump.lab;
+  if (lab) {
+    const name = lab.page === 'planet-lab' ? 'Planet lab' : 'Plant lab';
+    const time = lab.time !== null ? ` · t=${lab.time.toFixed(2)} s` : '';
+    lines.push(`Where: ${name}: ${lab.title}${time}${lab.ready ? '' : ' · mid-rebuild'}`);
+    lines.push(`Camera: distance ${lab.camera.zoom.toFixed(2)} · fov ${lab.camera.fov}`);
+  } else if (s) {
     const time = s.mode === 'planet' && s.planet ? s.planet.time : s.system.time;
     const moving = s.transitioning ? ` · mid-transition${s.crossfade !== null ? ` (crossfade ${s.crossfade.toFixed(2)})` : ''}` : '';
     lines.push(`Where: ${where(s)} · seed ${s.seed ?? 'default'} · star ${s.star} · t=${time.toFixed(2)} s${moving}`);

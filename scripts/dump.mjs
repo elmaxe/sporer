@@ -1,4 +1,4 @@
-// Unpacks a debug dump (the game's menu → "Save debug dump", or F8) for reading: its pictures as files, the rest
+// Unpacks a debug dump (the game's menu → "Save debug dump", or F8; the labs' Report button) for reading: its pictures as files, the rest
 // as JSON without the pictures, and a readable summary on stdout. See the debug-dump skill.
 //
 // Usage: npm run dump -- <dump.json> [--out <dir>]
@@ -6,9 +6,11 @@
 //
 // Writes:
 //   annotated.jpg   the screen with the player's marks (numbered rings) and a summary strip under it: look first
-//   screen.jpg      the screen as the player saw it: the game with the HUD, tooltip, maps and buttons over it
+//   screen.jpg      the screen as the player saw it: the game with the HUD, tooltip, maps and buttons over it (in a
+//                   lab, its readout and panel)
 //   game.png        the game's own picture, exact pixels (no HTML overlays)
-//   state.json      the dump without the pictures (game state, device, renderer, frame times, console log, tunables)
+//   state.json      the dump without the pictures (game or lab state, device, renderer, frame times, console log,
+//                   tunables)
 // Prints the summary, every console error, the marks in picture pixels, and the command that restores the dump's
 // state in the headless browser (npm run shot -- --dump <file>).
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -74,7 +76,9 @@ function imageSize(b) {
 const lines = [];
 const say = (s = '') => lines.push(s);
 const s = dump.state;
-say(`Debug dump ${basename(file)} · taken ${dump.createdAt}`);
+const lab = dump.lab ?? null;
+const APPS = { game: 'the game', 'planet-lab': 'the planet lab', 'plant-lab': 'the plant lab' };
+say(`Debug dump ${basename(file)} · taken ${dump.createdAt} in ${APPS[dump.app ?? 'game'] ?? dump.app}`);
 say(`Note: ${dump.note?.trim() ? dump.note.trim().replace(/\n/g, '\n      ') : '(none)'}`);
 const [sw, sh] = sizes.screen ?? sizes.game ?? [0, 0];
 const [vw, vh] = dump.device.viewport;
@@ -87,7 +91,15 @@ if (dump.marks.length > 0) {
 say(`URL: ${dump.url}`);
 const b = dump.build;
 say(`Build: ${b.branch ?? '?'} · ${b.build !== null ? `build ${b.build}` : b.dev ? 'dev server' : 'local build'} · commit ${b.commit ?? '?'}`);
-if (s) {
+if (lab) {
+  say(`${lab.page === 'planet-lab' ? 'Planet lab' : 'Plant lab'}: ${lab.title}${lab.ready ? '' : ' (mid-rebuild: the picture may be from before the last edit)'}`);
+  if (lab.link !== dump.url) say(`  Link: ${lab.link}`);
+  const c = lab.camera;
+  say(`Camera: distance ${c.zoom.toFixed(3)} ${lab.page === 'planet-lab' ? 'planet radii' : "plant heights (the grove: units)"} from its centre, direction ${c.direction.map((v) => v.toFixed(3)).join(', ')} · position ${c.position.map((v) => v.toFixed(2)).join(', ')} · fov ${c.fov}`);
+  if (lab.time !== null) say(`Clock: t=${lab.time.toFixed(3)} s`);
+  if (lab.ship) say(`UFO: over ${lab.ship.map((v) => v.toFixed(3)).join(', ')}`);
+  say(`Overlays: ${lab.ui.overlays.map((o) => `${o.id} [${o.rect.join(',')}]`).join(' ')}`);
+} else if (s) {
   say(`Level: ${s.mode}${s.transitioning ? ` (mid-transition, crossfade ${s.crossfade})` : ''} · seed ${s.seed ?? 'default'} · system ${s.system.id} ${s.system.name}${s.system.starless ? ' (rogue)' : ''}`);
   const ship = s.system.ship;
   say(`System: t=${s.system.time.toFixed(3)} s · ship ${ship.enRoute ? 'flying to' : 'hovering at'} ${ship.target ? `${ship.target.name} (${ship.target.kind} ${ship.target.index})` : '?'} · view distance ${ship.viewDistance.toFixed(1)}`);
@@ -123,8 +135,9 @@ for (const e of log) say(`  [${e.t.toFixed(1)} s] ${e.level}: ${e.text.replace(/
 if (images.screenError) say(`Screen picture failed: ${images.screenError} (game.png has the game alone)`);
 say();
 say(`Files: ${written.join('  ')}`);
-if (s) {
+if (s || lab) {
   const phone = d.touch ? ' --phone' : '';
-  say(`Reproduce: npm run shot -- --dump ${file} --out ${join(out, 'repro')} --clean${phone} shot:restored`);
+  // A lab's panel is part of what the player saw: keep it.
+  say(`Reproduce: npm run shot -- --dump ${file} --out ${join(out, 'repro')}${lab ? '' : ' --clean'}${phone} shot:restored`);
 }
 console.log(lines.join('\n'));

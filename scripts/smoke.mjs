@@ -79,10 +79,11 @@
 // system view's tooltip say it's a debris field, revisiting low orbit shows the field (no globe, no plants or weather),
 // and it's still busted after a trip out to the galaxy and back.
 // Planet lab (lab.html): every type, a moon, a comet and an asteroid build and draw in both views, a game planet, a game comet
-// and a game asteroid load, the panel works.
+// and a game asteroid load, the panel works, and the readout's Report button saves a debug dump of the lab.
 // Plant lab (plants.html): every architecture grows and draws at every level of detail, each level cheaper than the
 // last, zooming out on one plant goes through the levels (the game's crossfade) and past the last one, the line-up and
-// the grove (the game's own plant system) draw, a game planet's plants load, the planet lab links to its plants.
+// the grove (the game's own plant system) draw, a game planet's plants load, the planet lab links to its plants, and
+// the Report button saves a debug dump of the lab.
 // Prints JSON with FPS, console errors and screenshot paths. Exit 1 on failure.
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -1638,7 +1639,8 @@ if (started && !stalled) writeFileSync(screenshot, await page.screenshot());
 /**
  * The planet lab (lab.html): every planet type and a moon build in the globe and system views and draw a lit
  * planet (mean brightness of the middle of the canvas), lava worlds have eruptions, a game planet loads by
- * star and index with its name, the panel's type control rebuilds the planet, and the page URL keeps a link.
+ * star and index with its name, the panel's type control rebuilds the planet, the page URL keeps a link, and the
+ * Report button saves a debug dump of it.
  */
 async function runLab() {
   const r = { cases: [] };
@@ -1707,6 +1709,7 @@ async function runLab() {
     await lab.whenReady();
     return lab.planet.type;
   })()`);
+  r.dump = await labDump(page);
   r.screenshot = join(outDir, 'lab.png');
   writeFileSync(r.screenshot, await page.screenshot());
   r.ok =
@@ -1723,8 +1726,30 @@ async function runLab() {
     r.loadedAsteroid?.kind === 'asteroid' &&
     r.loadedAsteroid.shape &&
     r.loadedAsteroid.source?.asteroid === 0 &&
-    r.panelType === 'ice';
+    r.panelType === 'ice' &&
+    labDumpOk(r.dump, 'planet-lab');
   return r;
+}
+
+/**
+ * A lab's debug dump: the readout's Report button opens the dump dialog with the screen, and Save makes the JSON
+ * file with the pictures and the lab's state (its #hash, the camera), no game state.
+ */
+async function labDump(page) {
+  const evaluate = page.tryEvaluate;
+  await evaluate(`window.__dumpBlob = null; { const o = URL.createObjectURL; URL.createObjectURL = (b) => { window.__dumpBlob = b; return o(b); }; }
+    document.getElementById('lab-dump').click()`);
+  if (!(await page.waitFor(`!document.getElementById('dump').hidden && document.getElementById('dump-image').naturalWidth > 0`, 60000))) return { opened: false };
+  await evaluate(`document.getElementById('dump-note').value = 'lab'; document.getElementById('dump-save').click()`);
+  if (!(await page.waitFor(`window.__dumpBlob !== null && document.getElementById('dump').hidden`, 60000))) return { opened: true, saved: false };
+  return evaluate(`window.__dumpBlob.text().then((t) => { const d = JSON.parse(t);
+    return { opened: true, saved: true, format: d.format, app: d.app, note: d.note, state: d.state, hash: d.lab?.hash === location.hash.slice(1),
+      zoom: d.lab?.camera.zoom ?? 0, screen: !!d.images.screen?.startsWith('data:image/jpeg'), annotated: !!d.images.annotated?.startsWith('data:image/jpeg'),
+      tunables: !!d.tunables, running: !game.paused }; })`);
+}
+
+function labDumpOk(d, app) {
+  return !!d && d.saved && d.format === 'sporer-debug-dump' && d.app === app && d.note === 'lab' && d.state === null && d.hash && d.zoom > 0 && d.screen && d.annotated && d.tunables && d.running;
 }
 await section('lab', async () => (lab = await runLab()).ok);
 
@@ -1798,6 +1823,7 @@ async function plantLabChecks(page) {
   })()`);
   r.screenshot = join(outDir, 'plant-lab.png');
   writeFileSync(r.screenshot, await page.screenshot());
+  r.dump = await labDump(page);
   await evaluate(`plantLab.setView({ view: 'specimen', showLods: false })`);
   r.loaded = await evaluate(`(async () => {
     await plantLab.load('1337', ${PLANT_STAR}, ${PLANT_PLANET});
@@ -1828,7 +1854,8 @@ async function plantLabChecks(page) {
     r.loaded.source?.star === PLANT_STAR &&
     r.loaded.hash > 100 &&
     r.linked?.species === r.loaded.species &&
-    r.linked.source?.planet === PLANT_PLANET;
+    r.linked.source?.planet === PLANT_PLANET &&
+    labDumpOk(r.dump, 'plant-lab');
   return r;
 }
 await section('plants', async () => (plantLab = await runPlantLab()).ok);

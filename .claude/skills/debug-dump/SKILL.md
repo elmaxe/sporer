@@ -1,19 +1,21 @@
 ---
 name: debug-dump
-description: Read a debug dump from this game (a sporer-dump-*.json file the player saved with the menu's "Save debug dump" button or F8) and reproduce what it shows. Use whenever the user shares, attaches or mentions a dump file, a sporer-dump JSON, or a bug report made with the dump button, before guessing at the problem; and when changing what the dump records (src/debug/).
+description: Read a debug dump from this game (a sporer-dump-*.json file the player saved with the menu's "Save debug dump" button or F8, or with the planet or plant lab's Report button) and reproduce what it shows. Use whenever the user shares, attaches or mentions a dump file, a sporer-dump JSON, or a bug report made with the dump button, before guessing at the problem; and when changing what the dump records (src/debug/).
 ---
 
 # Debug dumps
 
-The player presses **Save debug dump** in the menu (Esc, or the menu button on phones) or **F8**. The game freezes, captures the frame, and opens a dialog where they **tap the picture to mark the problem** (numbered rings) and write a note. Then they **Save file** or **Share…** (phones) a single `sporer-dump-YYYY-MM-DD-HHMM-SS.json`. It holds:
+The player presses **Save debug dump** in the menu (Esc, or the menu button on phones) or **F8**. In the planet lab (`lab.html`) and the plant lab (`plants.html`) it's the readout's **Report** button or **F8**: the same dialog and file, with the lab's state in `lab` instead of the game's in `state`, and `app` saying which page it was. The game freezes, captures the frame, and opens a dialog where they **tap the picture to mark the problem** (numbered rings) and write a note. Then they **Save file** or **Share…** (phones) a single `sporer-dump-YYYY-MM-DD-HHMM-SS.json`. It holds:
 
 | Key | What |
 |---|---|
 | `note`, `marks` | what the player wrote, and the spots they marked (`x`, `y`: 0–1 across and down the picture) |
 | `images.annotated` | JPEG: the screen with the marks as numbered rings and a summary strip **under** it (note, where, build, device, FPS, console). Look at this first |
-| `images.screen` | JPEG: what the player saw, the game with the HUD, tooltip, maps and buttons drawn over it (html-to-image). `images.screenError` if that failed |
+| `images.screen` | JPEG: what the player saw, the game with the HUD, tooltip, maps and buttons drawn over it (html-to-image; in a lab, its readout and panel too). `images.screenError` if that failed |
 | `images.game` | PNG: the game canvas alone, exact pixels (the planet map's terrain is drawn in it; HTML overlays aren't) |
 | `state` | the game's state (`GameState` in `src/debug/dumpFormat.ts`): seed, system id, level (`mode`), mid-transition or not, camera and orbit, system clock, the ship and its target body, every body's spin, low orbit's body, clock and ship spot, the bodies blown apart by the planet buster (and when) and whether one was going off, the volcanoes raised by the volcano bomb, the galaxy's spin, graphics switches, the HUD's text, the tooltip, which maps were shown, and the overlays' rectangles (CSS px) |
+| `app` | `game`, `planet-lab` or `plant-lab` (missing in older dumps: the game) |
+| `lab` | in a lab (`LabDumpState`): the page's `#hash` (the exact planet, or plant set and selection, and the view) and its `link`, a one-line `title`, the camera (direction from its centre and distance: planet radii, plant heights, units in the grove), the planet lab's clock and UFO, whether the last edit was built (`ready`), the overlays' rectangles (the panel among them); `state` is null |
 | `device` | user agent, viewport (CSS px), devicePixelRatio, touch, orientation, home-screen app, fullscreen |
 | `renderer` | GPU, WebGL version, pixel ratio, drawing buffer, quality, draw calls and triangles in the last frame, programs, context lost |
 | `performance` | FPS stats and the last ~600 frame times, JS heap, uptime |
@@ -57,7 +59,9 @@ Start the dev server (see `screenshot`), then:
 npm run shot -- --dump <file.json> --out <dir> --clean [steps...]
 ```
 
-It loads the dump's seed and system at its page size and quality (a touch device in `--phone` mode), then restores the state (`debugDump.restore(state)`): graphics switches; the system clock and every body's spin; the ship at its body; busted bodies (blown apart again, at their blast times, before anything else); volcanoes (on the globes and in their bodies' change lists); for low orbit, the descent to the body, its clock and spin, the ship's spot and altitude, and the globe's detail built; for the galaxy, its spin; then the orbit camera's distance, direction and look-up, the HUD and the map. It leaves the game **paused** at that moment, and the first result is a list of notes on what couldn't be matched (a ship caught mid-flight is parked at its destination; a mid-transition dump comes back at the incoming level, settled). With no steps it takes `shot:restored`; add more steps as usual, e.g. `crop:` around a mark, `js:game.paused = false` then `wait:` to watch it move, or `freeze:` on something.
+A lab's dump opens that lab at the dump's `#hash`, at its page size, puts the camera (and the planet lab's clock and UFO) back and leaves it paused; leave out `--clean` so the panel shows as the player saw it (the summary's Reproduce line does). Then tweak the planet or plants in the panel or with `js:lab.set(...)` / `js:plantLab.set(...)`.
+
+For the game, it loads the dump's seed and system at its page size and quality (a touch device in `--phone` mode), then restores the state (`debugDump.restore(state)`): graphics switches; the system clock and every body's spin; the ship at its body; busted bodies (blown apart again, at their blast times, before anything else); volcanoes (on the globes and in their bodies' change lists); for low orbit, the descent to the body, its clock and spin, the ship's spot and altitude, and the globe's detail built; for the galaxy, its spin; then the orbit camera's distance, direction and look-up, the HUD and the map. It leaves the game **paused** at that moment, and the first result is a list of notes on what couldn't be matched (a ship caught mid-flight is parked at its destination; a mid-transition dump comes back at the incoming level, settled). With no steps it takes `shot:restored`; add more steps as usual, e.g. `crop:` around a mark, `js:game.paused = false` then `wait:` to watch it move, or `freeze:` on something.
 
 Compare `restored.png` with `screen.jpg`. Animated things (twinkle, storm particles) and the pixel ratio (headless runs at DPR 1) differ; positions, the body, the light and the terrain should match. If they don't, that's a restore bug: fix it in `src/debug/gameState.ts`.
 
@@ -71,6 +75,6 @@ After a fix, run the same `--dump` command and compare with the dump's pictures.
 
 ## Changing the dump
 
-- The format is `src/debug/dumpFormat.ts` (`DUMP_VERSION`; bump it when a field changes meaning). Capture and restore of the game state: `src/debug/gameState.ts`. The button, pictures and file: `src/debug/DebugDump.ts`; the dialog: `src/ui/DebugDumpDialog.ts` (`#dump` in `index.html`); the marked-up picture: `src/debug/annotate.ts`; the console log: `src/debug/consoleLog.ts`; frame times: `src/debug/frameTimes.ts`.
+- The format is `src/debug/dumpFormat.ts` (`DUMP_VERSION`; bump it when a field changes meaning). Capture and restore of the game state: `src/debug/gameState.ts`; of the labs': `src/lab/labDump.ts`, `src/plantlab/plantLabDump.ts` (each page hands `DebugDumpControl` its `DumpSource`). The button, pictures and file: `src/debug/DebugDump.ts`; the dialog: `src/ui/DebugDumpDialog.ts` (`#dump` in `index.html`); the marked-up picture: `src/debug/annotate.ts`; the console log: `src/debug/consoleLog.ts`; frame times: `src/debug/frameTimes.ts`.
 - Something new the game shows that a bug report would need (a new level, a new kind of body, a setting) → record it in `GameState`, restore it in `restoreGameState`, and print it in `scripts/dump.mjs`.
-- The smoke test's `audio` section takes a dump through the menu and checks the file.
+- The smoke test's `audio` section takes a dump through the menu and checks the file; the `lab` and `plants` sections take one with the Report button.

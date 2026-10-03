@@ -23,6 +23,8 @@
 //                      (a phone's in --phone mode) and quality, then restore its state (level, body, clocks,
 //                      ship, camera, graphics switches) and leave the game paused there; the notes on what
 //                      couldn't be matched are the first result. With no steps: shot:restored. See debug-dump.
+//                      A dump taken in the planet or plant lab opens that lab at its #hash (the exact planet or
+//                      plants and view) and restores its camera (and the planet lab's clock and UFO).
 //
 // Steps, run in order (with no steps: shot:view):
 //   shot:<name>                  screenshot → <name>.png
@@ -50,8 +52,8 @@
 //   goto:<url or ?params>        load another page (e.g. goto:?star=2) and wait for the game
 //
 // Page globals (dev build): game, levels, galaxy, ship, world, system, planet, audio, menu, debugDump, generateSystem.
-// In the lab: game and lab (src/lab/PlanetLab.ts: lab.set, setView, generate, load, look, setTime, ...);
-// settle there waits for lab.ready (the latest edit built and drawn). In the plant lab: game and plantLab
+// In the lab: game, debugDump and lab (src/lab/PlanetLab.ts: lab.set, setView, generate, load, look, setTime, ...);
+// settle there waits for lab.ready (the latest edit built and drawn). In the plant lab: game, debugDump and plantLab
 // (src/plantlab/PlantLab.ts: plantLab.set, setForm, select, setView, generate, load, look, ...), settle waits for plantLab.ready.
 // Prints JSON: { ok, failure, out, shots, results, errors } (errors: console errors/warnings/exceptions).
 // A failing step stops the run, saves failure.png and exits 1.
@@ -95,10 +97,17 @@ for (let i = 0; i < args.length; i++) {
   else steps.push(a);
 }
 if (opts.dump) {
-  const { state, device, url: dumpUrl } = opts.dump;
-  if (!state) throw new Error(`The dump has no game state (${opts.dump.stateError ?? 'unknown why'})`);
-  if (state.seed !== null) opts.params.seed ??= state.seed;
-  opts.params.star ??= String(state.star);
+  const { state, lab, device, url: dumpUrl } = opts.dump;
+  if (lab) {
+    // A lab's dump: that lab, at the dump's planet or plants (its #hash).
+    if (lab.page === 'plant-lab') opts.plants = true;
+    else opts.lab = true;
+    opts.hash = lab.hash;
+  } else {
+    if (!state) throw new Error(`The dump has no game state (${opts.dump.stateError ?? 'unknown why'})`);
+    if (state.seed !== null) opts.params.seed ??= state.seed;
+    opts.params.star ??= String(state.star);
+  }
   if (new URL(dumpUrl).searchParams.get('quality') === 'low') opts.params.quality = 'low';
   if (device.touch) opts.phone = true;
   if (!args.includes('--size')) opts.size = device.viewport.join('x');
@@ -115,6 +124,7 @@ const page_ = opts.plants
     : '';
 const url = new URL(page_, opts.url);
 for (const [k, v] of Object.entries(opts.params)) url.searchParams.set(k, v);
+if (opts.hash) url.hash = opts.hash;
 /** True once the page's game (or the lab) is running. */
 const STARTED = `typeof window.lab !== 'undefined' || typeof window.plantLab !== 'undefined' || (typeof window.levels !== 'undefined' && typeof window.ship !== 'undefined')`;
 /** True when nothing is changing: no level transition in the game, the latest edit built and drawn in the lab. */
@@ -316,7 +326,7 @@ async function run(step) {
       });
       return;
     case 'restore':
-      results.push({ step, value: await page.evaluate(`debugDump.restore(${JSON.stringify(opts.dump.state)})`, 300000) });
+      results.push({ step, value: await page.evaluate(`debugDump.restore(${JSON.stringify(opts.dump.lab ?? opts.dump.state)})`, 300000) });
       return;
     case 'goto': {
       const next = new URL(rest, url);
