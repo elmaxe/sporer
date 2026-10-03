@@ -1178,6 +1178,12 @@ await section('dust', async () => {
   const home = startId;
   // Where the section started: it ends there, so the sections after it run where they would without it.
   const from = await evaluate(`system.id`);
+  // And with the ship at the same body and the view from the same side (coming back through the galaxy map leaves the
+  // view facing the way it arrived from, and the planet section's descent lands where the view faces).
+  const view = await evaluate(`(() => {
+    const o = levels.systemLevel.orbit, V = game.camera.position.constructor;
+    return { dir: o.direction(new V()).toArray(), zoom: o.zoom, body: ship.targetBody.name };
+  })()`);
   const segmentsBefore = await evaluate(`window.__seamless ? __seamless.segments.length : 0`);
   /** Through the galaxy map to system `id` (no page load, so the zoom recorder keeps running). */
   const visit = async (id) => {
@@ -1278,6 +1284,13 @@ await section('dust', async () => {
     minBrightness: +Math.min(...seg.frames.map((x) => x.brightness)).toFixed(2),
   })) : null`);
   r.returned = from === home || (await visit(from));
+  await evaluate(`(() => {
+    const body = [...world.stars, ...world.planets, ...world.moons].find((b) => b.name === ${JSON.stringify(view.body)});
+    if (body) ship.parkAt(body);
+    const o = levels.systemLevel.orbit;
+    o.setDistance(${view.zoom});
+    o.lookFrom(new (game.camera.position.constructor)(...${JSON.stringify(view.dir)}));
+  })()`);
 
   r.ok =
     r.returned &&
