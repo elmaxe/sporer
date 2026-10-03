@@ -4,6 +4,7 @@ import { GLOBE_SIZE_FACTOR } from '../gen/planets';
 import { faceGridPoint, type FacePoint } from '../world/cubeSphereMath';
 import { GROUND_LAYER } from '../world/groundDepth';
 import type { SurfaceSampler } from '../world/planetGeometry';
+import { viewFreeze } from '../world/viewFreeze';
 import {
   CHUNK_CELLS,
   beyondHorizon,
@@ -39,7 +40,7 @@ export const lodParams = {
   budgetMs: 4,
   /** Seconds a new chunk takes to blend from its parent's shape to its own (and back before a merge). */
   morphSeconds: 0.4,
-  /** Stop splitting and merging (to look around at what was built). */
+  /** Stop splitting and merging (to look around at what was built; the menu's Freeze does this too, see world/viewFreeze.ts). */
   freeze: false,
 };
 
@@ -169,7 +170,7 @@ export class LodSurface {
    * advances their blending by `dt` seconds and builds some of the missing ones.
    */
   update(camera: THREE.Vector3, dt: number): void {
-    if (lodParams.freeze) return;
+    if (lodParams.freeze || viewFreeze.enabled) return;
     this.camera.copy(camera);
     this.cameraDistance = camera.length();
     this.morphStep = lodParams.morphSeconds > 0 ? dt / lodParams.morphSeconds : 1;

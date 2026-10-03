@@ -85,6 +85,32 @@ html.touch #fps {
   bottom: max(8px, env(safe-area-inset-bottom));
 }
 
+/* The frozen view's note (menu → Freeze view, or F): under the FPS counter. */
+#freeze-note {
+  position: fixed;
+  top: calc(max(8px, env(safe-area-inset-top)) + 26px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(60, 46, 0, 0.6);
+  color: #ffd24a;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 50;
+}
+
+#freeze-note[hidden] {
+  display: none;
+}
+
+html.touch #freeze-note {
+  top: auto;
+  bottom: calc(max(8px, env(safe-area-inset-bottom)) + 26px);
+}
+
 /* Above the maps, which show tooltips for their bodies too. */
 #tooltip {
   position: fixed;
