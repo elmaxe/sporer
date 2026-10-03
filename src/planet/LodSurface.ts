@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
 import { GLOBE_SIZE_FACTOR } from '../gen/planets';
-import { faceGridPoint, type FacePoint } from '../world/cubeSphereMath';
+import { craterParams } from '../gen/craters';
+import { cubeFacePoint, faceCubePoint, faceGridPoint, type FacePoint, type Vec3Like } from '../world/cubeSphereMath';
 import { GROUND_LAYER } from '../world/groundDepth';
 import type { SurfaceSampler } from '../world/planetGeometry';
 import { viewFreeze } from '../world/viewFreeze';
@@ -57,6 +58,16 @@ export const lodParams = {
   freeze: false,
 };
 
+/** The craters' tunables (gen/craters.ts), next to the LOD's: they take effect on the next globe built. */
+export function addCraterDebug(debug: Debug): void {
+  const f = debug.folder('Craters');
+  f?.add(craterParams, 'largest', 0.02, 0.2, 0.005);
+  f?.add(craterParams, 'coarseOctaves', 0, 4, 1);
+  f?.add(craterParams, 'smallest', 0.5, 10, 0.1);
+  f?.add(craterParams, 'maxOctaves', 1, 8, 1);
+  f?.add(craterParams, 'hills', 0, 1, 0.01);
+}
+
 export function addLodDebug(debug: Debug): void {
   const f = debug.folder('Planet LOD');
   f?.add(lodParams, 'cellAngle', 0.01, 0.2, 0.005);
@@ -104,6 +115,19 @@ interface LodNode {
   /** The shown node across each edge, and how many levels coarser it is (0 if the same or finer). */
   readonly neighbours: (LodNode | null)[];
   readonly coarser: Int8Array;
+  /**
+   * Per edge with a coarser neighbour: for each point along the edge, the
+   * neighbour's vertex at the same place (found once per neighbour), whose
+   * position the edge's vertices snap onto.
+   */
+  readonly snap: (Int32Array | null)[];
+  /**
+   * Per corner (0: s and t at their least, 1: s at its most, 2: t at its
+   * most, 3: both), the coarsest shown chunks touching it (`group`, all one
+   * level) and the vertex there of one of them (`holder`, `at`); null where
+   * it has none (see write).
+   */
+  readonly corners: ({ group: LodNode[]; holder: LodNode; at: number } | null)[];
   /** What the mesh was last written with (own morph, then each edge's), to skip unchanged chunks. */
   readonly written: Float32Array;
 }
@@ -162,7 +186,9 @@ export class LodSurface {
   private readonly dir = new THREE.Vector3();
   private readonly color = new THREE.Color();
   private readonly facePoint: FacePoint = { face: 0, s: 0, t: 0 };
+  private readonly cube: Vec3Like = { x: 0, y: 0, z: 0 };
   private readonly edgeMorph = new Float32Array(4);
+  private readonly cornerMorph = new Float32Array(4);
   private readonly smooth: 'outlineError' | 'coastError' | null;
   private readonly renderOrder: number;
   private readonly hiddenBelow: number;
@@ -368,13 +394,17 @@ export class LodSurface {
       targetColors: null,
       neighbours: [null, null, null, null],
       coarser: new Int8Array(4),
-      written: new Float32Array(5).fill(-1),
+      snap: [null, null, null, null],
+      corners: [null, null, null, null],
+      written: new Float32Array(9).fill(-1),
     };
   }
 
   /** Samples the node's grid and makes its (hidden) mesh. */
   private build(node: LodNode): void {
     const n = CHUNK_CELLS * 2 ** node.depth;
+    // How far apart its samples are (radians, about): the sampler leaves out detail too small for them to catch.
+    const spacing = Math.PI / 2 / n;
     const positions = new Float32Array(VERTICES * 3);
     const normals = new Float32Array(VERTICES * 3);
     const colors = new Float32Array(VERTICES * 3);
@@ -383,7 +413,7 @@ export class LodSurface {
       for (let i = 0; i < SIDE; i++) {
         const v = (j * SIDE + i) * 3;
         faceGridPoint(node.face, node.x * CHUNK_CELLS + i, node.y * CHUNK_CELLS + j, n, dir);
-        const r = this.sample(dir, color);
+        const r = this.sample(dir, color, spacing);
         dir.toArray(normals, v);
         positions[v] = dir.x * r;
         positions[v + 1] = dir.y * r;
@@ -408,10 +438,12 @@ export class LodSurface {
       }
     }
     if (parent) {
+      // The parent's own samples at the points it shares (its finer-detail
+      // child may sample them differently), so blended back it's the parent's surface exactly.
       node.target = new Float32Array(VERTICES * 3);
       node.targetColors = new Float32Array(VERTICES * 3);
-      parentTarget(node.base, node.target, SIDE, parentAC);
-      parentTarget(node.baseColors, node.targetColors, SIDE, parentAC);
+      parentTarget(parentPoints(node.base, parent.base!, px, py), node.target, SIDE, parentAC);
+      parentTarget(parentPoints(node.baseColors, parent.baseColors!, px, py), node.targetColors, SIDE, parentAC);
     } else {
       node.target = node.base;
       node.targetColors = node.baseColors;
@@ -456,9 +488,37 @@ export class LodSurface {
     for (let edge = 0 as Edge; edge < 4; edge++) {
       edgeNeighbour(node.face, node.depth, node.x, node.y, edge, this.facePoint);
       const other = this.shownAt(this.facePoint);
+      if (node.neighbours[edge] !== other) node.snap[edge] = null;
       node.neighbours[edge] = other;
       node.coarser[edge] = Math.max(0, node.depth - other.depth);
     }
+    for (let corner = 0; corner < 4; corner++) node.corners[corner] = this.cornerOf(node, corner);
+    // The chunks round it may have changed: write it all again.
+    node.written.fill(-1);
+  }
+
+  /**
+   * The coarsest shown chunks touching `node`'s `corner` (it among them, if
+   * none is coarser), from points just off the corner all round it (on
+   * whichever face they land), and one of their vertices there.
+   */
+  private cornerOf(node: LodNode, corner: number): LodNode['corners'][number] {
+    const size = 1 / 2 ** node.depth;
+    const s = (node.x + (corner & 1)) * size;
+    const t = (node.y + (corner >> 1)) * size;
+    const step = size * 1e-3;
+    let group: LodNode[] = [node];
+    for (let k = 0; k < 4; k++) {
+      faceCubePoint(node.face, s + (k & 1 ? step : -step), t + (k & 2 ? step : -step), this.cube);
+      const other = this.shownAt(cubeFacePoint(this.cube.x, this.cube.y, this.cube.z, this.facePoint));
+      if (other.depth < group[0]!.depth) group = [other];
+      else if (other.depth === group[0]!.depth && !group.includes(other)) group.push(other);
+    }
+    const own = cornerVertex(corner);
+    if (group.length === 1 && group[0] === node) return null;
+    const holder = group[0]!;
+    const at = holder === node ? own : sharedVertex(node, own, holder);
+    return at < 0 ? null : { group, holder, at };
   }
 
   /** The shown node covering a face point. */
@@ -489,6 +549,15 @@ export class LodSurface {
       node.written[edge + 1] = key;
     }
     node.written[0] = node.morph;
+    for (let corner = 0; corner < 4; corner++) {
+      const c = node.corners[corner];
+      if (!c) continue;
+      let slowest = 1;
+      for (const g of c.group) slowest = Math.min(slowest, g.morph);
+      this.cornerMorph[corner] = slowest;
+      if (node.written[5 + corner] !== Math.fround(slowest)) changed = true;
+      node.written[5 + corner] = slowest;
+    }
     if (!changed) return;
 
     const geometry = node.mesh!.geometry;
@@ -518,14 +587,29 @@ export class LodSurface {
         }
         continue;
       }
-      // Onto the coarser neighbour's vertices, where it has them now: its own
-      // sampled point blended from its parent's edge, which runs through this
-      // edge's vertices a step either side (the same bits it has).
+      // Onto the coarser neighbour's vertices, where it has them now: the
+      // same blend of its parent's surface and its own samples that it
+      // writes there (the same bits). Its samples, not this chunk's at the
+      // same points: a finer chunk's sampler may add detail there.
+      // (Many levels coarser, its vertices may be further apart than this
+      // chunk: then the edge's ends lie between them, and take this chunk's
+      // own blend of its parent's edge there.)
       const step = snapStep(levels);
+      const other = node.neighbours[edge]!;
+      const at = (node.snap[edge] ??= sharedVertices(node, edge, other));
       const along = (edge < 2 ? node.y : node.x) * CHUNK_CELLS;
       for (let e = 0; e <= CHUNK_CELLS; e++) {
         const v = edgeVertex(edge, e) * 3;
         const to = snapTo(e, step);
+        const shared = at[to]!;
+        if (shared >= 0) {
+          const p = shared * 3;
+          for (let k = 0; k < 3; k++) {
+            positions[v + k] = blend(other.target![p + k]!, other.base![p + k]!, te);
+            colors[v + k] = blend(other.targetColors![p + k]!, other.baseColors![p + k]!, te);
+          }
+          continue;
+        }
         const p = edgeVertex(edge, to) * 3;
         const odd = ((along + to) / step) % 2 === 1 && to - step >= 0 && to + step <= CHUNK_CELLS;
         const a = odd ? edgeVertex(edge, to - step) * 3 : p;
@@ -533,6 +617,35 @@ export class LodSurface {
         for (let k = 0; k < 3; k++) {
           positions[v + k] = blend(Math.fround(midpoint(base[a + k]!, base[b + k]!)), base[p + k]!, te);
           colors[v + k] = blend(Math.fround(midpoint(baseColors[a + k]!, baseColors[b + k]!)), baseColors[p + k]!, te);
+        }
+      }
+    }
+    // Each corner: what the coarsest chunks there write, at the slowest of their blends (a seam's rule, for every chunk round it).
+    for (let corner = 0; corner < 4; corner++) {
+      const c = node.corners[corner];
+      if (!c) continue;
+      const v = cornerVertex(corner) * 3;
+      const p = c.at * 3;
+      const h = c.holder;
+      const tc = this.cornerMorph[corner]!;
+      for (let k = 0; k < 3; k++) {
+        positions[v + k] = blend(h.target![p + k]!, h.base![p + k]!, tc);
+        colors[v + k] = blend(h.targetColors![p + k]!, h.baseColors![p + k]!, tc);
+      }
+    }
+    // Edge vertices collapsed onto a corner go wherever it went.
+    for (let edge = 0 as Edge; edge < 4; edge++) {
+      const levels = node.coarser[edge]!;
+      if (levels === 0) continue;
+      const step = snapStep(levels);
+      for (let e = 1; e < CHUNK_CELLS; e++) {
+        const to = snapTo(e, step);
+        if (to !== 0 && to !== CHUNK_CELLS) continue;
+        const v = edgeVertex(edge, e) * 3;
+        const c = edgeVertex(edge, to) * 3;
+        for (let k = 0; k < 3; k++) {
+          positions[v + k] = positions[c + k]!;
+          colors[v + k] = colors[c + k]!;
         }
       }
     }
@@ -548,6 +661,59 @@ function blend(from: number, to: number, t: number): number {
 
 function midpoint(a: number, b: number): number {
   return (a + b) * 0.5;
+}
+
+/** Index of a chunk's corner vertex (see LodNode.corners). */
+function cornerVertex(corner: number): number {
+  return (corner >> 1) * CHUNK_CELLS * SIDE + (corner & 1) * CHUNK_CELLS;
+}
+
+/**
+ * A child chunk's `own` values (3 per grid point) with the points it shares
+ * with its parent (the even ones) taken from the parent's `parent` values;
+ * the child covers the parent's cells from (px, py). What parentTarget reads.
+ */
+function parentPoints(own: Float32Array, parent: Float32Array, px: number, py: number): Float32Array {
+  const out = own.slice();
+  for (let j = 0; j < SIDE; j += 2) {
+    for (let i = 0; i < SIDE; i += 2) {
+      const v = (j * SIDE + i) * 3;
+      const p = ((py + j / 2) * SIDE + px + i / 2) * 3;
+      out[v] = parent[p]!;
+      out[v + 1] = parent[p + 1]!;
+      out[v + 2] = parent[p + 2]!;
+    }
+  }
+  return out;
+}
+
+/**
+ * For each point along `node`'s `edge` (0 to CHUNK_CELLS), the vertex of the
+ * coarser chunk `other` at the same place, or of the nearest point that has
+ * one: grid points have the same bits on every grid and face
+ * (cubeSphereMath.faceGridPoint), so they're matched by their directions,
+ * which every chunk keeps as its normals.
+ */
+function sharedVertices(node: LodNode, edge: Edge, other: LodNode): Int32Array {
+  const out = new Int32Array(SIDE);
+  for (let e = 0; e <= CHUNK_CELLS; e++) out[e] = sharedVertex(node, edgeVertex(edge, e), other);
+  return out;
+}
+
+/** The vertex of `other` on its border at the place of `node`'s vertex `v`, or -1 if it has none there. */
+function sharedVertex(node: LodNode, v: number, other: LodNode): number {
+  const own = node.mesh!.geometry.getAttribute('normal').array as Float32Array;
+  const theirs = other.mesh!.geometry.getAttribute('normal').array as Float32Array;
+  const x = own[v * 3]!;
+  const y = own[v * 3 + 1]!;
+  const z = own[v * 3 + 2]!;
+  for (let edge = 0 as Edge; edge < 4; edge++) {
+    for (let f = 0; f <= CHUNK_CELLS; f++) {
+      const w = edgeVertex(edge, f);
+      if (theirs[w * 3] === x && theirs[w * 3 + 1] === y && theirs[w * 3 + 2] === z) return w;
+    }
+  }
+  return -1;
 }
 
 function allBuilt(nodes: readonly LodNode[]): boolean {

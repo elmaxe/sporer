@@ -17,7 +17,12 @@ import type { Vec3Like } from './cubeSphereMath';
  */
 
 
-export type TerrainNoise = (x: number, y: number, z: number, seed: number) => number;
+/**
+ * Terrain noise (gen/noise.ts): the value in [-1, 1] at direction (x, y, z).
+ * `spacing`, where given, is how far apart (radians) the surface is sampled:
+ * features too small for it may be left out (gen/craters.ts craterNoise).
+ */
+export type TerrainNoise = (x: number, y: number, z: number, seed: number, spacing?: number) => number;
 
 export interface TerrainOptions {
   /** Cube sphere segments per cube face edge. */
@@ -78,8 +83,10 @@ export function terrainPainter(style: PlanetStyle, seaFloor = false, seed?: numb
  * A planet's surface as a function of direction: for the unit direction
  * `dir`, writes the colour into `color` and returns the radius there. The
  * whole-globe meshes and the planet level's LOD chunks are built from these.
+ * `spacing` (radians) is how far apart the caller samples, when it samples
+ * a grid: detail too small for it may be left out, so it doesn't alias.
  */
-export type SurfaceSampler = (dir: Vec3Like, color: THREE.Color) => number;
+export type SurfaceSampler = (dir: Vec3Like, color: THREE.Color, spacing?: number) => number;
 
 /** Terrain displaced by noise and coloured by height (see TerrainOptions; `segments` is unused). */
 export function terrainSampler(
@@ -92,13 +99,13 @@ export function terrainSampler(
   const relief = style.relief * reliefScale;
   if (shape) {
     // No sea on small bodies: the relief is added on top of the shape.
-    return (dir, color) => {
+    return (dir, color, spacing) => {
       const s = shapeRadius(shape, dir.x, dir.y, dir.z);
-      return radius * (s + relief * paint(noise(dir.x * s, dir.y * s, dir.z * s, seed), color, dir.x, dir.y, dir.z));
+      return radius * (s + relief * paint(noise(dir.x * s, dir.y * s, dir.z * s, seed, spacing), color, dir.x, dir.y, dir.z));
     };
   }
-  return (dir, color) => {
-    const height = paint(noise(dir.x, dir.y, dir.z, seed), color, dir.x, dir.y, dir.z);
+  return (dir, color, spacing) => {
+    const height = paint(noise(dir.x, dir.y, dir.z, seed, spacing), color, dir.x, dir.y, dir.z);
     return radius * (1 + relief * (height < 0 ? SEA_FLOOR_DEPTH : 1) * height);
   };
 }
@@ -123,7 +130,7 @@ export function createTerrainGeometry(
   style: PlanetStyle,
   options: TerrainOptions,
 ): THREE.BufferGeometry {
-  return sampledSphere(createCubeSphere(1, options.segments), terrainSampler(radius, seed, style, options), true);
+  return sampledSphere(createCubeSphere(1, options.segments), terrainSampler(radius, seed, style, options), true, Math.PI / 2 / options.segments);
 }
 
 /**
@@ -132,14 +139,14 @@ export function createTerrainGeometry(
  * its triangles, so the surface stays watertight. `displaced` recomputes the
  * normals (else they stay pointing straight out: a smooth sphere).
  */
-function sampledSphere(geometry: THREE.BufferGeometry, sample: SurfaceSampler, displaced: boolean): THREE.BufferGeometry {
+function sampledSphere(geometry: THREE.BufferGeometry, sample: SurfaceSampler, displaced: boolean, spacing?: number): THREE.BufferGeometry {
   const position = geometry.getAttribute('position') as THREE.BufferAttribute;
   const colors = new Float32Array(position.count * 3);
   const dir = new THREE.Vector3();
   const color = new THREE.Color();
   for (let i = 0; i < position.count; i++) {
     dir.fromBufferAttribute(position, i);
-    dir.multiplyScalar(sample(dir, color));
+    dir.multiplyScalar(sample(dir, color, spacing));
     position.setXYZ(i, dir.x, dir.y, dir.z);
     color.toArray(colors, i * 3);
   }

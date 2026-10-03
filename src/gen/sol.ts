@@ -224,7 +224,8 @@ function planetSpecs(): PlanetSpec[] {
       tilt: 0.03,
       day: 4222.6,
       seed: SOL_SEEDS.mercury,
-      style: style('#4f4a45', '#b1aaa1', 0.04),
+      // Airless and heavily cratered (gen/craters.ts); the Moon's craters are in its real map instead.
+      style: { ...style('#4f4a45', '#b1aaa1', 0.04), craters: 1 },
       climate: { insolation: ins(0.387), gravity: 0.378, escape: 4.25, heat: 0.025, albedo: 0.088 },
       moons: [],
     },
