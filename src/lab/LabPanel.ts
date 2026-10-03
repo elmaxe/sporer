@@ -20,6 +20,7 @@ import {
   type LabPlanet,
 } from './labPlanet';
 import type { FpsCounter } from '../ui/FpsCounter';
+import { setViewFrozen, viewFreeze } from '../world/viewFreeze';
 import type { PlanetLab } from './PlanetLab';
 
 const COMPOSITIONS: Record<string, Composition> = {
@@ -105,6 +106,8 @@ export class LabPanel {
       .onChange(() => lab.rebuild());
     f.add(view, 'map').name('map (globe)').onChange(() => lab.rebuild());
     f.add(view, 'wireframe').onChange(() => lab.applyLive());
+    // Holds what's drawn for the camera as it is now, and outlines its view (world/viewFreeze.ts).
+    f.add(viewFreeze, 'enabled').name('freeze view').listen().onChange((on: boolean) => setViewFrozen(on));
     f.add(view, 'axes').name('axes (Y = spin axis)').onChange(() => lab.applyLive());
     f.add(view, 'starfield').onChange(() => lab.rebuild());
     f.add(this.fps, 'shown').name('FPS counter');

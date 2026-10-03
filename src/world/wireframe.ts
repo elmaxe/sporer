@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { beginFrozenCulling, endFrozenCulling, frozenOutline } from './viewFreeze';
 
 /** The wireframe view (the menu's Wireframe switch; the lab has its own): surfaces drawn as their triangles' edges. */
 export const wireframeParams = {
@@ -12,15 +13,23 @@ const others: THREE.Object3D[] = [];
  * Draws `scene` the usual way, or as a wireframe when `wireframe` (default:
  * the game's switch). Levels draw their scenes through this instead of
  * `renderer.render`. Clears like `renderer.render` does (per autoClear).
+ * While the view is frozen (world/viewFreeze.ts) objects are culled by the
+ * frozen camera's frustum, which is drawn too unless `outline` is false.
  */
 export function renderScene(
   renderer: THREE.WebGLRenderer,
   scene: THREE.Scene,
   camera: THREE.Camera,
   wireframe = wireframeParams.enabled,
+  outline = true,
 ): void {
+  beginFrozenCulling(scene, camera);
+  const helper = outline ? frozenOutline(scene, camera) : null;
+  if (helper) scene.add(helper);
   if (wireframe) renderWireframe(renderer, scene, camera);
   else renderer.render(scene, camera);
+  if (helper) scene.remove(helper);
+  endFrozenCulling();
 }
 
 /**
