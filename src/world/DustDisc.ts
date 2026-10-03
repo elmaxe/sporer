@@ -32,10 +32,8 @@ export const dustDiscParams = {
   slantCap: 0.15,
   /** How much brighter rings and darker gaps are than the dust's thickness alone shows. */
   contrast: 0.6,
-  /** A young disc's rim seen edge-on: optical depth through its midplane (a dark lane, like HH 30's). */
-  rimDepth: 6,
-  /** A debris disc's: how much dust its band along the plane shows. */
-  debrisRimDepth: 0.6,
+  /** How much dust a debris disc's band along its plane shows. */
+  debrisBandDepth: 0.6,
   /** Clumpy texture's strength, 0–1. */
   clumps: 0.55,
   /** The dust fades out between these distances from the camera (system units), so it never fills the view up close. */
@@ -94,6 +92,8 @@ const FRAGMENT = /* glsl */ `
   uniform sampler2D uClumpMap;        // see discClumps.ts
   uniform float uClumps;
   uniform float uInner;
+  uniform float uTaper;               // the dust thins out from here to the outer edge
+  uniform float uOuter;
   uniform float uLogSpan;             // log(outer / inner)
   uniform float uTime;
   uniform float uOmega;               // angular speed at the inner edge (rad/s); Kepler's ∝ r^-1.5 outside it
@@ -133,11 +133,14 @@ const FRAGMENT = /* glsl */ `
     vec3 v = toEye / dist;
     // A sheet seen at a slant holds more dust along the line of sight (capped: from inside it would be infinite).
     float slant = 1.0 / max(abs(v.y), uSlantCap);
-    // A debris disc's sheets hand over to its rim's band near edge-on (the rim fades in as they fade out), so the
+    // A debris disc's sheets hand over to its band near edge-on (the band fades in as they fade out), so the
     // gap between sheets doesn't show as a dark wedge along the plane.
     slant *= mix(1.0, smoothstep(0.06, 0.35, abs(v.y)), uGrazeFade);
     float tau = uDepth * pow(vBase * rel, uTauPower) * uLayerWeight * slant;
-    float alpha = (1.0 - exp(-tau)) * fade;
+    // Thinning out towards both edges (the disc is thick right up to them otherwise): edge-on or from a little
+    // above, the stacked sheets' hard edges showed as steps.
+    float edges = smoothstep(uInner, uInner * 1.6, r) * (1.0 - smoothstep(uTaper, uOuter, r));
+    float alpha = (1.0 - exp(-tau)) * fade * edges;
     // Scattered forwards (Henyey–Greenstein, relative to isotropic, capped).
     float g = uForward;
     float c = dot(normalize(vWorld - uStar), v);
@@ -151,42 +154,30 @@ const FRAGMENT = /* glsl */ `
   }
 `;
 
-/** The rim: a short open cylinder, ±RIM_HEIGHT scale heights tall (as tall as the flared sheets further out look edge-on). */
-const RIM_HEIGHT = 1.3;
-const RIM_SEGMENTS = [96, 16] as const;
+/** A debris disc's band: a short open cylinder (its far wall), ±BAND_HEIGHT scale heights tall. */
+const BAND_HEIGHT = 1.3;
+const BAND_SEGMENTS = [96, 16] as const;
 
-const RIM_VERTEX = /* glsl */ `
-  uniform float uHeight;              // the disc's scale height at the rim
+const BAND_VERTEX = /* glsl */ `
+  uniform float uHeight;              // the disc's scale height at the wall
   uniform float uHabitable;
   uniform float uLightPower;
   uniform float uMaxLight;
-  uniform float uLightAt;             // > 0: the light at this distance from the star, not the wall's own
-  uniform vec3 uStar;
+  uniform float uLightAt;             // lit as dust this far from the star is, not the wall itself
   varying vec3 vWorld;
   varying float vAcross;              // height over the scale height
-  varying vec2 vRound;               // the point's place round the disc (x, z), for its angle per pixel
   varying float vLight;
   void main() {
     vAcross = position.y / uHeight;
-    vRound = position.xz;
     vec4 world = modelMatrix * vec4(position, 1.0);
     vWorld = world.xyz;
-    float d = uLightAt > 0.0 ? uLightAt : distance(world.xyz, uStar);
-    vLight = min(pow(uHabitable / max(d, 1.0), 2.0 * uLightPower), uMaxLight);
+    vLight = min(pow(uHabitable / max(uLightAt, 1.0), 2.0 * uLightPower), uMaxLight);
     gl_Position = projectionMatrix * viewMatrix * world;
   }
 `;
 
-const RIM_FRAGMENT = /* glsl */ `
-  uniform sampler2D uClumpMap;
-  uniform float uClumpV;              // the rim's place across the clump map
-  uniform float uRimClumps;           // how much the clumps show on it (a slice of the map is stripes up a wall)
-  uniform float uTime;
-  uniform float uSpin;                // angular speed at the rim (rad/s)
-  uniform float uRimDepth;
-  uniform vec2 uEdgeOn;               // fades out between these sines of the view's elevation
-  uniform float uMidplane;            // a young disc's shaded midplane; 1 for a debris disc, lit all through
-  uniform float uOpaque;
+const BAND_FRAGMENT = /* glsl */ `
+  uniform float uBandDepth;
   uniform float uBrightness;
   uniform float uForward;
   uniform vec3 uColor;
@@ -194,32 +185,27 @@ const RIM_FRAGMENT = /* glsl */ `
   uniform vec2 uFade;
   varying vec3 vWorld;
   varying float vAcross;
-  varying vec2 vRound;               // the point's place round the disc (x, z), for its angle per pixel
   varying float vLight;
   void main() {
     vec3 toEye = cameraPosition - vWorld;
     float dist = length(toEye);
     vec3 v = toEye / dist;
-    // Only near edge-on, where the stacked sheets would show their gaps; from above the top sheet covers the disc.
-    float edgeOn = 1.0 - smoothstep(uEdgeOn.x, uEdgeOn.y, abs(v.y));
+    // Near edge-on only, as the sheets fade out there (their uGrazeFade): the two hand over.
+    float edgeOn = 1.0 - smoothstep(0.06, 0.35, abs(v.y));
     float fade = smoothstep(uFade.x, uFade.y, dist) * edgeOn;
     if (fade <= 0.0) discard;
     float s = vAcross;
-    // The angle per pixel: interpolated per vertex it would jump across the seam where atan wraps round.
-    float angle = atan(vRound.y, vRound.x);
-    float clump = texture2D(uClumpMap, vec2((angle - uTime * uSpin) / 6.2831853, uClumpV)).r * ${CLUMP_SCALE.toFixed(1)};
-    // The column through the disc's edge: Gaussian in height, so the midplane is opaque.
-    float tau = uRimDepth * exp(-s * s * 2.0) * mix(1.0, clump, uRimClumps);
-    float alpha = (1.0 - exp(-tau)) * fade * (1.0 - smoothstep(1.0, ${RIM_HEIGHT.toFixed(1)}, abs(s)));
-    // Lit on its flared surfaces, dark in the midplane (HH 30's dark lane).
-    float shade = mix(min(1.0, uMidplane * 0.4 + (1.0 - uOpaque)), 1.0, smoothstep(0.25, 1.0, abs(s)));
+    // The column along the plane: Gaussian in height.
+    float tau = uBandDepth * exp(-s * s * 2.0);
+    float alpha = (1.0 - exp(-tau)) * fade * (1.0 - smoothstep(1.0, ${BAND_HEIGHT.toFixed(1)}, abs(s)));
     // Its light comes from all the dust along the line of sight, most of it nearer the star than the wall:
     // scattered by the angle between the line of sight and the star (the elongation), not the wall's own.
     float g = uForward;
     float c = dot(normalize(uStar - cameraPosition), -v);
     float phase = min((1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * c, 1.5), 4.0);
-    vec3 col = uColor * vLight * phase * shade * uBrightness;
-    gl_FragColor = vec4(col * alpha, alpha * uOpaque);
+    vec3 col = uColor * vLight * phase * uBrightness;
+    // Thin dust: it only adds light.
+    gl_FragColor = vec4(col * alpha, 0.0);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
   }
@@ -246,8 +232,8 @@ export class DustDisc implements Entity {
   private readonly clumpMap: THREE.DataTexture;
   /** The sheets' heights, in scale heights. */
   private readonly layers: readonly number[];
-  /** The disc's rim (its far and near halves) and their shared uniforms. */
-  private readonly rim: { geometry: THREE.CylinderGeometry; meshes: THREE.Mesh[]; uniforms: Record<string, THREE.IUniform> };
+  /** A debris disc's band along its plane (null for a young disc). */
+  readonly band: THREE.Mesh<THREE.CylinderGeometry, THREE.ShaderMaterial> | null;
   private readonly local = new THREE.Vector3();
   private readonly star = new THREE.Vector3();
 
@@ -271,6 +257,7 @@ export class DustDisc implements Entity {
       uClumpMap: { value: this.clumpMap },
       uInner: { value: inner },
       uLogSpan: { value: Math.log(data.outer / inner) },
+      uTaper: { value: data.taper },
       uOuter: { value: data.outer },
       uAspect: { value: data.aspect },
       uFlare: { value: data.flare },
@@ -328,7 +315,7 @@ export class DustDisc implements Entity {
       this.sheets.push(sheet);
       this.object.add(sheet);
     });
-    this.rim = this.createRim(color, innerPeriod);
+    this.band = young ? null : this.createBand(color);
     this.object.name = young ? 'Protoplanetary disc' : 'Debris disc';
     scene.add(this.object);
   }
@@ -343,8 +330,7 @@ export class DustDisc implements Entity {
     this.shared.uMaxLight!.value = dustDiscParams.maxLight;
     this.shared.uTauPower!.value = dustDiscParams.tauPower;
     this.shared.uSlantCap!.value = young ? dustDiscParams.slantCap : dustDiscParams.debrisSlantCap;
-    this.rim.uniforms.uRimDepth!.value = young ? dustDiscParams.rimDepth : dustDiscParams.debrisRimDepth;
-    this.rim.uniforms.uMidplane!.value = dustDiscParams.midplane;
+    if (this.band) this.band.material.uniforms.uBandDepth!.value = dustDiscParams.debrisBandDepth;
     // Only a thick disc needs it: a thin one's brightness already follows its column.
     this.shared.uContrast!.value = young ? dustDiscParams.contrast : 0;
     this.shared.uClumps!.value = young ? dustDiscParams.clumps : dustDiscParams.clumps * 0.3;
@@ -354,77 +340,55 @@ export class DustDisc implements Entity {
   update(): void {}
 
   /**
-   * Seen edge-on or from inside, stacked sheets leave gaps: from the side a
-   * young disc showed separate plates, and from inside a debris disc a dark
-   * wedge along the plane, where the real band is brightest (no sheet lies
-   * along a line of sight in the plane). So both are closed off by a rim, an
-   * open cylinder painted with the column through the disc's edge. A young
-   * disc's stands round its dense part (out to the taper): from the side it
-   * reads as one thick disc, lit on its flared surfaces with a dark lane
-   * through the midplane, as edge-on discs are (HH 30); its far half is
-   * drawn before the sheets, its near half after them. A debris disc's stands
-   * near its outer edge, only adds light and has just its far half: from
-   * inside it is the band along the ecliptic, like the zodiacal light, lit as
-   * the dust near the star is.
+   * Seen from inside, stacked sheets leave a dark wedge along the plane,
+   * where the real band is brightest: no sheet lies along a line of sight in
+   * the plane. So a debris disc has a band: the far wall of an open cylinder
+   * near its outer edge, painted with the column along the plane. From inside
+   * it is the band along the ecliptic, like the zodiacal light, lit as the
+   * dust near the star is; near edge-on the sheets hand over to it. Only the
+   * far wall: close outside, a near wall would fill the view, while the real
+   * band's height comes from the disc's thickness across its whole width.
+   * (A young disc needs none: seen edge-on its flat sheets read as two lit
+   * surfaces with a dark lane between, as edge-on discs look, e.g. HH 30.)
    */
-  private createRim(color: THREE.Color, innerPeriod: number): NonNullable<DustDisc['rim']> {
+  private createBand(color: THREE.Color): NonNullable<DustDisc['band']> {
     const { data } = this;
-    const young = data.kind === 'protoplanetary';
-    const radius = young ? data.taper : data.outer * 0.9;
+    const radius = data.outer * 0.9;
     const height = data.aspect * data.outer * (radius / data.outer) ** data.flare;
-    const geometry = new THREE.CylinderGeometry(radius, radius, 2 * RIM_HEIGHT * height, RIM_SEGMENTS[0], RIM_SEGMENTS[1], true);
-    const inner = this.shared.uInner!.value as number;
-    const uniforms: Record<string, THREE.IUniform> = {
-      uHeight: { value: height },
-      uHabitable: this.shared.uHabitable!,
-      uLightPower: this.shared.uLightPower!,
-      uMaxLight: this.shared.uMaxLight!,
-      uStar: this.shared.uStar!,
-      uClumpMap: this.shared.uClumpMap!,
-      uClumpV: { value: Math.log(radius / inner) / (this.shared.uLogSpan!.value as number) },
-      // A slice of the clump map, painted up a wall, is vertical stripes: a little on a young disc's edge (seen only
-      // edge-on, where they read as clumps along it), none on a debris disc's band, which shows from higher up.
-      uRimClumps: { value: young ? 0.25 : 0 },
-      uTime: this.shared.uTime!,
-      uSpin: { value: ((2 * Math.PI) / innerPeriod) * (radius / inner) ** -1.5 },
-      uLightAt: { value: young ? 0 : this.shared.uHabitable!.value as number },
-      uRimDepth: { value: young ? dustDiscParams.rimDepth : dustDiscParams.debrisRimDepth },
-      // A young disc's sheets show their gaps only nearly edge-on (a taller window shows the rim as a drum);
-      // a debris disc's band stands in for its sheets further up (see uGrazeFade).
-      uEdgeOn: { value: young ? new THREE.Vector2(0.03, 0.1) : new THREE.Vector2(0.06, 0.35) },
-      uMidplane: { value: dustDiscParams.midplane },
-      uOpaque: { value: young ? 1 : 0 },
-      uBrightness: this.shared.uBrightness!,
-      uForward: this.shared.uForward!,
-      uColor: { value: color },
-      uFade: this.shared.uFade!,
-    };
-    // A debris disc keeps only the far wall: close outside, a near wall would fill the view, while the real band's
-    // height comes from the disc's thickness across its whole width (and from inside, every wall is a far one).
-    const sides = young ? ([THREE.BackSide, THREE.FrontSide] as const) : ([THREE.BackSide] as const);
-    const meshes = sides.map((side, k) => {
-      const mesh = new THREE.Mesh(
-        geometry,
-        new THREE.ShaderMaterial({
-          vertexShader: RIM_VERTEX,
-          fragmentShader: RIM_FRAGMENT,
-          uniforms,
-          blending: THREE.CustomBlending,
-          blendSrc: THREE.OneFactor,
-          blendDst: THREE.OneMinusSrcAlphaFactor,
-          depthWrite: false,
-          transparent: true,
-          side,
-        }),
-      );
-      // From outside, the back faces are the far half and the front faces the near half; from inside, all are back faces.
-      mesh.renderOrder = k === 0 ? -0.02 : -0.005;
-      mesh.frustumCulled = false;
-      mesh.name = `${young ? 'Protoplanetary' : 'Debris'} disc rim (${k === 0 ? 'far' : 'near'})`;
-      this.object.add(mesh);
-      return mesh;
-    });
-    return { geometry, meshes, uniforms };
+    const geometry = new THREE.CylinderGeometry(radius, radius, 2 * BAND_HEIGHT * height, BAND_SEGMENTS[0], BAND_SEGMENTS[1], true);
+    const band = new THREE.Mesh(
+      geometry,
+      new THREE.ShaderMaterial({
+        vertexShader: BAND_VERTEX,
+        fragmentShader: BAND_FRAGMENT,
+        uniforms: {
+          uHeight: { value: height },
+          uHabitable: this.shared.uHabitable!,
+          uLightPower: this.shared.uLightPower!,
+          uMaxLight: this.shared.uMaxLight!,
+          uLightAt: { value: this.shared.uHabitable!.value as number },
+          uStar: this.shared.uStar!,
+          uBandDepth: { value: dustDiscParams.debrisBandDepth },
+          uBrightness: this.shared.uBrightness!,
+          uForward: this.shared.uForward!,
+          uColor: { value: color },
+          uFade: this.shared.uFade!,
+        },
+        // Premultiplied like the sheets: it only adds light.
+        blending: THREE.CustomBlending,
+        blendSrc: THREE.OneFactor,
+        blendDst: THREE.OneFactor,
+        depthWrite: false,
+        transparent: true,
+        // From outside, the back faces are the far wall; from inside, every wall is.
+        side: THREE.BackSide,
+      }),
+    );
+    band.renderOrder = -0.02;
+    band.frustumCulled = false;
+    band.name = 'Debris disc band';
+    this.object.add(band);
+    return band;
   }
 
   private prepareSheet(sheet: THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial>, i: number, camera: THREE.Camera, weights: readonly number[], total: number): void {
@@ -446,8 +410,8 @@ export class DustDisc implements Entity {
     this.geometry.dispose();
     this.clumpMap.dispose();
     for (const s of this.sheets) s.material.dispose();
-    this.rim.geometry.dispose();
-    for (const m of this.rim.meshes) (m.material as THREE.Material).dispose();
+    this.band?.geometry.dispose();
+    this.band?.material.dispose();
   }
 }
 
@@ -494,8 +458,7 @@ export function addDustDiscDebug(debug: Debug): void {
   f?.add(dustDiscParams, 'debrisForward', 0, 0.9);
   f?.add(dustDiscParams, 'debrisSlantCap', 0.02, 1);
   f?.add(dustDiscParams, 'maxLight', 0.5, 6);
-  f?.add(dustDiscParams, 'rimDepth', 0, 20);
-  f?.add(dustDiscParams, 'debrisRimDepth', 0, 3);
+  f?.add(dustDiscParams, 'debrisBandDepth', 0, 3);
   f?.add(dustDiscParams, 'midplane', 0, 1);
   f?.add(dustDiscParams, 'clumps', 0, 1);
   f?.add(dustDiscParams, 'tauPower', 0.1, 1);
