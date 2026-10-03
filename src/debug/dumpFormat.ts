@@ -116,6 +116,11 @@ export interface LabDumpState {
    * plant's or the grove's pivot) and distance from it, in planet radii (plant heights; units in the grove).
    */
   camera: { direction: Vec3; zoom: number; position: Vec3; fov: number };
+  /**
+   * The plant lab's grove camera (the grove is a whole planet): the spot looked at, as a turn of the planet from
+   * the starting spot, and the heading, elevation (radians) and distance round it. Missing elsewhere.
+   */
+  grove?: { focus: Quat4; yaw: number; pitch: number; distance: number };
   /** The planet lab's UFO, as a direction from the planet's centre (globe view), else null. */
   ship: Vec3 | null;
   /** The planet lab's system clock (s), else null. */

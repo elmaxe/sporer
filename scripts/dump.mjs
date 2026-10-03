@@ -96,6 +96,7 @@ if (lab) {
   if (lab.link !== dump.url) say(`  Link: ${lab.link}`);
   const c = lab.camera;
   say(`Camera: distance ${c.zoom.toFixed(3)} ${lab.page === 'planet-lab' ? 'planet radii' : "plant heights (the grove: units)"} from its centre, direction ${c.direction.map((v) => v.toFixed(3)).join(', ')} · position ${c.position.map((v) => v.toFixed(2)).join(', ')} · fov ${c.fov}`);
+  if (lab.grove) say(`Grove camera: focus ${lab.grove.focus.map((v) => v.toFixed(4)).join(', ')} · heading ${lab.grove.yaw.toFixed(3)}, elevation ${lab.grove.pitch.toFixed(3)} rad · distance ${lab.grove.distance.toFixed(1)}`);
   if (lab.time !== null) say(`Clock: t=${lab.time.toFixed(3)} s`);
   if (lab.ship) say(`UFO: over ${lab.ship.map((v) => v.toFixed(3)).join(', ')}`);
   say(`Overlays: ${lab.ui.overlays.map((o) => `${o.id} [${o.rect.join(',')}]`).join(' ')}`);

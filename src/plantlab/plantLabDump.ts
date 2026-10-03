@@ -1,7 +1,7 @@
-import { MathUtils, type Vector3 } from 'three';
+import { MathUtils, Quaternion, type Vector3 } from 'three';
 import type { Game } from '../core/Game';
 import type { DumpSource } from '../debug/DebugDump';
-import type { LabDumpState, Vec3 } from '../debug/dumpFormat';
+import type { LabDumpState, Quat4, Vec3 } from '../debug/dumpFormat';
 import { frames, overlayRects } from '../debug/page';
 import { PLANT_KINDS } from '../gen/plants';
 import { decodePlantLab, encodePlantLab } from './labPlants';
@@ -31,6 +31,7 @@ function capture(game: Game, lab: PlantLab): LabDumpState {
     link: lab.link,
     title: `${s.name}: ${PLANT_KINDS[s.kind].label}, ${s.form.architecture} · species ${state.selected + 1} of ${state.species.length} · ${view.view}${lod}`,
     camera: { direction: carry ? vec(carry.direction) : [0, 0, 1], zoom: carry?.zoom ?? 0, position: vec(game.camera.position), fov: game.camera.fov },
+    ...(carry?.grove ? { grove: { ...carry.grove, focus: carry.grove.focus.toArray() as Quat4 } } : {}),
     ship: null,
     time: null,
     ready: lab.ready,
@@ -56,8 +57,14 @@ async function restore(game: Game, lab: PlantLab, state: LabDumpState): Promise<
   game.paused = true;
   const level = lab.level;
   if (!level) throw new Error('The lab has nothing built');
-  const [x, y, z] = state.camera.direction;
-  level.look(MathUtils.radToDeg(Math.atan2(x, z)), MathUtils.radToDeg(Math.asin(MathUtils.clamp(y, -1, 1))), state.camera.zoom);
+  if (level.groveCamera) {
+    const g = state.grove;
+    if (g) level.groveCamera.restore({ focus: new Quaternion(...g.focus), yaw: g.yaw, pitch: g.pitch, distance: g.distance });
+    else notes.push('the dump has no grove camera (taken before the grove was a planet): left where the view starts');
+  } else {
+    const [x, y, z] = state.camera.direction;
+    level.look(MathUtils.radToDeg(Math.atan2(x, z)), MathUtils.radToDeg(Math.asin(MathUtils.clamp(y, -1, 1))), state.camera.zoom);
+  }
   // The grove loads the cells the camera now sees.
   await frames(2);
   for (let i = 0; i < 600 && !(level.grove?.settled ?? true); i++) await frames(1);
