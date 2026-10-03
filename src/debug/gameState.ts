@@ -186,6 +186,9 @@ export function captureGameState(game: Game, levels: SceneManager): GameState {
       firing: !!planet?.busy,
       elapsed: planet?.buster.elapsed ?? null,
     },
+    volcanoes: spinning(world).flatMap((b) =>
+      b.volcanoSites.length === 0 ? [] : [{ body: bodyRef(world, b) ?? { kind: 'planet' as const, index: -1, name: b.name }, sites: b.volcanoSites }],
+    ),
     cargo: {
       inventory: levels.inventory.toJSON(),
       surface: planet ? levels.surfaceChanges.forPlanet(bodyKey(planet.body.config)).toJSON() : null,
@@ -266,6 +269,20 @@ export async function restoreGameState(game: Game, levels: SceneManager, state: 
     }
     body.bust(time);
     levels.busted.bust(bodyKey(body.config), time);
+  }
+  // Volcanoes before low orbit is built: it raises those in the body's change list.
+  for (const { body: ref, sites } of state.volcanoes ?? []) {
+    const body = resolveBody(world, ref) as Planet | null;
+    if (!body) {
+      notes.push(`no body ${ref.name} to raise volcanoes on`);
+      continue;
+    }
+    const changes = levels.surfaceChanges.forPlanet(bodyKey(body.config));
+    for (const site of sites) {
+      if (changes.volcanoes.some((v) => v.seed === site.seed)) continue;
+      changes.addVolcano(site);
+      body.addVolcano(site, null);
+    }
   }
   if (state.cargo) {
     levels.inventory.load(state.cargo.inventory);

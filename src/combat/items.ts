@@ -1,13 +1,14 @@
 /*
  * The items the ship carries, grouped into the item bar's tabs (ui/ItemBar.ts).
- * Pure data; what an item does lives with the level that can use it (the
- * planet buster: combat/PlanetBuster.ts in low orbit; the abduction beam and
- * the cargo it brings up: cargo/CargoBeam.ts).
+ * Pure data; what an item does lives with the level that can use it (in low
+ * orbit: the planet buster, combat/PlanetBuster.ts; the volcano bomb,
+ * combat/VolcanoBomb.ts; the abduction beam and the cargo it brings up:
+ * cargo/CargoBeam.ts).
  */
 
 export type ItemTab = 'weapons' | 'inventory';
 /** The tools: always in their tab's first slots. */
-export type ToolId = 'planetBuster' | 'abduct';
+export type ToolId = 'planetBuster' | 'volcanoBomb' | 'abduct';
 /** What a slot holds: a tool, or a stack of cargo in the hold (`cargo:` and the stack's key, see cargo/inventory.ts). */
 export type ItemId = ToolId | `cargo:${string}`;
 
@@ -42,6 +43,12 @@ export const ITEMS: readonly ItemDef[] = [
     tab: 'weapons',
     name: 'Planet Buster',
     description: 'Blows a whole planet or moon apart, for good. Fire it from low orbit.',
+  },
+  {
+    id: 'volcanoBomb',
+    tab: 'weapons',
+    name: 'Volcano Bomb',
+    description: 'Raises an erupting volcano where it lands. Fire it from low orbit over solid ground.',
   },
   {
     id: 'abduct',

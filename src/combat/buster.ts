@@ -1,9 +1,7 @@
-import * as THREE from 'three';
-
 /*
  * The planet buster's timeline, as pure functions of the seconds since it
- * was fired (THREE maths types only, no scene). Unit-tested in
- * tests/buster.test.ts.
+ * was fired (no scene). Unit-tested in tests/buster.test.ts; the
+ * projectile's path is combat/path.ts.
  *
  *   0          launch: the projectile leaves the ship, accelerating down
  *   flightTime impact: a bright flash where it hits, and the crust starts
@@ -21,8 +19,6 @@ export const busterParams = {
   fuse: 1.8,
   /** Seconds after the blast until the player may leave. */
   settle: 5,
-  /** How high the projectile's path bows above the straight line, × the arc it covers (planet radii). */
-  arcLift: 0.35,
   /** Peak brightness of the impact's and the blast's screen flashes (0–1) and their fade times, seconds. */
   impactFlash: 0.55,
   impactFade: 0.35,
@@ -92,33 +88,4 @@ export function shockRing(t: number, p: BusterParams = busterParams): { radius: 
   const s = (t - blastAt(p)) / p.ringTime;
   if (s < 0 || s >= 1) return { radius: 0, glow: 0 };
   return { radius: 1 + (p.ringSize - 1) * (1 - (1 - s) ** 2), glow: (1 - s) ** 1.5 };
-}
-
-const a = new THREE.Vector3();
-const b = new THREE.Vector3();
-
-/**
- * A point `u` (0 → 1) of the projectile's path from `from` (the ship) to
- * `to` (a point on the ground), both relative to the globe's centre: along
- * the great circle between them, its distance from the centre going from one
- * to the other, bowed up by `lift` × the arc covered so it clears the ground
- * between. Straight down when `to` is right beneath `from`.
- */
-export function arcPoint(from: THREE.Vector3, to: THREE.Vector3, u: number, lift: number, out: THREE.Vector3): THREE.Vector3 {
-  const r0 = from.length();
-  const r1 = to.length();
-  a.copy(from).divideScalar(r0);
-  b.copy(to).divideScalar(r1);
-  const angle = Math.acos(Math.min(1, Math.max(-1, a.dot(b))));
-  // Slerp between the two directions (a straight drop when they're the same).
-  if (angle < 1e-5) out.copy(a);
-  else {
-    const s = Math.sin(angle);
-    out
-      .copy(a)
-      .multiplyScalar(Math.sin((1 - u) * angle) / s)
-      .addScaledVector(b, Math.sin(u * angle) / s);
-  }
-  const r = r0 + (r1 - r0) * u + lift * angle * Math.min(r0, r1) * Math.sin(Math.PI * u);
-  return out.multiplyScalar(r);
 }

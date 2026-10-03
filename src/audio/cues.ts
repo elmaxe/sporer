@@ -17,6 +17,8 @@ export type SoundCue =
   | 'busterFlight'
   | 'busterImpact'
   | 'planetExplode'
+  | 'volcanoFire'
+  | 'volcanoRise'
   | 'abductBeam'
   | 'abductStart'
   | 'abductSuccess'
@@ -36,6 +38,8 @@ export const SOUND_CUES: readonly SoundCue[] = [
   'busterFlight',
   'busterImpact',
   'planetExplode',
+  'volcanoFire',
+  'volcanoRise',
   'abductBeam',
   'abductStart',
   'abductSuccess',
@@ -124,6 +128,10 @@ export const cueParams: Record<SoundCue, CueSpec> = {
   busterImpact: oneShot(),
   // The planet blowing apart (the blinding flash).
   planetExplode: oneShot(),
+  // Firing the volcano bomb: the molten shell leaving the ship.
+  volcanoFire: oneShot(),
+  // The shell landing and the volcano rising out of the ground (a rumble and the first eruption).
+  volcanoRise: oneShot(),
   // The abduction beam on, from the press until it's let go.
   abductBeam: { ...travel(), fadeIn: 0.1, fadeOut: 0.3 },
   // The beam catching something to lift (as it comes under the beam).
