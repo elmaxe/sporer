@@ -58,6 +58,7 @@ const vertexShader = /* glsl */ `
   uniform vec3 uSun;
   uniform float uSunPoint;
   uniform float uNearFade;
+  uniform float uRadius;
   uniform vec4 uFlashes[${FLASH_SLOTS}];
   uniform int uFlashCount;
   varying vec2 vCorner;
@@ -69,6 +70,7 @@ const vertexShader = /* glsl */ `
   varying float vShade;
   varying float vScatter;
   varying float vGlow;
+  varying float vFar;
 
   void main() {
     vec4 world = modelMatrix * vec4(iPos.xyz, 1.0);
@@ -103,11 +105,18 @@ const vertexShader = /* glsl */ `
     // A puff the camera is in or about to enter fades out instead of filling the screen.
     float near = smoothstep(size * 0.8, size * uNearFade, length(view.xyz));
     // Night-side clouds are dark and see-through enough not to blot out the air's glow at the limb.
-    vAlpha = iInfo.x * near * (0.3 + 0.7 * smoothstep(-0.3, 0.05, mu));
+    vAlpha = iInfo.x * near * (0.2 + 0.8 * smoothstep(-0.2, 0.1, mu));
+    // From orbit, puffs seen edge-on at the limb thin out, so the clouds don't stand round the planet as a fuzzy rim
+    // (in low orbit the horizon keeps its towering clouds).
+    float orbit = smoothstep(1.25, 1.8, length(cameraPosition - centre) / (uRadius * scale));
+    vAlpha *= mix(1.0, smoothstep(0.05, 0.4, dot(up, toCamera)), orbit);
     vCorner = position.xy;
     float shape = iInfo.z;
     vTile = vec2(mod(shape, 2.0), floor(shape / 2.0)) * 0.5;
-    view.xy += position.xy * size;
+    // Small on screen (seen from orbit): softer and a little bigger, so a cluster's puffs merge into one patch.
+    float screen = projectionMatrix[1][1] * size / max(-view.z, 1e-4);
+    vFar = 1.0 - smoothstep(0.012, 0.05, screen);
+    view.xy += position.xy * size * (1.0 + 0.5 * vFar);
     gl_Position = projectionMatrix * view;
     if (vAlpha <= 0.0) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
   }
@@ -133,16 +142,18 @@ const fragmentShader = /* glsl */ `
   varying float vShade;
   varying float vScatter;
   varying float vGlow;
+  varying float vFar;
 
   void main() {
-    // Crisp, cauliflower edges rather than a soft blur.
-    float a = smoothstep(0.06, 0.55, texture(uAtlas, vTile + (vCorner * 0.5 + 0.5) * 0.5).r);
+    // Crisp, cauliflower edges up close; soft from afar.
+    float d = texture(uAtlas, vTile + (vCorner * 0.5 + 0.5) * 0.5).r;
+    float a = mix(smoothstep(0.06, 0.55, d), d * 0.8, vFar);
     if (a < 0.01) discard;
     // A rounded puff: the sprite as the near half of a ball, lit by the sun (wrapped, so the shade side isn't black).
     vec3 n = vec3(vCorner, sqrt(max(0.0, 1.0 - dot(vCorner, vCorner))));
     float diffuse = 0.4 + 0.6 * max(0.0, dot(n, vLv));
     vec3 sun = uSunColor * vDay * diffuse * vShade * uSunGain;
-    vec3 lit = uColor * (uAmbient + sun) + vDusk * vec3(1.0, 0.5, 0.25) * 0.35 * uColor;
+    vec3 lit = uColor * (uAmbient + sun) + vDusk * vec3(1.0, 0.6, 0.4) * 0.2 * uColor;
     lit += uSunColor * vDay * vScatter * (1.0 - a) * uSilver;
     lit *= uSunStrength;
     float glow = vGlow * uFlashGain * mix(1.0, 0.35, vDay);
@@ -215,6 +226,7 @@ export class CumulusClouds {
         uFlashCount: shared.uFlashCount!,
         uOpacity: { value: cumulusParams.opacity },
         uNearFade: { value: cumulusParams.nearFade },
+        uRadius: { value: field.radius },
         uSilver: { value: cumulusParams.silver },
         uSunGain: { value: cumulusParams.sun },
         uSun: { value: sun.vector },
