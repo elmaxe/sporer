@@ -516,6 +516,7 @@ export function solSystem(ref: StarRef): SystemData {
         atmosphere: m.atmosphere ?? null,
         climate: moonClimate,
         shape: m.shape ? generateShape(new Rng(hashSeed('sol', m.name, 'shape')), m.shape) : null,
+        hostDistance: m.a,
       };
     });
     const extent = Math.max(radius, p.rings?.outer ?? 0, ...moons.map((m) => m.orbit.radius + m.radius));

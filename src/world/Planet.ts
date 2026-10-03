@@ -4,6 +4,7 @@ import { RAPIER, type Physics } from '../physics/Physics';
 import { keplerPosition, orbitPosition, type KeplerOrbit, type Orbit } from '../gen/orbit';
 import type { ShapeData } from '../gen/shape';
 import { describeClimate, type ClimateData } from '../gen/climate';
+import { describeLife, type LifeEstimate } from '../gen/life';
 import type { PlanetStyle, PlanetType, RingData } from '../gen/system';
 import type { CelestialBody } from './CelestialBody';
 import { atmosphereLook } from '../gen/atmosphere';
@@ -37,6 +38,8 @@ export interface PlanetConfig {
   tilt?: number;
   /** Solid bodies only (see gen/climate.ts). */
   climate?: ClimateData | null;
+  /** The chance of life (gen/life.ts), where it's been worked out for the body's system. */
+  life?: LifeEstimate | null;
   /** Irregular small bodies: the nucleus's shape (gen/shape.ts); `radius` is its longest reach. */
   shape?: ShapeData | null;
   /** A Kepler orbit round the star (comets), followed instead of `orbit`. */
@@ -119,7 +122,9 @@ export class Planet implements Entity, CelestialBody {
   ) {
     const { radius, seed, style } = config;
     this.whole = description;
-    this.climateLine = config.climate ? describeClimate(config.climate) : undefined;
+    this.climateLine = config.climate
+      ? describeClimate(config.climate) + (config.life ? ` · ${describeLife(config.life)}` : '')
+      : undefined;
     const gas = isGas(config);
     this.lava = gas ? null : createLavaLook(config, COARSE_VENT_RADIUS);
     this.surface = new THREE.Mesh(
