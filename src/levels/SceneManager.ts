@@ -11,6 +11,7 @@ import { isGas, type Planet } from '../world/Planet';
 import { arrivalParams, clampElevation, descentParams, leaveParams } from './arrival';
 import { SurfaceChangeStore } from '../surface/changes';
 import { BustedBodies, bodyKey } from '../combat/busted';
+import { Inventory } from '../cargo/inventory';
 import type { ItemUser } from '../combat/items';
 import { GALAXY_VIEW_DISTANCE, GALAXY_VIEW_ELEVATION, GalaxyLevel } from './GalaxyLevel';
 import { PLANET_VIEW_DISTANCE, PlanetLevel } from './PlanetLevel';
@@ -90,9 +91,12 @@ export class SceneManager implements Entity {
   /** The hover tooltip every level shares (and the item bar's slots). */
   readonly tooltip = new Tooltip();
   /** What the player has done to each visited planet's surface (removed plants), kept across visits. */
-  private readonly surfaceChanges = new SurfaceChangeStore();
+  /** What the player has done to each body's surface (plants taken, plants set down), by body key. */
+  readonly surfaceChanges = new SurfaceChangeStore();
   /** The bodies blown apart by planet busters, and when (they stay debris fields for the rest of the game). */
   readonly busted = new BustedBodies();
+  /** The ship's cargo hold: plants beamed up, to set down anywhere (cargo/inventory.ts). */
+  readonly inventory = new Inventory();
   private seamless: SeamlessTransition | null = null;
   // Scratch for the seamless zoom (live: the cameras read them every frame).
   private readonly view = new THREE.Quaternion();
@@ -519,6 +523,7 @@ export class SceneManager implements Entity {
         this.busted.bust(bodyKey(body.config), time);
         body.bust(time);
       },
+      this.inventory,
     );
     return this._planetLevel;
   }

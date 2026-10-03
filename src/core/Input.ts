@@ -46,11 +46,16 @@ export class Input {
   private dragDy = 0;
   private wheel = 0;
   private click: { ndcX: number; ndcY: number } | null = null;
+  /** A new primary press (left button, or a lone finger) not yet taken by `consumePress`. */
+  private press: { ndcX: number; ndcY: number } | null = null;
+  /** The current press belongs to a tool (`capturePress`): it neither drags nor clicks until released. */
+  private captured = false;
   private readonly delta = { x: 0, y: 0 };
   private _blocked = false;
   private _touchMode = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
   private readonly gestures = new TouchGestures({
     drag: (dx, dy) => {
+      if (this.captured) return;
       this.dragDx += dx;
       this.dragDy += dy;
     },
@@ -59,6 +64,7 @@ export class Input {
     },
     tap: (x, y) => {
       this.setPointer(x, y);
+      if (this.captured) return;
       this.click = { ndcX: this.pointerState.ndcX, ndcY: this.pointerState.ndcY };
     },
   });
@@ -86,6 +92,7 @@ export class Input {
     this._blocked = value;
     this.dragDx = this.dragDy = this.wheel = 0;
     this.click = null;
+    this.press = null;
   }
 
   /** True while the player last used touch (starts from whether the device's main pointer is coarse). */
@@ -136,6 +143,33 @@ export class Input {
     return this._blocked ? 0 : w;
   }
 
+  /**
+   * True while the primary press is held: the left button, or one finger on
+   * the screen (not a pinch). Tools that act while held (the beam) read it.
+   */
+  get primaryDown(): boolean {
+    if (this._blocked) return false;
+    return this.buttons.has(0) || (this.gestures.count === 1 && !this.gestures.pinched);
+  }
+
+  /** A primary press (in NDC) since the previous call, or null. It may already have been released (check `primaryDown`). */
+  consumePress(): { readonly ndcX: number; readonly ndcY: number } | null {
+    const p = this.press;
+    this.press = null;
+    return this._blocked ? null : p;
+  }
+
+  /**
+   * The current press is a tool's (e.g. the beam holding on a plant): it no
+   * longer turns the camera, and its release isn't a click. A click it has
+   * already made (a press released before the tool saw it) is dropped too.
+   */
+  capturePress(): void {
+    this.captured = true;
+    this.click = null;
+    this.dragDx = this.dragDy = 0;
+  }
+
   /** The last left click (in NDC) since the previous call, or null. */
   consumeClick(): { readonly ndcX: number; readonly ndcY: number } | null {
     const c = this.click;
@@ -181,7 +215,10 @@ export class Input {
   private onPointerDown = (e: PointerEvent) => {
     if (e.pointerType === 'touch') {
       // The first finger is the hovering pointer (hold still on something to see what it is).
-      if (this.gestures.count === 0) this.updatePointer(e);
+      if (this.gestures.count === 0) {
+        this.updatePointer(e);
+        this.newPress();
+      }
       this.gestures.down(e.pointerId, e.clientX, e.clientY);
       return;
     }
@@ -193,6 +230,7 @@ export class Input {
       this.dragging = false;
     }
     this.buttons.add(e.button);
+    if (e.button === 0) this.newPress();
   };
 
   private onPointerMove = (e: PointerEvent) => {
@@ -205,7 +243,7 @@ export class Input {
     if (!this.dragging && Math.hypot(e.clientX - this.pressX, e.clientY - this.pressY) >= CLICK_SLOP_PX) {
       this.dragging = true;
     }
-    if (this.dragging) {
+    if (this.dragging && !(this.captured && this.buttons.has(0))) {
       this.dragDx += e.movementX;
       this.dragDy += e.movementY;
     }
@@ -220,7 +258,7 @@ export class Input {
     }
     if (!this.buttons.delete(e.button)) return;
     this.updatePointer(e);
-    if (e.button === 0 && !this.dragging) this.click = { ndcX: this.pointerState.ndcX, ndcY: this.pointerState.ndcY };
+    if (e.button === 0 && !this.dragging && !this.captured) this.click = { ndcX: this.pointerState.ndcX, ndcY: this.pointerState.ndcY };
     if (this.buttons.size === 0) this.dragging = false;
   };
 
@@ -246,6 +284,11 @@ export class Input {
   private onContextMenu = (e: Event) => {
     e.preventDefault();
   };
+
+  private newPress(): void {
+    this.captured = false;
+    this.press = { ndcX: this.pointerState.ndcX, ndcY: this.pointerState.ndcY };
+  }
 
   private updatePointer(e: PointerEvent): void {
     this.setPointer(e.clientX, e.clientY);

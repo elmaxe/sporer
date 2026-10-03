@@ -3,6 +3,7 @@ import type { Entity } from '../core/Entity';
 import type { Input } from '../core/Input';
 import { PLANT_KINDS } from '../gen/plants';
 import type { Tooltip } from '../ui/Tooltip';
+import type { Plantings } from './Plantings';
 import type { SurfaceEntities } from './SurfaceEntities';
 
 /** How far past the ground's hit a plant can still be picked: its crown is wider than a point. */
@@ -24,7 +25,9 @@ export class PlantTooltip implements Entity {
   constructor(
     private readonly camera: THREE.Camera,
     private readonly input: Input,
-    private readonly plants: SurfaceEntities,
+    /** The body's own plants (null where none grow), and those the player set down. */
+    private readonly plants: SurfaceEntities | null,
+    private readonly plantings: Plantings | null,
     private readonly tooltip: Tooltip,
     /** Where the ray meets the ground (written into the second argument; the distance, or null): plants behind a hill don't count. */
     private readonly groundHit: (ray: THREE.Ray, out: THREE.Vector3) => number | null,
@@ -48,7 +51,16 @@ export class PlantTooltip implements Entity {
       const { ray } = this.raycaster;
       const ground = this.groundHit(ray, this.point);
       // A plant stands on the ground, so it is hit just before the ray reaches it.
-      const hit = this.plants.pick(ray, ground === null ? Infinity : ground + GROUND_SLACK);
+      const limit = ground === null ? Infinity : ground + GROUND_SLACK;
+      const hit = this.plants?.pick(ray, limit) ?? null;
+      const planted = this.plantings?.pick(ray, hit ? hit.distance : limit) ?? null;
+      if (planted) {
+        const { species, scale, origin } = planted.plant;
+        const info = `${PLANT_KINDS[species.kind].label} · ${(species.height * scale).toFixed(1)} u tall`;
+        this.tooltip.show(planted.id, species.name, info, pointer.clientX, pointer.clientY, `Brought from ${origin}`, this.input.touchMode);
+        this.shown = true;
+        return;
+      }
       if (hit) {
         const { species, plant } = hit;
         const height = species.height * plant.scale;
