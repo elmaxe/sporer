@@ -2,6 +2,7 @@ import type GUI from 'lil-gui';
 import type { Composition } from '../gen/climate';
 import { MOON_RADIUS, gasStyle, type MoonType, type PlanetType } from '../gen/planets';
 import { cometActivity } from '../gen/comets';
+import { iceShare } from '../gen/rings';
 import { Rng, hashSeed } from '../gen/rng';
 import { generateShape, normaliseShape, shapeExtents } from '../gen/shape';
 import { cometParams } from '../world/Comet';
@@ -475,6 +476,15 @@ export class LabPanel {
         const r = lab.planet.rings;
         if (r) r.outer = Math.max(v * lab.planet.radius, r.inner + 0.05);
       },
+      /** Share of ice among the rocks up close: set, or from the colour (gen/rings.ts iceShare). */
+      get ice() {
+        const r = lab.planet.rings;
+        return r ? Math.round((r.ice ?? iceShare(r.color)) * 100) / 100 : 0;
+      },
+      set ice(v: number) {
+        const r = lab.planet.rings;
+        if (r) r.ice = v;
+      },
     };
     f.add(rings, 'on')
       .name('rings')
@@ -487,6 +497,7 @@ export class LabPanel {
     f.add(rings, 'outer', 1.05, 6, 0.01).name('outer edge (× R)').onChange(changed).listen();
     f.addColor(p.rings, 'color').onChange(changed);
     f.add(p.rings, 'opacity', 0, 1, 0.01).onChange(changed);
+    f.add(rings, 'ice', 0, 1, 0.01).name('ice (rocks up close)').onChange(changed).listen();
   }
 
   private buildMoons(): void {

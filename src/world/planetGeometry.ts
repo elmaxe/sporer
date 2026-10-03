@@ -1,11 +1,11 @@
 import * as THREE from 'three';
 import { terrainNoise } from '../gen/noise';
 import { realSurface, surfaceColor } from '../gen/realSurface';
-import { hashSeed, Rng } from '../gen/rng';
 import { gasTone, generateGasLayout } from '../gen/gasGiants';
 import { paletteAt } from './gasLook';
 import { SHAPE_FLOOR, shapeRadius, type ShapeData } from '../gen/shape';
 import type { PlanetStyle, RingData } from '../gen/system';
+import { ringAt, ringProfile } from '../gen/rings';
 import { createCubeSphere } from './cubeSphere';
 import type { Vec3Like } from './cubeSphereMath';
 
@@ -179,8 +179,9 @@ export function createGasGeometry(radius: number, seed: number, bands: readonly 
 }
 
 /**
- * Flat, double-sided ring in the equatorial plane with seeded radial gaps and
- * brightness. `scale` converts the ring data's system units.
+ * Flat, double-sided ring in the equatorial plane with its radial profile
+ * (gen/rings.ts: seeded gaps and brightness, or a real ring's). `scale`
+ * converts the ring data's system units.
  */
 export function createRings(rings: RingData, seed: number, scale = 1): THREE.Mesh {
   const inner = rings.inner * scale;
@@ -188,13 +189,8 @@ export function createRings(rings: RingData, seed: number, scale = 1): THREE.Mes
   const geometry = new THREE.RingGeometry(inner, outer, 128, rings.profile ? Math.max(24, rings.profile.length * 2) : 24);
   geometry.rotateX(-Math.PI / 2);
 
-  const rng = new Rng(hashSeed(seed, 'rings'));
-  const samples =
-    rings.profile ??
-    Array.from({ length: 16 }, () => ({
-      alpha: rng.chance(0.15) ? 0.1 : rng.range(0.5, 1),
-      light: rng.range(0.75, 1.15),
-    }));
+  const profile = ringProfile(rings, seed);
+  const sample = { alpha: 0, light: 1 };
 
   const position = geometry.getAttribute('position') as THREE.BufferAttribute;
   const colors = new Float32Array(position.count * 4);
@@ -202,16 +198,10 @@ export function createRings(rings: RingData, seed: number, scale = 1): THREE.Mes
   const color = new THREE.Color();
   for (let i = 0; i < position.count; i++) {
     const r = Math.hypot(position.getX(i), position.getZ(i));
-    const t = THREE.MathUtils.clamp((r - inner) / (outer - inner), 0, 1);
-    const f = t * (samples.length - 1);
-    const a = samples[Math.floor(f)]!;
-    const b = samples[Math.min(Math.floor(f) + 1, samples.length - 1)]!;
-    const w = f - Math.floor(f);
-    // Fade the inner and outer edges (a real profile has its own).
-    const edge = rings.profile ? 1 : Math.min(1, t * 8, (1 - t) * 8);
-    color.copy(base).multiplyScalar(THREE.MathUtils.lerp(a.light, b.light, w));
+    ringAt(rings, profile, THREE.MathUtils.clamp((r - inner) / (outer - inner), 0, 1), sample);
+    color.copy(base).multiplyScalar(sample.light);
     color.toArray(colors, i * 4);
-    colors[i * 4 + 3] = rings.opacity * THREE.MathUtils.lerp(a.alpha, b.alpha, w) * edge;
+    colors[i * 4 + 3] = sample.alpha;
   }
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 4));
 
