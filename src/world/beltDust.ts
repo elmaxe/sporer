@@ -94,7 +94,7 @@ function valueNoise(x: number, y: number, z: number): number {
   );
 }
 
-function fbm(x: number, y: number, z: number, octaves: number): number {
+export function fbm(x: number, y: number, z: number, octaves: number): number {
   let sum = 0;
   let amp = 0.5;
   let total = 0;

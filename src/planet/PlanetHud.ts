@@ -27,6 +27,8 @@ export class PlanetHud implements Entity {
     input: Input,
     /** e.g. "15 °C · N₂–O₂ 1.0 bar · 1.0 g · geothermal low · T3"; null for gas giants. */
     private climate: string | null = null,
+    /** Something that comes and goes on the climate line, e.g. a meteor shower ('' when nothing). */
+    private readonly now: () => string = () => '',
   ) {
     this.help = new HelpText(input, HELP, TOUCH_HELP);
   }
@@ -35,10 +37,17 @@ export class PlanetHud implements Entity {
     this.active = true;
     this.locationEl.textContent = `${this.location} · low orbit`;
     // Only this HUD uses the climate line, so it shows it while active and hides it on leaving.
-    this.climateEl.textContent = this.climate ?? '';
-    this.climateEl.hidden = !this.climate;
+    this.showClimate();
     this.help.refresh(true);
     this.sinceRefresh = REFRESH_SECONDS;
+  }
+
+  /** The climate line, with whatever is happening now after it. */
+  private showClimate(): void {
+    const now = this.now();
+    const text = [this.climate, now].filter(Boolean).join(' · ');
+    if (this.climateEl.textContent !== text) this.climateEl.textContent = text;
+    this.climateEl.hidden = !text;
   }
 
   /** New lines for a body just blown apart by a planet buster. */
@@ -60,6 +69,7 @@ export class PlanetHud implements Entity {
     if (this.sinceRefresh < REFRESH_SECONDS) return;
     this.sinceRefresh = 0;
     this.help.refresh();
+    this.showClimate();
     this.speedEl.textContent = `${this.ship.speed.toFixed(0)} u/s`;
     this.targetEl.textContent = this.ship.enRoute ? 'Autopilot → surface point' : '';
   }

@@ -4,6 +4,7 @@ import { Physics } from './physics/Physics';
 import { generateGalaxy, solRef, systemRef } from './gen/galaxy';
 import { loadSurfaceMaps } from './world/surfaceMaps';
 import { geyserKind } from './gen/geysers';
+import { meteorShowers, nextShowerPeak } from './gen/meteors';
 import { volcanicLightning, weatherKind } from './gen/weather';
 import { parseSeed } from './gen/rng';
 import { findHomeSystem, generateSystem } from './gen/system';
@@ -63,7 +64,7 @@ async function main(): Promise<void> {
   // Handles for poking at the game from the browser console / automation.
   // ship / world / system follow the current system level, planet the planet level (or null).
   if (import.meta.env.DEV) {
-    Object.assign(window, { game, galaxy, levels, audio, menu, debugDump, freeze, generateSystem, geyserKind, weatherKind, volcanicLightning });
+    Object.assign(window, { game, galaxy, levels, audio, menu, debugDump, freeze, generateSystem, geyserKind, weatherKind, volcanicLightning, meteorShowers, nextShowerPeak });
     Object.defineProperties(window, {
       ship: { get: () => levels.systemLevel.ship, configurable: true },
       world: { get: () => levels.systemLevel.world, configurable: true },

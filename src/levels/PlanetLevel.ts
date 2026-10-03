@@ -11,6 +11,9 @@ import { bodyLabLink } from '../lab/bodyLink';
 import { describeGeysers, geyserActivity } from '../gen/geysers';
 import { describeWeather } from '../gen/weather';
 import { CometActivity } from '../planet/CometActivity';
+import { Meteors } from '../planet/Meteors';
+import { atmosphereLook } from '../gen/atmosphere';
+import { GIANT_ESCAPE_VELOCITY, METEOR_MIN_PRESSURE, describeShower, meteorShowers } from '../gen/meteors';
 import { Geysers } from '../planet/Geysers';
 import { Weather } from '../planet/Weather';
 import { LavaEruptions } from '../planet/LavaEruptions';
@@ -82,6 +85,8 @@ const WATCH_EASE = 0.8;
 const WATCH_LIMIT = 0.45;
 /** The HUD's line under the name once the body is busted. */
 const BUSTED_DETAIL = 'Blown apart by a planet buster: a field of rubble and dust';
+/** Over a giant's cloud tops (no atmosphere shell), meteors burn up to this many radii from the centre. */
+const GIANT_METEOR_TOP = 1.06;
 /** Bodies in the sky are drawn at least this many pixels in radius. */
 const SKY_MIN_PIXELS = 1.5;
 /** The sky camera's clipping range, in system units. */
@@ -113,6 +118,8 @@ export class PlanetLevel extends Level implements ItemUser {
   geysers: Geysers | null = null;
   /** Bodies with weather only: rain, lightning bolts and their light (the clouds are the globe's). */
   weather: Weather | null = null;
+  /** Bodies whose orbit crosses a comet's dust stream: meteors (or impact flashes) while it does (not once busted). */
+  meteors: Meteors | null = null;
   /** Comets only: their jets, coma and tails, as active as the comet is close to the star. */
   comet: CometActivity | null = null;
   /** A comet's orbit, which bends its dust tail back. */
@@ -352,7 +359,41 @@ export class PlanetLevel extends Level implements ItemUser {
           : config.shape
             ? describeShape(config.shape)
             : null;
-    this.hud = this.add(new PlanetHud(this.ship, `${body.name} · ${body.description}`, input, detail));
+    // Meteor showers where the body's orbit (a moon's: its planet's) crosses a comet's dust stream.
+    const heliocentric = body.parent?.config ?? config;
+    const showers =
+      config.shape || config.path || busted
+        ? []
+        : meteorShowers(
+            { orbit: heliocentric.orbit, escapeVelocity: climate?.escapeVelocity ?? GIANT_ESCAPE_VELOCITY, seed: config.seed },
+            system.data.comets,
+            system.data.habitableRadius,
+          );
+    const airless = config.type !== 'gas' && !(climate && climate.pressure >= METEOR_MIN_PRESSURE);
+    const look = climate && !airless ? atmosphereLook(climate, config.radius) : null;
+    this.meteors = showers.length
+      ? this.add(
+          new Meteors(
+            this.scene,
+            this.frame,
+            showers,
+            heliocentric.orbit,
+            airless,
+            globe.radius,
+            look?.top ?? GIANT_METEOR_TOP,
+            globe.groundHeight,
+            camera,
+            globe.sun,
+            this.ship.object,
+            debug,
+          ),
+        )
+      : null;
+    const showerLine = () =>
+      this.meteors?.shower
+        ? describeShower(this.meteors.shower, airless) + (this.meteors.radiantUp ? '' : ' (radiant below the horizon)')
+        : '';
+    this.hud = this.add(new PlanetHud(this.ship, `${body.name} · ${body.description}`, input, detail, showerLine));
     this.map = this.add(new PlanetMap(config, body.name, this.ship, globe, input, debug));
     debug
       .folder('Planet lab')
@@ -455,8 +496,9 @@ export class PlanetLevel extends Level implements ItemUser {
   private blast(): void {
     this.globe.bust(this.radius * DEBRIS_REACH);
     this.cargo?.clear(false);
-    for (const entity of [this.eruptions, this.geysers, this.weather, this.comet, this.plants, this.cargo, this.plantings, this.volcanoes]) if (entity) this.remove(entity);
-    this.eruptions = this.geysers = this.weather = this.comet = this.plants = this.cargo = this.plantings = null;
+    for (const entity of [this.eruptions, this.geysers, this.weather, this.comet, this.plants, this.cargo, this.plantings, this.volcanoes, this.meteors])
+      if (entity) this.remove(entity);
+    this.eruptions = this.geysers = this.weather = this.comet = this.plants = this.cargo = this.plantings = this.meteors = null;
     this.volcanoes = null;
     if (this.plantTooltip) {
       this.plantTooltip.deactivate();

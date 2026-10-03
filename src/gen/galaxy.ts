@@ -1,4 +1,5 @@
 import { hslToHex } from './color';
+import { chooseYoungStars } from './discs';
 import { generateName } from './names';
 import { generateNebulas, nebulaAt, type NebulaData } from './nebulas';
 import { hashSeed, Rng } from './rng';
@@ -27,6 +28,8 @@ export interface StarRef {
   nebula: NebulaData | null;
   /** A real system instead of a generated one: 'sol', our own (gen/sol.ts). Absent for every other star. */
   real?: 'sol';
+  /** A young star still wrapped in its protoplanetary disc (gen/discs.ts). Absent for the rest. */
+  young?: true;
 }
 
 export interface GalaxyData {
@@ -92,6 +95,8 @@ export function generateGalaxy(seed: number, count = DEFAULT_STAR_COUNT): Galaxy
   for (const star of stars) star.nebula = nebulaAt(nebulas, star.position)?.nebula ?? null;
   const rogues = generateRogues(seed, stars, nebulas, (r) => armPosition(r, arms, twist, armOffset));
   placeSol(stars, nebulas);
+  // After Sol, so it's never young; its own stream, so nothing above changes.
+  chooseYoungStars(seed, stars);
   return { seed, radius: GALAXY_RADIUS, arms, twist, armOffset, stars, nebulas, rogues };
 }
 
