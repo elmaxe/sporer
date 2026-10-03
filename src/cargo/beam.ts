@@ -1,8 +1,14 @@
+import * as THREE from 'three';
+import { bodyMass, earthRadii } from '../gen/climate';
+import { MIN_ARC_GRAVITY } from '../gen/lavaActivity';
+import type { PlanetConfig } from '../world/Planet';
+
 /*
  * The cargo beam's motion, pure: how fast things go up and down the beam,
  * how they shrink on the way up (so a tree fits in the UFO) and grow back on
- * the way down, and how they fall when let go. Stylised, in planet-level
- * units (the UFO is ~4 wide, a tree 6–14 tall).
+ * the way down, and how they fall when let go: on from where they were going,
+ * pulled down by the body's gravity. Stylised, in planet-level units (the UFO
+ * is ~4 wide, a tree 6–14 tall).
  */
 
 export const beamParams = {
@@ -14,9 +20,14 @@ export const beamParams = {
   minTime: 0.9,
   /** How tall something is when it reaches the ship (its full height shrinks to this). */
   carriedHeight: 1.2,
-  /** Falling: acceleration, units/s² (stylised: the same on every body), and fastest speed. */
+  /**
+   * Falling: acceleration at 1 g, units/s² (other bodies scale it as the
+   * lava's and geysers' arcs do, see `fallGravity`), and fastest speed down.
+   */
   gravity: 30,
   maxFallSpeed: 60,
+  /** Something still in the air after this long (s) has drifted off into space. */
+  maxFallTime: 20,
 };
 
 /** Seconds a trip along a beam `length` units long takes. */
@@ -41,19 +52,54 @@ export function beamScale(t: number, full: number, small: number): number {
   return full + (small - full) * u;
 }
 
-/** A falling thing's height above the ground and speed (down is positive). */
-export interface Fall {
-  height: number;
-  speed: number;
+/**
+ * Falling acceleration on a body of surface gravity `g` (Earth = 1),
+ * units/s²: as gen/lavaActivity.ts's arcs, √g with a floor, so weaker bodies
+ * let things drop slower without a comet's taking minutes.
+ */
+export function fallGravity(g: number, p = beamParams): number {
+  return p.gravity * Math.sqrt(Math.max(MIN_ARC_GRAVITY, g));
 }
 
-/** Steps a fall by `dt` seconds; true once it has hit the ground (height clamped to 0). */
-export function stepFall(f: Fall, dt: number, p = beamParams): boolean {
-  f.speed = Math.min(p.maxFallSpeed, f.speed + p.gravity * dt);
-  f.height -= f.speed * dt;
-  if (f.height > 0) return false;
-  f.height = 0;
-  return true;
+/**
+ * A body's surface gravity in g: its climate's, or else from its size, as
+ * gen/debris.ts works out escape velocities (giants are all gas, comets and
+ * asteroids next to nothing).
+ */
+export function bodyGravity(body: Pick<PlanetConfig, 'type' | 'radius' | 'size' | 'climate'>): number {
+  if (body.climate) return body.climate.gravity;
+  const R = earthRadii(body.radius);
+  const giant = body.size === 'gasGiant' || body.size === 'iceGiant';
+  return bodyMass(R, !giant && body.type === 'ice', body.size === 'gasGiant') / R ** 2;
+}
+
+/** A falling thing: where it is (from the body's centre) and its velocity, units/s. */
+export interface Fall {
+  readonly position: THREE.Vector3;
+  readonly velocity: THREE.Vector3;
+}
+
+const fallUp = new THREE.Vector3();
+
+/**
+ * Steps a fall by `dt` seconds: it keeps its velocity, pulled towards the
+ * body's centre at `gravity` (its speed down never past `maxFallSpeed`, its
+ * speed across untouched). `ground` is the ground's radius in a direction.
+ * Returns its height above the ground, 0 once it has hit it (put on the ground).
+ */
+export function stepFall(f: Fall, gravity: number, ground: (dir: THREE.Vector3) => number, dt: number, p = beamParams): number {
+  const { position, velocity } = f;
+  fallUp.copy(position).normalize();
+  velocity.addScaledVector(fallUp, -gravity * dt);
+  const down = -velocity.dot(fallUp);
+  if (down > p.maxFallSpeed) velocity.addScaledVector(fallUp, down - p.maxFallSpeed);
+  position.addScaledVector(velocity, dt);
+  fallUp.copy(position).normalize();
+  const groundR = ground(fallUp);
+  const height = position.length() - groundR;
+  if (height > 0) return height;
+  position.copy(fallUp).multiplyScalar(groundR);
+  return 0;
 }
 
 /**

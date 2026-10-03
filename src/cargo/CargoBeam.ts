@@ -16,7 +16,7 @@ import { GROUND_DETAIL_LAYER } from '../world/groundDepth';
 import { createGlowTexture } from '../world/glowTexture';
 import { CLOUD_RENDER_ORDER } from '../world/weatherLook';
 import { Rng, hashSeed } from '../gen/rng';
-import { beamEase, beamParams, beamScale, carriedScale, fallScale, stepFall, tripTime, type Fall } from './beam';
+import { beamEase, beamParams, beamScale, carriedScale, fallGravity, fallScale, stepFall, tripTime, type Fall } from './beam';
 import { ParticlePool, type Puff } from './CargoFx';
 import { speciesKey, type Inventory } from './inventory';
 import { describeFate, plantFate, type FateWorld, type Landing, type PlantFate } from './plantFate';
@@ -34,11 +34,12 @@ export interface CargoShip {
   readonly up: THREE.Vector3;
 }
 
-/** The body the beam works on: its key and name (for the hold's stacks) and its climate (for what becomes of a plant set down). */
+/** The body the beam works on: its key and name (for the hold's stacks), its climate (for what becomes of a plant set down) and surface gravity (g, for how things fall). */
 export interface CargoBody {
   readonly key: string;
   readonly name: string;
   readonly world: FateWorld;
+  readonly gravity: number;
 }
 
 /** How far past the ground's hit a plant can still be picked: its crown is wider than a point. */
@@ -88,10 +89,16 @@ interface Load {
   readonly small: number;
   scale: number;
   spin: number;
-  /** Falling: straight down `dir` from where it was let go. */
+  /** Its velocity, units/s: followed on the beam, so a load let go keeps it (`moved`: it has a frame of motion to go by). */
+  readonly velocity: THREE.Vector3;
+  moved: boolean;
+  /** Falling: on from where it was let go, with the velocity it had (`fall` shares `velocity`). */
   readonly fall: Fall;
   fallFrom: number;
   fallFromScale: number;
+  /** Seconds it has been falling. */
+  fallTime: number;
+  /** Where it lands (unit direction from the body's centre). */
   readonly dir: THREE.Vector3;
   fate: PlantFate;
   age: number;
@@ -106,13 +113,15 @@ interface Load {
  * entity). Selected on the item bar's Inventory tab (`arm`): the Abduction
  * Beam lifts a plant held under the pointer (mouse button or finger down on
  * it) up to the ship, shrinking as it rises; let go on the way and it falls
- * back. At the ship it goes into the hold (`Inventory`, a stack per species).
- * A stack selected instead sets one of its plants down where the pointer is
- * held on the ground, growing back to size on the way down; let go (or just
- * click) and it falls from where it is. Whatever lands meets its fate there
- * (`plantFate`): it takes root and stays (`Plantings`), or drowns, burns,
- * chars, freezes, withers, dissolves or sinks into a giant's clouds, which
- * plays out on the spot. One beam at a time; things in the air keep falling
+ * back, carrying on with the motion it had (the ship's and the beam's) as
+ * the body's gravity pulls it down. At the ship it goes into the hold
+ * (`Inventory`, a stack per species). A stack selected instead sets one of
+ * its plants down where the pointer is held on the ground, growing back to
+ * size on the way down; let go (or just click) and it falls from where it
+ * is, the same way. Whatever lands meets its fate there (`plantFate`): it
+ * takes root and stays (`Plantings`), or drowns, burns, chars, freezes,
+ * withers, dissolves or sinks into a giant's clouds, which plays out on the
+ * spot. One beam at a time; things in the air keep falling
  * and fates keep playing while the next one goes. Motion is scripted (no
  * physics): the trips along the beam and the falls are in cargo/beam.ts.
  */
@@ -135,6 +144,8 @@ export class CargoBeam implements Entity {
   private readonly point = new THREE.Vector3();
   private readonly hold = new THREE.Vector3();
   private readonly v = new THREE.Vector3();
+  /** Falling acceleration here, units/s². */
+  private gravity: number;
   private readonly w = new THREE.Vector3();
   private readonly up = new THREE.Vector3();
   private readonly q = new THREE.Quaternion();
@@ -175,6 +186,7 @@ export class CargoBeam implements Entity {
     debug: Debug,
   ) {
     this.rng = new Rng(hashSeed('cargo', body.key));
+    this.gravity = fallGravity(body.gravity);
     this.look = new BeamLook(scene);
     this.reticle = new MarkerRing(scene, '#8fffd2', 0.1, 0.18);
     this.farReticle = new MarkerRing(scene, '#7d8794', 0, 0.12);
@@ -185,8 +197,11 @@ export class CargoBeam implements Entity {
     f?.add(beamParams, 'speed', 1, 40);
     f?.add(beamParams, 'minTime', 0, 3);
     f?.add(beamParams, 'carriedHeight', 0.2, 4);
-    f?.add(beamParams, 'gravity', 1, 100);
+    f?.add(beamParams, 'gravity', 1, 100)
+      .name('gravity (1 g)')
+      .onChange(() => (this.gravity = fallGravity(body.gravity)));
     f?.add(beamParams, 'maxFallSpeed', 5, 200);
+    f?.add(beamParams, 'maxFallTime', 1, 60);
   }
 
   /** The item armed now: the beam, a stack to set down, or nothing. */
@@ -366,6 +381,7 @@ export class CargoBeam implements Entity {
     mesh.material = material;
     const small = carriedScale(species.height, full);
     const restUp = foot.clone().normalize();
+    const velocity = new THREE.Vector3();
     const load: Load = {
       state,
       object,
@@ -384,9 +400,12 @@ export class CargoBeam implements Entity {
       small,
       scale: full,
       spin: 0,
-      fall: { height: 0, speed: 0 },
+      velocity,
+      moved: false,
+      fall: { position: new THREE.Vector3(), velocity },
       fallFrom: 0,
       fallFromScale: full,
+      fallTime: 0,
       dir: restUp.clone(),
       fate: 'root',
       age: 0,
@@ -407,14 +426,15 @@ export class CargoBeam implements Entity {
     this.startFall(load);
   }
 
+  /** It falls from where it is, keeping the velocity it had. */
   private startFall(load: Load): void {
     load.state = 'fall';
     const pos = load.object.position;
+    load.fall.position.copy(pos);
     load.dir.copy(pos).normalize();
-    load.fall.height = Math.max(0, pos.length() - this.ground.groundHeight(load.dir));
-    load.fall.speed = 0;
-    load.fallFrom = load.fall.height;
+    load.fallFrom = Math.max(0, pos.length() - this.ground.groundHeight(load.dir));
     load.fallFromScale = load.scale;
+    load.fallTime = 0;
   }
 
   private stopSound(): void {
@@ -434,6 +454,7 @@ export class CargoBeam implements Entity {
         this.v.lerpVectors(load.foot, this.hold, e);
         this.up.copy(this.v).normalize();
         this.v.addScaledVector(this.up, -0.5 * e * load.species.height * load.scale);
+        this.track(load, this.v, dt);
         this.pose(load, this.v, load.scale);
         if (load.state === 'up' && load.t >= 1) this.arrive(load);
         else if (load.state === 'down' && load.t <= 0) {
@@ -445,12 +466,20 @@ export class CargoBeam implements Entity {
         return;
       }
       case 'fall': {
-        const landed = stepFall(load.fall, dt);
+        load.fallTime += dt;
+        const height = stepFall(load.fall, this.gravity, this.ground.groundHeight, dt);
         load.spin += BEAM_SPIN * 0.5 * dt;
-        load.scale = fallScale(load.fall.height, load.fallFrom, load.fallFromScale, load.full);
-        this.v.copy(load.dir).multiplyScalar(this.ground.groundHeight(load.dir) + load.fall.height);
-        this.pose(load, this.v, load.scale);
-        if (landed) this.land(load, false);
+        load.scale = fallScale(height, load.fallFrom, load.fallFromScale, load.full);
+        this.pose(load, load.fall.position, load.scale);
+        if (height === 0) {
+          this.dir(load, load.fall.position);
+          this.land(load, false);
+        } else if (load.fallTime > beamParams.maxFallTime) {
+          // Thrown faster than it falls back (off a small body): gone into space.
+          load.source?.destroy();
+          this.drop(load);
+          this.say(`${load.species.name} drifted off into space`);
+        }
         return;
       }
       case 'fate':
@@ -473,6 +502,13 @@ export class CargoBeam implements Entity {
     this.sfx.play('abductSuccess');
     for (let i = 0; i < 14; i++) this.burst(this.hold, 1.5, 1, 0.5, 0.05, 0.6, '#c8fff0', 0.9, 0, 2, this.glow);
     this.say(`${load.species.name} beamed up`);
+  }
+
+  /** Follows the load's velocity on the beam from its last place to `position` (its first frame has nothing to go by). */
+  private track(load: Load, position: THREE.Vector3, dt: number): void {
+    if (dt <= 0) return;
+    if (load.moved) load.velocity.subVectors(position, load.object.position).divideScalar(dt);
+    load.moved = true;
   }
 
   private dir(load: Load, point: THREE.Vector3): void {

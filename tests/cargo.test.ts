@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { beamEase, beamParams, beamScale, carriedScale, fallScale, stepFall, tripTime } from '../src/cargo/beam';
+import * as THREE from 'three';
+import { beamEase, beamParams, beamScale, bodyGravity, carriedScale, fallGravity, fallScale, stepFall, tripTime } from '../src/cargo/beam';
 import { CARGO_STACKS, Inventory, STACK_SIZE, speciesKey } from '../src/cargo/inventory';
 import { FREEZING, IGNITION_TEMPERATURE, landingTemperature, plantFate, type FateWorld } from '../src/cargo/plantFate';
 import { generateGalaxy, solRef } from '../src/gen/galaxy';
+import { MIN_ARC_GRAVITY } from '../src/gen/lavaActivity';
 import { generateSpecies, PLANT_KINDS, type PlantSpecies } from '../src/gen/plants';
 import { Rng } from '../src/gen/rng';
 import { generateSystem, type PlanetData } from '../src/gen/system';
@@ -137,19 +139,63 @@ describe('the beam\'s motion', () => {
     expect(tripTime(90)).toBeCloseTo(90 / beamParams.speed);
   });
 
-  it('falls faster and faster, lands, and is full size when it does', () => {
-    const f = { height: 20, speed: 0 };
+  /** Drops a fall onto a flat ball of radius 1000 from 20 up with `velocity`; where and when it lands. */
+  const drop = (velocity: THREE.Vector3, gravity = fallGravity(1)) => {
+    const f = { position: new THREE.Vector3(0, 1020, 0), velocity };
     let t = 0;
-    let landed = false;
-    while (!landed && t < 10) {
-      landed = stepFall(f, 1 / 60);
-      t += 1 / 60;
+    let height = 20;
+    while (height > 0 && t < 30) {
+      height = stepFall(f, gravity, () => 1000, 1 / 120);
+      t += 1 / 120;
     }
-    expect(landed).toBe(true);
-    expect(f.height).toBe(0);
+    return { height, t, position: f.position };
+  };
+
+  it('falls faster and faster, lands, and is full size when it does', () => {
+    const { height, t, position } = drop(new THREE.Vector3());
+    expect(height).toBe(0);
+    expect(position.length()).toBeCloseTo(1000);
+    expect(position.x).toBeCloseTo(0);
     // h = g t²/2 → t = √(2h/g).
     expect(t).toBeCloseTo(Math.sqrt((2 * 20) / beamParams.gravity), 1);
     expect(fallScale(0, 20, 0.1, 1)).toBe(1);
     expect(fallScale(20, 20, 0.1, 1)).toBeCloseTo(0.1);
+  });
+
+  it('keeps the velocity it was let go with: carried on across, thrown up or down', () => {
+    const still = drop(new THREE.Vector3());
+    const across = drop(new THREE.Vector3(15, 0, 0));
+    // Over the same time, about as far as its speed takes it (the ground curves away a little).
+    expect(across.t).toBeCloseTo(still.t, 1);
+    expect(across.position.x).toBeCloseTo(15 * across.t, 0);
+    const up = drop(new THREE.Vector3(0, 10, 0));
+    const down = drop(new THREE.Vector3(0, -10, 0));
+    // Up: rises, comes back and falls 20; t solves 20 + 10t − g t²/2 = 0.
+    const g = beamParams.gravity;
+    expect(up.t).toBeCloseTo((10 + Math.sqrt(100 + 40 * g)) / g, 1);
+    expect(down.t).toBeLessThan(still.t);
+  });
+
+  it('never falls faster than its fastest speed down, whatever it carries across', () => {
+    const f = { position: new THREE.Vector3(0, 5000, 0), velocity: new THREE.Vector3(30, -beamParams.maxFallSpeed * 2, 0) };
+    stepFall(f, fallGravity(1), () => 1000, 1 / 60);
+    const up = f.position.clone().normalize();
+    expect(-f.velocity.dot(up)).toBeLessThanOrEqual(beamParams.maxFallSpeed + 1e-6);
+    expect(f.velocity.x).toBeCloseTo(30, 0);
+  });
+
+  it('falls slower on weaker bodies, never so slow a comet takes minutes', () => {
+    expect(fallGravity(1)).toBe(beamParams.gravity);
+    expect(fallGravity(2.5)).toBeGreaterThan(fallGravity(1));
+    expect(fallGravity(0.16)).toBeLessThan(fallGravity(1));
+    expect(fallGravity(1e-5)).toBe(fallGravity(MIN_ARC_GRAVITY));
+    expect(drop(new THREE.Vector3(), fallGravity(0)).t).toBeLessThan(5);
+  });
+
+  it('knows each body\'s gravity: its climate\'s, or a giant\'s or a comet\'s from its size', () => {
+    expect(bodyGravity(body('Earth'))).toBeCloseTo(body('Earth').climate!.gravity);
+    const giant = sol.planets.find((p) => p.size === 'gasGiant')!;
+    expect(bodyGravity(giant)).toBeGreaterThan(1);
+    expect(bodyGravity({ type: 'barren', radius: 0.5, size: undefined, climate: null })).toBeLessThan(0.01);
   });
 });

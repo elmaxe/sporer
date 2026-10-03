@@ -1,0 +1,83 @@
+# Sets an issue's Status on the Sporer project (https://github.com/users/elmaxe/projects/1), adding the issue to
+# the project first if it isn't on it. Run by hand or by Claude when it starts fixing an issue (see CLAUDE.md):
+#   Actions → Project status → Run workflow, with the issue number and the status, e.g. "In Progress".
+# A project owned by a user can't be written with the workflow's own token, so this uses the PROJECT_TOKEN secret:
+# a classic personal access token with the `project` and `repo` scopes.
+# GitHub only runs workflow_dispatch workflows that are on the default branch.
+name: Project status
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: Issue number
+        required: true
+      status:
+        description: Status option, exactly as the project names it
+        required: true
+        default: In Progress
+
+permissions: {}
+
+env:
+  GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+  PROJECT_OWNER: elmaxe
+  PROJECT_NUMBER: 1
+  ISSUE: ${{ inputs.issue }}
+  STATUS: ${{ inputs.status }}
+  OWNER: ${{ github.repository_owner }}
+  REPO: ${{ github.event.repository.name }}
+
+jobs:
+  set-status:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set the issue's status
+        run: |
+          set -euo pipefail
+          [[ "$ISSUE" =~ ^[0-9]+$ ]] || { echo "::error::Issue must be a number, got '$ISSUE'"; exit 1; }
+          [ -n "$GH_TOKEN" ] || { echo "::error::The PROJECT_TOKEN secret is missing"; exit 1; }
+
+          project=$(gh api graphql -f owner="$PROJECT_OWNER" -F number="$PROJECT_NUMBER" -f query='
+            query($owner: String!, $number: Int!) {
+              user(login: $owner) {
+                projectV2(number: $number) {
+                  id
+                  field(name: "Status") { ... on ProjectV2SingleSelectField { id options { id name } } }
+                }
+              }
+            }')
+          project_id=$(jq -r '.data.user.projectV2.id' <<<"$project")
+          field_id=$(jq -r '.data.user.projectV2.field.id' <<<"$project")
+          option_id=$(jq -r --arg s "$STATUS" '.data.user.projectV2.field.options[] | select(.name == $s) | .id' <<<"$project")
+          if [ -z "$option_id" ]; then
+            echo "::error::No status '$STATUS'; the project has: $(jq -r '[.data.user.projectV2.field.options[].name] | join(", ")' <<<"$project")"
+            exit 1
+          fi
+
+          issue=$(gh api graphql -f owner="$OWNER" -f repo="$REPO" -F number="$ISSUE" -f query='
+            query($owner: String!, $repo: String!, $number: Int!) {
+              repository(owner: $owner, name: $repo) {
+                issue(number: $number) {
+                  id title
+                  projectItems(first: 50) { nodes { id project { id } } }
+                }
+              }
+            }')
+          issue_id=$(jq -r '.data.repository.issue.id' <<<"$issue")
+          item_id=$(jq -r --arg p "$project_id" '.data.repository.issue.projectItems.nodes[] | select(.project.id == $p) | .id' <<<"$issue")
+          if [ -z "$item_id" ]; then
+            item_id=$(gh api graphql -f project="$project_id" -f content="$issue_id" -f query='
+              mutation($project: ID!, $content: ID!) {
+                addProjectV2ItemById(input: { projectId: $project, contentId: $content }) { item { id } }
+              }' --jq '.data.addProjectV2ItemById.item.id')
+            echo "Added #$ISSUE to the project"
+          fi
+
+          gh api graphql -f project="$project_id" -f item="$item_id" -f field="$field_id" -f option="$option_id" -f query='
+            mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) {
+              updateProjectV2ItemFieldValue(input: {
+                projectId: $project, itemId: $item, fieldId: $field, value: { singleSelectOptionId: $option }
+              }) { projectV2Item { id } }
+            }' >/dev/null
+          echo "#$ISSUE ($(jq -r '.data.repository.issue.title' <<<"$issue")) → $STATUS" | tee -a "$GITHUB_STEP_SUMMARY"

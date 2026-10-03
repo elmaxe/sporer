@@ -1,5 +1,5 @@
 import { faceGridPoint, type Vec3Like } from '../world/cubeSphereMath';
-import type { Habitability } from './climate';
+import type { ClimateData, Habitability } from './climate';
 import { hslToHex } from './color';
 import { architectureFor, generateForm, type PlantForm } from './plantForm';
 import { generateName } from './names';
@@ -144,6 +144,11 @@ export interface PlantInput {
   /** Sea-level radius and highest terrain's radius, planet-level units. */
   readonly radius: number;
   readonly peak: number;
+}
+
+/** Whether plants grow on a body with this climate: a habitable tier and starlight to grow by (a rogue planet has none). */
+export function growsPlants(climate: Pick<ClimateData, 'habitability' | 'insolation'>): boolean {
+  return climate.habitability >= 1 && climate.insolation > 0;
 }
 
 /** The plants of a body, or null if it has none (tier 0). */
