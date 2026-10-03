@@ -1873,8 +1873,15 @@ async function runTouchLab() {
   }
 }
 await section('touch', async () => {
-  touch = await runTouch();
-  touchLab = await runTouchLab();
+  try {
+    touch = await runTouch();
+    touchLab = await runTouchLab();
+  } finally {
+    // Back to the desktop tab for the sections after it: left an emulated phone, the game would start in touch mode
+    // with its plants off, and clicks meant for the planet land on the item bar.
+    await send('Emulation.setTouchEmulationEnabled', { enabled: false });
+    await send('Emulation.clearDeviceMetricsOverride');
+  }
   return touch.ok && touchLab.ok;
 });
 await section('cargo', async () => {
