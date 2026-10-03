@@ -405,16 +405,22 @@ export class DustDisc implements Entity {
 
   /**
    * How far inside the dust layer the camera is, 1 within ±0.3 of its scale
-   * height at the camera's distance from the star, 0 beyond ±0.8: a debris
+   * height at the camera's distance from the star and within half the disc's
+   * radius, 0 beyond ±1 or beyond 0.85 of its radius: a debris
    * disc's band (and its sheets fading out edge-on) belong to a view from
    * inside, as the zodiacal light is seen from Earth.
    */
   private measureInside(camera: THREE.Camera): void {
     this.object.worldToLocal(camera.getWorldPosition(this.local));
     const { data } = this;
-    const r = Math.min(Math.max(Math.hypot(this.local.x, this.local.z), data.inner), data.outer);
+    const out = Math.hypot(this.local.x, this.local.z);
+    const r = Math.min(Math.max(out, data.inner), data.outer);
     const height = data.aspect * data.outer * (r / data.outer) ** data.flare;
-    this.shared.uInside!.value = 1 - THREE.MathUtils.smoothstep(Math.abs(this.local.y) / height, 0.3, 0.8);
+    const within = 1 - THREE.MathUtils.smoothstep(Math.abs(this.local.y) / height, 0.3, 1);
+    // And well inside the band's wall (at 0.9 of the outer edge): from outside, or close to it, its far wall
+    // showed as a lit rectangle across the system, however far off the camera was.
+    const among = 1 - THREE.MathUtils.smoothstep(out / data.outer, 0.5, 0.85);
+    this.shared.uInside!.value = within * among;
   }
 
   private prepareSheet(sheet: THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial>, i: number, camera: THREE.Camera, weights: readonly number[], total: number): void {
