@@ -11,7 +11,7 @@ import {
   shockRing,
 } from '../src/combat/buster';
 import { BustedBodies, bodyKey } from '../src/combat/busted';
-import { ITEMS, ITEM_TABS } from '../src/combat/items';
+import { ITEMS, ITEM_TABS, cargoItem, cargoKey, slotKey } from '../src/combat/items';
 import {
   DRAPER_POINT,
   ROCK,
@@ -60,11 +60,20 @@ describe('busted bodies', () => {
 });
 
 describe('items', () => {
-  it('puts every item in a tab, with its own key', () => {
+  it('puts every item in a tab, the buster in Weapons and the beam in the Inventory', () => {
     const tabs = new Set(ITEM_TABS.map((t) => t.id));
     for (const item of ITEMS) expect(tabs.has(item.tab)).toBe(true);
-    expect(new Set(ITEMS.map((i) => i.key)).size).toBe(ITEMS.length);
+    expect(new Set(ITEMS.map((i) => i.id)).size).toBe(ITEMS.length);
     expect(ITEMS.find((i) => i.id === 'planetBuster')?.tab).toBe('weapons');
+    expect(ITEMS.find((i) => i.id === 'abduct')?.tab).toBe('inventory');
+  });
+
+  it('keys the slots of the tab on show 1 to 9, and names cargo stacks by key', () => {
+    expect(slotKey(0)).toEqual({ code: 'Digit1', label: '1' });
+    expect(slotKey(8)?.code).toBe('Digit9');
+    expect(slotKey(9)).toBeNull();
+    expect(cargoKey(cargoItem('home#2'))).toBe('home#2');
+    expect(cargoKey('abduct')).toBeNull();
   });
 });
 

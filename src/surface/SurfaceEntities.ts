@@ -613,7 +613,7 @@ function trianglesOf(g: THREE.BufferGeometry): number {
  * direction from the planet's centre, turned by the plant's yaw, scaled by its
  * size, at the ground. (Column-major, as THREE's matrices.)
  */
-function writeMatrix(out: Float32Array, at: number, p: PlantData): void {
+function writeMatrix(out: Float32Array, at: number, p: PlantPlace): void {
   // Any direction across the surface: cross the up axis with the world axis it is least aligned with.
   const ax = Math.abs(p.x);
   const ay = Math.abs(p.y);
@@ -662,9 +662,33 @@ function writeMatrix(out: Float32Array, at: number, p: PlantData): void {
   out[at + 15] = 1;
 }
 
+/** Where a plant stands and how big and turned it is (a generated plant, or one set down by the player). */
+export type PlantPlace = Pick<PlantData, 'x' | 'y' | 'z' | 'radius' | 'scale' | 'yaw'>;
+
 /** The matrix of a plant as the instance batches and its live object use it. */
-export function plantMatrix(p: PlantData, out: THREE.Matrix4): THREE.Matrix4 {
+export function plantMatrix(p: PlantPlace, out: THREE.Matrix4): THREE.Matrix4 {
   const m = new Float32Array(16);
   writeMatrix(m, 0, p);
   return out.fromArray(m);
 }
+
+/**
+ * The yaw `writeMatrix` would need to turn a plant standing at unit direction
+ * `up` so its x axis points along `xAxis` (projected onto the ground's plane):
+ * the same tangent basis, so a plant set down keeps the turn it fell with.
+ */
+export function plantYaw(up: THREE.Vector3, xAxis: THREE.Vector3): number {
+  const ax = Math.abs(up.x);
+  const ay = Math.abs(up.y);
+  const az = Math.abs(up.z);
+  const ref = ax <= ay && ax <= az ? X_AXIS : ay <= az ? Y_AXIS : Z_AXIS;
+  const e1 = yawE1.crossVectors(up, ref).normalize();
+  const e2 = yawE2.crossVectors(up, e1);
+  return Math.atan2(xAxis.dot(e2), xAxis.dot(e1));
+}
+
+const X_AXIS = new THREE.Vector3(1, 0, 0);
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
+const Z_AXIS = new THREE.Vector3(0, 0, 1);
+const yawE1 = new THREE.Vector3();
+const yawE2 = new THREE.Vector3();

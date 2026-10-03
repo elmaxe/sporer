@@ -6,6 +6,7 @@ import type { Entity } from '../core/Entity';
 import type { Input } from '../core/Input';
 import type { GroundHeight } from '../planet/ground';
 import type { RenderClock } from '../planet/PlanetFrame';
+import type { GasLook } from '../world/gasLook';
 import { MarkerRing } from '../player/MarkerRing';
 import { createCubeSphere } from '../world/cubeSphere';
 import { blastParams } from '../gen/debris';
@@ -42,6 +43,8 @@ export interface BusterTarget {
   /** Sea-level radius (a small body's longest reach). */
   readonly radius: number;
   readonly groundHeight: GroundHeight;
+  /** A giant's clouds (null for a solid body): there's no crust to crack, the cloud deck burns instead. */
+  readonly gas: GasLook | null;
   groundHit(ray: THREE.Ray, out: THREE.Vector3): number | null;
 }
 
@@ -91,6 +94,37 @@ const CRACK_FRAGMENT = /* glsl */ `
   }
 `;
 
+/**
+ * A giant's fuse: no crust to char and crack, so the shock front races
+ * through the cloud deck instead, lighting it from within. Behind the front
+ * the clouds glow in streaks drawn out along the bands (the noise squeezed
+ * in latitude), brightening to incandescence; white-hot round the impact.
+ */
+const GAS_BURN_FRAGMENT = /* glsl */ `
+  uniform vec3 uImpact;
+  uniform float uAngle;
+  uniform float uGlow;
+  uniform float uSeed;
+  varying vec3 vDir;
+  ${SIMPLEX_GLSL}
+  void main() {
+    vec3 d = normalize(vDir);
+    float a = acos(clamp(dot(d, uImpact), -1.0, 1.0));
+    float inside = 1.0 - smoothstep(uAngle - 0.5, uAngle, a);
+    // Turbulent cloud streaks along the bands (y is the spin axis).
+    vec3 q = vec3(d.x * 3.0, d.y * 14.0, d.z * 3.0);
+    float streaks = 0.5 + 0.5 * snoise(q + uSeed);
+    streaks = 0.6 * streaks + 0.4 * (0.5 + 0.5 * snoise(q * 2.3 - uSeed));
+    float core = exp(-a * a * 8.0);
+    float front = exp(-pow((a - uAngle) / 0.14, 2.0)) * step(0.05, uAngle);
+    // Brighter the longer the front has been past (nearer the impact).
+    float age = clamp((uAngle - a) / 1.2, 0.0, 1.0);
+    float glow = clamp(inside * (0.25 + 0.75 * age) * (0.35 + 0.9 * streaks) + front + 1.5 * core, 0.0, 1.0);
+    vec3 hot = mix(vec3(1.0, 0.35, 0.08), vec3(1.0, 0.88, 0.6), clamp(core + 0.5 * age * streaks, 0.0, 1.0));
+    gl_FragColor = vec4(hot * 1.4, glow * uGlow);
+  }
+`;
+
 const RING_VERTEX = /* glsl */ `
   varying float vR;
   void main() {
@@ -115,7 +149,7 @@ const RING_FRAGMENT = /* glsl */ `
  * ring follows the pointer over the ground; a click there fires it (once:
  * the planet is then spent). The projectile leaves the ship and arcs down to
  * the point (busterParams), flashes on impact, and glowing cracks spread
- * over the globe from there until the blast: a blinding flash, the globe
+ * over the globe from there (a giant's cloud deck burns instead) until the blast: a blinding flash, the globe
  * gives way to its debris (the level swaps it, `BusterEvents.blast`), a
  * fireball swells and a shock ring races out along the old equator. The
  * whole sequence is a function of the level's clock since firing.
@@ -356,7 +390,7 @@ class BusterEffects {
     );
     this.trail.frustumCulled = false;
 
-    // The cracks' shell hugs the ground (a small body's lumps too), just above it.
+    // The cracks' shell hugs the ground (a small body's lumps too, a giant's cloud tops), just above it.
     const R = target.radius;
     const shell = createCubeSphere(1, SHELL_SEGMENTS);
     const pos = shell.attributes.position as THREE.BufferAttribute;
@@ -371,7 +405,7 @@ class BusterEffects {
       shell,
       new THREE.ShaderMaterial({
         vertexShader: CRACK_VERTEX,
-        fragmentShader: CRACK_FRAGMENT,
+        fragmentShader: target.gas ? GAS_BURN_FRAGMENT : CRACK_FRAGMENT,
         uniforms: {
           uImpact: { value: this.impactDir },
           uAngle: { value: 0 },

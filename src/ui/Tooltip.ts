@@ -24,17 +24,25 @@ export class Tooltip {
    * until `release`, so the levels, which hide it every frame nothing of
    * theirs is hovered, don't take it away.
    */
-  showClaimed(...args: Parameters<Tooltip['show']>): void {
+  showClaimed(tone: string | null, ...args: Parameters<Tooltip['show']>): void {
     this.claimed = false;
     this.show(...args);
     this.claimed = true;
+    this.setTone(tone);
   }
 
   /** The overlay is done with it: hidden, and the levels' again. */
   release(): void {
     if (!this.claimed) return;
     this.claimed = false;
+    this.setTone(null);
     this.hide();
+  }
+
+  /** Colours the tooltip as its owner (the item bar's tab: `#tooltip[data-tone]`), or as usual with null. */
+  private setTone(tone: string | null): void {
+    if (tone) this.el.dataset.tone = tone;
+    else delete this.el.dataset.tone;
   }
 
   /**

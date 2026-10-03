@@ -13,6 +13,7 @@ import { createGasLook, type GasLook } from '../world/gasLook';
 import type { Debug } from '../core/Debug';
 import { PLANET_SCALE, RELIEF_SCALE, globeRadius } from './frame';
 import { groundHit } from './ground';
+import type { Landing } from '../cargo/plantFate';
 import { LodSurface, addLodDebug } from './LodSurface';
 import type { RenderClock } from './PlanetFrame';
 
@@ -67,6 +68,8 @@ export class PlanetGlobe implements Entity {
   private readonly sample: SurfaceSampler;
   /** Worlds with a sea: the ground is never lower than its surface. */
   private readonly sea: boolean;
+  /** Gas and ice giants: the ground is their cloud tops. */
+  private readonly gasGiant: boolean;
   private readonly groundColor = new THREE.Color();
   /** Bodies with an atmosphere: where the ground is, so the haze stops there (see renderDepth). */
   private readonly ground: GroundDepth | null;
@@ -92,6 +95,7 @@ export class PlanetGlobe implements Entity {
     this.lava = gas ? null : createLavaLook(config, VENT_RADIUS);
 
     this.sea = seaFloor;
+    this.gasGiant = gas;
     this.sample = gas
       ? gasSampler(R, seed, config.bands, config.size === 'iceGiant')
       : terrainSampler(R, seed, style, { noise: detailedTerrain, reliefScale: RELIEF_SCALE, seaFloor, shape: config.shape });
@@ -119,10 +123,15 @@ export class PlanetGlobe implements Entity {
    */
   groundRadius(dir: THREE.Vector3): number {
     if (this.bustedRadius !== null) return this.bustedRadius;
+    const r = this.sample(dir, this.groundColor) + this.liftAt(dir);
+    return this.sea ? Math.max(r, this.radius) : r;
+  }
+
+  /** How far what was raised on the ground since (volcanoes) lifts it in unit direction `dir`. */
+  private liftAt(dir: THREE.Vector3): number {
     let lift = 0;
     for (const relief of this.reliefs) lift = Math.max(lift, relief.lift(dir));
-    const r = this.sample(dir, this.groundColor) + lift;
-    return this.sea ? Math.max(r, this.radius) : r;
+    return lift;
   }
 
   /** The terrain as generated (under any sea, without what was raised on it since) in unit direction `dir`; its colour into `color`. */
@@ -143,6 +152,13 @@ export class PlanetGlobe implements Entity {
   addRelief(relief: GroundRelief, peak: number): void {
     this.reliefs.push(relief);
     if (this.bustedRadius === null) this.top = Math.max(this.top, peak);
+  }
+
+  /** What something falling at unit direction `dir` lands on: a giant's clouds, the sea (or the lava sea) where it covers the terrain (and any volcano raised there), or land. */
+  landingAt(dir: THREE.Vector3): Landing {
+    if (this.gasGiant) return 'clouds';
+    if (this.busted || !this.sea || this.sample(dir, this.groundColor) + this.liftAt(dir) >= this.radius) return 'land';
+    return this.lava ? 'lava' : 'sea';
   }
 
   /** Where `ray` (in the globe's frame) meets the ground, written into `out`; the distance along the ray, or null on a miss. */

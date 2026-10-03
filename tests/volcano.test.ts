@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { ITEMS } from '../src/combat/items';
+import { ITEMS, slotKey } from '../src/combat/items';
 import {
   VolcanoShape,
   eruptionStrength,
@@ -16,10 +16,11 @@ const R = 400;
 const site: VolcanoSite = { x: 0.3, y: 0.8, z: -0.2, seed: 1234 };
 
 describe('the volcano bomb', () => {
-  it('is a weapon on its own key', () => {
-    const item = ITEMS.find((i) => i.id === 'volcanoBomb');
-    expect(item?.tab).toBe('weapons');
-    expect(item?.key).toBe('Digit2');
+  it('is the second weapon, so key 2 selects it', () => {
+    const weapons = ITEMS.filter((i) => i.tab === 'weapons');
+    const index = weapons.findIndex((i) => i.id === 'volcanoBomb');
+    expect(index).toBe(1);
+    expect(slotKey(index)?.code).toBe('Digit2');
   });
 
   it('speeds up from the ship to the ground', () => {

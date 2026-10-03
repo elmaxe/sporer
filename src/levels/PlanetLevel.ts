@@ -44,6 +44,12 @@ import { Volcanoes } from '../planet/Volcanoes';
 import { hashSeed } from '../gen/rng';
 import { isGas } from '../world/Planet';
 import type { ItemId, ItemStatus, ItemUser } from '../combat/items';
+import { bodyKey } from '../combat/busted';
+import { CargoBeam } from '../cargo/CargoBeam';
+import { bodyGravity } from '../cargo/beam';
+import type { Inventory } from '../cargo/inventory';
+import { weatherKind } from '../gen/weather';
+import { Plantings } from '../surface/Plantings';
 import { DEBRIS_REACH, debrisLookFor } from '../gen/debris';
 import { DEBRIS_NEAR, DebrisField } from '../world/DebrisField';
 
@@ -114,7 +120,11 @@ export class PlanetLevel extends Level implements ItemUser {
   private readonly now = new THREE.Vector3();
   /** Habitable bodies (T1 and up) only: plants standing on the ground (see gen/plants.ts). */
   plants: SurfaceEntities | null = null;
+  /** Plants the player set down here that took root (not once busted). */
+  plantings: Plantings | null = null;
   private plantTooltip: PlantTooltip | null = null;
+  /** The abduction beam and the cargo it sets down (not once busted). */
+  cargo: CargoBeam | null = null;
   /** The planet buster, fired from here (spent once the body is busted). */
   readonly buster: PlanetBuster;
   /** The volcano bomb, fired from here at solid ground (not on giants or once busted). */
@@ -156,6 +166,8 @@ export class PlanetLevel extends Level implements ItemUser {
     blastTime: number | null,
     /** Called as a planet buster is fired here, with the system time of the blast to come. */
     private readonly onBust: (blastTime: number) => void,
+    /** The ship's cargo hold (kept by the scene manager for the whole game). */
+    inventory: Inventory,
   ) {
     super();
     this.frame = this.add(new PlanetFrame(body, system.world.time, debug));
@@ -275,11 +287,32 @@ export class PlanetLevel extends Level implements ItemUser {
     const plantsSetup = busted ? null : plantSetup(config);
     this.plants = plantsSetup ? this.add(new SurfaceEntities(this.scene, plantsSetup.plan, plantsSetup.ground, camera, changes, debug)) : null;
     this.buryPlants();
-    this.plantTooltip = this.plants
-      ? this.add(new PlantTooltip(camera, input, this.plants, tooltip, (ray, out) => globe.groundHit(ray, out)))
+    this.plantings = busted ? null : this.add(new Plantings(this.scene, changes));
+    this.plantTooltip = this.plantings
+      ? this.add(new PlantTooltip(camera, input, this.plants, this.plantings, tooltip, (ray, out) => globe.groundHit(ray, out)))
       : null;
     const events = { fire: (time: number) => this.fire(time), blast: () => this.blast(), done: () => this.settled() };
     this.buster = this.add(new PlanetBuster(this.scene, this.frame, camera, input, globe, this.ship.object, sfx, events, busted, debug));
+    // Before the picker: a press the beam takes isn't a click that flies the ship.
+    const world = { climate: config.climate ?? null, weather: weatherKind(config.type, config.climate) };
+    this.cargo = this.plantings
+      ? this.add(
+          new CargoBeam(
+            this.scene,
+            camera,
+            input,
+            globe,
+            this.ship,
+            this.plants,
+            this.plantings,
+            inventory,
+            { key: bodyKey(config), name: body.name, world, gravity: bodyGravity(config) },
+            sfx,
+            () => (this.busy ? 'Not while the planet buster goes off' : null),
+            debug,
+          ),
+        )
+      : null;
     this.volcanoBomb = this.add(
       new VolcanoBomb(
         this.scene,
@@ -353,29 +386,25 @@ export class PlanetLevel extends Level implements ItemUser {
     return this.globe.busted;
   }
 
-  /** The item bar's view of this level: the planet buster and the volcano bomb can be fired from here. */
+  /** The item bar's view of this level: the planet buster and the volcano bomb can be fired from here, and the beam used. */
   get selected(): ItemId | null {
-    return this.buster.armed ? 'planetBuster' : this.volcanoBomb.armed ? 'volcanoBomb' : null;
+    return this.buster.armed ? 'planetBuster' : this.volcanoBomb.armed ? 'volcanoBomb' : (this.cargo?.selected ?? null);
   }
 
   status(item: ItemId): ItemStatus {
-    switch (item) {
-      case 'planetBuster':
-        return this.buster.status();
-      case 'volcanoBomb':
-        return this.volcanoBomb.status();
-    }
+    if (item === 'planetBuster') return this.buster.status();
+    if (item === 'volcanoBomb') return this.volcanoBomb.status();
+    if (this.cargo) return this.cargo.status(item);
+    return { available: false, hint: '', reason: item === 'abduct' ? 'Nothing left here to beam up' : 'Nothing here to set it down on' };
   }
 
   select(item: ItemId | null): void {
-    // The other one put away first (they share the aiming cursor).
-    if (item === 'planetBuster') {
-      this.volcanoBomb.arm(false);
-      this.buster.arm(true);
-    } else {
-      this.buster.arm(false);
-      this.volcanoBomb.arm(item === 'volcanoBomb');
-    }
+    // The weapons put away before the one chosen is armed (they share the aiming cursor), and before the beam, so its cursor isn't undone.
+    if (item !== 'planetBuster') this.buster.arm(false);
+    if (item !== 'volcanoBomb') this.volcanoBomb.arm(false);
+    if (item === 'planetBuster') this.buster.arm(true);
+    if (item === 'volcanoBomb') this.volcanoBomb.arm(true);
+    this.cargo?.arm(item === 'planetBuster' || item === 'volcanoBomb' ? null : item);
   }
 
   /** Why a volcano bomb can't be fired here now, or null if it can. */
@@ -394,10 +423,12 @@ export class PlanetLevel extends Level implements ItemUser {
     const dir = point.clone().normalize();
     const site = { x: dir.x, y: dir.y, z: dir.z, seed: hashSeed(this.body.config.seed, 'volcano', this.changes.volcanoes.length) };
     this.changes.addVolcano(site);
-    this.volcanoes.add(site, time);
+    const shape = this.volcanoes.add(site, time);
     // The system view's globe shows it too (rising with the same clock).
     this.body.addVolcano(site, time);
     this.buryPlants();
+    // Plants set down where it rose are gone for good (those set down on it later stay).
+    this.plantings?.bury((dir) => dir.dot(shape.centre) > shape.cosAngle);
   }
 
   /** The plants where volcanoes stand are buried under them. */
@@ -419,8 +450,9 @@ export class PlanetLevel extends Level implements ItemUser {
   /** The blast: the globe and everything on it give way to the debris, which becomes the ground. */
   private blast(): void {
     this.globe.bust(this.radius * DEBRIS_REACH);
-    for (const entity of [this.eruptions, this.geysers, this.weather, this.comet, this.plants, this.volcanoes]) if (entity) this.remove(entity);
-    this.eruptions = this.geysers = this.weather = this.comet = this.plants = null;
+    this.cargo?.clear(false);
+    for (const entity of [this.eruptions, this.geysers, this.weather, this.comet, this.plants, this.cargo, this.plantings, this.volcanoes]) if (entity) this.remove(entity);
+    this.eruptions = this.geysers = this.weather = this.comet = this.plants = this.cargo = this.plantings = null;
     this.volcanoes = null;
     if (this.plantTooltip) {
       this.plantTooltip.deactivate();
@@ -569,6 +601,7 @@ export class PlanetLevel extends Level implements ItemUser {
   override exit(): void {
     this.buster.arm(false);
     this.volcanoBomb.arm(false);
+    this.cargo?.arm(null);
     this.hud.deactivate();
     this.map.deactivate();
     this.plantTooltip?.deactivate();
