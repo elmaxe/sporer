@@ -4,6 +4,7 @@ import { celsius, describeAtmosphere } from '../gen/climate';
 import { EARTH_RADIUS_KM, atmosphereLook, scaleHeight } from '../gen/atmosphere';
 import { shapeExtents } from '../gen/shape';
 import { plantLabLink } from '../plantlab/labPlants';
+import { starLabLink } from '../starlab/labStars';
 import { describeLab, isSmallKind, labClimateData, labEarthRadii, labLife } from './labPlanet';
 import { formatChance, type LifeEstimate } from '../gen/life';
 import type { PlanetLab } from './PlanetLab';
@@ -23,6 +24,8 @@ export class LabInfo implements Entity {
   private readonly back = document.createElement('a');
   /** To the plant lab with this planet's species (shown when it has plants). */
   private readonly plants = document.createElement('a');
+  /** To the star lab at the system the planet came from (shown when it came from one). */
+  private readonly star = document.createElement('a');
   private readonly details = document.createElement('button');
   private readonly head = document.createElement('div');
   private readonly table = document.createElement('table');
@@ -44,9 +47,12 @@ export class LabInfo implements Entity {
     this.plants.className = 'lab-back';
     this.plants.textContent = 'Plants';
     this.plants.title = "This planet's plant species in the plant lab";
+    this.star.className = 'lab-back';
+    this.star.textContent = 'Star';
+    this.star.title = "This planet's star and system in the star lab";
     const links = document.createElement('div');
     links.className = 'lab-links';
-    links.append(this.back, this.plants);
+    links.append(this.back, this.star, this.plants);
     top.append(links, this.details);
     this.help.className = 'lab-help';
     this.root.append(top, this.head, this.table, this.help);
@@ -69,6 +75,8 @@ export class LabInfo implements Entity {
     this.back.title = this.lab.gameLink ? 'The game, at this planet\'s system' : 'The game';
     this.head.innerHTML =
       `<h1>${escape(planet.name)}</h1>` + `<div class="lab-sub">${escape(describeLab(planet))}${from ? ` · ${escape(from)}` : ''}</div>`;
+    this.star.hidden = !source;
+    if (source) this.star.href = starLabLink(source.seed, source.star, location.href, 'system');
     const plants = this.lab.level?.plants;
     this.plants.hidden = !plants;
     if (plants) {
