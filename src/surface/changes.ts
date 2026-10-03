@@ -1,10 +1,11 @@
+import type { VolcanoSite } from '../combat/volcano';
 import type { PlantSpecies } from '../gen/plants';
 
 /**
  * What the player has done to a planet's surface entities, kept outside the
  * planet level (which is built afresh on each visit): a removed plant stays
- * gone after leaving and coming back, and a plant set down by the cargo beam
- * stays where it took root. Generated plants are the same every time (see
+ * gone after leaving and coming back, a plant set down by the cargo beam
+ * stays where it took root, and a volcano raised by a volcano bomb stands. Generated plants are the same every time (see
  * gen/plants.ts), so these lists are all that save/load will need.
  */
 export interface SurfaceChangesData {
@@ -12,6 +13,8 @@ export interface SurfaceChangesData {
   removed: string[];
   /** Plants set down here that took root (removed ones left out). */
   planted?: PlantedPlant[];
+  /** Volcanoes raised by volcano bombs, in the order they were (older saves have none). */
+  volcanoes?: VolcanoSite[];
 }
 
 /** A plant the player set down that took root: its species (from wherever it grew) and where it stands. */
@@ -40,6 +43,7 @@ export class SurfaceChanges {
   private readonly removed = new Set<string>();
   private readonly planted = new Map<string, PlantedPlant>();
   private nextPlanted = 0;
+  private readonly _volcanoes: VolcanoSite[] = [];
 
   isRemoved(id: string): boolean {
     return this.removed.has(id);
@@ -73,8 +77,18 @@ export class SurfaceChanges {
     return record;
   }
 
+  /** The volcanoes raised on the planet, oldest first. */
+  get volcanoes(): readonly VolcanoSite[] {
+    return this._volcanoes;
+  }
+
+  /** Records a volcano raised at `site`. */
+  addVolcano(site: VolcanoSite): void {
+    this._volcanoes.push({ ...site });
+  }
+
   toJSON(): SurfaceChangesData {
-    return { removed: [...this.removed], planted: [...this.planted.values()] };
+    return { removed: [...this.removed], planted: [...this.planted.values()], volcanoes: this._volcanoes.map((v) => ({ ...v })) };
   }
 
   static fromJSON(data: SurfaceChangesData): SurfaceChanges {
@@ -85,6 +99,7 @@ export class SurfaceChanges {
       const n = Number(p.id.slice(PLANTED_PREFIX.length));
       if (Number.isInteger(n)) changes.nextPlanted = Math.max(changes.nextPlanted, n + 1);
     }
+    for (const v of data.volcanoes ?? []) changes.addVolcano(v);
     return changes;
   }
 }
@@ -102,5 +117,10 @@ export class SurfaceChangeStore {
   /** Replaces a body's list (restoring a saved game or a debug dump; takes effect the next time its level is built). */
   set(key: string, changes: SurfaceChanges): void {
     this.lists.set(key, changes);
+  }
+
+  /** The planet's list if anything was ever done there, without making one. */
+  find(key: string): SurfaceChanges | null {
+    return this.lists.get(key) ?? null;
   }
 }

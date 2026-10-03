@@ -20,6 +20,11 @@ const ICONS: Record<ToolId, string> = {
     '<circle cx="12" cy="12" r="6.5" />' +
     '<path d="m12 5.5-1.5 4 2.5 2-2 3.5.8 3.5" />' +
     '<path d="M3 3l2.6 2.6M21 3l-2.6 2.6M3 21l2.6-2.6M21 21l-2.6-2.6M12 1v1.5M12 21.5V23M1 12h1.5M21.5 12H23" /></svg>',
+  volcanoBomb:
+    '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M2 21h20l-7-10.5h-6z" />' +
+    '<path d="M9.5 10.5l1.2 3 1.3-1.6 1.3 1.6 1.2-3" />' +
+    '<path d="M10 7.5c-1-1.2-.4-2.8 1-3 .3-1.6 2.6-1.8 3.2-.4 1.4-.2 2.2 1.4 1.3 2.5" /></svg>',
   abduct:
     '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
     '<path d="M4 6.5c0-1.4 3.6-2.5 8-2.5s8 1.1 8 2.5S16.4 9 12 9 4 7.9 4 6.5z" />' +
@@ -50,17 +55,17 @@ interface SlotItem {
 
 /**
  * The item bar (#item-bar in index.html): tabs of item slots at the bottom
- * of the screen. Weapons (red) holds the planet buster; Inventory (grey)
- * the abduction beam and, after it, the cargo hold's stacks, a plant's
- * picture and count each (cargo/inventory.ts). The bar takes the colour of
- * the tab on show, its tooltips too. Click a slot or press its number (the
- * tab on show's slots are 1, 2, …) to select the item and again to put it
- * away; Tab switches tabs. What a selected item does is up to the level
- * (`ItemUser`): in low orbit the planet buster fires at the next click on the
- * planet, the beam lifts the plant held under the pointer, and a stack sets
- * one of its plants down where the pointer is held. Elsewhere the slots show
- * but can't be used, and say where they can. A global entity; hidden on the
- * galaxy map.
+ * of the screen. Weapons (red) holds the planet buster and the volcano
+ * bomb; Inventory (grey) the abduction beam and, after it, the cargo hold's
+ * stacks, a plant's picture and count each (cargo/inventory.ts). The bar
+ * takes the colour of the tab on show, its tooltips too. Click a slot or
+ * press its number (the tab on show's slots are 1, 2, …) to select the item
+ * and again to put it away; Tab switches tabs. What a selected item does is
+ * up to the level (`ItemUser`): in low orbit the planet buster and the
+ * volcano bomb fire at the next click on the planet, the beam lifts the
+ * plant held under the pointer, and a stack sets one of its plants down
+ * where the pointer is held. Elsewhere the slots show but can't be used, and
+ * say where they can. A global entity; hidden on the galaxy map.
  */
 export class ItemBar implements Entity {
   private readonly root = document.getElementById('item-bar')!;
