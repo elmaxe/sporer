@@ -21,6 +21,17 @@ The player presses **Save debug dump** in the menu (Esc, or the menu button on p
 | `build`, `url`, `createdAt` | which build (branch, CI build number, commit), the page URL, when |
 | `tunables` | lil-gui's values when the debug panel was on (dev builds and `?debug`) |
 
+## 0. Get the file
+
+A dump attached to a GitHub issue can't be downloaded from a cloud session: `github.com/user-attachments/...` isn't reachable through its repository-scoped GitHub access (curl gets a 403). The `Issue dumps` workflow (`.github/workflows/issue-dumps.yml`) copies every dump the owner or a collaborator attaches to an issue or its comments onto the `debug-dumps` branch, and comments on the issue when it has. Read it from there:
+
+```bash
+git fetch origin debug-dumps && git ls-tree --name-only origin/debug-dumps issue-<n>/
+git show origin/debug-dumps:issue-<n>/sporer-dump-....json > <scratchpad>/dump.json
+```
+
+If the issue's folder isn't there (an issue from before the workflow, or a dump posted by someone else), run the workflow by hand with the issue number (`Issue dumps` → Run workflow; the GitHub MCP's `actions_run_trigger` on `main`), wait for the run to succeed, and fetch again.
+
 ## 1. Unpack it
 
 ```bash

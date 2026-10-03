@@ -190,7 +190,11 @@ export class LabInfo implements Entity {
     } else if (view.view === 'globe' && planet.type !== 'gas' && !planet.shape) {
       rows.push(['Plants', 'none']);
     }
-    if (planet.rings) rows.push(['Rings', `${fmt(planet.rings.inner / planet.radius)}–${fmt(planet.rings.outer / planet.radius)} R`]);
+    if (planet.rings) {
+      const rocks = level?.globe?.rings;
+      const near = rocks ? ` · ${Math.round(rocks.ice * 100)}% ice · ${rocks.count} rocks near` : '';
+      rows.push(['Rings', `${fmt(planet.rings.inner / planet.radius)}–${fmt(planet.rings.outer / planet.radius)} R${near}`]);
+    }
     if (planet.kind !== 'moon' && !isSmallKind(planet.kind)) rows.push(['Moons', `${planet.moons.length}${planet.moons.length ? ' (system view)' : ''}`]);
     if (level) rows.push(['Build', `${Math.round(level.triangles / 1000)}k triangles · ${Math.round(level.buildMs)} ms`]);
     const lod = level?.globe?.lodStats();

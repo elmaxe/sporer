@@ -16,6 +16,7 @@ import { groundHit } from './ground';
 import type { Landing } from '../cargo/plantFate';
 import { LodSurface, addLodDebug } from './LodSurface';
 import type { RenderClock } from './PlanetFrame';
+import { RingRocks } from './RingRocks';
 
 // Mountains' exaggeration up close lives in frame.ts (the system view's clouds need it too); re-exported here.
 export { RELIEF_SCALE };
@@ -38,7 +39,7 @@ export interface GroundRelief {
 /**
  * The visited planet or moon, at its true size (see globeRadius) and detailed: the
  * terrain from the same noise as the system view plus finer octaves, a sea
- * surface for worlds with liquid, rings and the atmosphere glow. Gas giants
+ * surface for worlds with liquid, rings (their rocks up close) and the atmosphere glow. Gas giants
  * are the same banded sphere as in the system view, only finer. The surface
  * refines where the camera looks (LodSurface). Static in the planet level's
  * body frame.
@@ -62,6 +63,8 @@ export class PlanetGlobe implements Entity {
   readonly gas: GasLook | null;
   /** Bodies with weather: the cloud layer's look, its storms and lightning (planet/Weather.ts draws the rain and bolts). */
   readonly weather: WeatherLook | null;
+  /** Ringed bodies: the ring's rocks and ice up close. */
+  readonly rings: RingRocks | null;
 
   private readonly surface: LodSurface;
   /** The surface as drawn: radius (and colour) in a direction. */
@@ -106,7 +109,14 @@ export class PlanetGlobe implements Entity {
     this.object.add(this.surface.object);
     addLodDebug(debug);
     if (seaFloor) this.object.add(createSea(config.type, style.sea!, R, this.lava ? this.lava.createSeaMaterial(this.sun, this.sunLight, this.ambientLight) : null));
-    if (config.rings) this.object.add(createRings(config.rings, seed, PLANET_SCALE));
+    if (config.rings) {
+      const sheet = createRings(config.rings, seed, PLANET_SCALE);
+      this.rings = new RingRocks(config.rings, seed, config.spin, PLANET_SCALE, debug);
+      this.rings.fadeSheet(sheet.material as THREE.Material);
+      this.object.add(sheet, this.rings.object);
+    } else {
+      this.rings = null;
+    }
     // The same look as in the system view (in planet radii), so the two match across the zoom.
     const look = config.atmosphere && config.climate ? atmosphereLook(config.climate, config.radius) : null;
     this.ground = look ? new GroundDepth() : null;
@@ -205,6 +215,7 @@ export class PlanetGlobe implements Entity {
     this.lava?.animate(this.frame.renderTime);
     this.gas?.animate(this.frame.renderTime);
     this.weather?.animate(this.frame.renderTime);
+    this.rings?.animate(this.frame.renderTime);
     this.surface.update(this.object.worldToLocal(this.camera.getWorldPosition(this.cameraPosition)), frameDt);
   }
 
@@ -212,6 +223,7 @@ export class PlanetGlobe implements Entity {
     this.gas?.dispose();
     this.surface.dispose();
     this.ground?.dispose();
+    this.rings?.dispose();
     this.scene.remove(this.object);
     this.object.traverse((o) => {
       if (o instanceof THREE.Mesh) {
