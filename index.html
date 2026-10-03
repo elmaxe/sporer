@@ -110,7 +110,8 @@
           <button id="graphics-weather" class="menu-button" type="button" aria-pressed="true">Weather: on</button>
           <button id="graphics-plants" class="menu-button" type="button" aria-pressed="true">Plants: on</button>
           <button id="graphics-wireframe" class="menu-button" type="button" aria-pressed="false">Wireframe: off</button>
-          <p>Weather is clouds, storms, rain and lightning; plants stand on habitable planets in low orbit (off by default on phones). Turn them off if the game runs slowly. Wireframe draws the planets, moons and ship as their triangles (turn Weather off to see under the clouds).</p>
+          <button id="graphics-freeze" class="menu-button" type="button" aria-pressed="false">Freeze view: off</button>
+          <p>Weather is clouds, storms, rain and lightning; plants stand on habitable planets in low orbit (off by default on phones). Turn them off if the game runs slowly. Wireframe draws the planets, moons and ship as their triangles (turn Weather off to see under the clouds). Freeze view (F) keeps what's drawn as it was for the camera then, and outlines what that camera saw, while you turn and zoom the camera to look at it from outside.</p>
         </section>
         <section id="menu-lab-section">
           <h3>Planet lab</h3>
@@ -132,7 +133,7 @@
           <p>Play the release, the preview of what's coming next, or a pull request's build. An app added to the home screen opens the one you pick from then on.</p>
           <select id="menu-version" class="menu-button" aria-label="Version"></select>
         </section>
-        <p class="menu-keys">Esc: menu · M: mute · F8: debug dump</p>
+        <p class="menu-keys">Esc: menu · M: mute · F: freeze view · F8: debug dump</p>
         <p id="menu-build" class="menu-build"></p>
       </div>
     </div>
@@ -160,6 +161,7 @@
       </div>
     </div>
     <div id="fps" hidden></div>
+    <div id="freeze-note" hidden></div>
     <div id="loading">Loading…</div>
     <script type="module" src="/src/main.ts"></script>
   </body>

@@ -15,6 +15,7 @@ import { TouchControls } from './ui/TouchControls';
 import { FullscreenButton } from './ui/FullscreenButton';
 import { GameMenu } from './ui/GameMenu';
 import { FpsCounter } from './ui/FpsCounter';
+import { ViewFreezeControl } from './ui/ViewFreezeControl';
 import { ItemBar } from './ui/ItemBar';
 import { PlantIcons } from './ui/plantIcons';
 import { GraphicsSettingsControl, loadGraphicsSettings } from './ui/GraphicsSettings';
@@ -52,6 +53,7 @@ async function main(): Promise<void> {
   const levels = game.add(new SceneManager(game, galaxy, start, debug, audio));
   const menu = new GameMenu(game, levels);
   game.add(new FpsCounter());
+  const freeze = game.add(new ViewFreezeControl(game));
   game.add(new TouchControls(game));
   game.add(new ItemBar(levels, game.input, levels.tooltip, new PlantIcons(game.renderer)));
   const debugDump = game.add(new DebugDumpControl(game, levels, consoleLog, debug));
@@ -62,7 +64,7 @@ async function main(): Promise<void> {
   // Handles for poking at the game from the browser console / automation.
   // ship / world / system follow the current system level, planet the planet level (or null).
   if (import.meta.env.DEV) {
-    Object.assign(window, { game, galaxy, levels, audio, menu, debugDump, generateSystem, geyserKind, weatherKind, volcanicLightning, meteorShowers, nextShowerPeak });
+    Object.assign(window, { game, galaxy, levels, audio, menu, debugDump, freeze, generateSystem, geyserKind, weatherKind, volcanicLightning, meteorShowers, nextShowerPeak });
     Object.defineProperties(window, {
       ship: { get: () => levels.systemLevel.ship, configurable: true },
       world: { get: () => levels.systemLevel.world, configurable: true },

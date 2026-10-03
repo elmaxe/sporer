@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { CometData } from '../gen/comets';
 import { keplerPosition } from '../gen/orbit';
+import { ATMOSPHERE_RENDER_ORDER } from './atmosphereShell';
 import type { Planet, PlanetConfig } from './Planet';
 
 export const cometParams = {
@@ -33,6 +34,14 @@ const ION_WIDTH = 0.6;
 const END_ON_FADE = [0.1, 0.45] as const;
 /** The end-on glow's size, in tail widths. */
 const END_ON_SIZE = 4;
+/**
+ * The glows are drawn after the system's other see-through things (the belts'
+ * far rocks, planets' rings), which sort from their centres like the tails (at
+ * the star, as the shader places them) and would otherwise paint over them, and
+ * before the atmospheres, clouds and ship. They add light, so anything drawn
+ * before them shows through.
+ */
+const GLOW_RENDER_ORDER = ATMOSPHERE_RENDER_ORDER / 2;
 
 /*
  * Both tails are ribbons in one mesh (one draw call per comet), bent and
@@ -191,6 +200,7 @@ export class Comet {
       this.coma.lookAt(camera.position);
       this.coma.updateMatrixWorld();
     };
+    this.coma.renderOrder = GLOW_RENDER_ORDER;
     this.head.add(this.coma);
 
     this.endOn = new THREE.Mesh(
@@ -212,6 +222,7 @@ export class Comet {
       const [a, b] = END_ON_FADE;
       this.endOn.material.opacity = this.endOnBrightness * (1 - THREE.MathUtils.smoothstep(sine, a, b));
     };
+    this.endOn.renderOrder = GLOW_RENDER_ORDER;
     this.head.add(this.endOn);
 
     this.tails = new THREE.Mesh(
@@ -240,6 +251,7 @@ export class Comet {
     );
     // Drawn in world space by the shader, so the bounds are unknown.
     this.tails.frustumCulled = false;
+    this.tails.renderOrder = GLOW_RENDER_ORDER;
 
     this.object.add(this.head, this.tails);
     this.object.name = data.name;

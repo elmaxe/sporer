@@ -1,0 +1,110 @@
+# Copies the debug dumps attached to an issue (sporer-dump-*.json, the game menu's Save debug dump button or F8)
+# onto the debug-dumps branch, as debug-dumps:issue-<n>/<file>.json, and says so in a comment on the issue.
+# Claude Code's cloud sessions can't download issue attachments (github.com/user-attachments/... isn't reachable
+# through their repository-scoped GitHub access), but they can fetch a branch:
+#   git fetch origin debug-dumps && git show origin/debug-dumps:issue-75/sporer-dump-....json > dump.json
+# Runs when an issue or a comment with a dump link is written or edited, or by hand (Actions → Issue dumps → Run
+# workflow, with the issue number) for issues from before this existed. Only dumps posted by the repository's
+# owner, members and collaborators are copied, so strangers can't write to the repository.
+# Attachments of a public repository download without signing in; a private one's need a browser session.
+name: Issue dumps
+
+on:
+  issues:
+    types: [opened, edited]
+  issue_comment:
+    types: [created, edited]
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: Issue number
+        required: true
+
+permissions:
+  contents: write
+  issues: write
+
+# One run at a time, so two issues' dumps don't race to push the branch.
+concurrency:
+  group: issue-dumps
+  cancel-in-progress: false
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  ISSUE: ${{ inputs.issue || github.event.issue.number }}
+  BRANCH: debug-dumps
+  GIT_AUTHOR_NAME: github-actions[bot]
+  GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+  GIT_COMMITTER_NAME: github-actions[bot]
+  GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+
+jobs:
+  copy:
+    # Skip pull requests' comments, and runs whose text has no dump link (the body is only read through env).
+    if: >-
+      github.event_name == 'workflow_dispatch' || (!github.event.issue.pull_request &&
+      contains(github.event.comment.body || github.event.issue.body, 'sporer-dump-'))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Copy the dumps to the branch
+        run: |
+          set -euo pipefail
+          [[ "$ISSUE" =~ ^[0-9]+$ ]] || { echo "::error::Issue must be a number, got '$ISSUE'"; exit 1; }
+
+          # The issue's text and every comment's, from people trusted to write here.
+          {
+            gh api "repos/$GITHUB_REPOSITORY/issues/$ISSUE" --jq '[.]'
+            gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$ISSUE/comments"
+          } | jq -rs 'add | .[] | select(.author_association | IN("OWNER", "MEMBER", "COLLABORATOR")) | .body // ""' >texts
+          grep -oE 'https://github\.com/user-attachments/files/[0-9]+/sporer-dump-[A-Za-z0-9._-]+\.json' texts \
+            | sort -u >links || true
+          if [ ! -s links ]; then echo "No dumps on #$ISSUE from the owner or collaborators"; exit 0; fi
+
+          git init -q dumps && cd dumps
+          git remote add origin "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git"
+          if git fetch -q --depth 1 origin "$BRANCH"; then
+            git checkout -q -b "$BRANCH" FETCH_HEAD
+          else
+            git checkout -q --orphan "$BRANCH"
+            printf '%s\n' '# Debug dumps' '' \
+              'Debug dumps attached to issues, copied here by `.github/workflows/issue-dumps.yml` so they can be read' \
+              'with plain git: `issue-<n>/<file>.json`. Unpack one with `npm run dump -- <file.json>` (see the' \
+              '`debug-dump` skill).' >README.md
+            git add README.md
+          fi
+
+          dir="issue-$ISSUE"
+          mkdir -p "$dir"
+          added=()
+          while read -r url; do
+            file="$dir/$(basename "$url")"
+            if [ -e "$file" ]; then echo "Already have $file"; continue; fi
+            if ! curl -fsSL --retry 3 --max-filesize 100000000 -o "$file.part" "$url"; then
+              echo "::warning::Couldn't download $url"; rm -f "$file.part"; continue
+            fi
+            if ! jq -e '.format == "sporer-debug-dump"' "$file.part" >/dev/null 2>&1; then
+              echo "::warning::$url isn't a debug dump"; rm -f "$file.part"; continue
+            fi
+            mv "$file.part" "$file"
+            added+=("$file")
+            echo "Copied $url → $file"
+          done <links
+          if [ ${#added[@]} -eq 0 ]; then echo "Nothing new to copy"; exit 0; fi
+
+          git add "${added[@]}"
+          git commit -qm "Dumps from #$ISSUE"
+          git push -q origin "$BRANCH"
+
+          {
+            echo "Debug dumps copied to the \`$BRANCH\` branch:"
+            echo
+            for f in "${added[@]}"; do
+              echo "- [\`$f\`](https://github.com/$GITHUB_REPOSITORY/blob/$BRANCH/$f)"
+            done
+            echo
+            echo '```bash'
+            echo "git fetch origin $BRANCH && git show origin/$BRANCH:${added[0]} > dump.json && npm run dump -- dump.json"
+            echo '```'
+          } >comment.md
+          gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body-file comment.md
+          cat comment.md >>"$GITHUB_STEP_SUMMARY"

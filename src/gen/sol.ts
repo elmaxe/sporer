@@ -193,7 +193,8 @@ function saturnRings(radius: number): RingData {
     if (x > 2.205 && x < 2.225) return { alpha: 0.1, light: 0.8 }; // Encke gap
     return { alpha: 0.62, light: 0.94 }; // A ring
   });
-  return { inner: radius * real(inner), outer: radius * real(outer), color: '#d9c7a2', opacity: 1, profile };
+  // Ice ≳ 95% by mass (docs/research/rings.md).
+  return { inner: radius * real(inner), outer: radius * real(outer), color: '#d9c7a2', opacity: 1, profile, ice: 0.95 };
 }
 
 /** Uranus's narrow, dark rings (1.64–2.0 planet radii), the ε ring brightest at the outside. */
@@ -204,7 +205,8 @@ function uranusRings(radius: number): RingData {
     const ring = i === samples - 2 ? 1 : i % 5 === 2 ? 0.45 : 0.04;
     return { alpha: ring, light: 0.9 + 0.2 * t };
   });
-  return { inner: radius * Math.sqrt(1.64), outer: radius * Math.sqrt(2.0), color: '#9aa3a8', opacity: 0.5, profile };
+  // Dark as charcoal (albedo ~0.02 against Saturn's 0.4–0.6): not ice on the outside (docs/research/rings.md).
+  return { inner: radius * Math.sqrt(1.64), outer: radius * Math.sqrt(2.0), color: '#9aa3a8', opacity: 0.5, profile, ice: 0.05 };
 }
 
 /** The planets, Sun outwards (docs/research/sol.md for the numbers). */
