@@ -18,6 +18,7 @@ import { StarCloseUp } from '../galaxy/StarCloseUp';
 import { OrbitCamera, type OrbitParams } from '../player/OrbitCamera';
 import type { Tooltip } from '../ui/Tooltip';
 import { Level } from './Level';
+import { ease } from './seamlessZoom';
 
 /** Galaxy-scale camera: from a few stars around the ship out to the whole disc. */
 export const galaxyCameraParams: OrbitParams = {
@@ -36,6 +37,12 @@ export const GALAXY_VIEW_DISTANCE = 60;
  * system camera looks down steeply on a ship hovering over a body).
  */
 export const GALAXY_VIEW_ELEVATION = (35 * Math.PI) / 180;
+/**
+ * How far into the dive (0–1) the star's dots have moved onto the close-up's
+ * stars: a binary's dots, drawn apart on the map, close up into the system's
+ * real pair while they're still bright enough to see, then fade out on it.
+ */
+const CONVERGE_BY = 0.6;
 
 /**
  * The galaxy map in galaxy units. No physics: travel is scripted. The galaxy
@@ -58,6 +65,8 @@ export class GalaxyLevel extends Level {
   private readonly hud: GalaxyHud;
   private readonly light: THREE.HemisphereLight;
   private closeUp: StarCloseUp | null = null;
+  private dive = 0;
+  private readonly members: THREE.Vector3[] = [];
   private readonly tilt = new THREE.Quaternion();
 
   constructor(
@@ -126,15 +135,17 @@ export class GalaxyLevel extends Level {
   hideCloseUp(): void {
     this.closeUp?.dispose();
     this.closeUp = null;
+    this.map.convergeTo([], 0);
   }
 
   /**
    * How far the ship has dived into its current star, 0–1: the ship sinks in
    * (at 1 it's at the star's centre, so the camera looks at the star) and
-   * shrinks, the star's dot fades (the close-up takes over), and the rings
-   * are hidden.
+   * shrinks, the star's dot(s) move onto the close-up's star(s) and fade
+   * (the close-up takes over), and the rings are hidden.
    */
   setDive(u: number): void {
+    this.dive = u;
     this.ship.setDive(u);
     this.map.fade(this.ship.current, u);
     this.rogues.fade(this.ship.current, u);
@@ -149,7 +160,9 @@ export class GalaxyLevel extends Level {
 
   override update(frameDt: number, alpha: number): void {
     super.update(frameDt, alpha);
-    this.closeUp?.update();
+    if (!this.closeUp) return;
+    this.closeUp.update();
+    this.map.convergeTo(this.closeUp.memberPositions(this.members), ease(this.dive / CONVERGE_BY));
   }
 
   /** The nebulas first, at low resolution; the scene lays them over the glow behind them. */
