@@ -70,6 +70,8 @@ export function addLodDebug(debug: Debug): void {
 
 const SIDE = CHUNK_CELLS + 1;
 const VERTICES = SIDE * SIDE;
+/** A chunk's grid with a ring of points one cell outside it. */
+const RING_SIDE = SIDE + 2;
 
 interface LodNode {
   readonly parent: LodNode | null;
@@ -101,6 +103,9 @@ interface LodNode {
   baseColors: Float32Array | null;
   target: Float32Array | null;
   targetColors: Float32Array | null;
+  /** Terrain only (smooth surfaces keep their normals pointing straight out): normals as sampled, and the parent's at the same grid points. */
+  baseNormals: Float32Array | null;
+  targetNormals: Float32Array | null;
   /** The shown node across each edge, and how many levels coarser it is (0 if the same or finer). */
   readonly neighbours: (LodNode | null)[];
   readonly coarser: Int8Array;
@@ -162,6 +167,8 @@ export class LodSurface {
   private readonly dir = new THREE.Vector3();
   private readonly color = new THREE.Color();
   private readonly facePoint: FacePoint = { face: 0, s: 0, t: 0 };
+  /** A chunk's points and the ring around it, while it's built (see build). */
+  private readonly ring = new Float32Array(RING_SIDE * RING_SIDE * 3);
   private readonly edgeMorph = new Float32Array(4);
   private readonly smooth: 'outlineError' | 'coastError' | null;
   private readonly renderOrder: number;
@@ -366,6 +373,8 @@ export class LodSurface {
       baseColors: null,
       target: null,
       targetColors: null,
+      baseNormals: null,
+      targetNormals: null,
       neighbours: [null, null, null, null],
       coarser: new Int8Array(4),
       written: new Float32Array(5).fill(-1),
@@ -378,21 +387,33 @@ export class LodSurface {
     const positions = new Float32Array(VERTICES * 3);
     const normals = new Float32Array(VERTICES * 3);
     const colors = new Float32Array(VERTICES * 3);
-    const { dir, color } = this;
-    for (let j = 0; j < SIDE; j++) {
-      for (let i = 0; i < SIDE; i++) {
-        const v = (j * SIDE + i) * 3;
+    const { dir, color, ring } = this;
+    // Terrain samples a ring of points one cell outside the chunk too (the neighbours' own), for the normals.
+    const from = this.smooth ? 0 : -1;
+    for (let j = from; j < SIDE - from; j++) {
+      for (let i = from; i < SIDE - from; i++) {
+        const inside = i >= 0 && j >= 0 && i < SIDE && j < SIDE;
+        // The ring's corners aren't needed (and past a cube corner have no grid point to land on).
+        if (!inside && (i < 0 || i >= SIDE) && (j < 0 || j >= SIDE)) continue;
         faceGridPoint(node.face, node.x * CHUNK_CELLS + i, node.y * CHUNK_CELLS + j, n, dir);
         const r = this.sample(dir, color);
+        const e = ((j + 1) * RING_SIDE + i + 1) * 3;
+        ring[e] = dir.x * r;
+        ring[e + 1] = dir.y * r;
+        ring[e + 2] = dir.z * r;
+        if (!inside) continue;
+        const v = (j * SIDE + i) * 3;
         dir.toArray(normals, v);
-        positions[v] = dir.x * r;
-        positions[v + 1] = dir.y * r;
-        positions[v + 2] = dir.z * r;
+        positions[v] = ring[e]!;
+        positions[v + 1] = ring[e + 1]!;
+        positions[v + 2] = ring[e + 2]!;
         color.toArray(colors, v);
       }
     }
+    if (!this.smooth) ringNormals(ring, normals);
     node.base = positions.slice();
     node.baseColors = colors.slice();
+    node.baseNormals = this.smooth ? null : normals.slice();
     // This chunk is one quarter of its parent: the parent's cells it covers start here.
     const parent = node.parent;
     const half = CHUNK_CELLS / 2;
@@ -412,9 +433,26 @@ export class LodSurface {
       node.targetColors = new Float32Array(VERTICES * 3);
       parentTarget(node.base, node.target, SIDE, parentAC);
       parentTarget(node.baseColors, node.targetColors, SIDE, parentAC);
+      if (node.baseNormals) {
+        // The parent's own normals where it has vertices (its cells are twice the size: smoother), blended between.
+        const theirs = new Float32Array(VERTICES * 3);
+        const pn = parent.baseNormals!;
+        for (let j = 0; j < SIDE; j += 2) {
+          for (let i = 0; i < SIDE; i += 2) {
+            const v = (j * SIDE + i) * 3;
+            const p = ((py + j / 2) * SIDE + px + i / 2) * 3;
+            theirs[v] = pn[p]!;
+            theirs[v + 1] = pn[p + 1]!;
+            theirs[v + 2] = pn[p + 2]!;
+          }
+        }
+        node.targetNormals = new Float32Array(VERTICES * 3);
+        parentTarget(theirs, node.targetNormals, SIDE, parentAC);
+      }
     } else {
       node.target = node.base;
       node.targetColors = node.baseColors;
+      node.targetNormals = node.baseNormals;
     }
     chunkBounds([node.base, node.target], node.bounds);
     // Blending and the seams only ever move a vertex between these, so it stays under too.
@@ -494,50 +532,149 @@ export class LodSurface {
     const geometry = node.mesh!.geometry;
     const position = geometry.getAttribute('position') as THREE.BufferAttribute;
     const colour = geometry.getAttribute('color') as THREE.BufferAttribute;
+    const normal = geometry.getAttribute('normal') as THREE.BufferAttribute;
     const positions = position.array as Float32Array;
     const colors = colour.array as Float32Array;
+    const normals = normal.array as Float32Array;
     const base = node.base!;
     const baseColors = node.baseColors!;
     const target = node.target!;
     const targetColors = node.targetColors!;
+    // Smooth surfaces' normals point straight out whatever the blend.
+    const baseNormals = node.baseNormals;
+    const targetNormals = node.targetNormals!;
     const t = node.morph;
     for (let v = 0; v < VERTICES * 3; v++) {
       positions[v] = blend(target[v]!, base[v]!, t);
       colors[v] = blend(targetColors[v]!, baseColors[v]!, t);
     }
-    for (let edge = 0 as Edge; edge < 4; edge++) {
-      const levels = node.coarser[edge]!;
-      const te = m[edge]!;
-      if (levels === 0) {
+    if (baseNormals) for (let v = 0; v < VERTICES * 3; v++) normals[v] = blend(targetNormals[v]!, baseNormals[v]!, t);
+    // Coarser neighbours last, coarsest of all at the very end: a corner takes its normal (positions agree whatever the order).
+    const coarsest = Math.max(node.coarser[0]!, node.coarser[1]!, node.coarser[2]!, node.coarser[3]!);
+    for (let pass = 0; pass <= coarsest; pass++) {
+      for (let edge = 0 as Edge; edge < 4; edge++) {
+        const levels = node.coarser[edge]!;
+        if (levels !== pass) continue;
+        const te = m[edge]!;
+        if (levels === 0) {
+          for (let e = 0; e <= CHUNK_CELLS; e++) {
+            const v = edgeVertex(edge, e) * 3;
+            for (let k = 0; k < 3; k++) {
+              positions[v + k] = blend(target[v + k]!, base[v + k]!, te);
+              colors[v + k] = blend(targetColors[v + k]!, baseColors[v + k]!, te);
+              if (baseNormals) normals[v + k] = blend(targetNormals[v + k]!, baseNormals[v + k]!, te);
+            }
+          }
+          continue;
+        }
+        // Onto the coarser neighbour's vertices, where it has them now: its own
+        // sampled point blended from its parent's edge, which runs through this
+        // edge's vertices a step either side (the same bits it has).
+        const step = snapStep(levels);
+        const along = (edge < 2 ? node.y : node.x) * CHUNK_CELLS;
         for (let e = 0; e <= CHUNK_CELLS; e++) {
           const v = edgeVertex(edge, e) * 3;
+          const to = snapTo(e, step);
+          const p = edgeVertex(edge, to) * 3;
+          const odd = ((along + to) / step) % 2 === 1 && to - step >= 0 && to + step <= CHUNK_CELLS;
+          const a = odd ? edgeVertex(edge, to - step) * 3 : p;
+          const b = odd ? edgeVertex(edge, to + step) * 3 : p;
           for (let k = 0; k < 3; k++) {
-            positions[v + k] = blend(target[v + k]!, base[v + k]!, te);
-            colors[v + k] = blend(targetColors[v + k]!, baseColors[v + k]!, te);
+            positions[v + k] = blend(Math.fround(midpoint(base[a + k]!, base[b + k]!)), base[p + k]!, te);
+            colors[v + k] = blend(Math.fround(midpoint(baseColors[a + k]!, baseColors[b + k]!)), baseColors[p + k]!, te);
           }
-        }
-        continue;
-      }
-      // Onto the coarser neighbour's vertices, where it has them now: its own
-      // sampled point blended from its parent's edge, which runs through this
-      // edge's vertices a step either side (the same bits it has).
-      const step = snapStep(levels);
-      const along = (edge < 2 ? node.y : node.x) * CHUNK_CELLS;
-      for (let e = 0; e <= CHUNK_CELLS; e++) {
-        const v = edgeVertex(edge, e) * 3;
-        const to = snapTo(e, step);
-        const p = edgeVertex(edge, to) * 3;
-        const odd = ((along + to) / step) % 2 === 1 && to - step >= 0 && to + step <= CHUNK_CELLS;
-        const a = odd ? edgeVertex(edge, to - step) * 3 : p;
-        const b = odd ? edgeVertex(edge, to + step) * 3 : p;
-        for (let k = 0; k < 3; k++) {
-          positions[v + k] = blend(Math.fround(midpoint(base[a + k]!, base[b + k]!)), base[p + k]!, te);
-          colors[v + k] = blend(Math.fround(midpoint(baseColors[a + k]!, baseColors[b + k]!)), baseColors[p + k]!, te);
+          if (baseNormals) coarseNormal(node, levels, a, p, b, odd, te, normals, v);
         }
       }
     }
     position.needsUpdate = true;
     colour.needsUpdate = true;
+    if (baseNormals) normal.needsUpdate = true;
+  }
+}
+
+/**
+ * The normal a neighbour `levels` coarser has at its edge vertex `p` (this
+ * node's vertex indices `a`, `p`, `b` × 3, as in write: `odd` if `p` is
+ * between two of the neighbour's parent's vertices `a` and `b`), blended by
+ * `t`, written into `out` at `o`. The neighbour's own normals there are its
+ * cells' (coarser than this node's), so they're read from this node's
+ * ancestor of its level, which shares that edge and has the same normals on it
+ * to the bit, and its parent's. Jumps of more levels than a chunk's cells
+ * can't happen in practice: those use this node's own normals.
+ */
+function coarseNormal(node: LodNode, levels: number, a: number, p: number, b: number, odd: boolean, t: number, out: Float32Array, o: number): void {
+  if (levels >= Math.log2(CHUNK_CELLS)) {
+    const base = node.baseNormals!;
+    for (let k = 0; k < 3; k++) out[o + k] = blend(Math.fround(midpoint(base[a + k]!, base[b + k]!)), base[p + k]!, t);
+    return;
+  }
+  let level = node;
+  for (let k = 0; k < levels; k++) level = level.parent!;
+  const base = level.baseNormals!;
+  const pl = ancestorVertex(node, level, p);
+  const above = level.parent;
+  if (!above) {
+    for (let k = 0; k < 3; k++) out[o + k] = base[pl + k]!;
+    return;
+  }
+  const up = above.baseNormals!;
+  const pa = ancestorVertex(node, above, p);
+  const aa = odd ? ancestorVertex(node, above, a) : pa;
+  const ba = odd ? ancestorVertex(node, above, b) : pa;
+  for (let k = 0; k < 3; k++) {
+    const from = odd ? Math.fround(midpoint(up[aa + k]!, up[ba + k]!)) : up[pa + k]!;
+    out[o + k] = blend(from, base[pl + k]!, t);
+  }
+}
+
+/** Index (× 3) in `ancestor`'s grid of `node`'s vertex at index `v` (× 3), which must be one of the ancestor's grid points. */
+function ancestorVertex(node: LodNode, ancestor: LodNode, v: number): number {
+  const shift = node.depth - ancestor.depth;
+  const i = (v / 3) % SIDE;
+  const j = Math.floor(v / 3 / SIDE);
+  const ai = ((node.x * CHUNK_CELLS + i) >> shift) - ancestor.x * CHUNK_CELLS;
+  const aj = ((node.y * CHUNK_CELLS + j) >> shift) - ancestor.y * CHUNK_CELLS;
+  return (aj * SIDE + ai) * 3;
+}
+
+/**
+ * Smooth normals for a chunk's grid from `ring` (its points and a ring one
+ * cell outside, RING_SIDE wide): each across the points either side of it,
+ * on the grid and across it. Neighbouring chunks of the same level work
+ * them out from the same points, so they agree on their shared edges to the
+ * bit, and a smooth surface has no seams.
+ */
+function ringNormals(ring: Float32Array, out: Float32Array): void {
+  const at = (i: number, j: number) => ((j + 1) * RING_SIDE + i + 1) * 3;
+  for (let j = 0; j < SIDE; j++) {
+    for (let i = 0; i < SIDE; i++) {
+      const l = at(i - 1, j);
+      const r = at(i + 1, j);
+      const d = at(i, j - 1);
+      const u = at(i, j + 1);
+      const ux = ring[r]! - ring[l]!;
+      const uy = ring[r + 1]! - ring[l + 1]!;
+      const uz = ring[r + 2]! - ring[l + 2]!;
+      const vx = ring[u]! - ring[d]!;
+      const vy = ring[u + 1]! - ring[d + 1]!;
+      const vz = ring[u + 2]! - ring[d + 2]!;
+      // u × v points out (see CUBE_FACES); the chunk across a face edge may have it the other way round, so check.
+      let nx = uy * vz - uz * vy;
+      let ny = uz * vx - ux * vz;
+      let nz = ux * vy - uy * vx;
+      const c = at(i, j);
+      if (nx * ring[c]! + ny * ring[c + 1]! + nz * ring[c + 2]! < 0) {
+        nx = -nx;
+        ny = -ny;
+        nz = -nz;
+      }
+      const length = Math.hypot(nx, ny, nz) || 1;
+      const v = (j * SIDE + i) * 3;
+      out[v] = nx / length;
+      out[v + 1] = ny / length;
+      out[v + 2] = nz / length;
+    }
   }
 }
 

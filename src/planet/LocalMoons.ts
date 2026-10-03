@@ -36,7 +36,7 @@ export class LocalMoons implements Entity {
       const lava = this.lava[i] ?? null;
       const mesh = new THREE.Mesh(
         createTerrainGeometry(radius * frame.scale, seed, style, { segments: lava ? LAVA_SEGMENTS : TERRAIN_SEGMENTS }),
-        new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9 }),
+        new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 }),
       );
       lava?.paintTerrain(mesh.material, radius * frame.scale);
       mesh.name = moon.name;

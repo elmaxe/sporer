@@ -103,7 +103,7 @@ export class PlanetGlobe implements Entity {
     this.sample = gas
       ? gasSampler(R, seed, config.bands, config.size === 'iceGiant')
       : terrainSampler(R, seed, style, { noise: detailedTerrain, reliefScale: RELIEF_SCALE, seaFloor, shape: config.shape });
-    const material = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: !gas, roughness: 0.9 });
+    const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 });
     this.gas = createGasLook(config);
     this.gas?.apply(material);
     this.surface = new LodSurface(gas ? R : floorRadius(R, style, RELIEF_SCALE, seaFloor, config.shape != null), this.top, this.sample, material, {
