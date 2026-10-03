@@ -251,7 +251,7 @@ Moments get a banner and a sound cue (silent until their files exist, like step 
 
 ### Sandbox, Relaxed and Real (decided)
 
-A **Terraforming: Sandbox / Relaxed / Real** setting in the menu (a new Gameplay section, saved in localStorage like the Display settings; **Relaxed by default**, decided; revisit once the balance pass has played Real through). It can be switched at any time; the body's action log is the same, and only the tunables used to play it forward change. Both use the same physics: the tiers, temperatures and what each tool does per unit are identical, so the chart means the same in both.
+A **Terraforming: Sandbox / Relaxed / Real** setting in the menu (a new Gameplay section, saved in localStorage like the Display settings; **Relaxed by default**, decided; revisit once the balance pass has played Real through). It can be switched at any time; the body's action log is the same, and only the tunables used to play it forward change. All three use the same physics: the tiers, temperatures and what each tool does per unit are identical, so the chart means the same in each.
 
 | | Relaxed | Real |
 |---|---|---|
