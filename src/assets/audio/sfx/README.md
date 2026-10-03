@@ -16,6 +16,8 @@ rebuild; no code changes needed. Volumes and fades are in `cueParams` (`src/audi
 | `busterFlight/` | The planet buster's projectile flying down to the surface: starts at launch, fades out on impact | loop |
 | `busterImpact/` | The projectile hitting the ground (the first flash, as the crust starts to crack) | one-shot |
 | `planetExplode/` | The planet blowing apart (the blinding flash and the debris flying out) | one-shot |
+| `volcanoFire/` | Firing the volcano bomb: the molten shell leaving the ship | one-shot |
+| `volcanoRise/` | The shell landing and a volcano rising out of the ground, erupting (a rumble and a roar) | one-shot |
 | `abductBeam/` | The abduction beam on: starts on the press, fades out when it's let go | loop |
 | `abductStart/` | The beam catching something to lift (as it comes under the beam) | one-shot |
 | `abductSuccess/` | Something reaching the ship and going into the inventory | one-shot |

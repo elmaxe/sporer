@@ -7,6 +7,8 @@ import {
   beyondHorizon,
   cellAngle,
   childAt,
+  chordError,
+  chunkBounds,
   edgeNeighbour,
   cellDiagonal,
   parentTarget,
@@ -95,6 +97,18 @@ describe('cube sphere quadtree', () => {
     expect(wantsSplit(0.05 * MERGE_HYSTERESIS * 0.99, 0.05, true)).toBe(false);
   });
 
+  it('measures how far flat cells sag inside a sphere, as seen from the camera', () => {
+    // One cell of a depth-d node spans nodeArc(d) / CHUNK_CELLS radians of arc.
+    const r = 100;
+    for (const depth of [0, 2, 5]) {
+      const theta = Math.PI / 2 / 2 ** depth / CHUNK_CELLS;
+      const sag = r * (1 - Math.cos(theta / 2));
+      // A cell seen from where it looks 0.1 rad wide.
+      const distance = (r * theta) / 0.1;
+      expect(chordError(0.1, depth)).toBeCloseTo(sag / distance, 6);
+    }
+  });
+
   it('snaps to the coarser neighbour’s vertices', () => {
     expect([0, 1, 2, 3, 4].map((e) => snapTo(e, 1))).toEqual([0, 1, 2, 3, 4]);
     expect([0, 1, 2, 3, 4].map((e) => snapTo(e, 2))).toEqual([0, 0, 2, 2, 4]);
@@ -127,6 +141,14 @@ describe('LOD surface', () => {
     surface.object.children.filter((m): m is THREE.Mesh => m instanceof THREE.Mesh && m.visible);
   const triangles = (surface: LodSurface) =>
     drawn(surface).reduce((n, m) => n + m.geometry.getIndex()!.count / 3, 0);
+
+  it('bounds a chunk by its farthest point from the centre too, over both shapes', () => {
+    const own = new Float32Array([3, 0, 0, 0, 4, 0]);
+    const parent = new Float32Array([0, 0, 5, 1, 1, 1]);
+    const b = chunkBounds([own, parent], { x: 0, y: 0, z: 0, radius: 0, reach: 0, top: 0 });
+    expect(b.top).toBe(5);
+    expect(b.reach).toBe(3.5);
+  });
 
   it('refines near the camera, coarse and culled far away, and settles', () => {
     const surface = make();
@@ -253,6 +275,54 @@ describe('LOD surface', () => {
     // Each level blends in for morphSeconds before the next can split.
     expect(frames * 0.05).toBeGreaterThan(lodParams.morphSeconds);
     surface.dispose();
+  });
+
+  it('refines a smooth surface only as far as its outline (or coasts) need, far coarser than the terrain up close', () => {
+    const sphere = () => R;
+    const fine = new LodSurface(R, R, sphere, new THREE.MeshBasicMaterial());
+    const outline = new LodSurface(R, R, sphere, new THREE.MeshBasicMaterial(), { smooth: 'outline' });
+    const coast = new LodSurface(R, R, sphere, new THREE.MeshBasicMaterial(), { smooth: 'coast', renderOrder: -1 });
+    const camera = new THREE.Vector3(0, 0, R * 1.05);
+    for (const s of [fine, outline, coast]) expect(settle(s, camera)).toBe(true);
+    expect(triangles(outline)).toBeLessThan(triangles(fine) / 4);
+    // The coasts need a closer fit, still far coarser than the terrain's facets.
+    expect(triangles(coast)).toBeGreaterThan(triangles(outline));
+    expect(triangles(coast)).toBeLessThan(triangles(fine) / 3);
+    // Fewer than the fixed 46-segment sea sphere it replaces drew from anywhere (12·46²), before the frustum culls any.
+    expect(triangles(coast)).toBeLessThan(12 * 46 * 46);
+    expect(drawn(coast).every((m) => m.renderOrder === -1)).toBe(true);
+    for (const s of [fine, outline, coast]) s.dispose();
+  });
+
+  it('leaves out chunks lying wholly under hiddenBelow (the sea floor), and keeps the rest closed', () => {
+    const sea = R;
+    // A sea floor: everything below the sea except a band of land round the equator.
+    const floor = (dir: Vec3Like, color: THREE.Color) => {
+      color.setRGB(1, 1, 1);
+      return R * (Math.abs(dir.y) < 0.2 ? 1.02 : 0.95);
+    };
+    const all = new LodSurface(R * 0.95, R * 1.02, floor, new THREE.MeshBasicMaterial());
+    const hiding = new LodSurface(R * 0.95, R * 1.02, floor, new THREE.MeshBasicMaterial(), { hiddenBelow: sea });
+    for (const camera of [new THREE.Vector3(0, 0, R * 20), new THREE.Vector3(0.3, 0.6, 1).setLength(R * 1.1)]) {
+      expect(settle(all, camera)).toBe(true);
+      expect(settle(hiding, camera)).toBe(true);
+      // The same tree either way: hiding only changes what's drawn.
+      expect(hiding.object.children.length).toBe(all.object.children.length);
+      const shown = drawn(hiding);
+      expect(shown.length).toBeGreaterThan(0);
+      expect(shown.length).toBeLessThan(drawn(all).length);
+      // Every chunk drawn reaches above the sea, and those left out don't.
+      const top = (m: THREE.Mesh) => {
+        const p = m.geometry.getAttribute('position');
+        let t = 0;
+        for (let i = 0; i < p.count; i++) t = Math.max(t, Math.hypot(p.getX(i), p.getY(i), p.getZ(i)));
+        return t;
+      };
+      for (const m of shown) expect(top(m)).toBeGreaterThanOrEqual(sea);
+      expect(shown.length).toBe(drawn(all).filter((m) => top(m) >= sea).length);
+    }
+    all.dispose();
+    hiding.dispose();
   });
 });
 

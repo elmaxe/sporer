@@ -90,8 +90,7 @@ export class SceneManager implements Entity {
   private readonly side = new THREE.Vector3();
   /** The hover tooltip every level shares (and the item bar's slots). */
   readonly tooltip = new Tooltip();
-  /** What the player has done to each visited planet's surface (removed plants), kept across visits. */
-  /** What the player has done to each body's surface (plants taken, plants set down), by body key. */
+  /** What the player has done to each body's surface (plants taken, plants set down, volcanoes raised), by body key. */
   readonly surfaceChanges = new SurfaceChangeStore();
   /** The bodies blown apart by planet busters, and when (they stay debris fields for the rest of the game). */
   readonly busted = new BustedBodies();
@@ -547,10 +546,12 @@ export class SceneManager implements Entity {
       () => this.toGalaxy(),
       () => this.toPlanet(),
     );
-    // Busted bodies stay busted.
+    // Busted bodies stay busted, and raised volcanoes stand.
     for (const body of [...level.world.planets, ...level.world.moons, ...level.world.nuclei, ...level.world.asteroids]) {
+      const key = bodyKey(body.config);
       // A new system's clock starts afresh: its debris has long settled.
-      if (this.busted.isBusted(bodyKey(body.config))) body.bust(level.world.time - SETTLED_DEBRIS);
+      if (this.busted.isBusted(key)) body.bust(level.world.time - SETTLED_DEBRIS);
+      else for (const site of this.surfaceChanges.find(key)?.volcanoes ?? []) body.addVolcano(site, null);
     }
     // Remember the system in the URL, so a reload comes back here.
     const url = new URL(location.href);
