@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
-import { PLANT_CELL_SIZE, generateCell, parsePlantId, plantGridSize, type GroundRadius, type PlantData, type PlantPlan, type PlantSpecies } from '../gen/plants';
+import { MAX_PLANT_SCALE, PLANT_CELL_SIZE, generateCell, parsePlantId, plantGridSize, type GroundRadius, type PlantData, type PlantPlan, type PlantSpecies } from '../gen/plants';
 import { faceGridPoint } from '../world/cubeSphereMath';
 import { GROUND_DETAIL_LAYER } from '../world/groundDepth';
 import type { SurfaceChanges } from './changes';
@@ -118,6 +118,8 @@ export class SurfaceEntities implements Entity {
   private readonly promoted = new Set<string>();
   /** The farthest any species is drawn (units, before plantParams.range). */
   private readonly maxReach: number;
+  /** The widest crown of any species at the largest plant scale (units). */
+  private readonly widestCrown: number;
   private readonly camera = new THREE.Vector3();
   private readonly lastScan = new THREE.Vector3(Infinity, 0, 0);
   /** Cell indices in range, nearest first, and every cell's distance from the last scan (scratch, so a scan allocates nothing). */
@@ -162,6 +164,7 @@ export class SurfaceEntities implements Entity {
     }
     this.geometries = plan.species.map((s) => Array.from({ length: PLANT_LOD_COUNT }, (_, lod) => createPlantGeometry(s, lod)));
     this.liveMaterials = plan.species.map(() => null);
+    this.widestCrown = Math.max(...plan.species.map((s) => s.crownRadius)) * MAX_PLANT_SCALE;
     this.maxReach = Math.max(...plan.species.map((s) => s.height * 1.25 * farthest(s)));
     for (const s of plan.species) {
       const ranges = PLANT_LODS[s.kind];
@@ -482,6 +485,33 @@ export class SurfaceEntities implements Entity {
     return found ? hit : null;
   }
 
+  /**
+   * Calls `visit` for each plant drawn now that stands under a disc `radius`
+   * wide round `point` on the ground (`underDisc`), e.g. a beam's foot; in the
+   * planet's body frame. `hit.distance` is its base's distance from `point`;
+   * `hit` is reused, so read it in `visit`. `visit` may promote the plant.
+   */
+  within(point: THREE.Vector3, radius: number, visit: (hit: PlantHit) => void): void {
+    if (!plantParams.enabled) return;
+    const { middle, hit } = this;
+    const most = radius + this.widestCrown;
+    for (const cell of this.cells.values()) {
+      if (cell.plants.length === 0 || cell.centre.distanceTo(point) > cell.bound + most) continue;
+      for (const p of cell.plants) {
+        if (this.changes.isRemoved(p.id) || this.promoted.has(p.id)) continue;
+        const s = this.plan.species[p.species]!;
+        middle.set(p.x, p.y, p.z).multiplyScalar(p.radius);
+        const distance = middle.distanceTo(point);
+        if (!underDisc(distance, s.crownRadius * p.scale, radius) || !this.visibleAt(p, middle.distanceTo(this.camera))) continue;
+        hit.id = p.id;
+        hit.plant = p;
+        hit.species = s;
+        hit.distance = distance;
+        visit(hit);
+      }
+    }
+  }
+
   /** A generated plant by id, from the loaded cells or made afresh (null if there's none). */
   find(id: string): PlantData | null {
     const address = parsePlantId(id);
@@ -577,6 +607,15 @@ export class SurfaceEntities implements Entity {
     for (const row of this.geometries) for (const g of row) g.dispose();
     for (const m of this.liveMaterials) m?.dispose();
   }
+}
+
+/**
+ * Whether a plant whose base is `distance` from the centre of a disc `radius`
+ * wide on the ground, with a crown `crown` wide (radius), stands under it: its
+ * trunk does, or at least half its crown.
+ */
+export function underDisc(distance: number, crown: number, radius: number): boolean {
+  return distance <= radius + crown * 0.5;
 }
 
 /** How far out a species is drawn at all, in its heights. */

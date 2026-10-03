@@ -65,6 +65,26 @@ export class Inventory {
     return s ? s.count < STACK_SIZE : this.list.length < CARGO_STACKS;
   }
 
+  /**
+   * Whether one more of species `key` fits once the plants already on their
+   * way up (`pending`, one key per plant) are in: the beam can lift several
+   * at once, and stops catching when the hold would overflow.
+   */
+  canAddAfter(key: string, pending: readonly string[]): boolean {
+    let same = 0;
+    let fresh = 0;
+    for (let i = 0; i < pending.length; i++) {
+      const k = pending[i]!;
+      if (k === key) same++;
+      // Each new species on the way takes a stack (counted once).
+      if (!this.stack(k) && pending.indexOf(k) === i) fresh++;
+    }
+    const s = this.stack(key);
+    if (s) return s.count + same < STACK_SIZE;
+    if (same > 0) return same < STACK_SIZE;
+    return this.list.length + fresh < CARGO_STACKS;
+  }
+
   /** Puts one plant of `species` (key `key`) in the hold; null if it doesn't fit. */
   add(key: string, species: PlantSpecies, origin: string): CargoStack | null {
     if (!this.canAdd(key)) return null;

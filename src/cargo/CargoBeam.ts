@@ -8,10 +8,10 @@ import type { Input } from '../core/Input';
 import type { PlantSpecies } from '../gen/plants';
 import type { GroundHeight } from '../planet/ground';
 import { MarkerRing } from '../player/MarkerRing';
-import type { Plantings } from '../surface/Plantings';
+import type { PlantedHit, Plantings } from '../surface/Plantings';
 import { plantParams } from '../surface/plantParams';
 import { createTintedPlantMaterial, type PlantFadeUniforms } from '../surface/plantLook';
-import { plantYaw, type LivePlant, type SurfaceEntities } from '../surface/SurfaceEntities';
+import { plantYaw, type LivePlant, type PlantHit, type SurfaceEntities } from '../surface/SurfaceEntities';
 import { GROUND_DETAIL_LAYER } from '../world/groundDepth';
 import { createGlowTexture } from '../world/glowTexture';
 import { CLOUD_RENDER_ORDER } from '../world/weatherLook';
@@ -111,11 +111,14 @@ interface Load {
 /**
  * The abduction beam and the cargo it carries, in low orbit (a planet-level
  * entity). Selected on the item bar's Inventory tab (`arm`): the Abduction
- * Beam lifts a plant held under the pointer (mouse button or finger down on
- * it) up to the ship, shrinking as it rises; let go on the way and it falls
- * back, carrying on with the motion it had (the ship's and the beam's) as
- * the body's gravity pulls it down. At the ship it goes into the hold
- * (`Inventory`, a stack per species). A stack selected instead sets one of
+ * Beam fires wherever the pointer is held (mouse button or finger down) within
+ * reach, its foot following the pointer over the ground, and every plant under
+ * it (`beamParams.radius`) is caught, several at once, and lifted up to the
+ * ship, shrinking as it rises; held on bare ground it just shines there. Let
+ * go on the way and what's on it falls back, carrying on with the motion it
+ * had (the ship's and the beam's) as the body's gravity pulls it down. At the
+ * ship it goes into the hold (`Inventory`, a stack per species); the beam
+ * stops catching what wouldn't fit. A stack selected instead sets one of
  * its plants down where the pointer is held on the ground, growing back to
  * size on the way down; let go (or just click) and it falls from where it
  * is, the same way. Whatever lands meets its fate there (`plantFate`): it
@@ -128,8 +131,15 @@ interface Load {
 export class CargoBeam implements Entity {
   /** 'abduct', the key of the stack being set down, or null. */
   private armed: 'abduct' | { key: string } | null = null;
-  /** The load on the beam now, if any. */
-  private beam: Load | null = null;
+  /** The load being set down on the beam now, if any. */
+  private lowering: Load | null = null;
+  /** The abduction beam is on (held), meeting the ground at `beamFoot`; what's on it are the loads going `'up'`. */
+  private abducting = false;
+  private readonly beamFoot = new THREE.Vector3();
+  /** Keys of the plants on their way up (scratch: the hold's room for more), and how many the last sweep caught and turned away. */
+  private readonly pending: string[] = [];
+  private caught = 0;
+  private refused = 0;
   private readonly loads: Load[] = [];
   private sound: SoundHandle | null = null;
   private note = '';
@@ -169,6 +179,9 @@ export class CargoBeam implements Entity {
   private readonly canvas = document.querySelector('canvas');
   /** The pick under the pointer (reused). */
   private readonly target = { id: '', planted: false, species: null as unknown as PlantSpecies, key: '', origin: '', scale: 1, base: new THREE.Vector3() };
+  /** Plants found under the beam's foot: each is caught (made once, so sweeping allocates nothing). */
+  private readonly catchGrown = (hit: PlantHit): void => this.lift(this.fromGrown(hit));
+  private readonly catchPlanted = (hit: PlantedHit): void => this.lift(this.fromPlanted(hit));
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -194,8 +207,11 @@ export class CargoBeam implements Entity {
     this.smoke = new ParticlePool(scene, false, RENDER_ORDER);
     const f = debug.folder('Cargo beam');
     f?.add(beamParams, 'range', 10, 300);
+    f?.add(beamParams, 'radius', 0.5, 15);
     f?.add(beamParams, 'speed', 1, 40);
     f?.add(beamParams, 'minTime', 0, 3);
+    f?.add(beamParams, 'lowerSpeed', 1, 40);
+    f?.add(beamParams, 'lowerMinTime', 0, 5);
     f?.add(beamParams, 'carriedHeight', 0.2, 4);
     f?.add(beamParams, 'gravity', 1, 100)
       .name('gravity (1 g)')
@@ -210,9 +226,16 @@ export class CargoBeam implements Entity {
     return this.armed ? cargoItem(this.armed.key) : null;
   }
 
-  /** True while the beam is holding something. */
+  /** True while a beam is on: abducting (held, with or without plants on it) or setting cargo down. */
   get beaming(): boolean {
-    return this.beam !== null;
+    return this.abducting || this.lowering !== null;
+  }
+
+  /** How many plants are on their way up the beam now. */
+  get lifting(): number {
+    let n = 0;
+    for (const l of this.loads) if (l.state === 'up') n++;
+    return n;
   }
 
   /** What's in the air or playing out now (for tests): each load's state and fate. */
@@ -237,18 +260,23 @@ export class CargoBeam implements Entity {
     const touch = this.input.touchMode;
     if (item === 'abduct') {
       if (why) return { available: false, hint: note, reason: why };
-      if (this.beam?.state === 'up') return { available: true, hint: `Beaming up ${this.beam.species.name}… let go to drop it` };
+      const lifting = this.lifting;
+      if (lifting > 0) {
+        const first = this.loads.find((l) => l.state === 'up')!;
+        return { available: true, hint: lifting === 1 ? `Beaming up ${first.species.name}… let go to drop it` : `Beaming up ${lifting} plants… let go to drop them` };
+      }
       if (this.armed !== 'abduct') return { available: true, hint: note };
       if (note) return { available: true, hint: note };
       if (!plantParams.enabled) return { available: true, hint: 'Plants are hidden: turn them on in the menu to beam them up' };
       if (this.inventory.full) return { available: true, hint: 'The hold is full: set something down first' };
-      return { available: true, hint: touch ? 'Touch and hold a plant to beam it up' : 'Click and hold on a plant to beam it up' };
+      if (this.abducting) return { available: true, hint: touch ? 'Move your finger over plants to beam them up' : 'Sweep the beam over plants to beam them up' };
+      return { available: true, hint: touch ? 'Touch and hold to fire the beam: plants under it are beamed up' : 'Click and hold to fire the beam: plants under it are beamed up' };
     }
     const key = cargoKey(item);
     const stack = key ? this.inventory.stack(key) : null;
     if (!stack) return { available: false, hint: note, reason: 'Nothing left of it' };
     if (why) return { available: false, hint: note, reason: why };
-    if (this.beam?.state === 'down') return { available: true, hint: `Setting down ${this.beam.species.name}… let go to drop it` };
+    if (this.lowering) return { available: true, hint: `Setting down ${this.lowering.species.name}… let go to drop it` };
     const armed = this.armed !== null && this.armed !== 'abduct' && this.armed.key === key;
     if (!armed || note) return { available: true, hint: note };
     return {
@@ -264,9 +292,12 @@ export class CargoBeam implements Entity {
     if (this.noteTime > 0) this.noteTime -= frameDt;
     this.hold.copy(this.ship.object.position).addScaledVector(this.ship.up, -HOLD_DROP);
     const press = this.input.consumePress();
-    if (press && this.armed && !this.beam && !this.blocked()) this.startBeam(press.ndcX, press.ndcY);
-    // Let go (or the ship flew out of reach): whatever is on the beam falls.
-    if (this.beam && (!this.input.primaryDown || this.beam.foot.distanceTo(this.hold) > beamParams.range * 1.3 || this.blocked())) this.letGo();
+    if (press && this.armed && !this.beaming && !this.blocked()) this.startBeam(press.ndcX, press.ndcY);
+    // Let go (or the ship flew out of reach, or the beam was put away): whatever is on the beam falls.
+    if (this.abducting && (!this.input.primaryDown || this.armed !== 'abduct' || this.blocked())) this.stopAbducting();
+    if (this.abducting) this.sweep();
+    const lowering = this.lowering;
+    if (lowering && (!this.input.primaryDown || lowering.foot.distanceTo(this.hold) > beamParams.range * 1.3 || this.blocked())) this.letGo();
 
     for (let i = this.loads.length - 1; i >= 0; i--) this.step(this.loads[i]!, dt);
     this.aim(frameDt);
@@ -281,7 +312,8 @@ export class CargoBeam implements Entity {
   /** Everything in the air comes down at once and every fate ends (the body was blown apart, or the level is going). */
   clear(settle: boolean): void {
     this.stopSound();
-    this.beam = null;
+    this.lowering = null;
+    this.abducting = false;
     for (const load of [...this.loads]) {
       if (settle && load.state === 'up' && load.source) {
         load.source.restore();
@@ -318,26 +350,18 @@ export class CargoBeam implements Entity {
     this.raycaster.setFromCamera(this.ndc.set(ndcX, ndcY), this.camera);
     const { ray } = this.raycaster;
     if (this.armed === 'abduct') {
-      const target = this.pickPlant(ray);
-      // Not a plant: the press is the ground's (a click there still flies the ship).
-      if (!target) return;
-      if (target.base.distanceTo(this.hold) > beamParams.range) {
+      // Nothing under the pointer but sky: no beam.
+      if (!this.aimPoint(ray)) return;
+      if (this.point.distanceTo(this.hold) > beamParams.range) {
+        // Still a click: the ship flies there.
         this.say('Out of the beam’s reach: fly lower or closer');
         return;
       }
       this.input.capturePress();
-      if (!this.inventory.canAdd(target.key)) {
-        this.say('The hold is full: set something down first');
-        return;
-      }
-      const source = target.planted ? this.plantings.promote(target.id) : (this.plants?.promote(target.id) ?? null);
-      if (!source) return;
-      const mesh = source.object.children[0] as THREE.Mesh;
-      const load = this.createLoad('up', source.object, mesh, target.species, target.key, target.origin, source, target.base, target.scale);
-      load.t = 0;
-      this.beam = load;
-      this.sfx.play('abductStart');
+      this.abducting = true;
+      this.beamFoot.copy(this.point);
       this.sound = this.sfx.start('abductBeam');
+      this.catchUnder();
       return;
     }
     const key = this.armed!.key;
@@ -362,7 +386,7 @@ export class CargoBeam implements Entity {
     object.quaternion.setFromUnitVectors(Y, this.up).premultiply(this.qSpin.setFromAxisAngle(this.up, (this.inventory.version * 2.39996) % (Math.PI * 2)));
     const load = this.createLoad('down', object, mesh, species, key, origin, null, this.point, 1);
     load.t = 1;
-    this.beam = load;
+    this.lowering = load;
     this.sound = this.sfx.start('exportBeam');
   }
 
@@ -395,7 +419,7 @@ export class CargoBeam implements Entity {
       rest: object.quaternion.clone(),
       restUp,
       t: 0,
-      duration: tripTime(foot.distanceTo(this.hold)),
+      duration: tripTime(foot.distanceTo(this.hold), state === 'down'),
       full,
       small,
       scale: full,
@@ -417,13 +441,63 @@ export class CargoBeam implements Entity {
     return load;
   }
 
-  /** The beam lets go: its load falls from where it is. */
+  /** The beam setting cargo down lets go: its load falls from where it is. */
   private letGo(): void {
-    const load = this.beam;
+    const load = this.lowering;
     if (!load) return;
-    this.beam = null;
+    this.lowering = null;
     this.stopSound();
     this.startFall(load);
+  }
+
+  /** The abduction beam goes off: everything on it falls from where it is. */
+  private stopAbducting(): void {
+    this.abducting = false;
+    this.stopSound();
+    for (const load of this.loads) if (load.state === 'up') this.startFall(load);
+  }
+
+  /** The beam held: its foot follows the pointer over the ground within reach, and catches what's under it. */
+  private sweep(): void {
+    const { pointer } = this.input;
+    if (pointer.inside) {
+      this.raycaster.setFromCamera(this.ndc.set(pointer.ndcX, pointer.ndcY), this.camera);
+      // Pointed past the beam's reach (or at the sky), it stays where it last reached.
+      if (this.aimPoint(this.raycaster.ray) && this.point.distanceTo(this.hold) <= beamParams.range) this.beamFoot.copy(this.point);
+    }
+    // The ship flew off: the beam can't reach any more.
+    if (this.beamFoot.distanceTo(this.hold) > beamParams.range * 1.3) {
+      this.stopAbducting();
+      return;
+    }
+    this.catchUnder();
+  }
+
+  /** Catches every plant under the beam's foot that's in reach and fits in the hold, and lifts it. */
+  private catchUnder(): void {
+    this.pending.length = 0;
+    for (const l of this.loads) if (l.state === 'up') this.pending.push(l.key);
+    this.caught = this.refused = 0;
+    this.plants?.within(this.beamFoot, beamParams.radius, this.catchGrown);
+    this.plantings.within(this.beamFoot, beamParams.radius, this.catchPlanted);
+    if (this.caught > 0) this.sfx.play('abductStart');
+    if (this.refused > 0) this.say('The hold is full: set something down first');
+  }
+
+  /** One plant under the beam: promoted and on its way up, unless it's out of reach or wouldn't fit. */
+  private lift(target: CargoBeam['target']): void {
+    if (target.base.distanceTo(this.hold) > beamParams.range) return;
+    if (!this.inventory.canAddAfter(target.key, this.pending)) {
+      this.refused++;
+      return;
+    }
+    const source = target.planted ? this.plantings.promote(target.id) : (this.plants?.promote(target.id) ?? null);
+    if (!source) return;
+    const mesh = source.object.children[0] as THREE.Mesh;
+    const load = this.createLoad('up', source.object, mesh, target.species, target.key, target.origin, source, target.base, target.scale);
+    load.t = 0;
+    this.pending.push(target.key);
+    this.caught++;
   }
 
   /** It falls from where it is, keeping the velocity it had. */
@@ -450,15 +524,17 @@ export class CargoBeam implements Entity {
         load.spin += BEAM_SPIN * dt;
         const e = beamEase(load.t);
         load.scale = beamScale(e, load.full, load.small);
-        // Up the beam from its foot to the hold, centred on the beam as it nears the ship.
-        this.v.lerpVectors(load.foot, this.hold, e);
+        // Up the beam from its foot to the hold, centred on the beam as it nears the ship (drawn in from where it stood to
+        // the beam's axis on the way up, wherever the beam has moved).
+        const from = load.state === 'up' ? this.w.lerpVectors(load.foot, this.beamFoot, e) : load.foot;
+        this.v.lerpVectors(from, this.hold, e);
         this.up.copy(this.v).normalize();
         this.v.addScaledVector(this.up, -0.5 * e * load.species.height * load.scale);
         this.track(load, this.v, dt);
         this.pose(load, this.v, load.scale);
         if (load.state === 'up' && load.t >= 1) this.arrive(load);
         else if (load.state === 'down' && load.t <= 0) {
-          this.beam = null;
+          this.lowering = null;
           this.stopSound();
           this.dir(load, load.foot);
           this.land(load, false);
@@ -489,10 +565,8 @@ export class CargoBeam implements Entity {
     }
   }
 
-  /** Into the hold. */
+  /** Into the hold (the beam stays on while it's held). */
   private arrive(load: Load): void {
-    this.beam = null;
-    this.stopSound();
     if (!this.inventory.add(load.key, load.species, load.origin)) {
       this.startFall(load);
       return;
@@ -564,7 +638,7 @@ export class CargoBeam implements Entity {
   private drop(load: Load): void {
     const i = this.loads.indexOf(load);
     if (i >= 0) this.loads.splice(i, 1);
-    if (this.beam === load) this.beam = null;
+    if (this.lowering === load) this.lowering = null;
     this.scene.remove(load.object);
     load.material.dispose();
   }
@@ -585,36 +659,51 @@ export class CargoBeam implements Entity {
     const limit = groundAt === null ? Infinity : groundAt + GROUND_SLACK;
     const grown = this.plants?.pick(ray, limit) ?? null;
     const planted = this.plantings.pick(ray, grown ? grown.distance : limit);
-    const t = this.target;
-    if (planted) {
-      const p = planted.plant;
-      t.id = p.id;
-      t.planted = true;
-      t.species = p.species;
-      t.key = p.speciesKey;
-      t.origin = p.origin;
-      t.scale = p.scale;
-      t.base.set(p.x, p.y, p.z).multiplyScalar(p.radius);
-      return t;
-    }
-    if (grown) {
-      const p = grown.plant;
-      t.id = grown.id;
-      t.planted = false;
-      t.species = grown.species;
-      t.key = speciesKey(this.body.key, grown.species.index);
-      t.origin = this.body.name;
-      t.scale = p.scale;
-      t.base.set(p.x, p.y, p.z).multiplyScalar(p.radius);
-      return t;
-    }
+    if (planted) return this.fromPlanted(planted);
+    if (grown) return this.fromGrown(grown);
     return null;
   }
 
-  /** The aiming ring under the pointer while armed (and not beaming): on the plant to lift, or the ground to set cargo down on. */
+  /** Where the abduction beam meets the ground for a ray, into `point`: the base of the plant it passes through, or the ground it hits. False if it hits neither. */
+  private aimPoint(ray: THREE.Ray): boolean {
+    const target = this.pickPlant(ray);
+    if (target) {
+      this.point.copy(target.base);
+      return true;
+    }
+    return this.ground.groundHit(ray, this.point) !== null;
+  }
+
+  private fromPlanted(hit: PlantedHit): CargoBeam['target'] {
+    const p = hit.plant;
+    const t = this.target;
+    t.id = p.id;
+    t.planted = true;
+    t.species = p.species;
+    t.key = p.speciesKey;
+    t.origin = p.origin;
+    t.scale = p.scale;
+    t.base.set(p.x, p.y, p.z).multiplyScalar(p.radius);
+    return t;
+  }
+
+  private fromGrown(hit: PlantHit): CargoBeam['target'] {
+    const p = hit.plant;
+    const t = this.target;
+    t.id = hit.id;
+    t.planted = false;
+    t.species = hit.species;
+    t.key = speciesKey(this.body.key, hit.species.index);
+    t.origin = this.body.name;
+    t.scale = p.scale;
+    t.base.set(p.x, p.y, p.z).multiplyScalar(p.radius);
+    return t;
+  }
+
+  /** The aiming ring under the pointer while armed (and not beaming): where the beam would meet the ground, or the ground to set cargo down on. */
   private aim(frameDt: number): void {
     const { pointer } = this.input;
-    if (!this.armed || this.beam || !pointer.inside || this.blocked() || this.input.isDragging) {
+    if (!this.armed || this.beaming || !pointer.inside || this.blocked() || this.input.isDragging) {
       this.reticle.hide();
       this.farReticle.hide();
       return;
@@ -622,14 +711,12 @@ export class CargoBeam implements Entity {
     this.raycaster.setFromCamera(this.ndc.set(pointer.ndcX, pointer.ndcY), this.camera);
     let size: number;
     if (this.armed === 'abduct') {
-      const target = this.pickPlant(this.raycaster.ray);
-      if (!target) {
+      if (!this.aimPoint(this.raycaster.ray)) {
         this.reticle.hide();
         this.farReticle.hide();
         return;
       }
-      this.point.copy(target.base);
-      size = Math.max(MIN_BEAM_RADIUS, target.species.crownRadius * target.scale * 1.2);
+      size = beamParams.radius;
     } else {
       const stack = this.inventory.stack(this.armed.key);
       if (!stack || this.ground.groundHit(this.raycaster.ray, this.point) === null) {
@@ -647,7 +734,11 @@ export class CargoBeam implements Entity {
   }
 
   private drawBeam(frameDt: number): void {
-    const load = this.beam;
+    if (this.abducting) {
+      this.look.show(this.beamFoot, this.hold, beamParams.radius, 1, frameDt);
+      return;
+    }
+    const load = this.lowering;
     if (!load) {
       this.look.hide();
       return;

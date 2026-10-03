@@ -102,6 +102,9 @@ export const COVER_PER_TIER: readonly number[] = [0, 0.3, 0.55, 0.85];
 export const PLANT_CELL_SIZE = 32;
 /** Candidate spots are about this far apart, inside a cell. */
 export const PLANT_SPACING = 5;
+/** The range of a plant's own scale (its species' size times this). */
+export const MIN_PLANT_SCALE = 0.8;
+export const MAX_PLANT_SCALE = 1.25;
 /** Ground this close to sea level (as a fraction of the relief) is beach: nothing grows. */
 export const MIN_ELEVATION = 0.03;
 /** Gap, in units, the slope is measured over. */
@@ -333,7 +336,7 @@ export function generateCell(plan: PlantPlan, ground: GroundRadius, face: number
       const v = (b + rng.next()) / k;
       const keepRoll = rng.next();
       const speciesRoll = rng.next();
-      const scale = rng.range(0.8, 1.25);
+      const scale = rng.range(MIN_PLANT_SCALE, MAX_PLANT_SCALE);
       const yaw = rng.range(0, Math.PI * 2);
 
       const dir = faceGridPoint(face, i + u, j + v, n, scratch);
