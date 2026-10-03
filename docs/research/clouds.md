@@ -96,6 +96,7 @@ import { globeRadius } from './src/planet/frame';
 
   Seen from orbit, two more adjustments:
   - Puffs that are small on screen (under ~2–9% of the view's half-height) are drawn softer and up to 1.5× bigger, so a cluster merges into one patch instead of a scatter of white dots.
+  - Level of detail per cluster: below an angular size of 0.08 rad (span over distance), a cluster draws a share of its puffs, spread evenly over its height and up to 2.5× bigger, down to two at 0.008 rad. The system view's star 0 (two water worlds) went from ~9600 sprites to ~900. Under headless software rendering at `?quality=low`, the system view went from 6 fps back to 11 (13 on main without puffy clouds). Low orbit runs at 4 fps on both branches.
   - Puffs seen edge-on at the limb thin out when the camera is more than ~1.25–1.8 radii from the centre, so the clouds don't stand round the planet as a fuzzy rim (the old sheet's look). Low orbit keeps its towering clouds on the horizon.
 - **Clusters** (`cumulusCluster`):
   - **Channels.** A body has `clusters` channels, each holding one cluster per time slot of 1.5–3 × the weather's `change` time. A cluster billows up over the first quarter of its slot and evaporates over the last third, so the sky renews itself without popping.
