@@ -17,6 +17,7 @@ The player presses **Save debug dump** in the menu (Esc, or the menu button on p
 | `device` | user agent, viewport (CSS px), devicePixelRatio, touch, orientation, home-screen app, fullscreen |
 | `renderer` | GPU, WebGL version, pixel ratio, drawing buffer, quality, draw calls and triangles in the last frame, programs, context lost |
 | `performance` | FPS stats and the last ~600 frame times, JS heap, uptime |
+| `gpu` | the dumped frame's GPU and CPU time per render pass (`GpuTimings` in `src/debug/gpuReport.ts`), measured on the player's device by redrawing the frozen frame ~30 times under the dialog: which pass is slow there (`passes[].gpuMs`, `share`). `timerQueries: false` (Firefox, Safari) means CPU times only; absent in older dumps |
 | `log` | the console's errors and warnings, uncaught exceptions and rejections since the page loaded (last 100) |
 | `build`, `url`, `createdAt` | which build (branch, CI build number, commit), the page URL, when |
 | `tunables` | lil-gui's values when the debug panel was on (dev builds and `?debug`) |
@@ -34,6 +35,7 @@ Then **Read `annotated.jpg`**: the marked spots are the problem. Read `screen.jp
 Things to check before anything else:
 - **Console entries.** An error there is often the whole story.
 - **Build.** Compare `build.commit` with `git log`: the problem may already be fixed, or come from a branch.
+- **Slow frames.** `npm run dump` prints `gpu` per pass: the biggest `share` is where the player's GPU spends the frame. Look at that pass with `npm run shot -- --dump <file> gpu:dumped` (draws, objects, shaders; see the `screenshot` skill), and say the timings there are SwiftShader's, not the player's.
 - **Device.** Phones (`touch`, small viewport, high DPR) and their GPUs are where most layout and shader problems show; `renderer.quality` `low` means `?quality=low`.
 - **Mid-transition** (`state.transitioning`): the frame was part of a crossfade, which can't be restored exactly (see below).
 - **Layout problems** (text that doesn't fit, overlapping panels): `state.ui.overlays` has each overlay's rectangle in CSS px, `state.ui.hud` the text; compare with `screen.jpg`.

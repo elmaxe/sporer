@@ -49,6 +49,12 @@
 //                                expression giving {x, y}), wait a few frames; `release` lets go (the beam)
 //   release                      let go of a press, wait a few frames
 //   fps                          measure frames per second over 120 frames
+//   gpu:<name>[:<frames>]        GPU profile (src/debug/GpuProfiler.ts): time every render pass over <frames> frames
+//                                (default 60), then capture one frame's draw calls, WebGL calls, uploads and shader
+//                                programs → <name>.gpu.txt (the report, also printed), <name>.gpu.json (everything)
+//                                and <name>-shaders/ (each program's GLSL, and as translated for the driver). Use --gpu
+//                                for real timings; on SwiftShader only the counts mean anything. A frozen frame is
+//                                redrawn for it
 //   goto:<url or ?params>        load another page (e.g. goto:?star=2) and wait for the game
 //
 // Page globals (dev build): game, levels, galaxy, ship, world, system, planet, audio, menu, debugDump, generateSystem.
@@ -310,6 +316,35 @@ async function run(step) {
       if (opts.phone) await page.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
       else await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: at.x, y: at.y, button: 'left', buttons: 0, clickCount: 1 });
       await page.evaluate(`new Promise((r) => { let n = 0; (function f() { if (++n === 4) r(); else requestAnimationFrame(f); })(); })`);
+      return;
+    }
+    case 'gpu': {
+      const [name, frames = '60'] = rest.split(':');
+      if (!name) throw new Error('gpu needs a name: gpu:<name>[:<frames>]');
+      const report = await page.evaluate(`(async () => {
+        const drawn = game.gpu.framesDrawn;
+        const report = game.gpu.report(${Number(frames)});
+        // A frozen frame (freeze:) has no loop running: draw it again until the profile is done.
+        let done = false;
+        report.finally(() => (done = true));
+        await new Promise((r) => setTimeout(r, 300));
+        if (game.gpu.framesDrawn === drawn) while (!done) { game.redraw(); await new Promise((r) => setTimeout(r, 0)); }
+        return report;
+      })()`, 120000);
+      const dir = join(out, `${name}-shaders`);
+      mkdirSync(dir, { recursive: true });
+      const slug = (s) => s.replace(/[^\w-]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'unnamed';
+      for (const s of report.shaders) {
+        const base = join(dir, `${s.id}-${slug(s.name)}`);
+        if (s.vertex) writeFileSync(`${base}.vert`, s.vertex);
+        if (s.fragment) writeFileSync(`${base}.frag`, s.fragment);
+        if (s.translatedVertex) writeFileSync(`${base}.translated.vert`, s.translatedVertex);
+        if (s.translatedFragment) writeFileSync(`${base}.translated.frag`, s.translatedFragment);
+      }
+      const { shaders: _, lines, ...data } = report;
+      writeFileSync(join(out, `${name}.gpu.json`), JSON.stringify(data, null, 1));
+      writeFileSync(join(out, `${name}.gpu.txt`), lines.join('\n') + '\n');
+      results.push({ step, value: { report: join(out, `${name}.gpu.txt`), json: join(out, `${name}.gpu.json`), shaders: dir, lines } });
       return;
     }
     case 'fps':

@@ -162,6 +162,7 @@ export class PlanetLevel extends Level implements ItemUser {
     inventory: Inventory,
   ) {
     super();
+    this.scene.name = 'Planet';
     this.frame = this.add(new PlanetFrame(body, system.world.time, debug));
     const globe = (this.globe = this.add(new PlanetGlobe(this.scene, body.config, this.frame, camera, debug)));
     const busted = blastTime !== null;

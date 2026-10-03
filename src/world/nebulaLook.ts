@@ -463,7 +463,7 @@ export const STAR_DIMMING_GLSL = /* glsl */ `
  */
 export class NebulaSkyBake {
   readonly texture: THREE.CubeTexture;
-  private readonly scene = new THREE.Scene();
+  private readonly scene = Object.assign(new THREE.Scene(), { name: 'Nebula sky bake' });
   private readonly target: THREE.WebGLCubeRenderTarget;
   private readonly camera: THREE.CubeCamera;
   private readonly meshes: THREE.Mesh<THREE.IcosahedronGeometry, THREE.ShaderMaterial>[];

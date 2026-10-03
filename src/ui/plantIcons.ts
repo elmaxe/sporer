@@ -30,7 +30,7 @@ export class PlantIcons {
     const { renderer } = this;
     const geometry = createPlantGeometry(species, 0);
     const material = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9 });
-    const scene = new THREE.Scene();
+    const scene = Object.assign(new THREE.Scene(), { name: 'Plant icon' });
     const mesh = new THREE.Mesh(geometry, material);
     // Turned a little, so a flat crown shows some depth.
     mesh.rotation.y = 0.6;

@@ -12,7 +12,7 @@ import * as THREE from 'three';
 export class Crossfade {
   private texture: THREE.FramebufferTexture | null = null;
   private readonly size = new THREE.Vector2();
-  private readonly scene = new THREE.Scene();
+  private readonly scene = Object.assign(new THREE.Scene(), { name: 'Crossfade' });
   private readonly camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   private readonly material = new THREE.ShaderMaterial({
     uniforms: { map: { value: null }, opacity: { value: 1 } },

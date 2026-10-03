@@ -116,6 +116,12 @@ const r = dump.renderer;
 if (r) say(`Renderer: ${r.gpu ?? '?'} (${r.vendor ?? '?'}) · ${r.webgl} · pixel ratio ${r.pixelRatio} · buffer ${r.drawingBuffer.join('×')} · ${r.quality} quality · ${r.render.calls} draws, ${r.render.triangles} triangles in the frame · ${r.programs} programs${r.contextLost ? ' · CONTEXT LOST' : ''}`);
 const f = dump.performance.frames;
 if (f) say(`Frames: ${f.fps} FPS over ${f.frames} frames · median ${f.p50Ms} ms · 95th ${f.p95Ms} ms · worst ${f.maxMs} ms${dump.performance.jsHeapMb !== null ? ` · JS heap ${dump.performance.jsHeapMb} MB` : ''} · up ${dump.performance.uptime} s`);
+const gpu = dump.gpu;
+if (gpu) {
+  const g = gpu.gpuMs;
+  say(`GPU per pass (the dumped frame drawn ${gpu.frames} times${gpu.discarded ? `, ${gpu.discarded} discarded` : ''}): ${g ? `${g.mean} ms mean, ${g.max} ms worst` : 'no GPU timer queries, CPU times only'} · CPU ${gpu.cpuMs.mean} ms`);
+  for (const p of gpu.passes) say(`  ${p.name}: GPU ${p.gpuMs ?? '–'} ms${p.share !== null ? ` (${Math.round(p.share * 100)}%)` : ''} · CPU ${p.cpuMs} ms · ${p.draws} draws · ${p.triangles} triangles`);
+} else if (gpu === null) say('GPU per pass: not measured');
 const log = dump.log.entries;
 say(`Console: ${log.length} entries${dump.log.dropped ? ` (+${dump.log.dropped} older dropped)` : ''}`);
 for (const e of log) say(`  [${e.t.toFixed(1)} s] ${e.level}: ${e.text.replace(/\n/g, '\n      ')}`);

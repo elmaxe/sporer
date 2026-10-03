@@ -26,7 +26,7 @@ export const galaxyNebulaParams = {
 export class GalaxyNebulas implements Entity {
   private readonly meshes: THREE.Mesh<THREE.IcosahedronGeometry, THREE.ShaderMaterial>[];
   /** The volumes' own scene; `frame` copies the galaxy root's transform. */
-  private readonly volumes = new THREE.Scene();
+  private readonly volumes = Object.assign(new THREE.Scene(), { name: 'Nebula volumes' });
   private readonly frame = new THREE.Group();
   private readonly target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: false });
   private readonly quad: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>;

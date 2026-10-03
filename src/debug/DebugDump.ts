@@ -9,6 +9,7 @@ import { drawAnnotated } from './annotate';
 import type { LogRing } from './consoleLog';
 import { DUMP_FORMAT, DUMP_VERSION, dumpFileName, summaryLines, type DebugDump, type DeviceInfo, type GameState, type RendererInfo } from './dumpFormat';
 import { FrameTimes } from './frameTimes';
+import type { GpuTimings } from './gpuReport';
 import { captureGameState, restoreGameState } from './gameState';
 
 /** Overlays left out of the screen picture: the dialogs over it, the debug panel (its values are in `tunables`). */
@@ -37,7 +38,7 @@ interface Capture {
  * maps), lets the player mark the problem and write a note (DebugDumpDialog),
  * then saves or shares one JSON file with the pictures, a marked-up copy
  * with a summary strip, the game state to reproduce it (gameState.ts), the
- * device and renderer, frame times and the console's errors (see
+ * device and renderer, frame times, the frame's GPU time per pass and the console's errors (see
  * dumpFormat.ts). A global entity: it times every frame for the dump.
  */
 export class DebugDumpControl implements Entity {
@@ -68,11 +69,13 @@ export class DebugDumpControl implements Entity {
     this.game.paused = true;
     try {
       const capture = await this.capture();
+      // The frozen frame is drawn again under the dialog: time its passes meanwhile.
+      const gpu = this.game.gpu.measure(30, 5000).catch(() => null);
       const canShare = typeof navigator.canShare === 'function' && navigator.canShare({ files: [new File(['{}'], 'x.json', { type: 'application/json' })] });
       let choice = await this.dialog.ask(capture.screenUrl ?? capture.gameUrl ?? '', canShare);
       while (choice.action !== 'cancel') {
         this.dialog.status('Making the file…');
-        const json = JSON.stringify(this.build(capture, choice));
+        const json = JSON.stringify(this.build(capture, choice, true, await gpu));
         const name = dumpFileName(capture.createdAt);
         try {
           await deliver(json, name, choice);
@@ -152,7 +155,7 @@ export class DebugDumpControl implements Entity {
     return capture;
   }
 
-  private build(capture: Capture, choice: DumpChoice, images = true): DebugDump {
+  private build(capture: Capture, choice: DumpChoice, images = true, gpu: GpuTimings | null = null): DebugDump {
     const memory = (performance as { memory?: { usedJSHeapSize: number } }).memory;
     const dump: DebugDump = {
       format: DUMP_FORMAT,
@@ -170,6 +173,7 @@ export class DebugDumpControl implements Entity {
         frameTimesMs: this.frames.durations().map((d) => Math.round(d * 10) / 10),
         jsHeapMb: memory ? Math.round(memory.usedJSHeapSize / 1e5) / 10 : null,
       },
+      ...(images ? { gpu } : {}),
       state: capture.state,
       ...(capture.stateError ? { stateError: capture.stateError } : {}),
       log: { entries: this.log.entries(), dropped: this.log.dropped },

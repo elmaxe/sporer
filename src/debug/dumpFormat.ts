@@ -2,6 +2,7 @@ import type { InventoryData } from '../cargo/inventory';
 import type { SurfaceChangesData } from '../surface/changes';
 import type { LogEntry } from './consoleLog';
 import type { FrameStats } from './frameTimes';
+import type { GpuTimings } from './gpuReport';
 
 /**
  * The debug dump file (the menu's "Save debug dump", F8): one JSON file with
@@ -143,6 +144,12 @@ export interface DebugDump {
   device: DeviceInfo;
   renderer: RendererInfo | null;
   performance: { uptime: number; frames: FrameStats | null; frameTimesMs: number[]; jsHeapMb: number | null };
+  /**
+   * Per-pass GPU and CPU times of the dumped frame, drawn again about 30 times
+   * while the dialog was open (GpuProfiler). Absent in older dumps and from
+   * `debugDump.data()`; null if it couldn't be measured.
+   */
+  gpu?: GpuTimings | null;
   state: GameState | null;
   /** Why the state couldn't be read, if it couldn't. */
   stateError?: string;
@@ -227,6 +234,11 @@ export function summaryLines(dump: Omit<DebugDump, 'images'>): string[] {
   );
   const f = dump.performance.frames;
   if (f) lines.push(`Frames: ${f.fps} FPS · median ${f.p50Ms} ms · 95% ${f.p95Ms} ms · worst ${f.maxMs} ms${r ? ` · ${r.render.calls} draws` : ''}`);
+  const gpu = dump.gpu;
+  if (gpu?.gpuMs) {
+    const top = gpu.passes.slice(0, 3).map((p) => `${p.name} ${p.gpuMs!.toFixed(1)}`).join(', ');
+    lines.push(`GPU: ${gpu.gpuMs.mean.toFixed(1)} ms a frame (${top} ms)`);
+  }
   const errors = dump.log.entries.filter((e) => e.level !== 'warn').length;
   const warnings = dump.log.entries.length - errors;
   if (dump.log.entries.length > 0) lines.push(`Console: ${errors} errors, ${warnings} warnings; last: ${dump.log.entries.at(-1)!.text.split('\n')[0]}`);

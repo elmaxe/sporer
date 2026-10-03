@@ -254,6 +254,7 @@ export class PlanetMap implements Entity {
     });
     this.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.material);
     this.quad.frustumCulled = false;
+    this.quad.name = 'Planet map';
 
     const f = debug.folder('Planet map');
     f?.add(planetMapParams, 'night', 0, 1);

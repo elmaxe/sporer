@@ -266,6 +266,7 @@ export class LabLevel extends Level {
     carry: LabCarry | null,
   ) {
     super(view.view === 'system' ? Physics.create(FIXED_DT) : null);
+    this.scene.name = 'Lab';
     const start = performance.now();
     this.mode = { view: view.view, camera: view.camera };
     this.touchControls = view.view === 'globe' ? 'surface' : 'none';

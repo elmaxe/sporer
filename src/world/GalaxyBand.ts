@@ -44,7 +44,7 @@ export class GalaxyBand implements Entity {
   readonly sky: GalacticSky;
   private readonly sphere: THREE.Mesh<THREE.SphereGeometry, THREE.ShaderMaterial>;
   private readonly stars: THREE.Points<THREE.BufferGeometry, THREE.ShaderMaterial>;
-  private readonly bakeScene = new THREE.Scene();
+  private readonly bakeScene = Object.assign(new THREE.Scene(), { name: 'Galaxy band bake' });
   private readonly bakeMaterial: THREE.ShaderMaterial;
   private readonly target = new THREE.WebGLCubeRenderTarget(BAKE_SIZE, { generateMipmaps: false });
   private readonly cubeCamera = new THREE.CubeCamera(0.1, 10, this.target);

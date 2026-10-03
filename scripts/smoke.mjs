@@ -21,7 +21,7 @@
 // galaxies, twinkles, spins and draws binaries as two dots, and picking works while it's turned), a real click on the
 // menu button starts audio and opens the menu (the game pauses; volume sliders and a planet lab link; its Save debug
 // dump opens the dump dialog, where typing a note doesn't reach the game and Save makes the JSON file with the
-// pictures and state, and Esc closes just the dialog; a real Esc closes the menu); then galaxy travel asks for its sound (and the zooms between levels for none), and M mutes. Then the planet loop (hover at
+// pictures, state and per-pass GPU times, and Esc closes just the dialog; a real Esc closes the menu); then galaxy travel asks for its sound (and the zooms between levels for none), and M mutes. Then the planet loop (hover at
 // a planet, scroll in to low orbit, click the globe and fly, the Equal Earth map is shown and a click on it sets the
 // autopilot there, scroll all the way in and out and check the ship's altitude follows, scroll back out to hover
 // above it, as high as the zoom says, with the camera zoomed out past the handover and the planet in view), and again for every planet
@@ -1155,6 +1155,7 @@ await section('audio', async () => {
     return { format: d.format, mode: d.state?.mode, star: d.state?.star === levels.systemLevel.data.id, savedNote: d.note, savedMarks: d.marks.length,
       game: d.images.game?.startsWith('data:image/png'), screen: d.images.screen?.startsWith('data:image/jpeg'),
       annotated: d.images.annotated?.startsWith('data:image/jpeg'), gpu: !!d.renderer?.gpu, frames: d.performance.frames?.frames ?? 0,
+      gpuPasses: d.gpu?.passes.map((p) => p.name) ?? [], gpuFrames: d.gpu?.frames ?? 0,
       menuOpen: menu.isOpen && game.paused }; })`));
   await evaluate(`document.getElementById('menu-dump').click()`);
   await until(`!document.getElementById('dump').hidden`, 30000);
@@ -1220,6 +1221,8 @@ await section('audio', async () => {
     audio.dump.annotated &&
     audio.dump.gpu &&
     audio.dump.frames > 0 &&
+    audio.dump.gpuPasses.includes('System') &&
+    audio.dump.gpuFrames > 0 &&
     audio.dump.menuOpen &&
     audio.dump.escClosesDialogOnly &&
     audio.closedByEsc &&

@@ -39,7 +39,7 @@ export class GroundDepth {
     groundFar: { value: 1 },
   };
   private readonly target: THREE.WebGLRenderTarget;
-  private readonly material = new THREE.MeshBasicMaterial({ colorWrite: false });
+  private readonly material = new THREE.MeshBasicMaterial({ colorWrite: false, name: 'Ground depth' });
   private readonly size = new THREE.Vector2();
   private readonly layers = new THREE.Layers();
 

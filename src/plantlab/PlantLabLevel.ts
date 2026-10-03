@@ -77,6 +77,7 @@ export class PlantLabLevel extends Level {
     carry: PlantLabCarry | null,
   ) {
     super(null);
+    this.scene.name = 'Plant lab';
     const start = performance.now();
     const view = state.view;
     this.mode = view.view;

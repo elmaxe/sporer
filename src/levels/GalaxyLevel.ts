@@ -73,6 +73,7 @@ export class GalaxyLevel extends Level {
     onZoomIn: () => void,
   ) {
     super();
+    this.scene.name = 'Galaxy';
     // Only the UFO is lit; stars and glows are unlit.
     this.light = new THREE.HemisphereLight('#cfe3ff', '#302040', 2);
     this.scene.add(this.light);

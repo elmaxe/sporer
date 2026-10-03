@@ -85,6 +85,7 @@ export class SystemLevel extends Level {
   ) {
     const physics = Physics.create(FIXED_DT);
     super(physics);
+    this.scene.name = 'System';
     this.data = generateSystem(ref);
 
     const near = NebulaSky.near(nebulas, ref.position);
@@ -223,7 +224,10 @@ export class SystemLevel extends Level {
     for (const body of hidden) body.object.visible = false;
     // A visited comet's coma and tails are all round the camera: low orbit draws them as seen from inside.
     for (const comet of this.world.comets) comet.object.visible = !hidden.includes(comet.nucleus) && !comet.nucleus.busted;
+    // Named for the GPU profiler's pass list.
+    this.scene.name = 'System sky';
     renderScene(renderer, this.scene, camera);
+    this.scene.name = 'System';
     for (const body of hidden) body.object.visible = true;
     for (const comet of this.world.comets) comet.object.visible = !comet.nucleus.busted;
     this.trails.visible = trails;

@@ -4,6 +4,7 @@ import type { Entity } from './Entity';
 import { FixedStep } from './FixedStep';
 import { Input } from './Input';
 import type { Debug } from './Debug';
+import { GpuProfiler } from '../debug/GpuProfiler';
 import type { Level } from '../levels/Level';
 
 export const FIXED_DT = 1 / 60;
@@ -21,6 +22,8 @@ export class Game {
   readonly renderer: THREE.WebGLRenderer;
   readonly camera: THREE.PerspectiveCamera;
   readonly input: Input;
+  /** Per-pass GPU timings and frame captures, on request (`game.gpu.measure()`, `capture()`, `report()`). */
+  readonly gpu: GpuProfiler;
   /** Called after each frame is drawn, before it's shown (for automation, e.g. reading pixels). */
   afterFrame: (() => void) | null = null;
   /** Shows only one side of a running crossfade (for inspecting a handover, e.g. while stopped). */
@@ -53,6 +56,7 @@ export class Game {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     // Draw counts add up over the whole frame (every level and pass), reset in `frame`: the debug dump reads them.
     this.renderer.info.autoReset = false;
+    this.gpu = new GpuProfiler(this.renderer);
     container.appendChild(this.renderer.domElement);
 
     this.camera = new THREE.PerspectiveCamera(65, 1, 0.1, 20000);
@@ -125,6 +129,7 @@ export class Game {
     this._level = null;
     this.fadingFrom = null;
     this.crossfade.dispose();
+    this.gpu.dispose();
     this.input.dispose();
     this.debug.dispose();
     this.renderer.dispose();
@@ -134,6 +139,7 @@ export class Game {
   private frame = (time: number) => {
     this.debug.beginFrame();
     this.renderer.info.reset();
+    this.gpu.beginFrame();
 
     const now = time / 1000;
     const frameDt = this.lastTime < 0 || this.paused ? 0 : Math.min(now - this.lastTime, MAX_FRAME_DT);
@@ -166,6 +172,7 @@ export class Game {
       const solo = this.crossfadeSolo;
       this.crossfade.draw(this.renderer, solo === 'outgoing' ? 1 : solo === 'incoming' ? 0 : 1 - this.fadeWeight);
     }
+    this.gpu.endFrame();
     this.afterFrame?.();
     this.debug.endFrame();
   };
