@@ -17,6 +17,8 @@
 //   --clean            hide the debug panel and FPS meter
 //   --low              ?quality=low: half resolution, no antialiasing (about 5x faster under SwiftShader; for
 //                      checks where a soft picture will do)
+//   --gpu              WebGL on this machine's graphics card instead of SwiftShader (real FPS, driver-specific
+//                      shader bugs); fails at once if there's no GPU the headless browser can use
 //   --sheet            also write sheet.png: every screenshot in a labelled grid (one Read for a sequence)
 //   --steps <file>     read more steps from a file, one per line (# comments), handy for long JS
 //   --dump <file>      a debug dump (menu → Save debug dump, F8): load its galaxy and system at its page size
@@ -53,7 +55,8 @@
 // In the lab: game and lab (src/lab/PlanetLab.ts: lab.set, setView, generate, load, look, setTime, ...);
 // settle there waits for lab.ready (the latest edit built and drawn). In the plant lab: game and plantLab
 // (src/plantlab/PlantLab.ts: plantLab.set, setForm, select, setView, generate, load, look, ...), settle waits for plantLab.ready.
-// Prints JSON: { ok, failure, out, shots, results, errors } (errors: console errors/warnings/exceptions).
+// Prints JSON: { ok, failure, out, gpu, shots, results, errors } (gpu: the WebGL vendor and renderer, SwiftShader
+// unless --gpu; errors: console errors/warnings/exceptions).
 // A failing step stops the run, saves failure.png and exits 1.
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -85,6 +88,7 @@ for (let i = 0; i < args.length; i++) {
   else if (a === '--clean') opts.clean = true;
   else if (a === '--low') opts.params.quality = 'low';
   else if (a === '--sheet') opts.sheet = true;
+  else if (a === '--gpu') opts.gpu = true;
   else if (a === '--steps') {
     for (const line of readFileSync(value(), 'utf8').split('\n')) {
       const s = line.trim();
@@ -127,7 +131,7 @@ if (!(await fetch(url).then((r) => r.ok, () => false))) {
   process.exit(1);
 }
 
-const page = await launch({ width, height });
+const page = await launch({ width, height, gpu: opts.gpu });
 if (opts.phone) {
   await page.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: true });
   await page.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
@@ -353,5 +357,5 @@ try {
 }
 
 const ok = !failure;
-console.log(JSON.stringify({ ok, failure: failure ?? undefined, out, shots, results, errors: page.errors }, null, 2));
+console.log(JSON.stringify({ ok, failure: failure ?? undefined, out, gpu: page.gpuInfo, shots, results, errors: page.errors }, null, 2));
 process.exit(ok ? 0 : 1);

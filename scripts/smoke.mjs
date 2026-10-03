@@ -10,6 +10,8 @@
 //   --timeout <s>      give up after this long (default 900), reporting the section it was in
 //   --full-quality     render as players see it (default: ?quality=low, half resolution without antialiasing,
 //                      about 5x the frame rate under SwiftShader)
+//   --gpu              WebGL on this machine's graphics card instead of SwiftShader, at full quality (the FPS mean
+//                      something); fails at once if there's no GPU the headless browser can use
 // Each section prints its time and result on stderr as it finishes. A page that stops answering (SwiftShader can
 // block it for minutes) fails the run at once, naming the step, instead of hanging.
 // Checks: the ship starts hovering above the star and there's no manual flying (W and a click on empty space leave
@@ -90,8 +92,9 @@ if (only?.some((name) => !SECTIONS.includes(name))) {
 const quick = args.includes('--quick');
 const runs = (name) => (only ? only.includes(name) : name !== 'types' || !quick);
 const deadline = Number(option('--timeout') ?? 900);
+const gpu = args.includes('--gpu');
 const gameUrl = new URL(args.find((a, i) => !a.startsWith('--') && !['--only', '--timeout'].includes(args[i - 1])) ?? 'http://localhost:5173/');
-if (!args.includes('--full-quality') && !gameUrl.searchParams.has('quality')) gameUrl.searchParams.set('quality', 'low');
+if (!args.includes('--full-quality') && !gpu && !gameUrl.searchParams.has('quality')) gameUrl.searchParams.set('quality', 'low');
 const url = gameUrl.href;
 /** Another page of the game (e.g. lab.html?gen=3) at the same render quality. */
 const pageUrl = (path) => {
@@ -106,7 +109,7 @@ if (!(await fetch(url).then((r) => r.ok, () => false))) {
 
 const outDir = mkdtempSync(join(tmpdir(), 'spore2-smoke-'));
 // A fresh browser and profile every run (so no saved volume or mute carries over), at 1280x720.
-const page = await launch({ width: 1280, height: 720 });
+const page = await launch({ width: 1280, height: 720, gpu });
 const { send, errors } = page;
 // Only throws if the page stops answering: a failed expression reads as undefined and fails the checks that use it.
 const evaluate = page.tryEvaluate;
@@ -1513,7 +1516,7 @@ await section('lab', async () => (lab = await runLab()).ok);
 const PLANT_STAR = 6;
 const PLANT_PLANET = 0;
 async function runPlantLab() {
-  const own = await launch({ width: 1280, height: 720 });
+  const own = await launch({ width: 1280, height: 720, gpu });
   try {
     return await plantLabChecks(own);
   } finally {
@@ -1813,7 +1816,7 @@ async function runTouch() {
 async function runTouchLab() {
   const W = 390;
   const H = 844;
-  const phone = await launch({ width: W, height: H });
+  const phone = await launch({ width: W, height: H, gpu });
   try {
     const send = phone.send;
     const evaluate = phone.tryEvaluate;
@@ -2242,7 +2245,7 @@ const ok = started && !stalled && Object.keys(sections).length > 0 && Object.val
 console.error(`[smoke] ${ok ? 'ok' : 'FAILED'} in ${Math.round((Date.now() - T0) / 1000)} s${errors.length ? `, ${errors.length} console errors` : ''}`);
 console.log(
   JSON.stringify(
-    { ok, started, stalled, sections, before, after, autopilot, pick, systemMap, sky, living, comet, belt, galaxyLoop, nebulas, rogues, seamless, audio, planetLoop, heldZoom, cometLoop, asteroidLoops, planetTypes, touch, touchLab, cargo, buster, lab, plantLab, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
+    { ok, started, stalled, sections, gpu: page.gpuInfo, before, after, autopilot, pick, systemMap, sky, living, comet, belt, galaxyLoop, nebulas, rogues, seamless, audio, planetLoop, heldZoom, cometLoop, asteroidLoops, planetTypes, touch, touchLab, cargo, buster, lab, plantLab, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
     null,
     2,
   ),

@@ -1,5 +1,6 @@
 // Headless Chrome/Edge over the DevTools protocol, shared by the smoke test and the screenshot tool.
-// No dependencies: Node's fetch + WebSocket. SwiftShader WebGL, so it runs without a GPU.
+// No dependencies: Node's fetch + WebSocket. SwiftShader WebGL by default, so it runs without a GPU; `gpu: true`
+// uses the machine's graphics card instead (for timings and driver-specific shader bugs).
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -22,13 +23,21 @@ export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  */
 export class StallError extends Error {}
 
+/** A WebGL renderer string that means software rendering, not a graphics card. */
+const SOFTWARE_GL = /swiftshader|llvmpipe|softpipe|software|basic render driver|microsoft basic/i;
+
 /**
  * Launches a fresh headless browser (its own profile, on a free debugging port) with a page of exactly
  * `width` × `height` CSS pixels, and connects to it. Console errors, warnings, failed asserts and
  * uncaught exceptions are collected in `errors`. A DevTools call without an answer in `callTimeoutMs`
  * rejects with a StallError. `await close()` when done (the browser is also killed when Node exits).
+ *
+ * WebGL runs on SwiftShader (on the CPU) unless `gpu` is set: then it uses the machine's graphics card, and
+ * launching fails if the browser fell back to software anyway (no GPU, or none it can reach headless; on
+ * Linux without an X display, try CHROME_FLAGS=--use-angle=vulkan). CHROME_FLAGS (space-separated) adds
+ * flags either way. `gpuInfo` is the { vendor, renderer } WebGL reports.
  */
-export async function launch({ width = 1280, height = 720, callTimeoutMs = 60000 } = {}) {
+export async function launch({ width = 1280, height = 720, callTimeoutMs = 60000, gpu = false } = {}) {
   const executable = process.env.CHROME_PATH ?? BROWSERS.find(existsSync);
   if (!executable) throw new Error('No Chrome/Edge found; set CHROME_PATH');
   const profile = mkdtempSync(join(tmpdir(), 'spore2-browser-'));
@@ -37,8 +46,9 @@ export async function launch({ width = 1280, height = 720, callTimeoutMs = 60000
     // Port 0: the browser picks a free one and writes it to DevToolsActivePort in the profile.
     '--remote-debugging-port=0',
     `--user-data-dir=${profile}`,
-    '--enable-unsafe-swiftshader',
-    '--use-angle=swiftshader',
+    // Headless forces software rendering unless told otherwise; the blocklist would turn some GPUs away.
+    ...(gpu ? ['--enable-gpu', '--ignore-gpu-blocklist'] : ['--enable-unsafe-swiftshader', '--use-angle=swiftshader']),
+    ...(process.env.CHROME_FLAGS?.split(/\s+/).filter(Boolean) ?? []),
     `--window-size=${width},${height}`,
     // Chrome refuses to run as root (e.g. in containers) with its sandbox on.
     ...(process.getuid?.() === 0 ? ['--no-sandbox'] : []),
@@ -160,5 +170,23 @@ export async function launch({ width = 1280, height = 720, callTimeoutMs = 60000
   await send('Page.enable');
   // Exactly width × height CSS pixels at DPR 1 (the window size alone leaves room for browser chrome).
   await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
-  return { send, evaluate, tryEvaluate, waitFor, screenshot, navigate, goto, close, errors, width, height };
+  const gpuInfo = await evaluate(`(() => {
+    const gl = document.createElement('canvas').getContext('webgl2');
+    if (!gl) return { vendor: null, renderer: null };
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    const info = {
+      vendor: gl.getParameter(ext ? ext.UNMASKED_VENDOR_WEBGL : gl.VENDOR),
+      renderer: gl.getParameter(ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER),
+    };
+    gl.getExtension('WEBGL_lose_context')?.loseContext();
+    return info;
+  })()`);
+  if (gpu && (!gpuInfo.renderer || SOFTWARE_GL.test(gpuInfo.renderer))) {
+    await close();
+    throw new Error(
+      `Asked for the GPU, but WebGL runs on ${gpuInfo.renderer ?? 'nothing (no WebGL 2)'}: no graphics card the ` +
+        'headless browser can use. On Linux it needs an X display (DISPLAY set) or CHROME_FLAGS=--use-angle=vulkan.',
+    );
+  }
+  return { send, evaluate, tryEvaluate, waitFor, screenshot, navigate, goto, close, errors, width, height, gpuInfo };
 }

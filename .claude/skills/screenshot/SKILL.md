@@ -23,6 +23,7 @@ npm run shot -- --out <dir> --clean [--sheet] [--star <id>] <steps...>
 - **`--out`**: in a cloud session, use a folder in your scratchpad directory so the user can open the files too. Otherwise any folder works; the default is a new temp dir.
 - **`--clean`** hides the debug panel and FPS meter. Leave it off when you want to see the FPS meter or debug values.
 - **`--low`** renders at `?quality=low` (half resolution, no antialiasing): about 5× faster under SwiftShader. Use it when a soft picture will do (checking a layout, that something shows up, a long sequence); leave it off to judge how a visual looks.
+- **`--gpu`**: WebGL on the machine's graphics card instead of SwiftShader. Use it when running on the user's computer to measure real FPS or chase a shader bug that only shows on some GPUs; the output's `gpu` names the renderer. It fails at once where there's no usable GPU (always in the cloud container); on Linux without an X display, try `CHROME_FLAGS=--use-angle=vulkan`. Without it, FPS is software rendering's and says nothing about players' frame rates.
 - **`--sheet`** also writes `sheet.png`: every shot in one labelled grid. Use it for sequences, so a single Read shows them all. Read single shots for detail.
 - **`--star <id>` / `--seed <s>`**: which system/galaxy to start in (`--url` for anything else, e.g. a preview build on :4173). Default page size is 1280×720 (`--size`).
 - **`--steps <file>`**: steps from a file, one per line, `#` comments. Use it when the JS gets long or needs quotes; put the file in the scratchpad.
