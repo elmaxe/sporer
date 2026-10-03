@@ -27,7 +27,7 @@ import { SkyStars } from '../world/SkyStars';
 import { StarSystem } from '../world/StarSystem';
 import { arrivalParams, hoverViewElevation } from './arrival';
 import { Level } from './Level';
-import { renderScene } from '../world/wireframe';
+import { renderScene, wireframeParams } from '../world/wireframe';
 
 /** Where the camera settles after flying in from the galaxy (or starting out in a system). */
 export const ARRIVAL_DISTANCE = 90;
@@ -223,7 +223,8 @@ export class SystemLevel extends Level {
     for (const body of hidden) body.object.visible = false;
     // A visited comet's coma and tails are all round the camera: low orbit draws them as seen from inside.
     for (const comet of this.world.comets) comet.object.visible = !hidden.includes(comet.nucleus) && !comet.nucleus.busted;
-    renderScene(renderer, this.scene, camera);
+    // A frozen view's outline is the planet level's (the same frustum, in its units).
+    renderScene(renderer, this.scene, camera, wireframeParams.enabled, false);
     for (const body of hidden) body.object.visible = true;
     for (const comet of this.world.comets) comet.object.visible = !comet.nucleus.busted;
     this.trails.visible = trails;

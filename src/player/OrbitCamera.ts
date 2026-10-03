@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Entity } from '../core/Entity';
 import type { Input } from '../core/Input';
 import type { Debug } from '../core/Debug';
+import { viewFreeze } from '../world/viewFreeze';
 
 export interface OrbitParams {
   minDistance: number;
@@ -344,7 +345,8 @@ export class OrbitCamera implements Entity {
   private trackPastLimit(wheel: number, frameDt: number): void {
     this.pastLimit *= Math.exp(-frameDt / PAST_LIMIT_DECAY);
     // The level changes wait until the ship has arrived (the zoom itself works meanwhile).
-    if (this.options.zoomLimitsHold?.()) this.pastLimit = 0;
+    // And never while the view is frozen (world/viewFreeze.ts): zooming out to look at it mustn't leave the level.
+    if (viewFreeze.enabled || this.options.zoomLimitsHold?.()) this.pastLimit = 0;
     else if (wheel === 0) return;
     else this.tallyPastLimit(wheel);
   }

@@ -8,6 +8,7 @@ import type { SurfaceChanges } from './changes';
 import { FADE_START, PLANT_LODS, createPlantGeometry, createPlantMaterial, setLodTint, type PlantFadeUniforms } from './plantLook';
 import { PLANT_LOD_COUNT } from './plantMesh';
 import { addPlantDebug, plantParams } from './plantParams';
+import { viewFreeze } from '../world/viewFreeze';
 
 /** A cell stays loaded until it is this much further out than it was wanted (so it doesn't flicker at the edge). */
 const KEEP_EXTRA = 1.15;
@@ -235,7 +236,7 @@ export class SurfaceEntities implements Entity {
       this.lastRange = plantParams.range;
       this.rescan = true;
     }
-    if (!plantParams.freeze && (this.rescan || this.camera.distanceTo(this.lastScan) > SCAN_DISTANCE)) this.scan();
+    if (!plantParams.freeze && !viewFreeze.enabled && (this.rescan || this.camera.distanceTo(this.lastScan) > SCAN_DISTANCE)) this.scan();
     if (this.dirty) this.rebuild();
   }
 

@@ -78,6 +78,8 @@ export interface RingData {
    * edge. Without it the view draws seeded gaps.
    */
   profile?: readonly { alpha: number; light: number }[];
+  /** A real ring's share of ice among its rocks (0–1); without it, from how bright `color` is (gen/rings.ts iceShare). */
+  ice?: number;
 }
 
 export interface PlanetData {

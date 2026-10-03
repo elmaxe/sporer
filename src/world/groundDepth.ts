@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { beginFrozenCulling, endFrozenCulling } from './viewFreeze';
 
 /**
  * Layer of the meshes that end an atmosphere's view rays (the low-orbit
@@ -61,6 +62,8 @@ export class GroundDepth {
     this.uniforms.groundNear.value = camera.near;
     this.uniforms.groundFar.value = camera.far;
 
+    // While the view is frozen, the ground the frozen camera would draw (see world/viewFreeze.ts).
+    beginFrozenCulling(scene, camera);
     const target = renderer.getRenderTarget();
     const autoClear = renderer.autoClear;
     const override = scene.overrideMaterial;
@@ -84,6 +87,7 @@ export class GroundDepth {
     scene.overrideMaterial = override;
     scene.background = background;
     camera.layers.mask = this.layers.mask;
+    endFrozenCulling();
   }
 
   dispose(): void {
