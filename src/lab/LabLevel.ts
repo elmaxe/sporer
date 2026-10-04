@@ -23,6 +23,8 @@ import { OrbitCamera } from '../player/OrbitCamera';
 import { zoomCurveParams } from '../player/zoomCurve';
 import { SurfaceChanges } from '../surface/changes';
 import { plantSetup } from '../surface/plantSetup';
+import { animalSetup } from '../surface/animalSetup';
+import { SurfaceAnimals } from '../surface/SurfaceAnimals';
 import { SurfaceEntities } from '../surface/SurfaceEntities';
 import { cometParams } from '../world/Comet';
 import { Planet } from '../world/Planet';
@@ -243,6 +245,8 @@ export class LabLevel extends Level {
   readonly weather: Weather | null = null;
   /** Plants on habitable bodies (globe view; the lab's menu-free switch is plantParams.enabled). */
   readonly plants: SurfaceEntities | null = null;
+  /** Animals roaming where plants grow (globe view; terraform a world into a habitable tier and they come). */
+  readonly animals: SurfaceAnimals | null = null;
   readonly ship: PlanetShip | null = null;
   readonly map: PlanetMap | null = null;
   readonly bodies: LabBodies | null = null;
@@ -345,6 +349,8 @@ export class LabLevel extends Level {
       );
     const plants = globe ? plantSetup(config) : null;
     if (globe && plants) this.plants = this.add(new SurfaceEntities(this.scene, plants.plan, plants.ground, camera, new SurfaceChanges(), debug));
+    const animals = globe ? animalSetup(config, plants) : null;
+    if (globe && animals) this.animals = this.add(new SurfaceAnimals(this.scene, animals.plan, animals.ground, camera, clock, debug));
     if (carry) {
       this.orbit.lookFrom(carry.direction);
       this.orbit.setDistance(THREE.MathUtils.clamp(carry.zoom * this.radius, min, max));

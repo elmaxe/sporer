@@ -7,6 +7,7 @@ import { bodyLabLink } from '../lab/bodyLink';
 import { lodParams } from '../planet/LodSurface';
 import type { OrbitCamera } from '../player/OrbitCamera';
 import { SurfaceChanges } from '../surface/changes';
+import { animalParams } from '../surface/animalParams';
 import { plantParams } from '../surface/plantParams';
 import type { CelestialBody } from '../world/CelestialBody';
 import type { Planet } from '../world/Planet';
@@ -177,7 +178,7 @@ export function captureGameState(game: Game, levels: SceneManager): GameState {
       levels.mode === 'galaxy'
         ? { spin: galaxy.spin.angle, current: galaxy.ship.current.id, destination: galaxy.ship.destination?.id ?? null }
         : null,
-    graphics: { weather: weatherParams.enabled, plants: plantParams.enabled, wireframe: wireframeParams.enabled },
+    graphics: { weather: weatherParams.enabled, plants: plantParams.enabled, animals: animalParams.enabled, wireframe: wireframeParams.enabled },
     busted: {
       bodies: spinning(world).flatMap((b) =>
         b.blastedAt === null ? [] : [{ body: bodyRef(world, b) ?? { kind: 'planet' as const, index: -1, name: b.name }, time: b.blastedAt }],
@@ -256,6 +257,8 @@ export async function restoreGameState(game: Game, levels: SceneManager, state: 
   }
   weatherParams.enabled = state.graphics.weather;
   plantParams.enabled = state.graphics.plants;
+  // Older dumps have no animals switch: they were shown with the plants.
+  animalParams.enabled = state.graphics.animals ?? state.graphics.plants;
   wireframeParams.enabled = state.graphics.wireframe;
   if (state.transitioning) notes.push(`taken mid-transition (crossfade ${state.crossfade ?? 'none'}): restored at the ${state.mode} level, settled`);
 

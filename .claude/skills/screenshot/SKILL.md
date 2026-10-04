@@ -30,6 +30,7 @@ npm run shot -- --out <dir> --clean [--sheet] [--star <id>] <steps...>
 - **`--dump <file>`**: restore a debug dump's state (the player's `sporer-dump-*.json`, see `debug-dump`) at its page size and quality, then run the steps (default `shot:restored`). The game is left paused there.
 - **`--lab [<query>]`**: shoot the planet lab (`lab.html`) instead of the game, e.g. `--lab "gen=7&type=ice&kind=moon"` or `--lab "seed=1337&star=5&planet=2"`. See *The planet lab* below.
 - **`--plants [<query>]`**: shoot the plant lab (`plants.html`), e.g. `--plants "gen=4&kind=tree&arch=palm&view=lineup"` or `--plants "seed=1337&star=6&planet=0"`. See *The plant lab* below.
+- **`--animals [<query>]`**: shoot the animal lab (`animals.html`), e.g. `--animals "gen=4&diet=carnivore&plan=biped&pace=trot"` or `--animals "seed=1337&star=6&planet=0&view=herds"`. See *The animal lab* below.
 
 Steps run in order. With no steps, you get `shot:view`.
 
@@ -163,6 +164,28 @@ npm run shot -- --out $OUT --clean --sheet --plants "gen=4&kind=tree&arch=palm&v
 npm run shot -- --out $OUT --clean --sheet --plants "gen=7&kind=tree&arch=broadleaf" "js:plantLab.look(0, 10, 2)" shot:near "js:plantLab.look(0, 10, 20)" wait:1000 shot:mid "js:plantLab.look(0, 10, 34)" wait:1000 shot:far
 # A grove from the UFO's height, levels tinted
 npm run shot -- --out $OUT --clean --plants "gen=12&view=grove" "js:plantLab.setView({ showLods: true })" "js:plantLab.look(0, 25, 80)" settle shot:grove
+```
+
+## The animal lab
+
+For how animals look and move (bodies, coats, the walk and trot, grazing, levels of detail, herds), shoot the animal lab: it grows the species you ask for with the game's own code (`gen/animalForm.ts`, `gen/animals.ts`, `surface/animalMesh.ts`) and draws and walks them with the game's shader (`surface/animalLook.ts`). The page has `game` and `animalLab` (`src/animallab/AnimalLab.ts`); every call returns a promise that resolves once it's drawn, and `settle` waits for `animalLab.ready`.
+
+| Call | Does |
+|---|---|
+| `animalLab.generate(seed, { tier, diet, plan })` | a new set of species, as a planet of that tier has (diet: herbivore, carnivore; plan: quadruped, hexapod, biped) |
+| `animalLab.load(galaxySeed, star, planet, moon?, species?)` | a game planet's animals (and its gravity) |
+| `animalLab.select(i)` | show and edit species `i` of the set |
+| `animalLab.set({ length: 4, form: { neckLength: 0.8 } })`, `animalLab.setForm({ pattern: 'stripes' })` | edit the selected species |
+| `animalLab.setBodyPlan('hexapod')`, `animalLab.reroll()` | another body plan, or new proportions of the same one (the coat kept) |
+| `animalLab.setView({ view: 'specimen' \| 'lineup' \| 'species' \| 'herds', pace: 'stand' \| 'graze' \| 'walk' \| 'trot', speed, gravity, lod: 'auto' \| 0..2, showLods, wireframe, skeleton })` | what to show and what the specimen does (it walks round a circle and the camera follows) |
+| `animalLab.look(yaw, pitch, distance)`, `animalLab.lookAtHerd(i)` | camera (degrees; distance in the animal's lengths, the herds' in units), or over the i-th nearest herd |
+| `animalLab.level.lods`, `.skeleton`, `.gait`, `.lodNow()`, `.herds.stats()` | what got built: triangles per level, the skeleton, speeds and strides, the level at the camera now, the herds' counts |
+
+```bash
+# The whole set side by side, then one animal trotting, side on
+npm run shot -- --out $OUT --clean --sheet --animals "gen=11&view=species" "js:animalLab.look(30, 12, 9)" settle shot:set "js:animalLab.setView({ view: 'specimen', pace: 'trot' })" "js:animalLab.look(-90, 8, 2.2)" wait:2000 shot:trot
+# Herds roaming the lab's planet, from the UFO's height
+npm run shot -- --out $OUT --clean --animals "gen=11&view=herds" settle "js:animalLab.look(30, 35, 25)" settle shot:herd
 ```
 
 ## Tips
