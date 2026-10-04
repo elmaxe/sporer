@@ -48,6 +48,13 @@ export const DETAIL_OCTAVES = 3 + Math.max(0, Math.round(Math.log(GLOBE_SIZE_FAC
  * view puts them; only hills and coastline wiggles are added.
  */
 export function detailedTerrain(x: number, y: number, z: number, seed: number): number {
+  // A real body keeps only some of the detail (RealSurface.detail).
+  const real = realSurface(seed);
+  return Math.max(-1, Math.min(1, terrainNoise(x, y, z, seed) + terrainDetail(x, y, z, seed) * (real ? real.detail : 1)));
+}
+
+/** What `detailedTerrain` adds to `terrainNoise`: the hills, within ±DETAIL_AMPLITUDE. */
+export function terrainDetail(x: number, y: number, z: number, seed: number): number {
   let sum = 0;
   let amp = 1;
   let freq = 11;
@@ -63,8 +70,5 @@ export function detailedTerrain(x: number, y: number, z: number, seed: number): 
     freq *= DETAIL_LACUNARITY;
   }
   // Stretched like terrainNoise (the raw sum clusters near 0), then scaled down.
-  const detail = DETAIL_AMPLITUDE * Math.max(-1, Math.min(1, (sum / total) * 2.5));
-  // A real body keeps only some of the detail (RealSurface.detail).
-  const real = realSurface(seed);
-  return Math.max(-1, Math.min(1, terrainNoise(x, y, z, seed) + detail * (real ? real.detail : 1)));
+  return DETAIL_AMPLITUDE * Math.max(-1, Math.min(1, (sum / total) * 2.5));
 }

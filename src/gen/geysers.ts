@@ -1,6 +1,7 @@
 import type { ClimateData } from './climate';
 import { LAVA_GRAVITY, MIN_ARC_GRAVITY, randomDirection, tangent } from './lavaActivity';
 import { detailedTerrain } from './noise';
+import { surfaceNoise } from './craters';
 import { GLOBE_SIZE_FACTOR, type MoonType, type PlanetStyle, type PlanetType } from './planets';
 import { Rng, hashSeed } from './rng';
 import type { Vec3Tuple } from './starActivity';
@@ -137,6 +138,8 @@ export interface GeyserBody {
   type: PlanetType | MoonType;
   seed: number;
   style: PlanetStyle;
+  /** System units; with it the ground has its craters (gen/craters.ts). */
+  radius?: number;
   climate?: ClimateData | null;
   moon: boolean;
 }
@@ -199,7 +202,7 @@ export function geyserActivity(body: GeyserBody, radius: number, reliefScale = 1
     const ws = windSpeed * rng.range(0.8, 1.2);
     return {
       dir,
-      base: groundRadius(dir, body.seed, body.style, radius, reliefScale),
+      base: groundRadius(dir, body, radius, reliefScale),
       period: rng.range(spec.period[0], spec.period[1]),
       duty: rng.range(spec.duty[0], spec.duty[1]),
       peak,
@@ -223,10 +226,18 @@ export function geyserActivity(body: GeyserBody, radius: number, reliefScale = 1
 /**
  * Radius of the ground at unit direction `dir` as the planet level draws it
  * (world/planetGeometry.ts, createTerrainGeometry): land raised by its
- * height, the sea (or ice sheet) at `radius`.
+ * height, the sea (or ice sheet) at `radius`; its craters too when the
+ * body's own `radius` (system units) is given.
  */
-export function groundRadius(dir: Vec3Tuple, seed: number, style: PlanetStyle, radius: number, reliefScale = 1): number {
-  const n = detailedTerrain(dir[0], dir[1], dir[2], seed);
+export function groundRadius(
+  dir: Vec3Tuple,
+  body: { seed: number; style: PlanetStyle; radius?: number; climate?: Pick<ClimateData, 'gravity'> | null },
+  radius: number,
+  reliefScale = 1,
+): number {
+  const { seed, style } = body;
+  const noise = body.radius === undefined ? detailedTerrain : surfaceNoise({ seed, style, radius: body.radius, climate: body.climate }, true);
+  const n = noise(dir[0], dir[1], dir[2], seed);
   const base = style.sea === null ? -1 : style.seaLevel;
   if (style.sea !== null && n < base) return radius;
   return radius * (1 + style.relief * reliefScale * ((n - base) / (1 - base)));

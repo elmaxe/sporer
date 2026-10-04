@@ -14,6 +14,8 @@ export interface PlanetStyle {
   high: string;
   /** Terrain height as a fraction of the radius. */
   relief: number;
+  /** Impact craters' density, 0 (none, or unset) to 1 (heavily cratered, as airless rock is); see gen/craters.ts. */
+  craters?: number;
 }
 
 /**
@@ -234,6 +236,8 @@ export function planetStyle(rng: Rng, type: Exclude<PlanetType, 'gas'> | MoonTyp
         low: hslToHex(h, s, rng.range(0.2, 0.3)),
         high: hslToHex(h + rng.range(-20, 20), s, rng.range(0.55, 0.7)),
         relief: rng.range(0.04, 0.07),
+        // Airless rock keeps every impact (gen/craters.ts). Not a draw, so nothing else moves.
+        craters: 1,
       };
     }
     case 'desert': {

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
 import type { Input } from '../core/Input';
-import { detailedTerrain } from '../gen/noise';
+import { surfaceNoise, type TerrainNoise } from '../gen/craters';
 import { LAVA_SEA_GLSL } from '../world/lavaMaterial';
 import { GAS_GLSL } from '../world/gasLook';
 import { isGas, type PlanetConfig } from '../world/Planet';
@@ -174,6 +174,8 @@ export class PlanetMap implements Entity {
   private bakedRows = 0;
   private sinceUpload = 0;
   private readonly terrain: TerrainPainter | null;
+  /** The ground's noise as low orbit's globe reads it (its craters too). */
+  private readonly noise: TerrainNoise;
   private readonly gas: GasPainter | null;
   private readonly relief: number;
   private active = false;
@@ -229,6 +231,7 @@ export class PlanetMap implements Entity {
     // Gas giants' clouds are drawn by the globe's shader (GAS); the bake only fills the outline.
     this.gas = gas ? gasPainter(config.seed, config.bands, config.size === 'iceGiant') : null;
     this.terrain = gas ? null : terrainPainter(config.style, false, config.seed);
+    this.noise = surfaceNoise(config, true);
     this.relief = gas ? 0 : config.style.relief;
     this.lava = globe.lava !== null;
     this.folded = loadFolded();
@@ -407,6 +410,8 @@ export class PlanetMap implements Entity {
     const start = performance.now();
     // Relief shading: a slope's brightness from its height change per pixel against the angle a pixel spans.
     const shadeGain = planetMapParams.hillshade * this.relief * this.scale;
+    // The angle a pixel spans: craters smaller than that are left out (they'd only speckle it).
+    const spacing = 1 / this.scale;
     while (this.bakedRows < height && performance.now() - start < BAKE_BUDGET_MS) {
       const j = this.bakedRows++;
       const y = (height / 2 - j - 0.5) / this.scale;
@@ -426,13 +431,13 @@ export class PlanetMap implements Entity {
           // A small body: the ground's radius in relief units (its shape plus the detail, read at the surface
           // point as the globe does), never negative, so the whole of it is shaded as land.
           const r = shapeRadius(shape, dx, dy, dz);
-          const h = (heights[p] = this.terrain!(detailedTerrain(dx * r, dy * r, dz * r, seed), color, dx, dy, dz) + (r - SHAPE_FLOOR) / this.relief);
+          const h = (heights[p] = this.terrain!(this.noise(dx * r, dy * r, dz * r, seed, spacing), color, dx, dy, dz) + (r - SHAPE_FLOOR) / this.relief);
           if (i > 0 && j > 0 && heights[p - 1]! >= 0 && heights[p - width]! >= 0) {
             const slope = heights[p - 1]! + heights[p - width]! - 2 * h;
             color.multiplyScalar(THREE.MathUtils.clamp(1 - slope * shadeGain, 0.55, 1.45));
           }
         } else {
-          const n = detailedTerrain(dx, dy, dz, seed);
+          const n = this.noise(dx, dy, dz, seed, spacing);
           const h = (heights[p] = this.terrain!(n, color, dx, dy, dz));
           if (this.lava && n < this.config.style.seaLevel) alpha = 0;
           // Lit from the upper left: darker where the ground falls away towards the lower right.
