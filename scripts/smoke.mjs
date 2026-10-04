@@ -2618,7 +2618,8 @@ await section('cargo', async () => {
       for (const p of A.herdPositions()) { v.copy(p).addScaledVector(p.clone().normalize(), 0.6); A.object.localToWorld(v); const s = v.clone().project(game.camera);
         if (Math.abs(s.x) < 0.8 && Math.abs(s.y) < 0.8 && s.z < 1) return { x: rect.left + ((s.x + 1) / 2) * rect.width, y: rect.top + ((1 - s.y) / 2) * rect.height }; }
       return null; }`);
-    // Beamed up: into a stack of its own, with its picture.
+    // Beamed up: into a stack of its own, with its picture (the plants above may have filled the hold: emptied first).
+    await evaluate(`levels.inventory.load({ stacks: [] })`);
     await key('Digit1', '1');
     const at = await evaluate(`__animal()`);
     const takenBefore = await evaluate(`${animalChanges}.removedAnimalCount`);
