@@ -71,6 +71,11 @@ export class PlantLabInfo implements Entity {
   private writeHelp(): void {
     const touch = this.input.touchMode;
     const zoom = touch ? 'pinch to zoom' : 'scroll to zoom';
+    if (this.lab.view.view === 'grove') {
+      const walk = touch ? '' : ' · WASD to move';
+      this.help.textContent = `Drag to orbit, or to turn the planet from high up · ${zoom} out to the whole planet${walk}`;
+      return;
+    }
     const auto = this.lab.view.view === 'specimen' && this.lab.view.lod === 'auto' ? ' out through the levels of detail' : '';
     this.help.textContent = `Drag to orbit · ${zoom}${auto}`;
   }

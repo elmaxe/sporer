@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { Entity } from '../core/Entity';
-import { detailedTerrain } from '../gen/noise';
+import { surfaceNoise } from '../gen/craters';
 import { isGas, type PlanetConfig } from '../world/Planet';
 import { atmosphereLook } from '../gen/atmosphere';
 import { createAtmosphere } from '../world/atmosphereShell';
@@ -14,7 +14,7 @@ import type { Debug } from '../core/Debug';
 import { PLANET_SCALE, RELIEF_SCALE, globeRadius } from './frame';
 import { groundHit } from './ground';
 import type { Landing } from '../cargo/plantFate';
-import { LodSurface, addLodDebug } from './LodSurface';
+import { LodSurface, addCraterDebug, addLodDebug } from './LodSurface';
 import type { RenderClock } from './PlanetFrame';
 import { RingRocks } from './RingRocks';
 
@@ -102,7 +102,7 @@ export class PlanetGlobe implements Entity {
     this.gasGiant = gas;
     this.sample = gas
       ? gasSampler(R, seed, config.bands, config.size === 'iceGiant')
-      : terrainSampler(R, seed, style, { noise: detailedTerrain, reliefScale: RELIEF_SCALE, seaFloor, shape: config.shape });
+      : terrainSampler(R, seed, style, { noise: surfaceNoise(config, true), reliefScale: RELIEF_SCALE, seaFloor, shape: config.shape });
     const material = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: !gas, roughness: 0.9 });
     this.gas = createGasLook(config);
     this.gas?.apply(material);
@@ -113,6 +113,7 @@ export class PlanetGlobe implements Entity {
     });
     this.object.add(this.surface.object);
     addLodDebug(debug);
+    addCraterDebug(debug);
     if (seaFloor && this.lava) {
       this.object.add(createLavaSea(R, this.lava.createSeaMaterial(this.sun, this.sunLight, this.ambientLight)));
     } else if (seaFloor) {
