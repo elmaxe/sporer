@@ -152,7 +152,7 @@ export class AnimalLabPanel {
     x.add(form, 'hornCurve', -1.5, 1.5, 0.01).name('horns curve back (−) / forward (+)').onChange(changed);
     x.add(form, 'ears', 0, 1.5, 0.01).name('ears (antennae)').onChange(changed);
     x.add(form, 'crest', 0, 1.5, 0.01).name('crest of spines').onChange(changed);
-    x.add(form, 'eyeSize', 0.03, 0.25, 0.005).name('eye size').onChange(changed);
+    x.add(form, 'eyeSize', 0.05, 0.6, 0.005).name('eye size (of the skull)').onChange(changed);
     x.add(form, 'eyesForward', 0, 1, 0.01).name('eyes: sides (prey) → front (hunter)').onChange(changed);
 
     const c = this.folder('Coat');

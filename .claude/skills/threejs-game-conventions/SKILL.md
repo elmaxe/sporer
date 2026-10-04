@@ -82,7 +82,7 @@ Constructor pattern: take the dependencies you need (`scene`, `physics`, `input`
 
 - **No per-frame allocation** in `fixedUpdate` / `update`: keep scratch `Vector3`/`Quaternion`/`Euler` objects as private readonly fields (see `Ship.ts`).
 - Many identical objects (asteroids, stars, fleets) → `InstancedMesh` or `Points`, never thousands of meshes.
-- Low-poly, flat-shaded, vertex-coloured style (`flatShading: true`, `vertexColors: true`). Procedural generation must be **seeded and deterministic** (`terrainNoise(x, y, z, seed)`).
+- Low-poly, flat-shaded, vertex-coloured style (`flatShading: true`, `vertexColors: true`); the terrain and animals are the exceptions, smooth-shaded (animals: round and soft, normals from their surface, posed with them in the shader). Procedural generation must be **seeded and deterministic** (`terrainNoise(x, y, z, seed)`).
 - The renderer uses ACES tone mapping. Emissive or glowing objects use `MeshBasicMaterial` or additive sprites.
 - Scale: the UFO is ~4 units wide, and distances are compressed (sun r=30, planets orbit at 90–330). The camera far plane is 20000 and the starfield sits at 9000. Galaxy scale lives in its own level (`GalaxyLevel`), never in huge system coordinates (float precision).
 - Pixel ratio is capped at 2.

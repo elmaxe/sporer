@@ -10,6 +10,7 @@ Habitable worlds get procedurally generated animals, like their plants (`gen/ani
 4. How body mass relates to leg length (for a mass from the generated body) and how legs thicken with size and gravity.
 5. How common animals are by size, how rare hunters are next to their prey, and how big herds and packs are.
 6. Coat rules: countershading and patterns.
+7. What makes an animal look cute (asked for after the first version, along with rounder bodies and smooth shading instead of flat facets).
 
 Precision: the right trends and roughly the right numbers for gameplay. The look is stylised (low-poly, sizes scaled up so animals read from the UFO's height; see *Game mapping*).
 
@@ -86,6 +87,15 @@ A research agent read these in this session (accessed 2026-10-04) and quoted eac
 - **Allen et al. 2011, Proc R Soc B (felids)**, https://pmc.ncbi.nlm.nih.gov/articles/PMC3061134/: "Patterning of any kind was associated with closed environments"; "Cats found in the open were more likely to be plain".
 - **Caro & Mallarino 2020, TREE**: "periodic stripes and spots, arise from spatially constrained developmental processes".
 
+**Cuteness**
+
+- **Glocker et al. 2009, PNAS 106(22):9115, "Baby schema modulates the brain reward system in nulliparous women"**, abstract via Europe PMC (PMID 19451625, accessed 2026-10-04): "Ethologist Konrad Lorenz defined the baby schema ("Kindchenschema") as a set of infantile physical features, such as round face and big eyes, that is perceived as cute and motivates caretaking behavior".
+- **Golle, Lisibach, Mast & Lobmaier 2013, PLoS ONE 8(3):e58248, "Sweet Puppies and Cute Babies: Perceptual Adaptation to Babyfacedness Transfers across Species"**, https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0058248 (read from the page):
+  - "The Kindchenschema is characterized by pedomorphic features such as a relatively large head compared to the size of the body, a relatively big cranium compared to the facial bones, large eyes that lie below the horizontal midline of the skull, a soft-elastic surface texture, and round and protruding cheeks."
+  - On Glocker et al. 2009's manipulated faces: "A round face, a high forehead, big eyes, a small nose, and a small mouth were defined as "high" Kindchenschema features. They found that cuteness ratings were positively related to the extent of the Kindchenschema."
+  - On Lorenz: "cuteness may be represented by a species-unspecific coding mechanism, since infant faces of different species are characterized by the same facial features (e.g. large eyes, big cranium, etc)".
+- A search summary also lists "short and thick extremities and plump body shape" in Lorenz's list; I didn't read that in a primary source this session, so it's marked unverified below.
+
 ## Measurements
 
 Run with `npx vite-node` against the game's own code (`gen/animals.ts`, `gen/animalForm.ts`, `surface/animalMesh.ts`):
@@ -107,8 +117,8 @@ mass 1000 kg (1.96 m) 1000.4 kg
 --- 60 generated T3 planets
 { 'quadruped herbivore': 110, 'quadruped carnivore': 61, 'hexapod carnivore': 33,
   'hexapod herbivore': 25, 'biped herbivore': 45, 'biped carnivore': 26 }
-length min/median/max 1.21 / 2.80 / 6.95 | hip 0.28 / 1.46 / 6.57 | mass kg 4.33 / 444.54 / 28817.78 | walk m/s 0.82 / 1.89 / 4.01
-mean triangles LOD0 719 LOD2 130
+length min/median/max 1.21 / 2.80 / 6.95 | hip 0.20 / 0.96 / 4.47 | mass kg 1.70 / 139.21 / 9901.26 | walk m/s 0.70 / 1.54 / 3.31
+mean triangles LOD0 2100 LOD2 187
 herd cells 5880 herds 1311 hunter packs 188 (14.3%) animals per herd 6.8
 ```
 
@@ -133,7 +143,7 @@ Pinned in `tests/animals.test.ts`:
 ## Game mapping
 
 **Bodies** (`gen/animalForm.ts`):
-- **Skin.** Spore wraps an implicit skin round spheres along a spine. This game uses its low-poly equivalent: an elliptical ring at each spine node (tail, torso, neck, head), joined into a tube.
+- **Skin.** Spore wraps an implicit skin round spheres along a spine. This game uses its low-poly equivalent: an elliptical ring at each spine node (tail, torso, neck, head), joined into one tube with a dome at each end. Unlike the game's faceted rocks, animals are smooth-shaded (Golle et al.'s "soft-elastic surface texture"): each vertex's normal comes from the surface it lies on (`surface/animalMesh.ts`), and the vertex shader turns normals with the parts it swings, so a walking leg stays lit as it stands. Legs end in round paws, antennae in bobbles.
 - **Body plans.** Three hand-made plans, as No Man's Sky does: four legs, six legs (a thorax carrying the legs and an abdomen behind, sprawling legs, antennae) and two legs (a body balanced over the hips by a long tail, optional arms). Proportions are randomised within each plan's ranges and editable in the lab.
 - **Rig.** Every vertex carries its rig like Spore's bone weights: its part, its leg's gait phases, its weight along the part, and its joint. The vertex shader (`surface/animalLook.ts`) does the animation from four numbers per animal, so thousands can share one instanced draw per species and level of detail.
 
@@ -153,9 +163,17 @@ Pinned in `tests/animals.test.ts`:
 - Six legs: alternating tripods, L1 L3 R2 against R1 R3 L2.
 - Two legs: half a stride apart; arms swing against the leg on their side.
 
+**Cuteness** (`generateAnimalForm`), each baby-schema feature as a parameter:
+- *A relatively large head, a round face, a big cranium compared to the face:* the head is 32–44% of the body length (`headSize`), most of it a round skull a little wider than tall (round cheeks), set up on the neck (a high forehead), with a short snout (`snout` 5–32% of the head).
+- *Large eyes below the skull's midline:* eyes are 27–38% of the skull's radius (`eyeSize`), set just below the midline, with a white eyeball, an iris, a dark pupil and a highlight.
+- *Small nose and mouth:* the snout is short and narrows to a round nose.
+- *Plump body, short thick limbs (unverified, see Sources):* a deep, wide torso (`bodyDepth` 0.34–0.48 of the length, `bodyWidth` 0.88–1.2), shorter legs (`legLength` 0.24–0.5 on four legs), thicker (`legThickness` 0.1–0.15 before the size and gravity rule), round ears and stubby rounded horns.
+- Coats are brighter (saturation 0.45–0.75) and the pattern is drawn per pixel with soft edges (`surface/animalLook.ts`).
+- **Stylised**: the schema describes infants' faces; applied here to adult animals' whole bodies, as games do, not a measured rule for animals.
+
 **Mass and legs:**
 - `animalMass(h) = (h / 0.163)^(1/0.36)` kg, from Mohamed Thangal & Donelan's hind-limb fit. Hip height stands in for hind-limb length.
-- Leg thickness follows elastic similarity with gravity. A leg's buckling load ∝ d⁴/l² must carry M·g with M ∝ d²·l, so d² ∝ g·l³ and d ∝ g^½·l^1.5. A leg's radius as a share of its length therefore grows as √(g·l), relative to a 1 m animal at 1 g (`legThicknessFor`, clamped to 0.04–0.22). Insects' legs are drawn at half the thickness (struts, not pillars).
+- Leg thickness follows elastic similarity with gravity. A leg's buckling load ∝ d⁴/l² must carry M·g with M ∝ d²·l, so d² ∝ g·l³ and d ∝ g^½·l^1.5. A leg's radius as a share of its length therefore grows as √(g·l), relative to a 1 m animal at 1 g (`legThicknessFor`, clamped to 0.04–0.22). Insects' legs are drawn at 0.42 of the thickness (struts, not pillars).
 
 **Abundance** (`generateHerd`):
 - Each herbivore's herd share is ∝ (M / M₀)^−0.75 (Damuth, capped at 8× so the smallest don't swamp the rest) × how lush the ground is (`fertility`, as for plants) × its climate window.
@@ -172,7 +190,8 @@ Pinned in `tests/animals.test.ts`:
 
 **Coats:**
 - Countershading on every animal: the back's colour on faces looking up, the belly's (paler, less saturated) on those looking down. This is Thayer's law, "the most common coloration phenotype".
-- Plain, striped, spotted or patched, at weights 3 : 2 : 2 : 1.5 (gameplay; the felid study ties patterns to closed habitats, which the game doesn't model yet).
+- Plain, striped, spotted or patched, at weights 3 : 2 : 2.5 : 1.5 (gameplay; the felid study ties patterns to closed habitats, which the game doesn't model yet). The pattern is drawn per pixel by the material from the rest-pose position, so it has soft round edges and moves with the body.
+- Colours are converted from sRGB to linear light before they become vertex colours, so a coat shows the colour picked.
 
 **Eyes and horns:**
 - Hunters' eyes face forward (`eyesForward` 0.65–1) and grazers' sit on the sides (0–0.25).
@@ -189,6 +208,8 @@ Pinned in `tests/animals.test.ts`:
 - Grazers graze in bouts while resting.
 
 ## Open questions
+
+- **Plump bodies and short thick limbs.** Seen only in a search summary of Lorenz's list, not in a source read this session; the round face, big cranium, large low eyes, small nose and soft texture are from the sources above.
 
 - **Gravity and the walk–run switch.** Kram et al. found the transition Froude number rising below ~0.4 g (0.83 at 0.2 g, 1.13 at 0.1 g). The game keeps Fr constant, so animals on very light worlds trot sooner than they would.
 - **Quadruped walking Froude number.** No source read gives the preferred walking Froude number of quadrupeds; people's 0.22 stands in. Heglund & Taylor's preferred trot speed ∝ M^0.2 was not checked against the game's √(g·h) (the coefficient wasn't read).

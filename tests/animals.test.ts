@@ -100,7 +100,8 @@ describe('animal bodies', () => {
   it('stands on its feet: every walking leg reaches the ground, the body above it', () => {
     for (const s of species) {
       const k = growAnimal(s);
-      for (const leg of k.legs.filter((l) => !l.arm)) expect(leg.points[leg.points.length - 1]![1]).toBeCloseTo(0, 6);
+      // A paw's centre is its radius up: it rests on the ground.
+      for (const leg of k.legs.filter((l) => !l.arm)) expect(leg.points[leg.points.length - 1]![1] - leg.radii[leg.radii.length - 1]!).toBeCloseTo(0, 6);
       expect(Math.min(...k.spine.map((n) => n.p[1] - n.ry))).toBeGreaterThan(0);
       expect(k.top).toBeGreaterThan(k.hipHeight);
       expect(k.front - k.back).toBeGreaterThan(s.length * 0.8);
@@ -132,16 +133,32 @@ describe('animal bodies', () => {
     expect(right[1]).toBe(left[0]);
   });
 
-  it('builds cheaper meshes further out, all finite, with valid rigs', { timeout: 30000 }, () => {
+  it('builds cheaper meshes further out, all finite, with smooth unit normals and valid rigs', { timeout: 30000 }, () => {
     for (const s of species.slice(0, 24)) {
       const k = growAnimal(s);
       const meshes = Array.from({ length: ANIMAL_LOD_COUNT }, (_, lod) => buildAnimalMesh(k, s.form, s.length, lod));
       for (let lod = 1; lod < ANIMAL_LOD_COUNT; lod++) expect(meshes[lod]!.triangles).toBeLessThan(meshes[lod - 1]!.triangles);
-      expect(meshes[0]!.triangles).toBeLessThan(1500);
-      expect(meshes[ANIMAL_LOD_COUNT - 1]!.triangles).toBeLessThan(200);
+      expect(meshes[0]!.triangles).toBeLessThan(2800);
+      expect(meshes[ANIMAL_LOD_COUNT - 1]!.triangles).toBeLessThan(300);
       for (const m of meshes) {
         expect(m.positions.length).toBe(m.triangles * 9);
         expect(m.rig.length).toBe(m.triangles * 12);
+        expect(m.normals.length).toBe(m.triangles * 9);
+        expect(m.coat.length).toBe(m.triangles * 3);
+        for (let i = 0; i < m.normals.length; i += 3) expect(Math.hypot(m.normals[i]!, m.normals[i + 1]!, m.normals[i + 2]!)).toBeCloseTo(1, 4);
+        // Each triangle faces the way its vertices' normals do (so it isn't culled from outside).
+        let facing = 0;
+        for (let t = 0; t < m.triangles; t++) {
+          const P = m.positions;
+          const N = m.normals;
+          const i = t * 9;
+          const u = [P[i + 3]! - P[i]!, P[i + 4]! - P[i + 1]!, P[i + 5]! - P[i + 2]!];
+          const v = [P[i + 6]! - P[i]!, P[i + 7]! - P[i + 1]!, P[i + 8]! - P[i + 2]!];
+          const f = [u[1]! * v[2]! - u[2]! * v[1]!, u[2]! * v[0]! - u[0]! * v[2]!, u[0]! * v[1]! - u[1]! * v[0]!];
+          const n = [N[i]! + N[i + 3]! + N[i + 6]!, N[i + 1]! + N[i + 4]! + N[i + 7]!, N[i + 2]! + N[i + 5]! + N[i + 8]!];
+          if (f[0]! * n[0]! + f[1]! * n[1]! + f[2]! * n[2]! >= 0) facing++;
+        }
+        expect(facing).toBe(m.triangles);
         expect(m.positions.every(Number.isFinite)).toBe(true);
         let low = Infinity;
         for (let i = 1; i < m.positions.length; i += 3) low = Math.min(low, m.positions[i]!);

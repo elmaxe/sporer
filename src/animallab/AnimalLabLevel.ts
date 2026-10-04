@@ -482,7 +482,9 @@ export class AnimalLabLevel extends Level {
     if (this.groveCamera) this.groveCamera.look(y, p, distance);
     else {
       this.orbit!.lookFrom(new THREE.Vector3(Math.cos(p) * Math.sin(y), Math.sin(p), Math.cos(p) * Math.cos(y)));
-      if (distance !== undefined) this.orbit!.setDistance(distance * this.species.length);
+      // The set side by side goes by its longest animal, so a link frames the same on any set.
+      const unit = this.mode === 'species' ? Math.max(...this.state.species.map((x) => x.length)) : this.species.length;
+      if (distance !== undefined) this.orbit!.setDistance(distance * unit);
     }
   }
 

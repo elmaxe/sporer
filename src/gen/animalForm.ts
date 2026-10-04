@@ -51,7 +51,7 @@ export interface AnimalForm {
   /** Neck length, and how steeply it rises from the shoulders (degrees above level). */
   readonly neckLength: number;
   readonly neckAngle: number;
-  /** Head length, and the share of it that is snout. */
+  /** Head length (skull and snout), and the share of it that is snout. */
   readonly headSize: number;
   readonly snout: number;
   /** Tail length, its radius at the base as a share of the torso's, and how far it's raised (degrees, − droops). */
@@ -66,7 +66,7 @@ export interface AnimalForm {
   readonly ears: number;
   /** 0 to 1: spines or plates along the back. */
   readonly crest: number;
-  /** Eye radius as a share of the head's length, and 0 (on the sides, prey) to 1 (facing forward, predators). */
+  /** Eye radius as a share of the skull's radius, and 0 (on the sides, prey) to 1 (facing forward, predators). */
   readonly eyeSize: number;
   readonly eyesForward: number;
   /** A two-legged animal's arms, as a share of its legs (0: none). */
@@ -127,6 +127,8 @@ export interface Spike {
 export interface Eye {
   readonly centre: Vec3;
   readonly radius: number;
+  /** Unit direction the eye looks (its iris and pupil face this way). */
+  readonly look: Vec3;
 }
 
 /**
@@ -176,6 +178,11 @@ export const GAIT_PHASES = {
 const add = (a: Vec3, b: Vec3, s = 1): Vec3 => [a[0] + b[0] * s, a[1] + b[1] * s, a[2] + b[2] * s];
 const lerp3 = (a: Vec3, b: Vec3, t: number): Vec3 => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 const mirror = (a: Vec3): Vec3 => [-a[0], a[1], a[2]];
+const scale3 = (a: Vec3, s: number): Vec3 => [a[0] * s, a[1] * s, a[2] * s];
+function normalize(a: Vec3): Vec3 {
+  const l = Math.hypot(a[0], a[1], a[2]) || 1;
+  return [a[0] / l, a[1] / l, a[2] / l];
+}
 
 function clamp(v: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, v));
@@ -183,7 +190,7 @@ function clamp(v: number, lo: number, hi: number): number {
 
 /** A torso's girth along it, 0 at the rump to 1 at the shoulders: round at both ends, `chest` the front against the back. */
 function girth(u: number, chest: number): number {
-  const ends = Math.sin(Math.PI * clamp(0.08 + 0.84 * u, 0, 1)) ** 0.55;
+  const ends = Math.sin(Math.PI * clamp(0.08 + 0.84 * u, 0, 1)) ** 0.42;
   const k = Math.sqrt(chest);
   return ends * (u < 0.5 ? 1 / k + (1 - 1 / k) * (u / 0.5) : 1 + (k - 1) * ((u - 0.5) / 0.5));
 }
@@ -228,7 +235,7 @@ export function growAnimal(input: AnimalShapeInput): AnimalSkeleton {
       const droop = plan === 'biped' ? 0.15 : 0.55;
       const a = raise - droop * t * t;
       const s = tailLen * t;
-      const r = Math.max(tailR * (1 - 0.85 * t), L * 0.006);
+      const r = Math.max(tailR * (1 - 0.6 * t), L * 0.01);
       // A long drooping tail lies along the ground rather than through it.
       pts.push({ p: [0, Math.max(r * 1.2, tailBase[1] + Math.sin(a) * s), tailBase[2] - Math.cos(a) * s], r, w: t });
     }
@@ -243,7 +250,7 @@ export function growAnimal(input: AnimalShapeInput): AnimalSkeleton {
 
   function growTorso(): void {
     // Rump to shoulders: rings of the torso, the back rising into a hump over the shoulders.
-    const n = 7;
+    const n = 10;
     for (let i = 0; i <= n; i++) {
       const u = i / n;
       const g = girth(u, form.chest);
@@ -266,7 +273,7 @@ export function growAnimal(input: AnimalShapeInput): AnimalSkeleton {
     const nA = 5;
     for (let i = 0; i <= nA; i++) {
       const u = i / nA;
-      const g = Math.sin(Math.PI * clamp(0.06 + 0.88 * u, 0, 1)) ** 0.7;
+      const g = Math.sin(Math.PI * clamp(0.06 + 0.88 * u, 0, 1)) ** 0.5;
       spine.push({ p: [0, bodyY + ry * 0.25 * (1 - u), a0 + abdomen * u], rx: Math.max(rx * 1.05 * g, L * 0.02), ry: Math.max(ry * 1.05 * g, L * 0.02), part: 'body', w: 0 });
     }
     const t0 = a0 + abdomen + torso * 0.05;
@@ -279,85 +286,90 @@ export function growAnimal(input: AnimalShapeInput): AnimalSkeleton {
   }
 
   // --- Neck and head ---
+  // The head is a round skull with a short snout ahead of it, the baby schema's big round head (see docs/research/animals.md).
   const last = spine[spine.length - 1]!;
   const neckBase: Vec3 = [0, last.p[1] + last.ry * 0.25, last.p[2]];
   const neckR0 = Math.min(last.rx, last.ry) * 0.6;
-  const headRy = head * 0.3;
-  const headRx = head * 0.27;
+  const snoutLen = head * clamp(form.snout, 0, 0.8);
+  const skullR = Math.max(L * 0.04, (head - snoutLen * 0.7) / 2);
   const nNeck = Math.max(1, Math.round((neckLen / L) * 6));
   let p = neckBase;
   for (let i = 1; i <= nNeck; i++) {
     const t = i / nNeck;
     p = [0, neckBase[1] + Math.sin(neckAngle) * neckLen * t, neckBase[2] + Math.cos(neckAngle) * neckLen * t];
-    const r = neckR0 + (headRy * 0.75 - neckR0) * t;
+    const r = neckR0 + (skullR * 0.6 - neckR0) * t;
     spine.push({ p, rx: r * (rx / ry) ** 0.3, ry: r, part: 'head', w: t });
   }
-  // The head runs forward from the neck's end, tipped down a little, the snout narrowing ahead of it.
-  const tip = Math.max(-0.9, -0.25 - 0.4 * Math.sin(neckAngle));
+  // Looking ahead, tipped down a little; the skull sits up on the neck's end (a high forehead).
+  const tip = Math.max(-0.7, -0.12 - 0.25 * Math.sin(neckAngle));
   const hd: Vec3 = [0, Math.sin(tip), Math.cos(tip)];
-  const skull = head * (1 - form.snout * 0.7);
-  const back = add(p, hd, -headRy * 0.2);
-  const headNodes: [number, number, number][] = [
-    // share along the head, half-width, half-height
-    [0, 0.75, 0.8],
-    [0.3 * (skull / head), 1, 1],
-    [0.75 * (skull / head), 0.85, 0.85],
+  const hu: Vec3 = [0, Math.cos(tip), -Math.sin(tip)];
+  const skull = add(add(p, hd, skullR * 0.55), hu, skullR * 0.25);
+  // Along the head in skull radii: the round skull's rings (a little wider than tall: round cheeks), then the snout.
+  const skullRings: [number, number][] = [
+    [-0.72, 0.68],
+    [-0.38, 0.93],
+    [0, 1],
+    [0.38, 0.93],
+    [0.68, 0.74],
   ];
-  const snoutR = 0.5 + 0.3 * (1 - form.snout);
-  headNodes.push([(skull + (head - skull) * 0.55) / head, snoutR, snoutR * 0.9], [1, snoutR * 0.6, snoutR * 0.55]);
-  const headPts: Vec3[] = [];
-  for (const [s, wx, wy] of headNodes) {
-    const q = add(back, hd, head * s);
-    headPts.push(q);
-    spine.push({ p: q, rx: headRx * wx, ry: headRy * wy, part: 'head', w: 1 });
+  for (const [x, f] of skullRings) spine.push({ p: add(skull, hd, x * skullR), rx: skullR * f * 1.06, ry: skullR * f, part: 'head', w: 1 });
+  if (snoutLen > head * 0.06) {
+    // The snout sits low on the face, under the eyes, and narrows a little to a round nose.
+    const snoutR = skullR * (0.42 + 0.18 * (1 - form.snout));
+    const base = add(add(skull, hd, skullR * 0.86), hu, -skullR * 0.22);
+    spine.push({ p: base, rx: snoutR * 1.1, ry: snoutR, part: 'head', w: 1 });
+    spine.push({ p: add(add(base, hd, snoutLen * 0.75), hu, -snoutLen * 0.08), rx: snoutR * 0.92, ry: snoutR * 0.82, part: 'head', w: 1 });
   }
-  const crown = headPts[1]!;
 
-  // Eyes: on the sides of the head (prey see round them) or turned to face forward (predators).
+  // Eyes: big and low on the face, on its sides (prey see round them) or turned to face forward (predators).
   {
     const fwd = clamp(form.eyesForward, 0, 1);
-    const er = Math.max(head * form.eyeSize, L * 0.008);
-    const around = (Math.PI / 2) * (1 - 0.55 * fwd);
-    const at = add(crown, hd, head * 0.12);
-    const x = Math.sin(around) * headRx * 0.92;
-    const z = Math.cos(around) * headRx * 0.92;
-    const e: Vec3 = [x, at[1] + headRy * 0.35, at[2] + z];
-    eyes.push({ centre: e, radius: er }, { centre: mirror(e), radius: er });
+    const er = Math.max(skullR * form.eyeSize, L * 0.01);
+    const around = ((70 - 38 * fwd) * Math.PI) / 180;
+    const d = add(add([Math.sin(around), 0, 0], hd, Math.cos(around)), hu, -0.1);
+    const dir = normalize(d);
+    // Sunk into the skull by a third of its radius, looking out and a little ahead.
+    const centre = add(skull, dir, skullR * 1.02 - er * 0.35);
+    const look = normalize(add(dir, hd, 0.35));
+    eyes.push({ centre, radius: er, look }, { centre: mirror(centre), radius: er, look: mirror(look) });
   }
 
-  // Ears, or a six-legged animal's antennae.
+  // Ears, or a six-legged animal's antennae (each ending in a bobble).
   if (plan === 'hexapod') {
-    const len = head * (1 + form.ears * 2);
-    const base: Vec3 = add(headPts[2]!, [0, headRy * 0.6, 0]);
+    const len = skullR * (1.4 + form.ears * 1.8);
+    const base = add(add(skull, hu, skullR * 0.75), hd, skullR * 0.35);
     const pts: Vec3[] = [];
     for (let i = 0; i <= 4; i++) {
       const t = i / 4;
-      pts.push([headRx * 0.3 + len * 0.35 * t, base[1] + len * (0.55 * t - 0.25 * t * t), base[2] + len * 0.75 * t]);
+      pts.push(add(add([skullR * 0.28 + len * 0.3 * t, 0, 0], base), add(scale3(hu, len * (0.7 * t - 0.2 * t * t)), scale3(hd, len * 0.55 * t))));
     }
-    const radii = pts.map((_, i) => Math.max(L * 0.005, head * 0.05 * (1 - i / 5)));
+    const radii = pts.map((_, i) => Math.max(L * 0.006, skullR * 0.09 * (1 - i / 6)));
     spikes.push({ points: pts, radii, kind: 'antenna', part: 'head', w: 1 }, { points: pts.map(mirror), radii, kind: 'antenna', part: 'head', w: 1 });
   } else if (form.ears > 0.05) {
-    const len = head * (0.25 + form.ears * 0.6);
-    const base: Vec3 = [headRx * 0.55, crown[1] + headRy * 0.75, crown[2] - head * 0.08];
-    const pts: Vec3[] = [base, [base[0] + len * 0.35, base[1] + len * 0.75, base[2] - len * 0.25], [base[0] + len * 0.45, base[1] + len, base[2] - len * 0.35]];
-    const radii = [len * 0.32, len * 0.24, len * 0.02];
+    // Round lobes on top of the skull, set back a little, leaning out.
+    const len = skullR * (0.55 + form.ears * 0.9);
+    const base = add(add(skull, hu, skullR * 0.72), hd, -skullR * 0.15);
+    const b0: Vec3 = [skullR * 0.5, base[1], base[2]];
+    const pts: Vec3[] = [b0, add(b0, add([len * 0.25, 0, 0], add(scale3(hu, len * 0.5), scale3(hd, -len * 0.1)))), add(b0, add([len * 0.38, 0, 0], add(scale3(hu, len * 0.85), scale3(hd, -len * 0.18))))];
+    const radii = [len * 0.28, len * 0.36, len * 0.26];
     spikes.push({ points: pts, radii, kind: 'ear', part: 'head', w: 1 }, { points: pts.map(mirror), radii, kind: 'ear', part: 'head', w: 1 });
   }
 
-  // Horns: pairs on the crown, curving back or forward.
+  // Horns: stubby rounded pairs on the crown, curving back or forward.
   const pairs = Math.round(clamp(form.horns, 0, 2));
   for (let k = 0; k < pairs; k++) {
-    const len = head * form.hornLength * (k === 0 ? 1 : 0.6);
-    const base: Vec3 = [headRx * (0.45 + 0.2 * k), crown[1] + headRy * 0.8, crown[2] + head * (0.12 - 0.2 * k)];
+    const len = skullR * form.hornLength * 1.4 * (k === 0 ? 1 : 0.65);
+    const base = add(add(skull, hu, skullR * 0.82), hd, skullR * (0.15 - 0.45 * k));
+    const b0: Vec3 = [skullR * (0.38 + 0.12 * k), base[1], base[2]];
     const pts: Vec3[] = [];
     const n = 4;
     for (let i = 0; i <= n; i++) {
       const t = i / n;
-      // Up and out, then curving back (hornCurve < 0) or forward.
       const curve = form.hornCurve * t * t;
-      pts.push([base[0] + len * 0.35 * t, base[1] + len * (0.85 * t - 0.25 * Math.abs(curve) * t), base[2] + len * (0.9 * curve - 0.15 * t)]);
+      pts.push(add(b0, add([len * 0.3 * t, 0, 0], add(scale3(hu, len * (0.85 * t - 0.25 * Math.abs(curve) * t)), scale3(hd, len * (0.8 * curve - 0.1 * t))))));
     }
-    const radii = pts.map((_, i) => Math.max(L * 0.004, len * 0.14 * (1 - i / (n + 0.4))));
+    const radii = pts.map((_, i) => Math.max(L * 0.006, len * (0.24 - 0.12 * (i / n))));
     spikes.push({ points: pts, radii, kind: 'horn', part: 'head', w: 1 }, { points: pts.map(mirror), radii, kind: 'horn', part: 'head', w: 1 });
   }
 
@@ -374,13 +386,13 @@ export function growAnimal(input: AnimalShapeInput): AnimalSkeleton {
       const t = f - i;
       const top: Vec3 = [0, a.p[1] + (b.p[1] - a.p[1]) * t + (a.ry + (b.ry - a.ry) * t) * 0.9, a.p[2] + (b.p[2] - a.p[2]) * t];
       const h = depth * form.crest * 0.55 * Math.sin(Math.PI * (0.15 + 0.7 * u));
-      spikes.push({ points: [top, add(top, [0, h, -h * 0.25])], radii: [h * 0.35, h * 0.02], kind: 'crest', part: 'body', w: 0 });
+      spikes.push({ points: [top, add(top, [0, h, -h * 0.25])], radii: [h * 0.45, h * 0.26], kind: 'crest', part: 'body', w: 0 });
     }
   }
 
   // --- Legs ---
-  // A six-legged animal's legs are thin struts (an insect's), a quadruped's and biped's pillars.
-  const legR = Math.max(leg * form.legThickness * (plan === 'hexapod' ? 0.5 : 1), L * 0.01);
+  // A six-legged animal's legs are struts (an insect's), thinner than a quadruped's and biped's pillars.
+  const legR = Math.max(leg * form.legThickness * (plan === 'hexapod' ? 0.42 : 1), L * 0.01);
   if (plan === 'quadruped') {
     const body = spine.filter((s) => s.part === 'body');
     const hindZ = rear + torso * 0.14;
@@ -421,9 +433,11 @@ export function growAnimal(input: AnimalShapeInput): AnimalSkeleton {
       const outward = leg * 0.62;
       const hipP: Vec3 = [thorax[1]!.rx * 0.8, bodyY - ry * 0.15, zs[k]!];
       const knee: Vec3 = [hipP[0] + outward * 0.45 * Math.cos(fan), hipP[1] + leg * 0.28, hipP[2] + outward * 0.45 * Math.sin(fan)];
-      const foot: Vec3 = [hipP[0] + outward * Math.cos(fan), 0, hipP[2] + outward * Math.sin(fan) * 1.3];
-      const ankle: Vec3 = lerp3(knee, foot, 0.8);
-      const l: Leg = { points: [hipP, knee, ankle, foot], radii: [legR, legR * 0.8, legR * 0.5, legR * 0.3], swing: 'sprawl', walk: phases[k]!, trot: phases[k]!, arm: false };
+      // A round foot resting on the ground.
+      const footR = legR * 0.6;
+      const foot: Vec3 = [hipP[0] + outward * Math.cos(fan), footR, hipP[2] + outward * Math.sin(fan) * 1.3];
+      const ankle: Vec3 = lerp3(knee, foot, 0.75);
+      const l: Leg = { points: [hipP, knee, ankle, foot], radii: [legR, legR * 0.8, legR * 0.6, footR], swing: 'sprawl', walk: phases[k]!, trot: phases[k]!, arm: false };
       const other = phases[k] === tripodA ? tripodB : tripodA;
       legs.push(l, mirrorLeg(l, other, other));
     }
@@ -434,9 +448,11 @@ export function growAnimal(input: AnimalShapeInput): AnimalSkeleton {
     const sign = hind ? 1 : -1;
     const bend = 0.12 + 0.1 * rng.next();
     const knee: Vec3 = [hipP[0], hipP[1] - h * 0.45, hipP[2] + sign * h * bend];
-    const ankle: Vec3 = [hipP[0], h * (hind ? 0.18 : 0.12), hipP[2] - sign * h * bend * 0.6];
-    const toe: Vec3 = [hipP[0], 0, ankle[2] + h * 0.1];
-    return { points: [hipP, knee, ankle, toe], radii: [r, r * 0.72, r * 0.5, r * 0.55], swing: 'pendulum', walk, trot, arm: false };
+    const ankle: Vec3 = [hipP[0], Math.max(r * 1.4, h * (hind ? 0.2 : 0.15)), hipP[2] - sign * h * bend * 0.6];
+    // A round paw resting on the ground: its centre a paw's radius up.
+    const paw = r * 0.82;
+    const toe: Vec3 = [hipP[0], paw, ankle[2] + h * 0.08];
+    return { points: [hipP, knee, ankle, toe], radii: [r, r * 0.8, r * 0.66, paw], swing: 'pendulum', walk, trot, arm: false };
   }
 
   function mirrorLeg(l: Leg, walk: number, trot: number): Leg {
@@ -483,16 +499,18 @@ export function growAnimal(input: AnimalShapeInput): AnimalSkeleton {
 
 /** Ranges the generator draws each number from, by body plan (the lab's sliders go wider). */
 const RANGES: Record<BodyPlan, { legLength: readonly [number, number]; neckLength: readonly [number, number]; tailLength: readonly [number, number] }> = {
-  quadruped: { legLength: [0.32, 0.8], neckLength: [0.05, 0.55], tailLength: [0.1, 0.9] },
-  hexapod: { legLength: [0.55, 1.05], neckLength: [0, 0.05], tailLength: [0, 0] },
-  biped: { legLength: [0.55, 1.0], neckLength: [0.15, 0.6], tailLength: [0.5, 1.1] },
+  quadruped: { legLength: [0.24, 0.5], neckLength: [0.04, 0.28], tailLength: [0.15, 0.7] },
+  hexapod: { legLength: [0.4, 0.65], neckLength: [0, 0.04], tailLength: [0, 0] },
+  biped: { legLength: [0.38, 0.68], neckLength: [0.08, 0.32], tailLength: [0.4, 0.8] },
 };
 
 /**
  * A random form of body plan `plan` and diet `diet`, its coat near hue
- * `hue` (degrees). Herbivores have eyes on the sides of their heads and
- * often horns; carnivores face forward, with bigger heads and shorter snouts.
- * Coats are countershaded: a darker back over a pale belly.
+ * `hue` (degrees). Cute by the baby schema (Lorenz's Kindchenschema: a big
+ * round head, big eyes set low, a short snout, a plump round body, short
+ * thick limbs; docs/research/animals.md). Herbivores have eyes on the sides
+ * of their heads and often horns (stubby ones); carnivores' eyes face
+ * forward. Coats are bright and countershaded: a darker back over a pale belly.
  */
 export function generateAnimalForm(rng: Rng, plan: BodyPlan, diet: Diet, hue: number): AnimalForm {
   const r = RANGES[plan];
@@ -500,43 +518,43 @@ export function generateAnimalForm(rng: Rng, plan: BodyPlan, diet: Diet, hue: nu
   const pattern = rng.weighted<CoatPattern>([
     ['plain', 3],
     ['stripes', 2],
-    ['spots', 2],
+    ['spots', 2.5],
     ['patches', 1.5],
   ]);
   const h = hue + rng.range(-25, 25);
-  const sat = rng.range(0.25, 0.6);
-  const light = rng.range(0.3, 0.5);
+  const sat = rng.range(0.45, 0.75);
+  const light = rng.range(0.45, 0.6);
   const patternHue = rng.chance(0.6) ? h + rng.range(-15, 15) : h + 180 + rng.range(-40, 40);
   return {
     plan,
     seed: rng.int(0, 0xffffff),
-    bodyDepth: rng.range(0.24, 0.42) * (plan === 'hexapod' ? 0.85 : 1),
-    bodyWidth: rng.range(0.7, 1.15),
-    chest: rng.range(0.8, 1.3),
-    hump: rng.chance(0.3) ? rng.range(0.2, 1) : 0,
+    bodyDepth: rng.range(0.34, 0.48) * (plan === 'hexapod' ? 0.85 : 1),
+    bodyWidth: rng.range(0.88, 1.2),
+    chest: rng.range(0.88, 1.2),
+    hump: rng.chance(0.2) ? rng.range(0.2, 0.7) : 0,
     legLength: rng.range(r.legLength[0], r.legLength[1]),
-    legThickness: rng.range(0.05, 0.085),
+    legThickness: rng.range(0.1, 0.15),
     neckLength: rng.range(r.neckLength[0], r.neckLength[1]),
-    neckAngle: plan === 'hexapod' ? 0 : rng.range(10, 60),
-    headSize: rng.range(0.18, 0.3) * (predator ? 1.1 : 1),
-    snout: predator ? rng.range(0.15, 0.45) : rng.range(0.25, 0.6),
+    neckAngle: plan === 'hexapod' ? 0 : rng.range(25, 60),
+    headSize: rng.range(0.32, 0.44),
+    snout: predator ? rng.range(0.08, 0.3) : rng.range(0.05, 0.32),
     tailLength: rng.range(r.tailLength[0], r.tailLength[1]),
-    tailThickness: plan === 'biped' ? rng.range(0.35, 0.6) : rng.range(0.12, 0.45),
-    tailRaise: plan === 'biped' ? rng.range(-5, 15) : rng.range(-35, 40),
-    horns: !predator && plan !== 'hexapod' && rng.chance(0.55) ? (rng.chance(0.25) ? 2 : 1) : 0,
-    hornLength: rng.range(0.4, 1.4),
+    tailThickness: plan === 'biped' ? rng.range(0.4, 0.6) : rng.range(0.2, 0.45),
+    tailRaise: plan === 'biped' ? rng.range(-5, 15) : rng.range(-20, 45),
+    horns: !predator && plan !== 'hexapod' && rng.chance(0.45) ? (rng.chance(0.2) ? 2 : 1) : 0,
+    hornLength: rng.range(0.25, 0.7),
     hornCurve: rng.range(-1, 1),
-    ears: plan === 'hexapod' ? rng.range(0.2, 1) : rng.chance(0.75) ? rng.range(0.2, 1) : 0,
-    crest: rng.chance(predator ? 0.2 : 0.3) ? rng.range(0.25, 1) : 0,
-    eyeSize: rng.range(0.07, 0.13),
+    ears: plan === 'hexapod' ? rng.range(0.2, 0.9) : rng.chance(0.85) ? rng.range(0.35, 1.1) : 0,
+    crest: rng.chance(predator ? 0.15 : 0.2) ? rng.range(0.2, 0.6) : 0,
+    eyeSize: rng.range(0.27, 0.38),
     eyesForward: predator ? rng.range(0.65, 1) : rng.range(0, 0.25),
-    arms: plan === 'biped' && rng.chance(0.6) ? rng.range(0.2, 0.55) : 0,
+    arms: plan === 'biped' && rng.chance(0.6) ? rng.range(0.25, 0.5) : 0,
     pattern,
-    patternScale: rng.range(0.8, 2.5),
+    patternScale: rng.range(1, 2.5),
     color: hslToHex(h, sat, light),
-    belly: hslToHex(h + rng.range(-10, 10), sat * 0.5, Math.min(0.85, light + rng.range(0.25, 0.4))),
-    patternColor: hslToHex(patternHue, Math.min(0.8, sat + 0.1), rng.chance(0.5) ? light * 0.45 : Math.min(0.85, light + 0.3)),
-    accentColor: hslToHex(rng.range(25, 50), rng.range(0.1, 0.35), rng.range(0.55, 0.8)),
-    eyeColor: hslToHex(rng.range(0, 360), rng.range(0.5, 0.9), rng.range(0.15, 0.55)),
+    belly: hslToHex(h + rng.range(-10, 10), sat * 0.45, Math.min(0.9, light + rng.range(0.25, 0.35))),
+    patternColor: hslToHex(patternHue, Math.min(0.85, sat + 0.1), rng.chance(0.5) ? light * 0.55 : Math.min(0.9, light + 0.28)),
+    accentColor: hslToHex(rng.range(20, 45), rng.range(0.15, 0.4), rng.range(0.6, 0.82)),
+    eyeColor: hslToHex(rng.range(0, 360), rng.range(0.55, 0.9), rng.range(0.3, 0.5)),
   };
 }

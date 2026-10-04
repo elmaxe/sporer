@@ -1,8 +1,8 @@
 import * as THREE from 'three';
-import { growAnimal, type AnimalSkeleton } from '../gen/animalForm';
+import { COAT_PATTERNS, growAnimal, type AnimalSkeleton } from '../gen/animalForm';
 import { animalGait, type AnimalSpecies } from '../gen/animals';
 import { groundDepthPass } from '../world/groundDepth';
-import { ANIMAL_LOD_COUNT, buildAnimalMesh, type AnimalMeshData } from './animalMesh';
+import { ANIMAL_LOD_COUNT, buildAnimalMesh, linearRgb, type AnimalMeshData } from './animalMesh';
 import { FADE_START, LOD_TINTS, TINT_MIX, fadeWindow } from './plantLook';
 
 /*
@@ -51,7 +51,9 @@ export function createAnimalGeometry(s: AnimalSpecies, lod: number): THREE.Buffe
   const data = animalMeshData(s, lod);
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(data.positions, 3));
+  geometry.setAttribute('normal', new THREE.BufferAttribute(data.normals, 3));
   geometry.setAttribute('color', new THREE.BufferAttribute(data.colors, 3));
+  geometry.setAttribute('aCoat', new THREE.BufferAttribute(data.coat, 1));
   geometry.setAttribute('aRig', new THREE.BufferAttribute(data.rig, 4));
   geometry.setAttribute('aPivot', new THREE.BufferAttribute(data.pivots, 3));
   geometry.computeBoundingSphere();
@@ -121,6 +123,11 @@ export interface AnimalUniforms {
   uGraze: THREE.IUniform<number>;
   uTint: THREE.IUniform<THREE.Color>;
   uTintMix: THREE.IUniform<number>;
+  /** The coat's pattern (index in COAT_PATTERNS), per unit, colour and seed. */
+  uPattern: THREE.IUniform<number>;
+  uPatternK: THREE.IUniform<number>;
+  uPatternColor: THREE.IUniform<THREE.Color>;
+  uSeed: THREE.IUniform<number>;
 }
 
 export function setAnimalTint(u: Pick<AnimalUniforms, 'uTint' | 'uTintMix'>, lod: number, on: boolean): void {
@@ -151,12 +158,20 @@ uniform float uGraze;
 uniform float uLength;
 uniform float uRange;
 varying float vAnimalDistance;
+attribute float aCoat;
+varying vec3 vAnimalRest;
+varying vec3 vAnimalRestNormal;
+varying float vAnimalCoat;
 vec3 animalRotX(vec3 d, float a) { float c = cos(a), s = sin(a); return vec3(d.x, c * d.y - s * d.z, s * d.y + c * d.z); }
 vec3 animalRotY(vec3 d, float a) { float c = cos(a), s = sin(a); return vec3(c * d.x + s * d.z, d.y, -s * d.x + c * d.z); }
 `;
 
 const POSE_GLSL = /* glsl */ `
+vec3 animalPos = position;
 {
+  vAnimalRest = position;
+  vAnimalRestNormal = normal;
+  vAnimalCoat = aCoat;
   float part = aRig.x;
   float w = aRig.w;
   float cycle = 6.2831853 * aAnim.x;
@@ -164,28 +179,32 @@ const POSE_GLSL = /* glsl */ `
   float trot = aAnim.z;
   float graze = aAnim.w;
   float bob = uBob * stride * cos(2.0 * cycle);
-  vec3 d = transformed - aPivot;
+  vec3 d = animalPos - aPivot;
   if (part > 0.5 && part < 2.5) {
     // A leg: swinging about its hip in its phase, the foot lifting as it comes forward.
     float ph = cycle + 6.2831853 * mix(aRig.y, aRig.z, trot);
     float swing = mix(uSwing.x, uSwing.y, trot) * stride * sin(ph);
-    d = part < 1.5 ? animalRotX(d, swing) : animalRotY(d, swing * sign(aPivot.x));
+    float turn = part < 1.5 ? swing : swing * sign(aPivot.x);
+    d = part < 1.5 ? animalRotX(d, turn) : animalRotY(d, turn);
+    objectNormal = part < 1.5 ? animalRotX(objectNormal, turn) : animalRotY(objectNormal, turn);
     d.y += uLift * stride * max(0.0, -cos(ph)) * w;
-    transformed = aPivot + d;
+    animalPos = aPivot + d;
     // The hip bobs with the body; the foot stays down.
-    transformed.y += bob * (1.0 - w);
+    animalPos.y += bob * (1.0 - w);
   } else if (part > 2.5 && part < 3.5) {
     // The tail sways with the stride and idly.
     float sway = (0.22 * stride * sin(cycle) + 0.14 * sin(aIdle * 1.3) + 0.06 * sin(aIdle * 3.1)) * w;
-    transformed = aPivot + animalRotY(d, sway);
-    transformed.y += bob;
+    animalPos = aPivot + animalRotY(d, sway);
+    objectNormal = animalRotY(objectNormal, sway);
+    animalPos.y += bob;
   } else if (part > 3.5) {
     // The neck and head: bent down to graze, nodding as it walks.
-    float bend = uGraze * graze + 0.07 * stride * sin(2.0 * cycle) + 0.03 * sin(aIdle * 0.9) * (1.0 - graze);
-    transformed = aPivot + animalRotX(d, bend * w);
-    transformed.y += bob;
+    float bend = (uGraze * graze + 0.07 * stride * sin(2.0 * cycle) + 0.03 * sin(aIdle * 0.9) * (1.0 - graze)) * w;
+    animalPos = aPivot + animalRotX(d, bend);
+    objectNormal = animalRotX(objectNormal, bend);
+    animalPos.y += bob;
   } else {
-    transformed.y += bob;
+    animalPos.y += bob;
   }
   // Distance to the camera in this animal's lengths (an instance's up axis is scaled by its size).
   vec3 animalCentre = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
@@ -195,11 +214,50 @@ const POSE_GLSL = /* glsl */ `
 `;
 
 /**
- * A lit, vertex-coloured, flat-shaded material that poses each instance from
- * its animation attributes (see the shader above) and fades it in and out
- * by its distance like the plants (a dither, nothing sorted). With `fade`
- * off (the lab's fixed levels) every distance draws. Flat shading takes its
- * normals from the posed triangles, so a swinging leg is lit as it stands.
+ * The coat's pattern, per pixel from the rest-pose position (so it moves
+ * with the body), where the mesh's `coat` is 1 and not on the belly:
+ * soft-edged stripes across the body, round spots one to a cell of a 3D
+ * grid, or patches where a smooth noise is high. `uPatternK` is the pattern
+ * per unit (patternScale over the length).
+ */
+const PATTERN_GLSL = /* glsl */ `
+float animalHash(vec3 p) {
+  p = fract(p * vec3(0.1031, 0.1030, 0.0973) + uSeed);
+  p += dot(p, p.yxz + 33.33);
+  return fract((p.x + p.y) * p.z);
+}
+float animalNoise(vec3 x) {
+  vec3 i = floor(x);
+  vec3 f = fract(x);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(animalHash(i), animalHash(i + vec3(1, 0, 0)), f.x), mix(animalHash(i + vec3(0, 1, 0)), animalHash(i + vec3(1, 1, 0)), f.x), f.y),
+    mix(mix(animalHash(i + vec3(0, 0, 1)), animalHash(i + vec3(1, 0, 1)), f.x), mix(animalHash(i + vec3(0, 1, 1)), animalHash(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+}
+float animalPattern(vec3 p) {
+  vec3 q = p * uPatternK;
+  if (uPattern == 1) {
+    float s = sin((q.z * 2.0 + 0.25 * sin(q.y * 6.0)) * 6.2831853);
+    return smoothstep(0.2, 0.45, s);
+  }
+  if (uPattern == 2) {
+    vec3 g = q * 3.0;
+    vec3 c = floor(g);
+    if (animalHash(c) > 0.6) return 0.0;
+    vec3 o = 0.4 + 0.2 * vec3(animalHash(c + 11.0), animalHash(c + 23.0), animalHash(c + 37.0));
+    return 1.0 - smoothstep(0.26, 0.33, length(fract(g) - o));
+  }
+  if (uPattern == 3) return smoothstep(0.5, 0.58, animalNoise(q * 1.5));
+  return 0.0;
+}
+`;
+
+/**
+ * A lit, vertex-coloured, smooth-shaded material that poses each instance
+ * from its animation attributes (see the shader above: positions and
+ * normals turn together, so a swinging leg is lit as it stands), draws the
+ * coat's pattern, and fades it in and out by its distance like the plants
+ * (a dither, nothing sorted). With `fade` off (the lab's fixed levels)
+ * every distance draws.
  */
 export function createAnimalMaterial(lod: number, s: AnimalSpecies, motion: AnimalMotion, fade = true): { material: THREE.MeshStandardMaterial; uniforms: AnimalUniforms } {
   const uniforms: AnimalUniforms = {
@@ -213,18 +271,27 @@ export function createAnimalMaterial(lod: number, s: AnimalSpecies, motion: Anim
     uGraze: { value: motion.graze },
     uTint: { value: new THREE.Color() },
     uTintMix: { value: 0 },
+    uPattern: { value: COAT_PATTERNS.indexOf(s.form.pattern) },
+    uPatternK: { value: s.form.patternScale / s.length },
+    // In linear light, as the vertex colours are (animalMesh.ts linearRgb).
+    uPatternColor: { value: new THREE.Color().setRGB(...linearRgb(s.form.patternColor), THREE.LinearSRGBColorSpace) },
+    uSeed: { value: (s.form.seed % 997) / 997 },
   };
   setAnimalTint(uniforms, lod, false);
-  const material = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.85 });
+  // Soft fur, a little sheen.
+  const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.72 });
   material.customProgramCacheKey = () => 'animal';
   material.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
     shader.uniforms.uDepthPass = groundDepthPass;
-    shader.vertexShader = shader.vertexShader.replace('#include <common>', `#include <common>\n${RIG_GLSL}`).replace('#include <begin_vertex>', `#include <begin_vertex>\n${POSE_GLSL}`);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>\n${RIG_GLSL}`)
+      .replace('#include <beginnormal_vertex>', `#include <beginnormal_vertex>\n${POSE_GLSL}`)
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed = animalPos;');
     shader.fragmentShader = shader.fragmentShader
       .replace(
         '#include <common>',
-        '#include <common>\nvarying float vAnimalDistance;\nuniform vec2 uLower;\nuniform vec2 uUpper;\nuniform vec3 uTint;\nuniform float uTintMix;\nuniform bool uDepthPass;',
+        `#include <common>\nvarying float vAnimalDistance;\nvarying vec3 vAnimalRest;\nvarying vec3 vAnimalRestNormal;\nvarying float vAnimalCoat;\nuniform vec2 uLower;\nuniform vec2 uUpper;\nuniform vec3 uTint;\nuniform float uTintMix;\nuniform bool uDepthPass;\nuniform int uPattern;\nuniform float uPatternK;\nuniform vec3 uPatternColor;\nuniform float uSeed;\n${PATTERN_GLSL}`,
       )
       .replace(
         '#include <clipping_planes_fragment>',
@@ -240,7 +307,16 @@ export function createAnimalMaterial(lod: number, s: AnimalSpecies, motion: Anim
           }
         }`,
       )
-      .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb = mix(diffuseColor.rgb, uTint, uTintMix);');
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+        {
+          // The pattern on the coat, fading out down the flanks before the belly.
+          float mark = vAnimalCoat > 0.5 ? animalPattern(vAnimalRest) * smoothstep(-0.5, -0.15, normalize(vAnimalRestNormal).y) : 0.0;
+          diffuseColor.rgb = mix(diffuseColor.rgb, uPatternColor, mark);
+          diffuseColor.rgb = mix(diffuseColor.rgb, uTint, uTintMix);
+        }`,
+      );
   };
   return { material, uniforms };
 }

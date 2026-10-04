@@ -1,24 +1,28 @@
 import { hexToRgb } from '../gen/color';
-import type { AnimalForm, AnimalSkeleton, BodyPart, Leg, SpineNode, Spike, Vec3 } from '../gen/animalForm';
+import type { AnimalForm, AnimalSkeleton, BodyPart, Eye, Leg, SpineNode, Spike, Vec3 } from '../gen/animalForm';
 
 /*
  * An animal's mesh at each level of detail, from its skeleton
  * (gen/animalForm.ts). Pure (no THREE), so triangle counts are unit-tested;
  * animalLook.ts turns the arrays into geometry and plays the walk.
  *
- * The body is a skin of rings round the spine (an ellipse at each node,
- * joined into a tube and closed at the snout and the tail tip); legs, horns,
- * ears, antennae and crest spines are tapering tubes; eyes are small
- * polyhedra. Flat-shaded and vertex-coloured like the rest of the game:
- * non-indexed triangles, one colour per face. The coat is countershaded
- * (the back's colour over the belly's, by which way the face looks) with its
- * pattern on top.
+ * Soft and round, unlike the game's faceted rocks: the body is a skin of
+ * rings round the spine (an ellipse at each node) joined into one tube and
+ * closed by a dome at the snout and the tail's tip; legs, horns, ears,
+ * antennae and crest spines are tapering tubes ending in domes (legs in
+ * round paws, antennae in a bobble); eyes are spheres with an iris, a pupil
+ * and a highlight. Every vertex has a smooth normal, worked out from the
+ * surface it lies on (so lighting rolls round the body instead of showing
+ * its rings), and its colour: the coat countershaded by which way the
+ * vertex looks (the back's colour over the belly's). The coat's pattern is
+ * drawn per pixel by the material from the rest-pose position, where
+ * `coat` is 1.
  *
  * Every vertex also carries its rig, read by the vertex shader: which part
  * it belongs to (body, a leg swinging fore and aft or sprawling, the tail,
  * the head and neck), the leg's gait phases, how far along its part it is,
- * and the joint it turns about. Going down a level: fewer sides and rings,
- * small spikes and the eyes go, legs become one straight tube.
+ * and the joint it turns about. Going down a level: fewer sides, rings and
+ * dome steps, small spikes and then the eyes go, legs become one straight tube.
  */
 
 /** Levels of detail per animal: 0 is the full animal. */
@@ -34,60 +38,37 @@ export interface AnimalLodSpec {
   readonly spikeSides: number;
   /** Keep every `spineStep`-th spine node of the torso and tail (the head's are always kept, its shape is in them). */
   readonly spineStep: number;
+  /** Rings in each end's dome (0: a single point). */
+  readonly domeSteps: number;
   /** Legs keep all their joints, or go straight from the hip to the toe. */
   readonly joints: boolean;
-  /** Spikes kept: all, only the big ones (horns, crest), or none. */
+  /** Spikes kept: all, only the big ones (horns, crest, ears), or none. */
   readonly spikes: 'all' | 'big' | 'none';
-  readonly eyes: boolean;
+  /** Eyes: with iris, pupil and highlight, a plain eyeball and pupil, or none. */
+  readonly eyes: 'full' | 'simple' | 'none';
 }
 
 export function animalLodSpec(lod: number): AnimalLodSpec {
-  if (lod <= 0) return { ringSides: 10, legSides: 6, spikeSides: 5, spineStep: 1, joints: true, spikes: 'all', eyes: true };
-  if (lod === 1) return { ringSides: 6, legSides: 4, spikeSides: 3, spineStep: 2, joints: true, spikes: 'big', eyes: true };
-  return { ringSides: 4, legSides: 3, spikeSides: 3, spineStep: 3, joints: false, spikes: 'none', eyes: false };
+  if (lod <= 0) return { ringSides: 14, legSides: 8, spikeSides: 6, spineStep: 1, domeSteps: 3, joints: true, spikes: 'all', eyes: 'full' };
+  if (lod === 1) return { ringSides: 8, legSides: 5, spikeSides: 4, spineStep: 2, domeSteps: 1, joints: true, spikes: 'big', eyes: 'simple' };
+  return { ringSides: 5, legSides: 3, spikeSides: 3, spineStep: 3, domeSteps: 0, joints: false, spikes: 'none', eyes: 'none' };
 }
 
 /** Vertex arrays of an animal mesh: three vertices per triangle. */
 export interface AnimalMeshData {
   readonly positions: Float32Array;
+  readonly normals: Float32Array;
   readonly colors: Float32Array;
   /** Per vertex: part code (RIG), walk phase, trot phase, weight along the part. */
   readonly rig: Float32Array;
   /** Per vertex: the joint it turns about (hip, tail root, neck root). */
   readonly pivots: Float32Array;
+  /** Per vertex: 1 where the coat's pattern is drawn (body, neck, tail, upper legs), 0 elsewhere. */
+  readonly coat: Float32Array;
   readonly triangles: number;
 }
 
 type Rgb = [number, number, number];
-
-/** Small deterministic hash noise for the coat, from a point and the animal's seed (0 to 1). */
-function hash3(x: number, y: number, z: number, seed: number): number {
-  let h = Math.imul(x | 0, 0x8da6b343) ^ Math.imul(y | 0, 0xd8163841) ^ Math.imul(z | 0, 0xcb1ab31f) ^ seed;
-  h = Math.imul(h ^ (h >>> 13), 0x5bd1e995);
-  h ^= h >>> 15;
-  return (h >>> 0) / 4294967296;
-}
-
-/** Smooth value noise for patches (0 to 1). */
-function valueNoise(x: number, y: number, z: number, seed: number): number {
-  const xi = Math.floor(x);
-  const yi = Math.floor(y);
-  const zi = Math.floor(z);
-  const fx = x - xi;
-  const fy = y - yi;
-  const fz = z - zi;
-  const sx = fx * fx * (3 - 2 * fx);
-  const sy = fy * fy * (3 - 2 * fy);
-  const sz = fz * fz * (3 - 2 * fz);
-  let v = 0;
-  for (let c = 0; c < 8; c++) {
-    const dx = c & 1;
-    const dy = (c >> 1) & 1;
-    const dz = (c >> 2) & 1;
-    v += hash3(xi + dx, yi + dy, zi + dz, seed) * (dx ? sx : 1 - sx) * (dy ? sy : 1 - sy) * (dz ? sz : 1 - sz);
-  }
-  return v;
-}
 
 function smoothstep(a: number, b: number, v: number): number {
   const t = Math.min(1, Math.max(0, (v - a) / (b - a)));
@@ -103,83 +84,23 @@ export interface Coat {
   readonly eye: Rgb;
 }
 
-export function coatOf(form: AnimalForm): Coat {
-  return { back: hexToRgb(form.color), belly: hexToRgb(form.belly), pattern: hexToRgb(form.patternColor), accent: hexToRgb(form.accentColor), eye: hexToRgb(form.eyeColor) };
+/** A hex colour's channels in linear light, as the renderer wants vertex colours (so the coat shows the colour picked). */
+export function linearRgb(hex: string): Rgb {
+  return hexToRgb(hex).map((c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)) as Rgb;
 }
 
-class Builder {
-  readonly positions: number[] = [];
-  readonly colors: number[] = [];
-  readonly rig: number[] = [];
-  readonly pivots: number[] = [];
-  constructor(
-    readonly form: AnimalForm,
-    readonly coat: Coat,
-    readonly length: number,
-  ) {}
+export function coatOf(form: AnimalForm): Coat {
+  return { back: linearRgb(form.color), belly: linearRgb(form.belly), pattern: linearRgb(form.patternColor), accent: linearRgb(form.accentColor), eye: linearRgb(form.eyeColor) };
+}
 
-  /** One triangle, its vertices' rigs given per vertex. */
-  tri(a: Vec3, b: Vec3, c: Vec3, color: Rgb, rigs: readonly (readonly number[])[], pivots: readonly Vec3[]): void {
-    for (const [i, p] of [a, b, c].entries()) {
-      this.positions.push(p[0], p[1], p[2]);
-      this.colors.push(color[0], color[1], color[2]);
-      const r = rigs[i]!;
-      this.rig.push(r[0]!, r[1]!, r[2]!, r[3]!);
-      const q = pivots[i]!;
-      this.pivots.push(q[0], q[1], q[2]);
-    }
-  }
-
-  /** The coat's colour for a face at centroid `c` with normal `n`, on the body (patterned) or elsewhere (plain countershading). */
-  coatColor(c: Vec3, n: Vec3, patterned: boolean): Rgb {
-    const { coat, form, length: L } = this;
-    // Countershading: the back's colour on faces looking up, the belly's on those looking down.
-    const up = smoothstep(-0.45, 0.35, n[1]);
-    const col: Rgb = [
-      coat.belly[0] + (coat.back[0] - coat.belly[0]) * up,
-      coat.belly[1] + (coat.back[1] - coat.belly[1]) * up,
-      coat.belly[2] + (coat.back[2] - coat.belly[2]) * up,
-    ];
-    if (!patterned || form.pattern === 'plain' || n[1] < -0.35) return col;
-    const k = form.patternScale / L;
-    let mark = 0;
-    if (form.pattern === 'stripes') {
-      // Bands across the body, a little wavy.
-      const s = Math.sin((c[2] * k * 2 + 0.25 * Math.sin(c[1] * k * 6)) * Math.PI * 2);
-      mark = s > 0.35 ? 1 : 0;
-    } else if (form.pattern === 'spots') {
-      const q = k * 3;
-      const x = c[0] * q;
-      const y = c[1] * q;
-      const z = c[2] * q;
-      const cx = Math.floor(x);
-      const cy = Math.floor(y);
-      const cz = Math.floor(z);
-      const h = hash3(cx, cy, cz, form.seed);
-      // A spot in about half the cells, somewhere in it.
-      if (h < 0.55) {
-        const ox = cx + 0.5 + (hash3(cx, cy, cz, form.seed ^ 0x51) - 0.5) * 0.4;
-        const oy = cy + 0.5 + (hash3(cx, cy, cz, form.seed ^ 0x93) - 0.5) * 0.4;
-        const oz = cz + 0.5 + (hash3(cx, cy, cz, form.seed ^ 0x27) - 0.5) * 0.4;
-        mark = Math.hypot(x - ox, y - oy, z - oz) < 0.38 ? 1 : 0;
-      }
-    } else {
-      mark = valueNoise(c[0] * k * 1.5, c[1] * k * 1.5, c[2] * k * 1.5, form.seed) > 0.55 ? 1 : 0;
-    }
-    if (!mark) return col;
-    return [coat.pattern[0], coat.pattern[1], coat.pattern[2]];
-  }
-
-  build(): AnimalMeshData {
-    const n = this.positions.length / 3;
-    return {
-      positions: new Float32Array(this.positions),
-      colors: new Float32Array(this.colors),
-      rig: new Float32Array(this.rig),
-      pivots: new Float32Array(this.pivots),
-      triangles: n / 3,
-    };
-  }
+/** The countershaded coat at a vertex looking along `n`: the back's colour looking up, the belly's looking down. */
+export function countershade(coat: Coat, n: Vec3): Rgb {
+  const up = smoothstep(-0.55, 0.45, n[1]);
+  return [
+    coat.belly[0] + (coat.back[0] - coat.belly[0]) * up,
+    coat.belly[1] + (coat.back[1] - coat.belly[1]) * up,
+    coat.belly[2] + (coat.back[2] - coat.belly[2]) * up,
+  ];
 }
 
 // --- Vector helpers ---
@@ -187,12 +108,172 @@ class Builder {
 const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const add = (a: Vec3, b: Vec3, s = 1): Vec3 => [a[0] + b[0] * s, a[1] + b[1] * s, a[2] + b[2] * s];
 const cross = (a: Vec3, b: Vec3): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const dot = (a: Vec3, b: Vec3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 function normalize(a: Vec3): Vec3 {
   const l = Math.hypot(a[0], a[1], a[2]) || 1;
   return [a[0] / l, a[1] / l, a[2] / l];
 }
-const centroid = (a: Vec3, b: Vec3, c: Vec3): Vec3 => [(a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3, (a[2] + b[2] + c[2]) / 3];
-const faceNormal = (a: Vec3, b: Vec3, c: Vec3): Vec3 => normalize(cross(sub(b, a), sub(c, a)));
+function centroidOf(pts: readonly Vec3[]): Vec3 {
+  const c: Vec3 = [0, 0, 0];
+  for (const p of pts) {
+    c[0] += p[0];
+    c[1] += p[1];
+    c[2] += p[2];
+  }
+  return [c[0] / pts.length, c[1] / pts.length, c[2] / pts.length];
+}
+
+/** What a ring of a surface carries to its vertices. */
+interface RingInfo {
+  readonly rig: readonly number[];
+  readonly pivot: Vec3;
+  readonly coat: number;
+}
+
+/** One vertex as written. */
+interface Vertex {
+  p: Vec3;
+  n: Vec3;
+  c: Rgb;
+  rig: readonly number[];
+  pivot: Vec3;
+  coat: number;
+}
+
+class Builder {
+  readonly positions: number[] = [];
+  readonly normals: number[] = [];
+  readonly colors: number[] = [];
+  readonly rig: number[] = [];
+  readonly pivots: number[] = [];
+  readonly coats: number[] = [];
+  constructor(
+    readonly form: AnimalForm,
+    readonly coat: Coat,
+    readonly length: number,
+  ) {}
+
+  /** A triangle, wound so its face looks the way its vertices' normals do. */
+  tri(a: Vertex, b: Vertex, c: Vertex): void {
+    const face = cross(sub(b.p, a.p), sub(c.p, a.p));
+    const avg = add(add(a.n, b.n), c.n);
+    const verts = dot(face, avg) >= 0 ? [a, b, c] : [a, c, b];
+    for (const v of verts) {
+      this.positions.push(v.p[0], v.p[1], v.p[2]);
+      this.normals.push(v.n[0], v.n[1], v.n[2]);
+      this.colors.push(v.c[0], v.c[1], v.c[2]);
+      this.rig.push(v.rig[0]!, v.rig[1]!, v.rig[2]!, v.rig[3]!);
+      this.pivots.push(v.pivot[0], v.pivot[1], v.pivot[2]);
+      this.coats.push(v.coat);
+    }
+  }
+
+  /**
+   * A smooth surface through `rings` (each the same number of points, in
+   * order round it), closed at each end by a dome of `domeSteps` rings
+   * bulging `domes[i]` beyond it (0: left open). Normals come from the grid
+   * (along the rings and round them), turned to look away from each ring's
+   * centre; colours from `color` at each vertex.
+   */
+  surface(rings: Vec3[][], info: RingInfo[], domes: readonly [number, number], domeSteps: number, color: (p: Vec3, n: Vec3, ring: number) => Rgb): void {
+    const all: Vec3[][] = [];
+    const allInfo: RingInfo[] = [];
+    const tips: (Vec3 | null)[] = [null, null];
+    // The start's dome, from its tip in to the first ring.
+    const domeOf = (end: 0 | 1): Vec3[][] => {
+      const h = domes[end];
+      if (h <= 0) return [];
+      const ring = end === 0 ? rings[0]! : rings[rings.length - 1]!;
+      const next = end === 0 ? rings[1] ?? ring : rings[rings.length - 2] ?? ring;
+      const c = centroidOf(ring);
+      const axis = normalize(sub(c, centroidOf(next)));
+      tips[end] = add(c, axis, h);
+      const out: Vec3[][] = [];
+      for (let j = 1; j <= domeSteps; j++) {
+        const th = (j / (domeSteps + 1)) * (Math.PI / 2);
+        out.push(ring.map((p) => add(add(c, sub(p, c), Math.cos(th)), axis, h * Math.sin(th))));
+      }
+      return out;
+    };
+    const startDome = domeOf(0).reverse();
+    const endDome = domeOf(1);
+    for (const r of startDome) {
+      all.push(r);
+      allInfo.push(info[0]!);
+    }
+    rings.forEach((r, i) => {
+      all.push(r);
+      allInfo.push(info[i]!);
+    });
+    for (const r of endDome) {
+      all.push(r);
+      allInfo.push(info[info.length - 1]!);
+    }
+    const n = all[0]!.length;
+    const centres = all.map(centroidOf);
+    const verts: Vertex[][] = all.map((ring, i) =>
+      ring.map((p, k) => {
+        const along = sub(all[Math.min(all.length - 1, i + 1)]![k]!, all[Math.max(0, i - 1)]![k]!);
+        const around = sub(ring[(k + 1) % n]!, ring[(k + n - 1) % n]!);
+        let nn = normalize(cross(along, around));
+        if (dot(nn, sub(p, centres[i]!)) < 0) nn = [-nn[0], -nn[1], -nn[2]];
+        // Where the rings shrink to nothing (a dome's last ring), lean on the axis.
+        if (!Number.isFinite(nn[0]) || Math.hypot(...around) < 1e-9) nn = normalize(sub(p, centres[i]!));
+        const ri = allInfo[i]!;
+        return { p, n: nn, c: color(p, nn, i - startDome.length), rig: ri.rig, pivot: ri.pivot, coat: ri.coat };
+      }),
+    );
+    for (let i = 0; i + 1 < verts.length; i++) {
+      for (let k = 0; k < n; k++) {
+        const k1 = (k + 1) % n;
+        this.tri(verts[i]![k]!, verts[i + 1]![k]!, verts[i + 1]![k1]!);
+        this.tri(verts[i]![k]!, verts[i + 1]![k1]!, verts[i]![k1]!);
+      }
+    }
+    // The tips: a fan from each dome's last ring (or the end ring, flat, when it has no dome).
+    for (const end of [0, 1] as const) {
+      const ringVerts = end === 0 ? verts[0]! : verts[verts.length - 1]!;
+      const c = centroidOf(ringVerts.map((v) => v.p));
+      const tip = tips[end];
+      const inner = end === 0 ? centres[Math.min(1, centres.length - 1)]! : centres[Math.max(0, centres.length - 2)]!;
+      const axis = normalize(sub(c, inner));
+      const at = tip ?? c;
+      const ri = end === 0 ? allInfo[0]! : allInfo[allInfo.length - 1]!;
+      const tv: Vertex = { p: at, n: axis, c: color(at, axis, end === 0 ? -1 : rings.length), rig: ri.rig, pivot: ri.pivot, coat: ri.coat };
+      for (let k = 0; k < n; k++) this.tri(ringVerts[k]!, ringVerts[(k + 1) % n]!, tv);
+    }
+  }
+
+  /**
+   * A sphere (an icosahedron, subdivided `detail` times) of colour `color`,
+   * all of it moving with `rig`, squashed along unit `axis` to `squash` of
+   * its radius (a lens, for an iris or pupil).
+   */
+  sphere(centre: Vec3, radius: number, detail: number, color: Rgb, rig: readonly number[], pivot: Vec3, axis: Vec3 = [0, 1, 0], squash = 1): void {
+    for (const [a, b, c] of icosphere(detail)) {
+      const vert = (d: Vec3): Vertex => {
+        const along = dot(d, axis);
+        const p = add(add(centre, d, radius), axis, along * radius * (squash - 1));
+        const n = normalize(add(d, axis, along * (1 / squash - 1)));
+        return { p, n, c: color, rig, pivot, coat: 0 };
+      };
+      this.tri(vert(a), vert(b), vert(c));
+    }
+  }
+
+  build(): AnimalMeshData {
+    const n = this.positions.length / 3;
+    return {
+      positions: new Float32Array(this.positions),
+      normals: new Float32Array(this.normals),
+      colors: new Float32Array(this.colors),
+      rig: new Float32Array(this.rig),
+      pivots: new Float32Array(this.pivots),
+      coat: new Float32Array(this.coats),
+      triangles: n / 3,
+    };
+  }
+}
 
 function rigOf(part: BodyPart, w: number): number[] {
   return [part === 'tail' ? RIG.tail : part === 'head' ? RIG.head : RIG.body, 0, 0, w];
@@ -203,13 +284,13 @@ export function buildAnimalMesh(skeleton: AnimalSkeleton, form: AnimalForm, leng
   const spec = animalLodSpec(lod);
   const b = new Builder(form, coatOf(form), length);
   const pivotOf = (part: BodyPart): Vec3 => (part === 'tail' ? skeleton.tailBase : part === 'head' ? skeleton.neckBase : [0, 0, 0]);
-  skin(b, thinSpine(skeleton.spine, spec.spineStep), spec.ringSides, pivotOf);
-  for (const leg of skeleton.legs) legTube(b, leg, spec, length);
+  skin(b, thinSpine(skeleton.spine, spec.spineStep), spec, pivotOf);
+  for (const leg of skeleton.legs) legTube(b, leg, spec);
   for (const spike of skeleton.spikes) {
-    if (spec.spikes === 'none' || (spec.spikes === 'big' && (spike.kind === 'ear' || spike.kind === 'antenna'))) continue;
-    spikeTube(b, spike, spec.spikeSides, pivotOf(spike.part));
+    if (spec.spikes === 'none' || (spec.spikes === 'big' && spike.kind === 'antenna')) continue;
+    spikeTube(b, spike, spec, pivotOf(spike.part));
   }
-  if (spec.eyes) for (const e of skeleton.eyes) eye(b, e.centre, e.radius, lod === 0, skeleton.neckBase);
+  if (spec.eyes !== 'none') for (const e of skeleton.eyes) eye(b, e, spec.eyes === 'full', skeleton.neckBase);
   return b.build();
 }
 
@@ -219,79 +300,35 @@ function thinSpine(spine: readonly SpineNode[], step: number): SpineNode[] {
   return spine.filter((s, i) => i === 0 || i === spine.length - 1 || s.part === 'head' || i % step === 0);
 }
 
-/** The body's skin: a ring round each spine node, joined into a tube and closed at both ends. */
-function skin(b: Builder, spine: readonly SpineNode[], sides: number, pivotOf: (part: BodyPart) => Vec3): void {
+/** The body's skin: a ring round each spine node, one smooth tube domed at both ends. */
+function skin(b: Builder, spine: readonly SpineNode[], spec: AnimalLodSpec, pivotOf: (part: BodyPart) => Vec3): void {
+  const sides = spec.ringSides;
   const rings: Vec3[][] = [];
-  let side: Vec3 = [1, 0, 0];
   for (let i = 0; i < spine.length; i++) {
     const s = spine[i]!;
     const prev = spine[Math.max(0, i - 1)]!.p;
     const next = spine[Math.min(spine.length - 1, i + 1)]!.p;
     const t = normalize(sub(next, prev));
     // The ring's up is the world's up made square to the spine (the spine never points straight up).
-    const upRaw: Vec3 = [0, 1, 0];
-    side = normalize(cross(upRaw, t));
+    let side = normalize(cross([0, 1, 0], t));
     if (!Number.isFinite(side[0])) side = [1, 0, 0];
     const up = normalize(cross(t, side));
     const ring: Vec3[] = [];
     for (let k = 0; k < sides; k++) {
-      // Start at the top so the flat-shaded facets sit symmetrically.
-      const a = (k / sides) * Math.PI * 2 + Math.PI / sides;
-      const cx = Math.sin(a) * s.rx;
-      const cy = Math.cos(a) * s.ry;
-      ring.push(add(add(s.p, side, cx), up, cy));
+      const a = (k / sides) * Math.PI * 2;
+      ring.push(add(add(s.p, side, Math.sin(a) * s.rx), up, Math.cos(a) * s.ry));
     }
     rings.push(ring);
   }
-  const rigs = spine.map((s) => rigOf(s.part, s.w));
-  const pivots = spine.map((s) => pivotOf(s.part));
-  for (let i = 0; i + 1 < rings.length; i++) {
-    const r0 = rings[i]!;
-    const r1 = rings[i + 1]!;
-    for (let k = 0; k < sides; k++) {
-      const k1 = (k + 1) % sides;
-      const a = r0[k]!;
-      const c = r1[k]!;
-      const d = r1[k1]!;
-      const e = r0[k1]!;
-      const patterned = spine[i]!.part !== 'head' || spine[i + 1]!.part !== 'head';
-      b.tri(a, c, d, b.coatColor(centroid(a, c, d), faceNormal(a, c, d), patterned), [rigs[i]!, rigs[i + 1]!, rigs[i + 1]!], [pivots[i]!, pivots[i + 1]!, pivots[i + 1]!]);
-      b.tri(a, d, e, b.coatColor(centroid(a, d, e), faceNormal(a, d, e), patterned), [rigs[i]!, rigs[i + 1]!, rigs[i]!], [pivots[i]!, pivots[i + 1]!, pivots[i]!]);
-    }
-  }
-  // Caps: a point a little beyond each end.
-  for (const end of [0, rings.length - 1]) {
-    const s = spine[end]!;
-    const inner = spine[end === 0 ? 1 : end - 1]!.p;
-    const tip = add(s.p, normalize(sub(s.p, inner)), Math.min(s.rx, s.ry) * 0.6);
-    const ring = rings[end]!;
-    for (let k = 0; k < sides; k++) {
-      const k1 = (k + 1) % sides;
-      const [a, c] = end === 0 ? [ring[k]!, ring[k1]!] : [ring[k1]!, ring[k]!];
-      b.tri(a, c, tip, b.coatColor(centroid(a, c, tip), faceNormal(a, c, tip), false), [rigs[end]!, rigs[end]!, rigs[end]!], [pivots[end]!, pivots[end]!, pivots[end]!]);
-    }
-  }
+  const info = spine.map((s) => ({ rig: rigOf(s.part, s.w), pivot: pivotOf(s.part), coat: 1 }));
+  const first = spine[0]!;
+  const last = spine[spine.length - 1]!;
+  b.surface(rings, info, [Math.min(first.rx, first.ry) * 0.9, Math.min(last.rx, last.ry) * 0.9], spec.domeSteps, (_p, n) => countershade(b.coat, n));
 }
 
-/** A tapering tube along `points` (radius `radii` at each), `sides` round, closed at its far end; `color` per face from its share along it. */
-function tube(
-  b: Builder,
-  points: readonly Vec3[],
-  radii: readonly number[],
-  sides: number,
-  color: (t: number, c: Vec3, n: Vec3) => Rgb,
-  rig: (p: Vec3, t: number) => number[],
-  pivot: Vec3,
-  flat = 1,
-): void {
+/** Rings of a tube along `points` with radii `radii`, `sides` round (squashed across by `flat`). */
+function tubeRings(points: readonly Vec3[], radii: readonly number[], sides: number, flat = 1): Vec3[][] {
   const rings: Vec3[][] = [];
-  const ts: number[] = [];
-  let total = 0;
-  const lengths = [0];
-  for (let i = 1; i < points.length; i++) {
-    total += Math.hypot(...sub(points[i]!, points[i - 1]!));
-    lengths.push(total);
-  }
   let ref: Vec3 = [0, 1, 0];
   for (let i = 0; i < points.length; i++) {
     const prev = points[Math.max(0, i - 1)]!;
@@ -306,128 +343,123 @@ function tube(
       ring.push(add(add(points[i]!, u, Math.cos(a) * radii[i]!), v, Math.sin(a) * radii[i]! * flat));
     }
     rings.push(ring);
-    ts.push(total > 0 ? lengths[i]! / total : 0);
   }
-  const rigs = rings.map((r, i) => r.map((p) => rig(p, ts[i]!)));
-  for (let i = 0; i + 1 < rings.length; i++) {
-    for (let k = 0; k < sides; k++) {
-      const k1 = (k + 1) % sides;
-      const a = rings[i]![k]!;
-      const c = rings[i + 1]![k]!;
-      const d = rings[i + 1]![k1]!;
-      const e = rings[i]![k1]!;
-      const tm = (ts[i]! + ts[i + 1]!) / 2;
-      b.tri(a, d, c, color(tm, centroid(a, d, c), faceNormal(a, d, c)), [rigs[i]![k]!, rigs[i + 1]![k1]!, rigs[i + 1]![k]!], [pivot, pivot, pivot]);
-      b.tri(a, e, d, color(tm, centroid(a, e, d), faceNormal(a, e, d)), [rigs[i]![k]!, rigs[i]![k1]!, rigs[i + 1]![k1]!], [pivot, pivot, pivot]);
-    }
-  }
-  // The far end closed with a fan to its centre.
-  const last = rings.length - 1;
-  const tip = points[last]!;
-  const tipRig = rig(tip, 1);
-  for (let k = 0; k < sides; k++) {
-    const k1 = (k + 1) % sides;
-    const a = rings[last]![k]!;
-    const c = rings[last]![k1]!;
-    b.tri(a, c, tip, color(1, centroid(a, c, tip), faceNormal(a, c, tip)), [rigs[last]![k]!, rigs[last]![k1]!, tipRig], [pivot, pivot, pivot]);
-  }
+  return rings;
 }
 
-/** A leg: a tube from the hip to the toe (or straight, at the far level), the coat on the upper leg, darker below and the accent at the foot. */
-function legTube(b: Builder, leg: Leg, spec: AnimalLodSpec, length: number): void {
+/** Shares along a polyline, 0 at its start to 1 at its end. */
+function along(points: readonly Vec3[]): number[] {
+  const d = [0];
+  for (let i = 1; i < points.length; i++) d.push(d[i - 1]! + Math.hypot(...sub(points[i]!, points[i - 1]!)));
+  const total = d[d.length - 1]! || 1;
+  return d.map((x) => x / total);
+}
+
+/** A leg: a tube from the hip to a round paw, the coat on the upper leg, darker below, the accent on the paw. */
+function legTube(b: Builder, leg: Leg, spec: AnimalLodSpec): void {
   const hip = leg.points[0]!;
   const points = spec.joints ? leg.points : [hip, leg.points[leg.points.length - 1]!];
   const radii = spec.joints ? leg.radii : [leg.radii[0]!, leg.radii[leg.radii.length - 1]!];
-  // The foot sits a little into the ground so it never shows a gap, and carries the hoof or claws.
-  const foot = points[points.length - 1]!;
-  const pts = [...points.slice(0, -1), [foot[0], Math.max(0, foot[1] - length * 0.005), foot[2]] as Vec3];
   const part = leg.swing === 'sprawl' ? RIG.sprawl : RIG.pendulum;
   const hipY = Math.max(1e-4, hip[1]);
-  const coat = b.coat;
-  tube(
-    b,
-    pts,
-    radii,
-    spec.legSides,
-    (t, c, n) => {
-      if (t > 0.85) return coat.accent;
-      const col = b.coatColor(c, n, t < 0.35);
-      const dark = 1 - 0.25 * smoothstep(0.3, 0.8, t);
-      return [col[0] * dark, col[1] * dark, col[2] * dark];
-    },
+  const shares = along(points);
+  const info = points.map((p, i) => ({
     // Weight: how far down the leg (the foot lifts most), from its height under the hip.
-    (p) => [part, leg.walk, leg.trot, leg.arm ? 0.5 : Math.min(1, Math.max(0, (hip[1] - p[1]) / hipY))],
-    hip,
-  );
-}
-
-/** A horn, ear, crest spine or antenna (ears flattened across). */
-function spikeTube(b: Builder, spike: Spike, sides: number, pivot: Vec3): void {
+    rig: [part, leg.walk, leg.trot, leg.arm ? 0.5 : Math.min(1, Math.max(0, (hip[1] - p[1]) / hipY))],
+    pivot: hip,
+    coat: shares[i]! < 0.4 ? 1 : 0,
+  }));
   const coat = b.coat;
-  const color = (t: number, c: Vec3, n: Vec3): Rgb => {
-    if (spike.kind === 'horn') return [coat.accent[0] * (1 - 0.25 * t), coat.accent[1] * (1 - 0.25 * t), coat.accent[2] * (1 - 0.25 * t)];
-    if (spike.kind === 'crest') return t > 0.5 ? coat.pattern : coat.back;
-    if (spike.kind === 'ear') return n[2] > 0.3 ? coat.belly : coat.back;
-    return b.coatColor(c, n, false);
+  const paw = radii[radii.length - 1]!;
+  b.surface(tubeRings(points, radii, spec.legSides), info, [0, paw], spec.domeSteps, (_p, n, ring) => {
+    if (ring >= points.length - 1) return coat.accent;
+    const t = shares[Math.max(0, Math.min(points.length - 1, ring))]!;
+    const col = countershade(coat, n);
+    const dark = 1 - 0.18 * smoothstep(0.35, 0.85, t);
+    return [col[0] * dark, col[1] * dark, col[2] * dark];
+  });
+}
+
+/** A horn, ear, crest spine or antenna (ears flattened across), domed at the tip; an antenna ends in a bobble. */
+function spikeTube(b: Builder, spike: Spike, spec: AnimalLodSpec, pivot: Vec3): void {
+  const coat = b.coat;
+  const shares = along(spike.points);
+  const color = (_p: Vec3, n: Vec3, ring: number): Rgb => {
+    const t = shares[Math.max(0, Math.min(shares.length - 1, ring))] ?? 1;
+    if (spike.kind === 'horn') return [coat.accent[0] * (1 - 0.2 * t), coat.accent[1] * (1 - 0.2 * t), coat.accent[2] * (1 - 0.2 * t)];
+    if (spike.kind === 'crest') return t > 0.4 ? coat.pattern : coat.back;
+    // An ear's inside (facing forward) is the belly's colour.
+    if (spike.kind === 'ear') return n[2] > 0.25 ? coat.belly : countershade(coat, n);
+    return countershade(coat, n);
   };
-  const part = spike.part;
-  tube(b, spike.points, spike.radii, sides, color, () => rigOf(part, spike.w), pivot, spike.kind === 'ear' ? 0.3 : 1);
+  const rig = rigOf(spike.part, spike.w);
+  const info = spike.points.map(() => ({ rig, pivot, coat: 0 }));
+  const tipR = spike.radii[spike.radii.length - 1]!;
+  b.surface(tubeRings(spike.points, spike.radii, spec.spikeSides, spike.kind === 'ear' ? 0.35 : 1), info, [0, tipR], spec.domeSteps, color);
+  if (spike.kind === 'antenna') b.sphere(spike.points[spike.points.length - 1]!, tipR * 3, spec.domeSteps > 1 ? 1 : 0, coat.pattern, rig, pivot);
 }
 
-/** An eye: an icosahedron (an octahedron further out), dark with the eye's colour on the faces looking out. */
-function eye(b: Builder, centre: Vec3, radius: number, fine: boolean, neckBase: Vec3): void {
-  const verts: Vec3[] = fine
-    ? icosahedron()
-    : [
-        [1, 0, 0],
-        [-1, 0, 0],
-        [0, 1, 0],
-        [0, -1, 0],
-        [0, 0, 1],
-        [0, 0, -1],
-      ];
-  const faces = fine ? ICO_FACES : OCTA_FACES;
+/**
+ * An eye: a white eyeball sunk into the head, with an iris of the eye's
+ * colour, a dark pupil and a highlight looking out of it (the big, bright
+ * eyes that read as cute); further out a dark eyeball with a light pupil dot.
+ */
+function eye(b: Builder, e: Eye, full: boolean, neckBase: Vec3): void {
   const rig = rigOf('head', 1);
-  const out = normalize([centre[0], 0, 0.6]);
-  for (const [i, j, k] of faces) {
-    const a = add(centre, verts[i]!, radius);
-    const c = add(centre, verts[j]!, radius);
-    const d = add(centre, verts[k]!, radius);
-    const n = faceNormal(a, c, d);
-    const lookingOut = n[0] * out[0] + n[2] * out[2] > 0.55;
-    const col: Rgb = lookingOut ? b.coat.eye : [0.04, 0.04, 0.05];
-    b.tri(a, c, d, col, [rig, rig, rig], [neckBase, neckBase, neckBase]);
+  const r = e.radius;
+  const out = e.look;
+  if (!full) {
+    b.sphere(e.centre, r, 0, [0.9, 0.9, 0.86], rig, neckBase);
+    b.sphere(add(e.centre, out, r * 0.9), r * 0.5, 0, [0.01, 0.01, 0.012], rig, neckBase, out, 0.35);
+    return;
   }
+  b.sphere(e.centre, r, 1, [0.9, 0.9, 0.86], rig, neckBase);
+  // Iris and pupil: lenses on the eyeball's front, each just proud of the one behind.
+  b.sphere(add(e.centre, out, r * 0.86), r * 0.64, 1, b.coat.eye, rig, neckBase, out, 0.3);
+  b.sphere(add(e.centre, out, r * 0.97), r * 0.36, 1, [0.01, 0.01, 0.012], rig, neckBase, out, 0.3);
+  // A highlight up and to the side of the pupil.
+  const up = normalize(sub([0, 1, 0], [out[0] * out[1], out[1] * out[1], out[2] * out[1]]));
+  b.sphere(add(add(e.centre, out, r * 1.04), up, r * 0.24), r * 0.13, 0, [1, 1, 1], rig, neckBase);
 }
 
-const OCTA_FACES: readonly (readonly [number, number, number])[] = [
-  [0, 2, 4],
-  [2, 1, 4],
-  [1, 3, 4],
-  [3, 0, 4],
-  [2, 0, 5],
-  [1, 2, 5],
-  [3, 1, 5],
-  [0, 3, 5],
-];
+// --- Icospheres ---
 
-function icosahedron(): Vec3[] {
+const icoCache = new Map<number, [Vec3, Vec3, Vec3][]>();
+
+/** The unit icosahedron's faces, each split into four `detail` times and pushed out onto the sphere. */
+export function icosphere(detail: number): [Vec3, Vec3, Vec3][] {
+  const cached = icoCache.get(detail);
+  if (cached) return cached;
   const t = (1 + Math.sqrt(5)) / 2;
-  const v: Vec3[] = [
-    [-1, t, 0],
-    [1, t, 0],
-    [-1, -t, 0],
-    [1, -t, 0],
-    [0, -1, t],
-    [0, 1, t],
-    [0, -1, -t],
-    [0, 1, -t],
-    [t, 0, -1],
-    [t, 0, 1],
-    [-t, 0, -1],
-    [-t, 0, 1],
-  ];
-  return v.map(normalize);
+  const v: Vec3[] = (
+    [
+      [-1, t, 0],
+      [1, t, 0],
+      [-1, -t, 0],
+      [1, -t, 0],
+      [0, -1, t],
+      [0, 1, t],
+      [0, -1, -t],
+      [0, 1, -t],
+      [t, 0, -1],
+      [t, 0, 1],
+      [-t, 0, -1],
+      [-t, 0, 1],
+    ] as Vec3[]
+  ).map(normalize);
+  let faces: [Vec3, Vec3, Vec3][] = ICO_FACES.map(([a, b, c]) => [v[a]!, v[b]!, v[c]!]);
+  for (let d = 0; d < detail; d++) {
+    const next: [Vec3, Vec3, Vec3][] = [];
+    for (const [a, b, c] of faces) {
+      const ab = normalize(add(a, b));
+      const bc = normalize(add(b, c));
+      const ca = normalize(add(c, a));
+      next.push([a, ab, ca], [ab, b, bc], [ca, bc, c], [ab, bc, ca]);
+    }
+    faces = next;
+  }
+  icoCache.set(detail, faces);
+  return faces;
 }
 
 const ICO_FACES: readonly (readonly [number, number, number])[] = [
