@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { detailedTerrain } from '../gen/noise';
+import { surfaceNoise } from '../gen/craters';
 import { growsPlants, planPlants, type GroundRadius, type PlantPlan } from '../gen/plants';
 import { RELIEF_SCALE, globeRadius } from '../planet/frame';
 import { isGas, type PlanetConfig } from '../world/Planet';
@@ -30,7 +30,7 @@ export function plantSetup(config: PlanetConfig): PlantSetup | null {
     peak: peakRadius(R, style, RELIEF_SCALE),
   });
   if (!plan) return null;
-  const sample = terrainSampler(R, seed, style, { noise: detailedTerrain, reliefScale: RELIEF_SCALE, seaFloor: style.sea !== null });
+  const sample = terrainSampler(R, seed, style, { noise: surfaceNoise(config, true), reliefScale: RELIEF_SCALE, seaFloor: style.sea !== null });
   const color = new THREE.Color();
   return { plan, ground: (dir) => sample(dir, color) };
 }

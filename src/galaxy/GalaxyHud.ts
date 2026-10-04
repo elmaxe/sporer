@@ -129,7 +129,7 @@ export class GalaxyHud implements Entity {
 
   /** "G main sequence star", or for a rogue planet "Rogue planet · ice world · Earth-sized · …". */
   private describe(ref: StarRef): string {
-    if (!isRogue(ref)) return describeStars(ref.stars);
+    if (!isRogue(ref)) return describeStars(ref.stars) + (ref.young ? ' · young, in a dusty disc' : '');
     let line = this.rogueLines.get(ref.id);
     if (!line) {
       const planet = generateSystem(ref).planets[0]!;

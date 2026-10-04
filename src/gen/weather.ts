@@ -7,9 +7,10 @@ import type { Vec3Tuple } from './starActivity';
 /*
  * Weather: clouds, storms, rain and lightning on bodies whose climate
  * (step 12) supports it. Pure data and maths; the views are
- * world/weatherLook.ts (the cloud layer, in both the system view and low
- * orbit) and planet/Weather.ts (rain, lightning bolts and their light, low
- * orbit only).
+ * world/weatherLook.ts (the clouds, in both the system view and low orbit:
+ * a sheet, and on water and methane worlds puffy clusters from
+ * gen/cumulus.ts) and planet/Weather.ts (rain, lightning bolts and their
+ * light, low orbit only).
  *
  * Four kinds, from the climate:
  * - water: worlds with liquid water (or frozen water under breathable air):

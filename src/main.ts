@@ -4,6 +4,7 @@ import { Physics } from './physics/Physics';
 import { generateGalaxy, solRef, systemRef } from './gen/galaxy';
 import { loadSurfaceMaps } from './world/surfaceMaps';
 import { geyserKind } from './gen/geysers';
+import { meteorShowers, nextShowerPeak } from './gen/meteors';
 import { volcanicLightning, weatherKind } from './gen/weather';
 import { parseSeed } from './gen/rng';
 import { findHomeSystem, generateSystem } from './gen/system';
@@ -16,7 +17,6 @@ import { GameMenu } from './ui/GameMenu';
 import { FpsCounter } from './ui/FpsCounter';
 import { ViewFreezeControl } from './ui/ViewFreezeControl';
 import { ItemBar } from './ui/ItemBar';
-import { PlantIcons } from './ui/plantIcons';
 import { GraphicsSettingsControl, loadGraphicsSettings } from './ui/GraphicsSettings';
 import { installConsoleLog } from './debug/consoleLog';
 import { DebugDumpControl } from './debug/DebugDump';
@@ -54,7 +54,7 @@ async function main(): Promise<void> {
   game.add(new FpsCounter());
   const freeze = game.add(new ViewFreezeControl(game));
   game.add(new TouchControls(game));
-  game.add(new ItemBar(levels, game.input, levels.tooltip, new PlantIcons(game.renderer)));
+  game.add(new ItemBar(levels, game.input, levels.tooltip, levels.icons.plants));
   const debugDump = game.add(new DebugDumpControl(game, levels, consoleLog, debug));
 
   document.getElementById('loading')?.remove();
@@ -63,7 +63,7 @@ async function main(): Promise<void> {
   // Handles for poking at the game from the browser console / automation.
   // ship / world / system follow the current system level, planet the planet level (or null).
   if (import.meta.env.DEV) {
-    Object.assign(window, { game, galaxy, levels, audio, menu, debugDump, freeze, generateSystem, geyserKind, weatherKind, volcanicLightning });
+    Object.assign(window, { game, galaxy, levels, audio, menu, debugDump, freeze, generateSystem, geyserKind, weatherKind, volcanicLightning, meteorShowers, nextShowerPeak });
     Object.defineProperties(window, {
       ship: { get: () => levels.systemLevel.ship, configurable: true },
       world: { get: () => levels.systemLevel.world, configurable: true },

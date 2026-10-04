@@ -11,6 +11,9 @@ import { bodyLabLink } from '../lab/bodyLink';
 import { describeGeysers, geyserActivity } from '../gen/geysers';
 import { describeWeather } from '../gen/weather';
 import { CometActivity } from '../planet/CometActivity';
+import { Meteors } from '../planet/Meteors';
+import { atmosphereLook } from '../gen/atmosphere';
+import { GIANT_ESCAPE_VELOCITY, METEOR_MIN_PRESSURE, describeShower, meteorShowers } from '../gen/meteors';
 import { Geysers } from '../planet/Geysers';
 import { Weather } from '../planet/Weather';
 import { LavaEruptions } from '../planet/LavaEruptions';
@@ -23,12 +26,16 @@ import { PlanetLights } from '../planet/PlanetLights';
 import { PlanetMap } from '../planet/PlanetMap';
 import { PlanetPicker } from '../planet/PlanetPicker';
 import { PlanetShip } from '../planet/PlanetShip';
+import { SpeciesTab, type SpeciesIcons } from '../planet/SpeciesTab';
+import { Radar } from '../radar/Radar';
 import { maxViewDistance, travelScale } from '../planet/frame';
 import { OrbitCamera, type OrbitParams } from '../player/OrbitCamera';
 import { flightAltitude, maxLookUpAt, minPitchAt, zoomCurveParams, zoomFraction } from '../player/zoomCurve';
 import type { SurfaceChanges } from '../surface/changes';
 import { PlantTooltip } from '../surface/PlantTooltip';
 import { plantSetup } from '../surface/plantSetup';
+import { animalSetup } from '../surface/animalSetup';
+import { SurfaceAnimals } from '../surface/SurfaceAnimals';
 import { SurfaceEntities } from '../surface/SurfaceEntities';
 import type { Tooltip } from '../ui/Tooltip';
 import { cometParams } from '../world/Comet';
@@ -44,7 +51,7 @@ import { volcanoParams } from '../combat/volcano';
 import { Volcanoes } from '../planet/Volcanoes';
 import { hashSeed } from '../gen/rng';
 import { isGas } from '../world/Planet';
-import type { ItemId, ItemStatus, ItemUser } from '../combat/items';
+import type { ItemId, ItemStatus, ItemSwitches, ItemUser } from '../combat/items';
 import { bodyKey } from '../combat/busted';
 import { CargoBeam } from '../cargo/CargoBeam';
 import { bodyGravity } from '../cargo/beam';
@@ -82,6 +89,8 @@ const WATCH_EASE = 0.8;
 const WATCH_LIMIT = 0.45;
 /** The HUD's line under the name once the body is busted. */
 const BUSTED_DETAIL = 'Blown apart by a planet buster: a field of rubble and dust';
+/** Over a giant's cloud tops (no atmosphere shell), meteors burn up to this many radii from the centre. */
+const GIANT_METEOR_TOP = 1.06;
 /** Bodies in the sky are drawn at least this many pixels in radius. */
 const SKY_MIN_PIXELS = 1.5;
 /** The sky camera's clipping range, in system units. */
@@ -113,6 +122,8 @@ export class PlanetLevel extends Level implements ItemUser {
   geysers: Geysers | null = null;
   /** Bodies with weather only: rain, lightning bolts and their light (the clouds are the globe's). */
   weather: Weather | null = null;
+  /** Bodies whose orbit crosses a comet's dust stream: meteors (or impact flashes) while it does (not once busted). */
+  meteors: Meteors | null = null;
   /** Comets only: their jets, coma and tails, as active as the comet is close to the star. */
   comet: CometActivity | null = null;
   /** A comet's orbit, which bends its dust tail back. */
@@ -121,6 +132,10 @@ export class PlanetLevel extends Level implements ItemUser {
   private readonly now = new THREE.Vector3();
   /** Habitable bodies (T1 and up) only: plants standing on the ground (see gen/plants.ts). */
   plants: SurfaceEntities | null = null;
+  /** The animals roaming it (gen/animals.ts), where plants grow. */
+  animals: SurfaceAnimals | null = null;
+  /** The radar, tracking a species of those animals picked on the map's Species tab (not once busted). */
+  radar: Radar | null = null;
   /** Plants the player set down here that took root (not once busted). */
   plantings: Plantings | null = null;
   private plantTooltip: PlantTooltip | null = null;
@@ -169,6 +184,10 @@ export class PlanetLevel extends Level implements ItemUser {
     private readonly onBust: (blastTime: number) => void,
     /** The ship's cargo hold (kept by the scene manager for the whole game). */
     inventory: Inventory,
+    /** Which switch items are on: the radar tracks only while it is (kept by the scene manager for the whole game). */
+    private readonly switches: ItemSwitches,
+    /** Pictures of species for the map's Species tab (none in tests). */
+    icons: SpeciesIcons | null = null,
   ) {
     super();
     this.frame = this.add(new PlanetFrame(body, system.world.time, debug));
@@ -288,9 +307,15 @@ export class PlanetLevel extends Level implements ItemUser {
     const plantsSetup = busted ? null : plantSetup(config);
     this.plants = plantsSetup ? this.add(new SurfaceEntities(this.scene, plantsSetup.plan, plantsSetup.ground, camera, changes, debug)) : null;
     this.buryPlants();
+    const animalsSetup = busted ? null : animalSetup(config, plantsSetup);
+    this.animals = animalsSetup ? this.add(new SurfaceAnimals(this.scene, animalsSetup.plan, animalsSetup.ground, camera, this.frame, debug)) : null;
+    // After the ship and the camera: its waves spread round where the ship is drawn this frame.
+    this.radar = animalsSetup
+      ? this.add(new Radar(this.scene, animalsSetup.plan, animalsSetup.ground, this.ship, camera, this.frame, sfx, () => switches.isOn('radar'), debug))
+      : null;
     this.plantings = busted ? null : this.add(new Plantings(this.scene, changes));
     this.plantTooltip = this.plantings
-      ? this.add(new PlantTooltip(camera, input, this.plants, this.plantings, tooltip, (ray, out) => globe.groundHit(ray, out)))
+      ? this.add(new PlantTooltip(camera, input, this.plants, this.plantings, tooltip, this.animals, (ray, out) => globe.groundHit(ray, out)))
       : null;
     const events = { fire: (time: number) => this.fire(time), blast: () => this.blast(), done: () => this.settled() };
     this.buster = this.add(new PlanetBuster(this.scene, this.frame, camera, input, globe, this.ship.object, sfx, events, busted, debug));
@@ -352,8 +377,43 @@ export class PlanetLevel extends Level implements ItemUser {
           : config.shape
             ? describeShape(config.shape)
             : null;
-    this.hud = this.add(new PlanetHud(this.ship, `${body.name} · ${body.description}`, input, detail));
-    this.map = this.add(new PlanetMap(config, body.name, this.ship, globe, input, debug));
+    // Meteor showers where the body's orbit (a moon's: its planet's) crosses a comet's dust stream.
+    const heliocentric = body.parent?.config ?? config;
+    const showers =
+      config.shape || config.path || busted
+        ? []
+        : meteorShowers(
+            { orbit: heliocentric.orbit, escapeVelocity: climate?.escapeVelocity ?? GIANT_ESCAPE_VELOCITY, seed: config.seed },
+            system.data.comets,
+            system.data.habitableRadius,
+          );
+    const airless = config.type !== 'gas' && !(climate && climate.pressure >= METEOR_MIN_PRESSURE);
+    const look = climate && !airless ? atmosphereLook(climate, config.radius) : null;
+    this.meteors = showers.length
+      ? this.add(
+          new Meteors(
+            this.scene,
+            this.frame,
+            showers,
+            heliocentric.orbit,
+            airless,
+            globe.radius,
+            look?.top ?? GIANT_METEOR_TOP,
+            globe.groundHeight,
+            camera,
+            globe.sun,
+            this.ship.object,
+            debug,
+          ),
+        )
+      : null;
+    const showerLine = () =>
+      this.meteors?.shower
+        ? describeShower(this.meteors.shower, airless) + (this.meteors.radiantUp ? '' : ' (radiant below the horizon)')
+        : '';
+    this.hud = this.add(new PlanetHud(this.ship, `${body.name} · ${body.description}`, input, detail, showerLine));
+    const species = new SpeciesTab(bodyKey(config), animalsSetup?.plan.species ?? [], plantsSetup?.plan.species ?? [], this.radar, icons, () => switches.isOn('radar'));
+    this.map = this.add(new PlanetMap(config, body.name, this.ship, globe, input, debug, species));
     debug
       .folder('Planet lab')
       ?.add({ open: () => window.open(this.labLink(), '_blank') }, 'open')
@@ -396,6 +456,7 @@ export class PlanetLevel extends Level implements ItemUser {
   }
 
   status(item: ItemId): ItemStatus {
+    if (item === 'radar') return this.radarStatus();
     if (item === 'planetBuster') return this.buster.status();
     if (item === 'volcanoBomb') return this.volcanoBomb.status();
     if (this.cargo) return this.cargo.status(item);
@@ -409,6 +470,21 @@ export class PlanetLevel extends Level implements ItemUser {
     if (item === 'planetBuster') this.buster.arm(true);
     if (item === 'volcanoBomb') this.volcanoBomb.arm(true);
     this.cargo?.arm(item === 'planetBuster' || item === 'volcanoBomb' ? null : item);
+  }
+
+  /** The radar's line above the item bar while it's on (a switch: always available). */
+  private radarStatus(): ItemStatus {
+    const radar = this.radar;
+    if (!this.switches.isOn('radar')) return { available: true, hint: '' };
+    if (!radar) return { available: true, hint: 'Radar: no animals live here' };
+    const tracking = radar.tracking;
+    if (tracking === null) return { available: true, hint: "Radar on: pick an animal on the map's Species tab to track it" };
+    const name = radar.plan.species[tracking]!.name;
+    const state = radar.state;
+    return {
+      available: true,
+      hint: state === 'tracking' ? `Radar: the nearest ${name} is ${radar.proximity}` : state === 'none' ? `Radar: no ${name} found here` : `Radar: searching for ${name}…`,
+    };
   }
 
   /** Why a volcano bomb can't be fired here now, or null if it can. */
@@ -455,8 +531,9 @@ export class PlanetLevel extends Level implements ItemUser {
   private blast(): void {
     this.globe.bust(this.radius * DEBRIS_REACH);
     this.cargo?.clear(false);
-    for (const entity of [this.eruptions, this.geysers, this.weather, this.comet, this.plants, this.cargo, this.plantings, this.volcanoes]) if (entity) this.remove(entity);
-    this.eruptions = this.geysers = this.weather = this.comet = this.plants = this.cargo = this.plantings = null;
+    for (const entity of [this.eruptions, this.geysers, this.weather, this.comet, this.plants, this.animals, this.radar, this.cargo, this.plantings, this.volcanoes, this.meteors])
+      if (entity) this.remove(entity);
+    this.eruptions = this.geysers = this.weather = this.comet = this.plants = this.animals = this.radar = this.cargo = this.plantings = this.meteors = null;
     this.volcanoes = null;
     if (this.plantTooltip) {
       this.plantTooltip.deactivate();

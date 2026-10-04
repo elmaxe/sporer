@@ -40,6 +40,7 @@ export class GalaxyMap implements Entity {
   /** ...and how far its dots have moved there, 0–1. */
   private readonly converge = { value: 0 };
   private readonly cameraLocal = new THREE.Vector3();
+  private readonly centre = new THREE.Vector3();
   private readonly inverse = new THREE.Matrix4();
   private time = 0;
 
@@ -241,6 +242,16 @@ export class GalaxyMap implements Entity {
     const radii = new THREE.Vector3(g.radii.x, g.radii.y, g.radii.z);
     const glow = createGlowVolume(radii, g.color, g.faceOnOpacity, g.maxBrightness, GLOW_NEAR);
     glow.renderOrder = -1;
+    const range = g.zoomedOut;
+    if (range) {
+      // The glow is centred on the galaxy's origin, so the camera's distance from it is its distance from the centre.
+      const brightness = glow.material.uniforms.maxBrightness!;
+      const at = new THREE.Vector3();
+      glow.onBeforeRender = (_renderer, _scene, camera) => {
+        const d = at.setFromMatrixPosition(camera.matrixWorld).distanceTo(this.parent.getWorldPosition(this.centre));
+        brightness.value = g.maxBrightness * THREE.MathUtils.smoothstep(d, range[0], range[1]);
+      };
+    }
     this.parent.add(glow);
     this.glows.push(glow);
   }

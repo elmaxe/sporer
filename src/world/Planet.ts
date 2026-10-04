@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { applySeaGlint } from './seaWaves';
 import type { Entity } from '../core/Entity';
 import { RAPIER, type Physics } from '../physics/Physics';
 import { keplerPosition, orbitPosition, type KeplerOrbit, type Orbit } from '../gen/orbit';
@@ -15,7 +16,7 @@ import type { SizeClass } from '../gen/planets';
 import { createGasGeometry, createRings, createTerrainGeometry, terrainSampler } from './planetGeometry';
 import { createWeatherLook, type WeatherLook } from './weatherLook';
 import { PLANET_SCALE, RELIEF_SCALE, globeRadius } from '../planet/frame';
-import { detailedTerrain } from '../gen/noise';
+import { surfaceNoise } from '../gen/craters';
 import { VolcanoShape, eruptionStrength, volcanoGrowth, type VolcanoSite } from '../combat/volcano';
 import { VolcanoMesh } from './volcanoMesh';
 import { createGlowTexture } from './glowTexture';
@@ -66,6 +67,16 @@ export const GAS_SEGMENTS = 22;
 export const REAL_SEGMENTS = 40;
 /** Lava bodies' terrain: finer, since their seas' glow is worked out per vertex (1728 triangles). */
 export const LAVA_SEGMENTS = 12;
+/** Cratered bodies' terrain: fine enough for the biggest craters to read as bowls (6144 triangles). */
+export const CRATER_SEGMENTS = 32;
+
+/** Cube sphere segments of a solid body's terrain in the system view (`lava`: it has a lava sea). */
+export function terrainSegments(config: PlanetConfig, lava: boolean): number {
+  if (realSurface(config.seed)) return REAL_SEGMENTS;
+  if (lava) return LAVA_SEGMENTS;
+  return (config.style.craters ?? 0) > 0 ? CRATER_SEGMENTS : TERRAIN_SEGMENTS;
+}
+
 /** A vent's glow in the system view, radians (wider than up close, so it shows at that size). */
 export const COARSE_VENT_RADIUS = 0.15;
 /** Cube sphere segments of the system view's cloud layers (4800 triangles; the drift is worked out per vertex). */
@@ -163,11 +174,13 @@ export class Planet implements Entity, CelestialBody {
     this.surface = new THREE.Mesh(
       gas
         ? createGasGeometry(radius, seed, config.bands, GAS_SEGMENTS, config.size === 'iceGiant')
-        : createTerrainGeometry(radius, seed, style, { segments: realSurface(seed) ? REAL_SEGMENTS : this.lava ? LAVA_SEGMENTS : TERRAIN_SEGMENTS, shape: config.shape }),
-      new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: !gas, roughness: 0.9 }),
+        : createTerrainGeometry(radius, seed, style, { segments: terrainSegments(config, this.lava !== null), noise: surfaceNoise(config, false), shape: config.shape }),
+      new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 }),
     );
     // Lava seas glow on the terrain's own flat sea.
     this.lava?.paintTerrain(this.surface.material, radius);
+    // Water seas are as glossy as low orbit's from afar, so the sun's glint carries across the zoom.
+    applySeaGlint(this.surface.material, config, radius);
     this.gas = createGasLook(config);
     this.gas?.apply(this.surface.material);
     // Clouds turn with the ground; the same layer as low orbit's, in planet radii.
@@ -264,8 +277,8 @@ export class Planet implements Entity, CelestialBody {
     // Its shape comes from low orbit's ground, in planet units, exactly as there.
     const R = globeRadius(config.radius);
     const sea = config.style.sea !== null;
-    const near = terrainSampler(R, config.seed, config.style, { noise: detailedTerrain, reliefScale: RELIEF_SCALE, seaFloor: sea, shape: config.shape });
-    const paint = terrainSampler(config.radius, config.seed, config.style, { shape: config.shape });
+    const near = terrainSampler(R, config.seed, config.style, { noise: surfaceNoise(config, true), reliefScale: RELIEF_SCALE, seaFloor: sea, shape: config.shape });
+    const paint = terrainSampler(config.radius, config.seed, config.style, { noise: surfaceNoise(config, false), shape: config.shape });
     const color = new THREE.Color();
     const centre = new THREE.Vector3(site.x, site.y, site.z).normalize();
     const shape = new VolcanoShape(site, R, near(centre, color), sea ? R : null);

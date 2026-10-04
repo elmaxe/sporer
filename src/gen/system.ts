@@ -1,6 +1,7 @@
 import { flatTilt, type Quat } from './galactic';
 import { BELT_MARGIN, generateBelts, reserveMainBelt, wantsMainBelt, type BeltData } from './belts';
 import { generateComets, type CometData } from './comets';
+import { generateDebrisDisc, generateProtoplanetaryDisc, type DiscContext, type DustDiscData, type DustGap, type DustRing, type FormingPlanet } from './discs';
 import { atmosphereTint, generateClimate, type ClimateData } from './climate';
 import type { GalaxyData, StarRef } from './galaxy';
 import type { NebulaData } from './nebulas';
@@ -26,7 +27,7 @@ import {
   type SizeClass,
 } from './planets';
 import { Rng } from './rng';
-import { isSol, solSystem } from './sol';
+import { isSol, SOL_HABITABLE_RADIUS, solOrbit, solSystem } from './sol';
 import {
   ROGUE_HEAT,
   ROGUE_MOON_WEIGHTS,
@@ -129,6 +130,8 @@ export interface SystemData {
   nebula: NebulaData | null;
   /** Asteroid belts, outer icy belts and Trojan swarms, with their named asteroids (see gen/belts.ts). */
   belts: BeltData[];
+  /** A young star's protoplanetary disc, a mature system's faint debris disc, or none (see gen/discs.ts). */
+  dust: DustDiscData | null;
 }
 
 /** G-class period at the reference distance; other orbits follow Kepler's third law. */
@@ -139,6 +142,7 @@ const REFERENCE_PERIOD = 50;
 export function generateSystem(ref: StarRef): SystemData {
   if (isSol(ref)) return solSystem(ref);
   if (isRogue(ref)) return generateRogueSystem(ref);
+  if (ref.young) return generateYoungSystem(ref);
   const rng = new Rng(ref.seed);
   const stars = placeStars(rng.fork('stars'), ref.stars);
   const totalMass = ref.stars.reduce((m, s) => m + s.mass, 0);
@@ -268,6 +272,12 @@ export function generateSystem(ref: StarRef): SystemData {
     period: (r) => keplerPeriod(r, totalMass),
   });
 
+  // Own stream: a faint debris disc along the planets' plane in some systems.
+  let extent = starZone;
+  for (const p of planets) extent = Math.max(extent, p.orbit.radius + p.extent);
+  for (const b of belts) extent = Math.max(extent, b.outer);
+  const dust = generateDebrisDisc(rng.fork('dust'), discContext(stars, starZone, habitableRadius), extent);
+
   return {
     id: ref.id,
     name: ref.name,
@@ -280,6 +290,104 @@ export function generateSystem(ref: StarRef): SystemData {
     comets,
     nebula: ref.nebula ?? null,
     belts,
+    dust,
+  };
+}
+
+/** What a system's dust is generated from: real AU mapped as Sol's are, in units of its habitable radius. */
+export function discContext(stars: readonly StarData[], starZone: number, habitableRadius: number): DiscContext {
+  return { stars, starZone, habitableRadius, toSystem: (au) => (solOrbit(au) / SOL_HABITABLE_RADIUS) * habitableRadius };
+}
+
+/**
+ * A young star's system (roadmap step 29): the star wrapped in its
+ * protoplanetary disc, with one to three planets still forming in the gaps
+ * they've cleared: molten rocky bodies (a magma ocean under a thin crust)
+ * inside the snow line, young giants outside it. No moons, rings, belts or
+ * comets yet: the disc is all of them. See gen/discs.ts.
+ */
+export function generateYoungSystem(ref: StarRef): SystemData {
+  const rng = new Rng(ref.seed);
+  const stars = placeStars(rng.fork('stars'), ref.stars);
+  const totalMass = ref.stars.reduce((m, s) => m + s.mass, 0);
+  const totalLuminosity = ref.stars.reduce((l, s) => l + s.luminosity, 0);
+  const starZone = Math.max(...stars.map((s) => s.orbit.radius + s.radius));
+  const habitableRadius = clamp(140 * Math.sqrt(totalLuminosity), 60, 600);
+  const { disc, planets: forming } = generateProtoplanetaryDisc(rng.fork('disc'), discContext(stars, starZone, habitableRadius));
+  const planets: PlanetData[] = [];
+  const gaps: DustGap[] = [];
+  const rings: DustRing[] = [];
+  // The outer edge of the last gap's bright ring: the next gap starts beyond it.
+  let clear = disc.inner;
+  forming.forEach((f, i) => {
+    const planet = formingPlanet(rng.fork('planet', i), `${ref.name} ${romanNumeral(planets.length + 1)}`, f, habitableRadius, totalMass);
+    // Stylised: a rocky planet's real gap would be narrower than the planet is drawn, so every gap clears the planet.
+    const gap = disc.gaps[i]!;
+    gap.width = Math.max(gap.width, planet.radius * MIN_GAP_RADII);
+    const ring = disc.rings[i]!;
+    ring.at = Math.max(ring.at, gap.at + gap.width * 1.6);
+    ring.width = Math.max(ring.width, gap.width * 0.4);
+    // Gaps that would run into the last one's ring, or out of the disc, are left out (with their planets).
+    if (gap.at - gap.width < clear || ring.at + ring.width > disc.outer) return;
+    clear = ring.at + 2 * ring.width;
+    planets.push(planet);
+    gaps.push(gap);
+    rings.push(ring);
+  });
+  disc.gaps = gaps;
+  disc.rings = rings;
+  return {
+    id: ref.id,
+    name: ref.name,
+    seed: ref.seed,
+    stars,
+    planets,
+    starZone,
+    habitableRadius,
+    galacticTilt: flatTilt(rng.fork('galactic')),
+    comets: [],
+    nebula: ref.nebula ?? null,
+    belts: [],
+    dust: disc,
+  };
+}
+
+/** A forming planet's gap is at least this many of its radii either side of it. */
+export const MIN_GAP_RADII = 4;
+
+/** A planet forming in a young disc's gap: a molten rocky body or a young giant, with no moons or rings yet. */
+function formingPlanet(prng: Rng, name: string, f: FormingPlanet, habitableRadius: number, totalMass: number): PlanetData {
+  const size: SizeClass = f.giant ? 'gasGiant' : prng.weighted<SizeClass>([['small', 1], ['earth', 2], ['superEarth', 1]]);
+  const type: PlanetType = f.giant ? 'gas' : 'lava';
+  const radius = planetRadius(prng, size);
+  let bands: string[] | null = null;
+  let style: PlanetStyle;
+  if (type === 'gas') {
+    bands = gasBands(prng);
+    style = gasStyle(bands);
+  } else {
+    style = planetStyle(prng, 'lava');
+    // A magma ocean: mostly molten, a thin crust over the highest ground.
+    style.seaLevel = prng.range(0.15, 0.45);
+  }
+  const insolation = (habitableRadius / f.at) ** 2;
+  const climate = type === 'gas' ? null : generateClimate(prng.fork('climate'), { type, kind: size, radius, insolation });
+  return {
+    name,
+    type,
+    size,
+    radius,
+    seed: prng.int(0, 1_000_000),
+    spin: prng.range(0.05, 0.35) * prng.sign(),
+    orbit: { radius: f.at, period: keplerPeriod(f.at, totalMass), phase: prng.range(0, Math.PI * 2), inclination: prng.gaussian(0, 0.01) },
+    style,
+    bands,
+    atmosphere: climate ? atmosphereTint(prng.fork('climate', 'tint'), climate) : null,
+    climate,
+    rings: null,
+    moons: [],
+    extent: radius,
+    tilt: prng.gaussian(0, 0.2),
   };
 }
 
@@ -365,6 +473,7 @@ export function generateRogueSystem(ref: StarRef): SystemData {
     comets: [],
     belts: [],
     nebula: ref.nebula ?? null,
+    dust: null,
   };
 }
 
@@ -385,7 +494,7 @@ export function findHomeSystem(galaxy: GalaxyData): StarRef {
   for (const ref of galaxy.stars) {
     const [star, companion] = ref.stars;
     // The real Sol system is somewhere to visit, not where the game starts.
-    if (isSol(ref) || companion || star!.kind !== 'mainSequence' || !['G', 'K'].includes(star!.spectralClass)) continue;
+    if (isSol(ref) || ref.young || companion || star!.kind !== 'mainSequence' || !['G', 'K'].includes(star!.spectralClass)) continue;
     const d = Math.hypot(ref.position.x, ref.position.z) / galaxy.radius;
     if (d < 0.35 || d > 0.75) continue;
     const system = generateSystem(ref);

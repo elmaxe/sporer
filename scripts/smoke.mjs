@@ -2,7 +2,8 @@
 // Usage: npm run smoke [-- [options] [http://localhost:5173/]]   (dev server must be running)
 //   --only <sections>  run just these, comma-separated, in the usual order: core (flying, picking, system map,
 //                      living stars, comets, sky), galaxy (the galaxy loop), nebulas (every kind on the map
-//                      and from inside), rogues (fly to a rogue planet and down to it), audio, planet (the home planet
+//                      and from inside), rogues (fly to a rogue planet and down to it), dust (a young star's disc,
+//                      a debris disc, comet dust trails, meteor showers and impact flashes in low orbit), audio, planet (the home planet
 //                      loop, held zoom, seamless zooms), types (every planet type and geyser kind), lab, plants
 //                      (the plant lab), touch, cargo (the abduction beam and the hold), volcano (the volcano bomb), buster
 //                      (the planet buster, last: it blows up a moon of the home system)
@@ -16,7 +17,7 @@
 // it there), hovering + clicking the star targets it, the system map shows every planet and moon (hover, click to
 // fly, N folds it), and the galaxy loop works (scroll out to the galaxy, click the nearest star, travel, scroll in to
 // its system, where the ship flies in and hovers straight above the star with the camera over it; the galaxy shows distant
-// galaxies, twinkles, spins and draws binaries as two dots, and picking works while it's turned), a real click on the
+// galaxies, twinkles, spins, draws binaries as two dots and its arms' gas and haze, and picking works while it's turned), a real click on the
 // menu button starts audio and opens the menu (the game pauses; volume sliders and a planet lab link; its Save debug
 // dump opens the dump dialog, where typing a note doesn't reach the game and Save makes the JSON file with the
 // pictures and state, and Esc closes just the dialog; a real Esc closes the menu); then galaxy travel asks for its sound (and the zooms between levels for none), and M mutes. Then the planet loop (hover at
@@ -38,7 +39,7 @@
 // Plants: bodies of tier 1 and up have plants around the ship (none on tier 0 or gas giants), hovering one shows it in the
 // tooltip, the menu's Plants button turns them off and on, and a removed plant stays in the change list.
 // Weather: every body in the planet loop has the weather its climate says (or none), as clouds in the system view and
-// low orbit, with storms and flashes coming and going over time; the loop also visits an acid-deck (Venus-like, with
+// low orbit (water and methane worlds' as puffy clusters, some in view), with storms and flashes coming and going over time; the loop also visits an acid-deck (Venus-like, with
 // volcanic lightning), a methane (Titan-like) and a dusty (Mars-like) world. The menu's Weather toggle switches it.
 // Seamless zooms: through the galaxy and planet loops, every frame of every level transition records the crossfade
 // weight and canvas brightness; each transition must crossfade and never go black (screenshots mid-handover).
@@ -54,17 +55,22 @@
 // there; scrolled into, its "system" has no star but the galactic light, the HUD and URL say where it is, the ship
 // hovers above it and it isn't pitch black (system view and low orbit); the planet loop runs over it (no plants, no
 // star in the sky) and every zoom on the way crossfades and never goes black; FPS in its system.
+// Dust: a young star (a handful in the galaxy, most in nebulas) has a protoplanetary disc with its forming planets in its
+// gaps, named by the HUD and the galaxy map's tooltip; the disc lights the system view and, down at a forming planet,
+// low orbit's sky (hiding it changes both); the zooms crossfade. A debris disc and comet dust trails draw. In the home
+// system a planet crossing a comet's stream gets meteors at the shower's peak (and the HUD says so), and an airless moon
+// of it impact flashes.
 // Cargo beam: the item bar's Inventory tab (grey; the bar and its tooltips take the tab's colour) holds the beam;
 // over a forest on the home planet a real 1 arms it, holding the mouse on a tree beams it up (the ship stays) into the
 // hold (a stack with the plant's picture and count), letting go halfway drops it again, holding on bare ground fires
-// the beam there too (and the ship stays), sweeping it over the forest catches several plants, a real 2 selects the stack and
+// the beam there too (and the ship stays), sweeping it over the forest catches several plants, a real 3 selects the stack and
 // holding on the ground sets it down to take root; one dropped with a click falls from the ship (which stays), one set
 // down in the sea drowns; what was taken
 // and planted is still so after leaving and coming back; the cues abductStart, abductBeam, abductSuccess, exportBeam
 // and dropImpact are asked for.
 // Volcano bomb: pressing 2 in the system says where to use it; in low orbit over a solid planet a real 2 arms it and a
-// real click on the ground fires it: a volcano rises there (the ground under it is higher, the ship flies over it), the
-// cues go fire → rise, the bomb stays armed for another; over a gas giant it can't be used; the system view's globe
+// real click on the ground fires it: a volcano rises there (the ground under it is higher, the ship flies over it; its
+// cone is one chunk seen from afar and splits into finer ones next to it, like the terrain), the cues go fire → rise, the bomb stays armed for another; over a gas giant it can't be used; the system view's globe
 // shows it, it's still there (risen) when the planet is visited again, and on the globe after a trip to the galaxy.
 // Planet buster (last, as it leaves a moon of the home system busted): the item bar shows in the system with the
 // buster unusable (pressing 1 says where to use it); in low orbit over a moon, a real 1 arms it and a real click on the
@@ -76,7 +82,13 @@
 // and a game asteroid load, the panel works.
 // Plant lab (plants.html): every architecture grows and draws at every level of detail, each level cheaper than the
 // last, zooming out on one plant goes through the levels (the game's crossfade) and past the last one, the line-up and
-// the grove (the game's own plant system) draw, a game planet's plants load, the planet lab links to its plants.
+// the grove (the game's own plant system) draw, close up and as a whole planet, a game planet's plants load, the planet lab links to its plants.
+// Animals: in the animal lab every body plan draws at every level of detail, the specimen walks and grazes, zooming out goes
+// through the levels, the line-ups and herds draw, a game planet's animals load, the planet lab links to them; in the game a
+// herd roams near the ship on the home planet and the tooltip names an animal under the pointer; the planet map's Species
+// tab lists the planet's animals and plants with their pictures and counts the herds; a real click on that herd's species
+// picks it, but the radar stays quiet until the item bar's Radar switch is turned on (a real click): then waves round the
+// ship, close by, whole rings, the radarPing cue at its highest pitch; switched off it goes quiet again, and a second click on the species stops it.
 // Prints JSON with FPS, console errors and screenshot paths. Exit 1 on failure.
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -85,7 +97,7 @@ import { launch, sleep, StallError } from './lib/browser.mjs';
 
 const args = process.argv.slice(2);
 const option = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
-const SECTIONS = ['core', 'galaxy', 'nebulas', 'rogues', 'audio', 'planet', 'types', 'lab', 'plants', 'touch', 'cargo', 'volcano', 'buster'];
+const SECTIONS = ['core', 'galaxy', 'nebulas', 'rogues', 'dust', 'audio', 'planet', 'types', 'lab', 'plants', 'animals', 'touch', 'cargo', 'volcano', 'buster'];
 const only = option('--only')?.split(',');
 if (only?.some((name) => !SECTIONS.includes(name))) {
   console.error(`--only takes some of: ${SECTIONS.join(', ')}`);
@@ -134,9 +146,11 @@ const timer = setTimeout(() => {
 // Let the first frames draw (shader compiles, the sky's one-off bake) before timing anything.
 const started = await page.goto(url, READY, 60000);
 if (started) await drawFrames(20);
+/** The system the game starts in (the URL's, or the galaxy's home system); sections may leave it elsewhere. */
+const startId = started ? await evaluate(`system.id`) : null;
 
 const state = `({ speed: +ship.speed.toFixed(1), pos: ship.object.position.toArray().map((n) => +n.toFixed(1)) })`;
-let before, after, autopilot, pick, systemMap, sky, living, comet, belt, galaxyLoop, fps, audio, planetLoop, heldZoom, cometLoop, asteroidLoops, seamless, nebulas, rogues;
+let before, after, autopilot, pick, systemMap, sky, living, comet, belt, galaxyLoop, fps, audio, planetLoop, heldZoom, cometLoop, asteroidLoops, seamless, nebulas, rogues, dust;
 const planetTypes = [];
 let lab = null;
 let buster = null;
@@ -281,16 +295,19 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null, during = n
   r.weather = await evaluate(`planet.weather && new Promise((resolve) => {
     const look = planet.weather.look;
     const start = planet.frame.renderTime, wall = performance.now();
-    let storms = 0, flashes = 0, shafts = 0;
+    let storms = 0, flashes = 0, shafts = 0, puffs = 0;
     const clouds = planet.scene.getObjectByName('Clouds');
     (function f() {
       storms = Math.max(storms, look.shown.length);
+      puffs = Math.max(puffs, look.puffs[0] ? look.puffs[0].puffCount : 0);
       flashes = Math.max(flashes, look.flashCount);
       shafts = Math.max(shafts, planet.weather.shaftCount);
       // 4 s of the level's clock (bounded in wall time, should the clock stall).
       if (planet.frame.renderTime - start < 4 && performance.now() - wall < 20000) return requestAnimationFrame(f);
       resolve({ kind: look.data.kind, volcanic: look.data.volcanic, lightning: look.data.storms.some((s) => s.lightning > 0) || look.data.backgroundLightning > 0,
         storms, flashes, shafts, clouds: !!clouds && clouds.visible, systemView: !!__body.weather && __body.weather.data.kind === look.data.kind,
+        // Water and methane worlds' clouds are puffy clusters (gen/cumulus.ts), some of them in view.
+        puffy: !!look.cumulus, puffs,
         cloudRadius: +(look.data.cloudRadius / look.data.radius).toFixed(3) });
     })();
   })`);
@@ -442,6 +459,8 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null, during = n
         r.weather.volcanic === r.expectedWeather.volcanic &&
         r.weather.clouds &&
         r.weather.systemView &&
+        r.weather.puffy === (r.weather.kind === 'water' || r.weather.kind === 'methane') &&
+        (!r.weather.puffy || r.weather.puffs > 0) &&
         r.weather.cloudRadius > 1)) &&
     r.modeAfter === 'system' &&
     r.parkedAt === r.name &&
@@ -700,7 +719,7 @@ await section('core', async () => {
   return hovered && noManual && picked && skyOk && alive;
 });
 
-if (started && (runs('galaxy') || runs('nebulas') || runs('rogues') || runs('audio') || runs('planet'))) {
+if (started && (runs('galaxy') || runs('nebulas') || runs('rogues') || runs('dust') || runs('audio') || runs('planet'))) {
   // Seamless zooms: while a level transition runs, sample every drawn frame (after drawing, before it's shown):
   // the crossfade weight and the canvas brightness (mean over a sparse grid). Each transition is one segment,
   // from the level it left to the one it reached. Setting __seamless.freezeWhen to a mode stops the game once
@@ -763,6 +782,7 @@ await section('galaxy', async () => {
       stars: galaxy.stars.length,
       twinkle: level.map.points.material.uniforms.twinkle.value,
       twinkleTime: level.map.points.material.uniforms.time.value,
+      dust: level.dust.counts,
     }), 1000);
   })`);
   // Turn the galaxy well away from its start, so the click below also checks picking and travel while rotated.
@@ -825,6 +845,8 @@ await section('galaxy', async () => {
     galaxyLoop.polish.dots > galaxyLoop.polish.stars &&
     galaxyLoop.polish.twinkle > 0 &&
     galaxyLoop.polish.twinkleTime > 0 &&
+    galaxyLoop.polish.dust.gas > 0 &&
+    galaxyLoop.polish.dust.haze > 0 &&
     galaxyLoop.clicked.destination === galaxyLoop.clicked.nearest &&
     galaxyLoop.heldWhileTravelling &&
     galaxyLoop.zoomedWhileTravelling &&
@@ -1108,6 +1130,214 @@ await section('rogues', async () => {
     r.loop.during.sunLight > 0 &&
     (r.segments === null || (r.segments.length >= 3 && r.segments.every((x) => x.crossfadeFrames > 0 && x.minBrightness > 0.5))) &&
     r.back;
+  return r.ok;
+});
+
+/** How much the system's dust lights the view: canvas brightness with it minus without it. */
+const dustEffect = `(() => {
+  const dust = world.dust;
+  if (!dust) return null;
+  const on = ${canvasBrightness};
+  dust.object.visible = false;
+  const off = ${canvasBrightness};
+  dust.object.visible = true;
+  return { on, off, effect: +(on - off).toFixed(2) };
+})()`;
+
+/** Descends to `bodyExpr`, sets the clock to its shower's peak and watches the meteors (or impact flashes) for a while. */
+async function watchShower(bodyExpr, name) {
+  for (let i = 0; i < 40 && (await evaluate(`levels.transitioning`)); i++) await sleep(250);
+  const r = await evaluate(`(() => {
+    const body = ${bodyExpr};
+    window.__body = body;
+    ship.parkAt(body);
+    levels.systemLevel.orbit.lookFrom(world.stars[0].position.clone().sub(body.renderPosition));
+    levels.toPlanet(body);
+    return { name: body.name };
+  })()`);
+  r.entered = await until(`levels.mode === 'planet' && !levels.transitioning`, 40000);
+  if (!r.entered) return r;
+  r.showers = await evaluate(`planet.meteors?.showers.length ?? 0`);
+  if (!r.showers) return r;
+  // To the peak, looking down from high enough to see the side facing the stream, the radiant up where we are.
+  r.start = await evaluate(`(() => {
+    const m = planet.meteors, s = m.showers[0];
+    const orbit = (__body.parent ?? __body).config.orbit;
+    planet.frame.restart(nextShowerPeak(s, orbit, planet.time) - 0.5);
+    const V = game.camera.position.constructor;
+    const radiant = planet.frame.toLocalDirection(new V(...s.radiant), new V());
+    planet.ship.placeAt(radiant);
+    planet.orbit.setDistance(planet.radius * 0.6);
+    return { airless: m.airless, speed: +s.speed.toFixed(1), from: s.name };
+  })()`);
+  r.watch = await evaluate(`new Promise((resolve) => {
+    const m = planet.meteors, start = planet.frame.renderTime, wall = performance.now();
+    let most = 0, activity = 0, hud = '';
+    (function f() {
+      most = Math.max(most, m.count);
+      activity = Math.max(activity, m.activity);
+      if (m.shower) hud = document.getElementById('hud-climate').textContent;
+      if (planet.frame.renderTime - start < 3 && performance.now() - wall < 20000) return requestAnimationFrame(f);
+      resolve({ most, activity: +activity.toFixed(2), hud, radiantUp: m.radiantUp });
+    })();
+  })`);
+  // Caught with one on screen.
+  for (let i = 0; i < 40 && !(await evaluate(`planet.meteors.count > 0`)); i++) await sleep(100);
+  const shot = await send('Page.captureScreenshot', { format: 'png' });
+  r.screenshot = join(outDir, `${name}.png`);
+  writeFileSync(r.screenshot, Buffer.from(shot.result.data, 'base64'));
+  await evaluate(`levels.leavePlanet()`);
+  r.left = await until(`levels.mode === 'system' && !levels.transitioning`, 40000);
+  r.ok = r.entered && r.watch.most > 0 && r.watch.activity > 0.2 && /meteor/.test(r.watch.hud) && r.left;
+  return r;
+}
+
+await section('dust', async () => {
+  const r = (dust = {});
+  const home = startId;
+  // Where the section started: it ends there, so the sections after it run where they would without it.
+  const from = await evaluate(`system.id`);
+  // And with the ship at the same body and the view from the same side (coming back through the galaxy map leaves the
+  // view facing the way it arrived from, and the planet section's descent lands where the view faces).
+  const view = await evaluate(`(() => {
+    const o = levels.systemLevel.orbit, V = game.camera.position.constructor;
+    return { dir: o.direction(new V()).toArray(), zoom: o.zoom, body: ship.targetBody.name };
+  })()`);
+  const segmentsBefore = await evaluate(`window.__seamless ? __seamless.segments.length : 0`);
+  /** Through the galaxy map to system `id` (no page load, so the zoom recorder keeps running). */
+  const visit = async (id) => {
+    await until(`!levels.transitioning`, 20000);
+    await evaluate(`levels.toGalaxy()`);
+    await until(`levels.mode === 'galaxy' && !levels.transitioning`, 40000);
+    await evaluate(`levels.galaxyLevel.ship.jumpTo(galaxy.stars[${id}]), levels.toSystem()`);
+    const entered = await until(`levels.mode === 'system' && !levels.transitioning && system.id === ${id}`, 40000);
+    await until(`!ship.enRoute`, 30000);
+    return entered;
+  };
+  r.young = await evaluate(`(() => {
+    const stars = galaxy.stars.filter((s) => s.young);
+    const ref = stars.find((s) => generateSystem(s).planets.length > 0);
+    return { count: stars.length, inNebulas: stars.filter((s) => s.nebula).length, id: ref?.id ?? null };
+  })()`);
+  if (r.young.id === null) return false;
+  current = 'dust (young star)';
+  // The galaxy map's tooltip says it's young.
+  await evaluate(`levels.toGalaxy()`);
+  await until(`levels.mode === 'galaxy' && !levels.transitioning`, 40000);
+  await evaluate(`levels.galaxyLevel.ship.jumpTo(galaxy.stars[${r.young.id}])`);
+  await sleep(1500);
+  r.tooltip = await evaluate(`new Promise((resolve) => {
+    const level = levels.galaxyLevel, ref = galaxy.stars[${r.young.id}];
+    const V = game.camera.position.constructor;
+    const p = new V(ref.position.x, ref.position.y, ref.position.z).applyMatrix4(level.root.matrixWorld).project(game.camera);
+    const rect = game.renderer.domElement.getBoundingClientRect();
+    const at = { clientX: rect.left + ((p.x + 1) / 2) * rect.width, clientY: rect.top + ((1 - p.y) / 2) * rect.height, bubbles: true };
+    game.renderer.domElement.dispatchEvent(new PointerEvent('pointermove', at));
+    let n = 0;
+    (function f() {
+      if (++n < 4) return requestAnimationFrame(f);
+      const tip = document.getElementById('tooltip');
+      resolve(tip.hidden ? null : { name: document.getElementById('tooltip-name').textContent, text: tip.textContent });
+    })();
+  })`);
+  r.loaded = await visit(r.young.id);
+  r.system = await evaluate(`(() => {
+    const d = system.dust;
+    return {
+      kind: d?.kind ?? null,
+      sheets: world.dust?.sheets.length ?? 0,
+      hud: document.getElementById('hud-location').textContent,
+      forming: world.planets.every((p) => p.description.includes('forming')),
+      inGaps: system.planets.length > 0 && system.planets.every((p, i) => Math.abs(p.orbit.radius - d.gaps[i].at) < 1e-6 && d.gaps[i].width >= p.radius),
+      comets: system.comets.length,
+      belts: system.belts.length,
+    };
+  })()`);
+  r.fps = await evaluate(measureFps);
+  // From above, the disc lights the view (and hiding it darkens it).
+  await evaluate(`(() => { const o = levels.systemLevel.orbit; o.setDistance(system.dust.outer * 1.3); o.lookFrom(new (game.camera.position.constructor)(0.25, 1, 0.15)); })()`);
+  await sleep(2500);
+  r.disc = await evaluate(dustEffect);
+  const shot = await send('Page.captureScreenshot', { format: 'png' });
+  r.screenshot = join(outDir, 'young-system.png');
+  writeFileSync(r.screenshot, Buffer.from(shot.result.data, 'base64'));
+  r.back = true;
+  // Down to a forming planet: the disc is in its sky too, as in the system view.
+  r.loop = await runPlanetLoop('world.planets[0]', 'forming-planet', null, async () => {
+    // Pulled out to see the sky round the planet.
+    await evaluate(`planet.orbit.setDistance(planet.orbit.params.maxDistance)`);
+    await sleep(2500);
+    const effect = await evaluate(dustEffect);
+    // Back in (at the limit, the loop's scroll out would leave at once).
+    await evaluate(`planet.orbit.setDistance(45)`);
+    await sleep(1500);
+    return effect;
+  });
+
+  // A debris disc: the first system with one draws it, and it adds a little light.
+  current = 'dust (debris disc)';
+  const debris = await evaluate(`galaxy.stars.find((s) => !s.young && generateSystem(s).dust?.kind === 'debris')?.id ?? null`);
+  r.debris = { id: debris, loaded: await visit(debris) };
+  r.debris.fps = await evaluate(measureFps);
+  await evaluate(`(() => { const o = levels.systemLevel.orbit; o.setDistance(system.dust.outer * 1.8); o.lookFrom(new (game.camera.position.constructor)(0.25, 1, 0.15)); })()`);
+  await sleep(2500);
+  Object.assign(r.debris, await evaluate(`({ kind: system.dust.kind, hud: document.getElementById('hud-location').textContent })`), { effect: await evaluate(dustEffect) });
+
+  // Meteor showers in the home system: a planet with air, and an airless moon, at their shower's peak.
+  current = 'dust (meteor showers)';
+  r.home = await visit(home);
+  r.trails = await evaluate(`({ trails: world.trails.length, comets: world.comets.length })`);
+  const pick = (airless) => `(() => {
+    const showers = (b) => meteorShowers({ orbit: (b.parent ?? b).config.orbit, escapeVelocity: 0, seed: b.config.seed }, system.comets, system.habitableRadius);
+    const air = (b) => b.config.type === 'gas' || (b.config.climate && b.config.climate.pressure >= 4e-7);
+    const body = [...world.planets, ...world.moons].find((b) => showers(b).length > 0 && ${airless ? '!' : ''}air(b));
+    return body ? (body.parent ? 'world.moons[' + world.moons.indexOf(body) + ']' : 'world.planets[' + world.planets.indexOf(body) + ']') : null;
+  })()`;
+  const withAir = await evaluate(pick(false));
+  const airless = await evaluate(pick(true));
+  r.meteors = withAir ? await watchShower(withAir, 'meteor-shower') : null;
+  r.flashes = airless ? await watchShower(airless, 'impact-flashes') : null;
+  r.segments = await evaluate(`window.__seamless ? __seamless.segments.slice(${segmentsBefore}).map((seg) => ({
+    zoom: seg.from + ' → ' + seg.to,
+    crossfadeFrames: seg.frames.filter((x) => x.weight !== null && x.weight > 0 && x.weight < 1).length,
+    minBrightness: +Math.min(...seg.frames.map((x) => x.brightness)).toFixed(2),
+  })) : null`);
+  r.returned = from === home || (await visit(from));
+  await evaluate(`(() => {
+    const body = [...world.stars, ...world.planets, ...world.moons].find((b) => b.name === ${JSON.stringify(view.body)});
+    if (body) ship.parkAt(body);
+    const o = levels.systemLevel.orbit;
+    o.setDistance(${view.zoom});
+    o.lookFrom(new (game.camera.position.constructor)(...${JSON.stringify(view.dir)}));
+  })()`);
+
+  r.ok =
+    r.returned &&
+    r.young.count >= 3 &&
+    r.young.count <= 15 &&
+    r.young.inNebulas >= r.young.count / 2 &&
+    r.loaded &&
+    r.system.kind === 'protoplanetary' &&
+    r.system.sheets > 0 &&
+    r.system.hud.includes('protoplanetary disc') &&
+    r.system.forming &&
+    r.system.inGaps &&
+    r.system.comets === 0 &&
+    r.system.belts === 0 &&
+    r.disc.effect > 3 &&
+    r.tooltip?.text.includes('young') &&
+    r.back &&
+    r.loop.ok &&
+    r.loop.during.effect > 1 &&
+    (r.segments === null || r.segments.every((x) => x.crossfadeFrames > 0 && x.minBrightness > 0.5)) &&
+    r.debris.loaded &&
+    r.debris.kind === 'debris' &&
+    r.debris.hud.includes('debris disc') &&
+    r.debris.effect.effect > 0.02 &&
+    r.home &&
+    r.trails.trails === r.trails.comets &&
+    !!r.meteors?.ok &&
+    !!r.flashes?.ok;
   return r.ok;
 });
 
@@ -1577,6 +1807,11 @@ async function plantLabChecks(page) {
   })()`);
   r.screenshot = join(outDir, 'plant-lab.png');
   writeFileSync(r.screenshot, await page.screenshot());
+  // The grove is a whole planet: zoomed out, the globe lit in the middle of the view, in space.
+  r.globe = await evaluate(`(async () => {
+    await plantLab.look(0, 90, 880);
+    return { brightness: ${brightness}, sky: plantLab.level.scene.background.getHSL({}).l };
+  })()`);
   await evaluate(`plantLab.setView({ view: 'specimen', showLods: false })`);
   r.loaded = await evaluate(`(async () => {
     await plantLab.load('1337', ${PLANT_STAR}, ${PLANT_PLANET});
@@ -1603,6 +1838,8 @@ async function plantLabChecks(page) {
     r.grove.plants > 1000 &&
     r.grove.lods.every((n) => n > 0) &&
     r.grove.brightness > 20 &&
+    r.globe.brightness > 20 &&
+    r.globe.sky < 0.05 &&
     r.loaded.species > 0 &&
     r.loaded.source?.star === PLANT_STAR &&
     r.loaded.hash > 100 &&
@@ -1613,8 +1850,276 @@ async function plantLabChecks(page) {
 await section('plants', async () => (plantLab = await runPlantLab()).ok);
 
 /**
- * Touch play on an emulated phone (390x844, real CDP touch events): hold a finger on the star (tooltip), lift
- * (autopilot to it), drag (rotates, no tap), pinch (zoom), Boost (no stick in space), then
+ * Animals: in the animal lab (animals.html, a browser of its own), every body plan grows and draws at every level of
+ * detail (each cheaper than the one before), the specimen walks and grazes and zooming out on it passes through every
+ * level and past the last, the line-ups draw, the herds view roams with the game's SurfaceAnimals, a game planet's
+ * animals load and the planet lab's Animals link opens them; then in the game, on the home system's habitable planet,
+ * a herd is drawn near the ship, walking or grazing, and hovering an animal names it in the tooltip.
+ */
+async function runAnimalLab() {
+  const own = await launch({ width: 1280, height: 720 });
+  try {
+    return await animalLabChecks(own);
+  } finally {
+    errors.push(...own.errors.map((e) => `animal lab: ${e}`));
+    await own.close();
+  }
+}
+
+async function animalLabChecks(page) {
+  const evaluate = page.tryEvaluate;
+  const r = { plans: [] };
+  if (!(await page.goto(pageUrl('animals.html?gen=3'), `typeof window.animalLab !== 'undefined' && animalLab.ready`, 30000))) return { ok: false, started: false };
+  const brightness = `(() => {
+    game.redraw();
+    const gl = game.renderer.getContext(), w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
+    const px = new Uint8Array(w * h * 4);
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    let sum = 0, n = 0;
+    for (let y = Math.floor(h * 0.3); y < h * 0.7; y += 4) for (let x = Math.floor(w * 0.4); x < w * 0.6; x += 4) {
+      const i = 4 * (y * w + x); sum += px[i] + px[i + 1] + px[i + 2]; n++;
+    }
+    return +(sum / (3 * n)).toFixed(1);
+  })()`;
+  for (const plan of ['quadruped', 'hexapod', 'biped']) {
+    r.plans.push(
+      await evaluate(`(async () => {
+        await animalLab.generate(5, { plan: '${plan}' });
+        await animalLab.setView({ view: 'specimen', lod: 0, pace: 'stand' });
+        await animalLab.look(60, 15, 2.4);
+        const levels = [];
+        for (const lod of [0, 1, 2]) {
+          await animalLab.setView({ lod });
+          levels.push({ lod, triangles: animalLab.level.lods[lod].triangles, brightness: ${brightness} });
+        }
+        return { plan: animalLab.species.form.plan, legs: animalLab.level.skeleton.legs.filter((l) => !l.arm).length, levels };
+      })()`),
+    );
+  }
+  // Walking round its circle: it moves, its legs swing (the drawn picture changes between frames as it goes).
+  r.walk = await evaluate(`(async () => {
+    await animalLab.generate(5, { plan: 'quadruped' });
+    await animalLab.setView({ view: 'specimen', lod: 'auto', pace: 'walk' });
+    const at = () => animalLab.level.posed[0].mesh.instanceMatrix.array.slice(12, 15);
+    const a = at();
+    await new Promise((ok) => setTimeout(ok, 1500));
+    const b = at();
+    return { moved: +Math.hypot(b[0] - a[0], b[2] - a[2]).toFixed(2), stride: +animalLab.level.posed[0].anim.array[1].toFixed(2) };
+  })()`);
+  r.graze = await evaluate(`(async () => { await animalLab.setView({ pace: 'graze' }); await new Promise((ok) => setTimeout(ok, 4000)); return +animalLab.level.posed[0].anim.array[3].toFixed(2); })()`);
+  // Zooming out with the game's own levels and fade: through every level, then gone.
+  r.zoom = await evaluate(`(async () => {
+    await animalLab.setView({ pace: 'stand' });
+    const seen = [];
+    for (const d of [3, 20, 50, 160]) {
+      await animalLab.look(0, 10, d);
+      await new Promise((ok) => setTimeout(ok, 1200));
+      seen.push(animalLab.level.lodNow().lod);
+    }
+    return seen;
+  })()`);
+  r.lineup = await evaluate(`(async () => { await animalLab.setView({ view: 'lineup', lod: 0 }); return { meshes: animalLab.level.posed.length, brightness: ${brightness} }; })()`);
+  r.species = await evaluate(`(async () => { await animalLab.setView({ view: 'species' }); return { meshes: animalLab.level.posed.length, set: animalLab.state.species.length }; })()`);
+  r.herds = await evaluate(`(async () => {
+    await animalLab.setView({ view: 'herds', showLods: true });
+    await animalLab.lookAtHerd();
+    await animalLab.look(0, 35, 30);
+    await new Promise((ok) => setTimeout(ok, 1500));
+    return animalLab.level.herds.stats();
+  })()`);
+  r.screenshot = join(outDir, 'animal-lab.png');
+  writeFileSync(r.screenshot, await page.screenshot());
+  await evaluate(`animalLab.setView({ view: 'specimen', showLods: false })`);
+  r.loaded = await evaluate(`(async () => {
+    await animalLab.load('1337', ${PLANT_STAR}, ${PLANT_PLANET});
+    return { species: animalLab.state.species.length, tier: animalLab.state.tier, source: animalLab.state.source, gravity: animalLab.view.gravity, hash: location.hash.length };
+  })()`);
+  if (!(await page.goto(pageUrl(`lab.html?seed=1337&star=${PLANT_STAR}&planet=${PLANT_PLANET}`), `typeof window.lab !== 'undefined' && lab.ready`, 30000))) return { ...r, ok: false };
+  const link = await evaluate(`(() => { const a = [...document.querySelectorAll('#lab-info a')].find((x) => x.textContent === 'Animals'); return a && !a.hidden ? a.href : null; })()`);
+  r.linked = link
+    ? (await page.goto(link, `typeof window.animalLab !== 'undefined' && animalLab.ready`, 30000)) &&
+      (await evaluate(`({ species: animalLab.state.species.length, source: animalLab.state.source })`))
+    : null;
+  r.ok =
+    r.plans.length === 3 &&
+    r.plans.every(
+      (a, i) =>
+        a.plan === ['quadruped', 'hexapod', 'biped'][i] &&
+        a.legs === [4, 6, 2][i] &&
+        a.levels.every((l, k) => l.triangles > 0 && l.brightness > 20 && (k === 0 || l.triangles < a.levels[k - 1].triangles)),
+    ) &&
+    r.walk.moved > 0.2 &&
+    r.walk.stride > 0.5 &&
+    r.graze > 0 &&
+    JSON.stringify(r.zoom) === JSON.stringify([0, 1, 2, 3]) &&
+    r.lineup.meshes === 3 &&
+    r.lineup.brightness > 20 &&
+    r.species.meshes === r.species.set &&
+    r.herds.herds > 5 &&
+    r.herds.drawn > 0 &&
+    r.herds.walking + r.herds.grazing > 0 &&
+    r.loaded.species > 0 &&
+    r.loaded.source?.star === PLANT_STAR &&
+    r.loaded.hash > 100 &&
+    r.linked?.species === r.loaded.species &&
+    r.linked.source?.planet === PLANT_PLANET;
+  return r;
+}
+
+async function runGameAnimals() {
+  if (!(await page.goto(url, READY, 60000))) return { ok: false };
+  await drawFrames(20);
+  await evaluate(`(() => { const p = world.planets.find((b) => b.config.climate && b.config.climate.habitability >= 2 && b.config.climate.insolation > 0); ship.parkAt(p); levels.toPlanet(p); })()`);
+  await until(`levels.mode === 'planet' && !levels.transitioning`, 60000);
+  // Over the first herd of four or more, a little to its side, zoomed in.
+  const r = { named: false };
+  r.found = await evaluate(`(async () => { const g = await import('/src/gen/animals.ts'); const A = planet.animals; if (!A) return null; const n = g.herdGridSize(A.plan.radius);
+    for (let f = 0; f < 6; f++) for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) { const h = g.generateHerd(A.plan, A.ground, f, i, j);
+      if (h && h.count >= 4) { const pose = {}; new g.HerdPath(A.plan, A.ground, h, { hipHeight: 1 }).pose(0, planet.frame.renderTime, pose); const e1 = {}, e2 = {}; g.tangentBasis(pose, e1, e2);
+        planet.ship.placeAt(new (planet.ship.up.constructor)(pose.x + e1.x * 0.012, pose.y + e1.y * 0.012, pose.z + e1.z * 0.012).normalize()); return { species: A.plan.species[h.species].name, count: h.count }; } }
+    return null; })()`);
+  await evaluate(`planet.orbit.zoomTo(10)`);
+  await sleep(2000);
+  await until(`planet.animals.settled`, 30000);
+  await until(`Math.abs(planet.ship.radius - planet.ship.goalRadius) < 0.05`, 30000);
+  await drawFrames(10);
+  r.stats = await evaluate(`planet.animals.stats()`);
+  // Hover the nearest drawn animal (aimed and moved to in one go, as the camera may still ease): the tooltip names it.
+  for (let i = 0; i < 6 && !r.named; i++) {
+    r.tooltip = await evaluate(`new Promise((resolve) => {
+      const A = planet.animals; const v = new (planet.ship.up.constructor)(); const canvas = game.renderer.domElement; const rect = canvas.getBoundingClientRect();
+      let at = null;
+      for (const p of A.herdPositions()) { v.copy(p).addScaledVector(p.clone().normalize(), 0.4); A.object.localToWorld(v); const s = v.clone().project(game.camera);
+        if (Math.abs(s.x) < 0.9 && Math.abs(s.y) < 0.9 && s.z < 1) { at = { clientX: rect.left + ((s.x + 1) / 2) * rect.width, clientY: rect.top + ((1 - s.y) / 2) * rect.height, bubbles: true }; break; } }
+      if (!at) return resolve(null);
+      canvas.dispatchEvent(new PointerEvent('pointermove', at));
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve(document.getElementById('tooltip').hidden ? null : document.getElementById('tooltip-name').textContent)));
+    })`);
+    r.named = (await evaluate(`planet.animals.plan.species.map((s) => s.name)`)).includes(r.tooltip);
+  }
+  r.screenshot = join(outDir, 'animals.png');
+  writeFileSync(r.screenshot, await page.screenshot());
+  r.radar = await runRadar(r.found?.species);
+  r.ok = !!r.found && r.stats.herds > 0 && r.stats.drawn > 0 && r.stats.drawCalls > 0 && r.named && r.radar.ok;
+  return r;
+}
+
+/**
+ * The planet map's Species tab and the radar, over the herd `name` runGameAnimals found: real clicks on the tab and on
+ * the species' row (which unlock audio, so the radarPing cue is asked for).
+ */
+async function runRadar(name) {
+  const r = {};
+  const click = async (selector) => {
+    const at = await evaluate(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) return null; e.scrollIntoView({ block: 'nearest' });
+      const b = e.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`);
+    if (!at) return false;
+    for (const type of ['mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, ...at, button: 'left', buttons: type === 'mousePressed' ? 1 : 0, clickCount: 1 });
+    await drawFrames(2);
+    return true;
+  };
+  await evaluate(`(() => { window.__cues = []; window.__rates = []; const play = audio.play.bind(audio);
+    audio.play = (c, o) => (__cues.push(c), c === 'radarPing' && __rates.push(o?.rate), play(c, o)); })()`);
+  // The debug panel sits over the map's title bar: out of the way meanwhile.
+  await evaluate(`document.querySelectorAll('.lil-gui.lil-auto-place').forEach((e) => (e.style.visibility = 'hidden'))`);
+  r.tab = await click('#planet-map-tabs button[data-tab=species]');
+  await until(`planet.radar.census.done && [...document.querySelectorAll('#planet-species .species-icon')].every((i) => i.src.startsWith('data:image/png'))`, 30000);
+  await drawFrames(20);
+  r.list = await evaluate(`({ tab: planet.map.tab, drawing: planet.map.drawing, shown: !document.getElementById('planet-species').hidden,
+    animals: document.querySelectorAll('#planet-species .species-row.animal').length, plants: document.querySelectorAll('#planet-species .species-row.plant').length,
+    species: planet.animals.plan.species.length, plantSpecies: planet.plants?.plan.species.length ?? 0,
+    statuses: [...document.querySelectorAll('#planet-species .species-row.animal .species-status')].map((e) => e.textContent),
+    herds: planet.radar.census.herds.length })`);
+  const index = await evaluate(`planet.animals.plan.species.findIndex((s) => s.name === ${JSON.stringify(name ?? '')})`);
+  // Picked with the radar off: nothing happens.
+  await evaluate(`levels.switches.set('radar', false)`);
+  r.picked = await click(`#planet-species .species-row.animal[data-species="${index}"]`);
+  await drawFrames(30);
+  r.standby = await evaluate(`({ state: planet.radar.state, pings: planet.radar.pingCount, visible: planet.radar.visible,
+    status: document.querySelector('#planet-species .species-row.tracking .species-status')?.textContent ?? '', dot: document.getElementById('planet-map-tabs').classList.contains('tracking') })`);
+  // The item bar's Radar, in the Inventory: switched on, it tracks.
+  await click('.item-tab[data-tab=inventory]');
+  r.switchedOn = await click('.item-slot[data-item=radar]');
+  r.slotOn = await evaluate(`document.querySelector('.item-slot[data-item=radar]').classList.contains('on')`);
+  await until(`planet.radar.state === 'tracking' && planet.radar.pingCount >= ${r.standby.pings + 2}`, 30000);
+  await drawFrames(4);
+  r.tracking = await evaluate(`({ tracking: planet.radar.tracking, state: planet.radar.state, distance: planet.radar.distance, proximity: planet.radar.proximity,
+    visible: planet.radar.visible, pings: planet.radar.pingCount, row: document.querySelector('#planet-species .species-row.tracking')?.dataset.species ?? null,
+    status: document.querySelector('#planet-species .species-row.tracking .species-status')?.textContent ?? '',
+    dot: document.getElementById('planet-map-tabs').classList.contains('tracking'), cues: __cues.filter((c) => c === 'radarPing').length,
+    rates: __rates.slice(), played: audio.lastPlayed && { name: audio.lastPlayed.name, rate: audio.lastPlayed.rate } })`);
+  r.nearPitch = await evaluate(`import('/src/radar/radarRules.ts').then((m) => m.radarParams.nearPitch)`);
+  // Once the "Radar on" note has had its moment, the hint line says what it tracks.
+  await until(`document.getElementById('item-hint').textContent.startsWith('Radar: ')`, 20000);
+  r.tracking.hint = await evaluate(`document.getElementById('item-hint').textContent`);
+  r.screenshot = join(outDir, 'radar.png');
+  writeFileSync(r.screenshot, await page.screenshot());
+  // Switched off again: no more pings, the waves die away.
+  await click('.item-slot[data-item=radar]');
+  const pings = await evaluate(`planet.radar.pingCount`);
+  await until(`!planet.radar.visible`, 20000);
+  await drawFrames(30);
+  r.switchedOff = await evaluate(`({ state: planet.radar.state, more: planet.radar.pingCount - ${pings}, visible: planet.radar.visible, on: levels.switches.isOn('radar') })`);
+  await click('.item-tab[data-tab=weapons]');
+  await click(`#planet-species .species-row.animal[data-species="${index}"]`);
+  r.stopped = await evaluate(`({ tracking: planet.radar.tracking, state: planet.radar.state, row: !!document.querySelector('#planet-species .species-row.tracking') })`);
+  await click('#planet-map-tabs button[data-tab=map]');
+  r.back = await evaluate(`({ tab: planet.map.tab, drawing: planet.map.drawing, shown: !document.getElementById('planet-species').hidden })`);
+  await evaluate(`document.querySelectorAll('.lil-gui.lil-auto-place').forEach((e) => (e.style.visibility = ''))`);
+  r.ok =
+    r.tab &&
+    r.list.tab === 'species' &&
+    !r.list.drawing &&
+    r.list.shown &&
+    r.list.animals === r.list.species &&
+    r.list.plants === r.list.plantSpecies &&
+    r.list.statuses.every((t) => /^(\d+ (herds?|packs?|seen)|None found)$/.test(t)) &&
+    r.list.herds > 0 &&
+    index >= 0 &&
+    r.picked &&
+    r.standby.state === 'standby' &&
+    r.standby.pings === 0 &&
+    !r.standby.visible &&
+    r.standby.status === 'Radar off' &&
+    !r.standby.dot &&
+    r.switchedOn &&
+    r.slotOn &&
+    /^Radar: the nearest .+ is (right here|close)$/.test(r.tracking.hint) &&
+    r.switchedOff.state === 'standby' &&
+    r.switchedOff.more === 0 &&
+    !r.switchedOff.visible &&
+    !r.switchedOff.on &&
+    r.tracking.tracking === index &&
+    r.tracking.row === String(index) &&
+    r.tracking.distance < 60 &&
+    /^Tracking · (right here|close)$/.test(r.tracking.status) &&
+    r.tracking.visible &&
+    r.tracking.dot &&
+    r.tracking.cues >= 2 &&
+    // Right above the herd the ping is at its highest (radarParams.nearPitch, or nearly), and the audio manager plays it at that rate.
+    r.tracking.rates.length === r.tracking.cues &&
+    r.tracking.rates.every((x) => x > r.nearPitch * 0.85 && x <= r.nearPitch + 1e-9) &&
+    r.tracking.played?.name === 'radarPing' &&
+    Math.abs(r.tracking.played.rate - r.tracking.rates.at(-1)) < 1e-9 &&
+    r.stopped.tracking === null &&
+    r.stopped.state === 'off' &&
+    !r.stopped.row &&
+    r.back.tab === 'map' &&
+    r.back.drawing &&
+    !r.back.shown;
+  return r;
+}
+let animalLab = null;
+let gameAnimals = null;
+await section('animals', async () => {
+  animalLab = await runAnimalLab();
+  gameAnimals = await runGameAnimals();
+  return animalLab.ok && gameAnimals.ok;
+});
+
+/**
+ * Touch play on an emulated phone (390x844, real CDP touch events): no full-screen button, the first tap goes full
+ * screen; hold a finger on the star (tooltip), lift (autopilot to it), drag (rotates, no tap), pinch (zoom), Boost (no stick in space), then
  * pinch in at a planet to descend, tap the globe, and pinch out to the system and on to the galaxy, checking which
  * on-screen controls each level shows.
  */
@@ -1654,7 +2159,8 @@ async function runTouch() {
   const r = {};
 
   r.system = await evaluate(`({ touchMode: game.input.touchMode, help: document.getElementById('hud-help').textContent.startsWith('Tap'),
-    fullscreenButton: getComputedStyle(document.getElementById('fullscreen-toggle')).display !== 'none', ...${controls} })`);
+    fullscreenButton: getComputedStyle(document.getElementById('fullscreen-toggle')).display !== 'none',
+    fullscreen: !!document.fullscreenElement, ...${controls} })`);
   const star = await evaluate(`(() => { const p = world.stars[0].renderPosition.clone().project(game.camera); return [(p.x + 1) / 2 * innerWidth, (1 - p.y) / 2 * innerHeight]; })()`);
   await touch('touchStart', [star]);
   await sleep(300);
@@ -1662,6 +2168,9 @@ async function runTouch() {
   await touch('touchEnd', []);
   await frames();
   r.tap = await evaluate(`({ star: world.stars[0].name, target: ship.targetBody?.name ?? null, tooltipHidden: document.getElementById('tooltip').hidden })`);
+  // The first tap took the page full screen (a phone always plays full screen, so it has no button for it).
+  for (let i = 0; i < 20 && !(await evaluate(`!!document.fullscreenElement`)); i++) await sleep(50);
+  r.fullscreen = await evaluate(`!!document.fullscreenElement`);
 
   const yaw = await evaluate(`levels.systemLevel.orbit.targetYaw`);
   await swipe([[150, 500]], [[250, 500]]);
@@ -1770,7 +2279,9 @@ async function runTouch() {
   r.ok =
     r.system.touchMode &&
     r.system.help &&
-    r.system.fullscreenButton &&
+    !r.system.fullscreenButton &&
+    !r.system.fullscreen &&
+    r.fullscreen &&
     r.system.ship === 'space' &&
     r.system.shown &&
     !r.system.stick &&
@@ -2018,8 +2529,8 @@ await section('cargo', async () => {
     await until(`planet.cargo.inFlight.length === 0`, 20000);
     sweep = { most, removed: (await removedCount()) - removed };
   }
-  // Select the stack (2) and hold on the ground: it's set down and takes root.
-  await key('Digit2', '2');
+  // Select the stack (3, after the beam and the radar) and hold on the ground: it's set down and takes root.
+  await key('Digit3', '3');
   const exportArmed = await evaluate(`planet.selected`);
   const stackBefore = await evaluate(`levels.inventory.stacks[0].count`);
   const totalBefore = await evaluate(`levels.inventory.total`);
@@ -2037,7 +2548,7 @@ await section('cargo', async () => {
   await key('Digit1', '1');
   await beamUp();
   await beamUp();
-  await key('Digit2', '2');
+  await key('Digit3', '3');
   const spot = await evaluate(`__ground('land', 8, 35)`);
   await mouse('mouseMoved', spot);
   await mouse('mousePressed', spot);
@@ -2046,7 +2557,7 @@ await section('cargo', async () => {
   await until(`planet.cargo.inFlight.length === 0`, 20000);
   dropped.shipStayed = !(await evaluate(`planet.ship.enRoute`));
   // The other set down in the sea: it drowns.
-  if (!(await evaluate(`planet.selected`))) await key('Digit2', '2');
+  if (!(await evaluate(`planet.selected`))) await key('Digit3', '3');
   const sea = await evaluate(`__ground('sea', 8, 68)`);
   let drown = null;
   if (sea) {
@@ -2200,6 +2711,20 @@ await section('volcano', async () => {
       aboveSea: planet.groundRadius(c) > (planet.globe.seaRadius ?? 0),
       shipAbove: ship.length() - planet.groundRadius(ship.clone().normalize()), saved: levels.surfaceChanges.forPlanet(__volcanic.name + ':' + __volcanic.config.seed).volcanoes.length };
   })()`);
+  // Its cone is refined near the camera like the terrain: one chunk from far off, finer chunks next to it.
+  await evaluate(`(() => {
+    const v = planet.volcanoes.shapes[0];
+    window.__zoom = planet.orbit.zoom;
+    planet.orbit.setFocus(v.centre.clone().multiplyScalar(planet.groundRadius(v.centre)));
+    planet.orbit.setDistance(v.baseRadius * 15);
+  })()`);
+  await drawFrames(3);
+  const lodFar = { settled: await until(`planet.volcanoes.settled`, 30000), ...(await evaluate(`planet.volcanoes.lodStats()[0]`)) };
+  await evaluate(`planet.orbit.setDistance(planet.volcanoes.shapes[0].baseRadius * 0.4)`);
+  await drawFrames(3);
+  const lodNear = { settled: await until(`planet.volcanoes.settled`, 30000), ...(await evaluate(`planet.volcanoes.lodStats()[0]`)) };
+  await evaluate(`(() => { planet.orbit.setFocus(null); planet.orbit.setDistance(__zoom); })()`);
+  const lod = { far: lodFar, near: lodNear };
   const heard = (await evaluate(`__cues`)).filter((c) => c.startsWith('volcano'));
   await evaluate(`levels.leavePlanet()`);
   await until(`levels.mode === 'system' && !levels.transitioning`, 60000);
@@ -2217,7 +2742,7 @@ await section('volcano', async () => {
   await evaluate(`levels.toSystem()`);
   await until(`levels.mode === 'system' && !levels.transitioning`, 60000);
   const rebuilt = await evaluate(`[...world.planets, ...world.moons].find((b) => b.name === __volcanic.name)?.volcanoSites.length`);
-  volcano = { inSpace, gas, armed, fired, landed, risen, after, heard, systemView, revisit, rebuilt };
+  volcano = { inSpace, gas, armed, fired, landed, risen, after, lod, heard, systemView, revisit, rebuilt };
   volcano.ok =
     inSpace.slots === 2 &&
     /down to a planet or moon/.test(inSpace.hint) &&
@@ -2236,6 +2761,11 @@ await section('volcano', async () => {
     after.selected === 'volcanoBomb' &&
     after.available &&
     after.saved === 1 &&
+    lod.far.settled &&
+    lod.far.chunks === 1 &&
+    lod.near.settled &&
+    lod.near.chunks > 4 &&
+    lod.near.maxDepth >= 2 &&
     heard.join(',') === 'volcanoFire,volcanoRise' &&
     systemView === 1 &&
     revisit.count === 1 &&
@@ -2364,7 +2894,7 @@ const ok = started && !stalled && Object.keys(sections).length > 0 && Object.val
 console.error(`[smoke] ${ok ? 'ok' : 'FAILED'} in ${Math.round((Date.now() - T0) / 1000)} s${errors.length ? `, ${errors.length} console errors` : ''}`);
 console.log(
   JSON.stringify(
-    { ok, started, stalled, sections, before, after, autopilot, pick, systemMap, sky, living, comet, belt, galaxyLoop, nebulas, rogues, seamless, audio, planetLoop, heldZoom, cometLoop, asteroidLoops, planetTypes, touch, touchLab, cargo, volcano, buster, lab, plantLab, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
+    { ok, started, stalled, sections, before, after, autopilot, pick, systemMap, sky, living, comet, belt, galaxyLoop, nebulas, rogues, dust, seamless, audio, planetLoop, heldZoom, cometLoop, asteroidLoops, planetTypes, touch, touchLab, cargo, volcano, buster, lab, plantLab, animalLab, gameAnimals, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
     null,
     2,
   ),

@@ -6,6 +6,7 @@ import { addAtmosphereDebug } from '../world/atmosphereShell';
 import { addWeatherDebug } from '../world/weatherLook';
 import { Physics } from '../physics/Physics';
 import { loadSurfaceMaps } from '../world/surfaceMaps';
+import { animalParams } from '../surface/animalParams';
 import { addPlantDebug, plantParams } from '../surface/plantParams';
 import { FpsCounter } from '../ui/FpsCounter';
 import { isTouchDevice } from '../ui/GraphicsSettings';
@@ -32,8 +33,9 @@ async function main(): Promise<void> {
   addGasDebug(debug);
   addAtmosphereDebug(debug);
   addWeatherDebug(debug);
-  // Plants are off by default on touch devices, as in the game's menu.
+  // Plants and animals are off by default on touch devices, as in the game's menu.
   plantParams.enabled = !isTouchDevice();
+  animalParams.enabled = plantParams.enabled;
   addPlantDebug(debug);
   const info = game.add(new LabInfo(lab, game.input));
   // The game's stick, Boost and Map buttons on phones (low orbit only, see LabLevel.touchControls).

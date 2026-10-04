@@ -3,7 +3,7 @@ import type { SoundEffects } from '../audio/sfx';
 import type { Debug } from '../core/Debug';
 import type { Input } from '../core/Input';
 import { generateDistantGalaxies } from '../gen/distantGalaxies';
-import { generateDust, type GalaxyData, type StarRef } from '../gen/galaxy';
+import { generateDust, generateHaze, type GalaxyData, type StarRef } from '../gen/galaxy';
 import type { SystemData } from '../gen/system';
 import { DistantGalaxies } from '../galaxy/DistantGalaxies';
 import { GalaxyDust } from '../galaxy/GalaxyDust';
@@ -62,6 +62,8 @@ export class GalaxyLevel extends Level {
   readonly spin: GalaxySpin;
   readonly distantGalaxies: DistantGalaxies;
   readonly nebulas: GalaxyNebulas;
+  /** The arms' gas and haze. */
+  readonly dust: GalaxyDust;
   private readonly hud: GalaxyHud;
   private readonly light: THREE.HemisphereLight;
   private closeUp: StarCloseUp | null = null;
@@ -90,8 +92,16 @@ export class GalaxyLevel extends Level {
     // First, so everything below sees this frame's rotation.
     this.spin = this.add(new GalaxySpin(this.root, debug));
     this.distantGalaxies = this.add(new DistantGalaxies(this.scene, generateDistantGalaxies(galaxy.seed), debug));
-    this.add(new GalaxyDust(this.root, generateDust(galaxy), galaxy.radius));
     this.nebulas = this.add(new GalaxyNebulas(this.scene, this.root, galaxy.nebulas, galaxy.radius, debug));
+    this.dust = this.add(
+      new GalaxyDust(
+        this.root,
+        { gas: generateDust(galaxy), haze: generateHaze(galaxy) },
+        galaxy.radius,
+        this.nebulas.frame,
+        debug,
+      ),
+    );
     this.map = this.add(new GalaxyMap(this.root, galaxy, debug));
     this.rogues = this.add(new GalaxyRogues(this.root, galaxy, debug));
     this.ship = this.add(new GalaxyShip(this.root, start, debug, sfx));

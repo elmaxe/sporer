@@ -1,8 +1,9 @@
+import type { CrateredBody } from '../gen/craters';
 import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
 import { groundRadius } from '../gen/geysers';
-import { GLOBE_SIZE_FACTOR, type PlanetStyle } from '../gen/planets';
+import { GLOBE_SIZE_FACTOR } from '../gen/planets';
 import { MAX_STORMS, flashBrightness, hash01, stormCentre, stormStrength, type Flash, type Precipitation } from '../gen/weather';
 import type { Vec3Tuple } from '../gen/starActivity';
 import { BOLT_RENDER_ORDER, RAIN_RENDER_ORDER, weatherParams, type WeatherLook } from '../world/weatherLook';
@@ -175,7 +176,7 @@ export class Weather implements Entity {
     private readonly scene: THREE.Scene,
     private readonly frame: RenderClock,
     readonly look: WeatherLook,
-    private readonly body: { seed: number; style: PlanetStyle },
+    private readonly body: CrateredBody,
     private readonly camera: THREE.Camera,
     sun: THREE.Vector3,
     sunLight: THREE.Color,
@@ -376,7 +377,7 @@ export class Weather implements Entity {
     bolt.seed = f.seed;
     const p = bolt.points;
     const [dx, dy, dz] = f.dir;
-    const ground = groundRadius(f.dir, this.body.seed, this.body.style, this.look.data.radius, RELIEF_SCALE);
+    const ground = groundRadius(f.dir, this.body, this.look.data.radius, RELIEF_SCALE);
     const height = top - ground;
     // A tangent basis at the strike point.
     const up = this.a.set(dx, dy, dz);

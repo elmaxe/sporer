@@ -50,15 +50,32 @@ export function spherify(x: number, y: number, z: number, out: Vec3Like): Vec3Li
  * gives the same bits for the same point whatever the grid (scaling i and n by
  * a power of two doesn't change the quotient), so neighbouring grids of any
  * size, on this face or the next, agree exactly on the points they share.
+ *
+ * A point a little off the face (i or j outside [0, n], by less than n) folds
+ * over the cube's edge onto the next face, as if the cube were unfolded flat,
+ * and lands on that face's grid point to the bit (off in i or in j, not both:
+ * past a corner there's no single next face).
  */
 export function faceGridPoint(face: number, i: number, j: number, n: number, out: Vec3Like): Vec3Like {
   const [o, u] = CUBE_FACES[face]!;
-  const cu = (2 * i - n) / n;
-  const cv = (2 * j - n) / n;
+  let co: number = o[1];
+  let cu = (2 * i - n) / n;
+  let cv = (2 * j - n) / n;
+  // Past the edge by `over`: back onto the edge, and as far again down the next face.
+  const overU = Math.abs(cu) - 1;
+  if (overU > 0) {
+    cu = Math.sign(cu);
+    co = o[1] * (1 - overU);
+  }
+  const overV = Math.abs(cv) - 1;
+  if (overV > 0) {
+    cv = Math.sign(cv);
+    co = o[1] * (1 - overV);
+  }
   return spherify(
-    o[0] === 0 ? o[1] : u[0] === 0 ? cu : cv,
-    o[0] === 1 ? o[1] : u[0] === 1 ? cu : cv,
-    o[0] === 2 ? o[1] : u[0] === 2 ? cu : cv,
+    o[0] === 0 ? co : u[0] === 0 ? cu : cv,
+    o[0] === 1 ? co : u[0] === 1 ? cu : cv,
+    o[0] === 2 ? co : u[0] === 2 ? cu : cv,
     out,
   );
 }

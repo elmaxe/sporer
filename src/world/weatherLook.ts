@@ -16,10 +16,14 @@ import {
   type WeatherData,
 } from '../gen/weather';
 import type { Vec3Tuple } from '../gen/starActivity';
+import { cumulusField, type CumulusField, type GroundRadius } from '../gen/cumulus';
+import { surfaceNoise } from '../gen/craters';
 import { RELIEF_SCALE, globeRadius } from '../planet/frame';
 import type { AtmosphereSun } from './atmosphereShell';
 import { createCubeSphere } from './cubeSphere';
+import { CumulusClouds, cumulusParams } from './cumulusLook';
 import { cloudNoiseTexture } from './noiseTexture';
+import { terrainSampler } from './planetGeometry';
 import type { PlanetConfig } from './Planet';
 
 /**
@@ -46,6 +50,12 @@ export function addWeatherDebug(debug: Debug): void {
   f?.add(weatherParams, 'brightness', 0, 3);
   f?.add(weatherParams, 'lightning', 0, 5);
   f?.add(weatherParams, 'wind', 0, 10);
+  f?.add(cumulusParams, 'opacity', 0, 1).name('puff opacity');
+  f?.add(cumulusParams, 'nearFade', 1, 6).name('puff near fade');
+  f?.add(cumulusParams, 'silver', 0, 3).name('puff silver lining');
+  f?.add(cumulusParams, 'sun', 0, 3).name('puff sunlight');
+  f?.add(cumulusParams, 'lodNear', 0.01, 0.5).name('puffs all from (rad)');
+  f?.add(cumulusParams, 'lodFar', 0.001, 0.05).name('puffs fewest at (rad)');
 }
 
 /**
@@ -294,15 +304,27 @@ export class WeatherLook {
   /** The storms drawn at the last `animate` (at most MAX_STORMS, strongest first when there are more). */
   readonly shown: StormEvent[] = [];
   readonly uniforms: Record<string, THREE.IUniform>;
-  private readonly layers: THREE.Mesh[] = [];
+  /**
+   * Water and methane worlds: the fair-weather clouds and thunderstorms are
+   * puffy clusters (gen/cumulus.ts) instead of the sheet, which then only
+   * draws what is sheet-like: cyclones, dust, ash, and lightning's glow.
+   */
+  readonly cumulus: CumulusField | null;
+  /** The puffy clouds of each layer made (one per view of the body). */
+  readonly puffs: CumulusClouds[] = [];
+  private readonly layers: THREE.Object3D[] = [];
+  private readonly sheets: THREE.Mesh[] = [];
   private readonly centre: Vec3Tuple = [0, 0, 0];
   private time = 0;
 
   constructor(
     readonly data: WeatherData,
     lava: { activity: LavaActivity; seed: number } | null,
+    /** The ground's radius by direction (planet units), for the puffy clouds' bases; sea level if absent. */
+    private readonly ground: GroundRadius = () => data.radius,
   ) {
     this.schedule = new StormSchedule(data, lava);
+    this.cumulus = cumulusField(data);
     const seed = data.seed;
     this.uniforms = {
       uNoise: { value: cloudNoiseTexture() },
@@ -346,7 +368,8 @@ export class WeatherLook {
     const u = this.uniforms;
     u.uTime!.value = time;
     u.uWind!.value = this.data.wind * weatherParams.wind;
-    u.uCoverage!.value = this.data.coverage * weatherParams.coverage;
+    // With puffy clouds the sheet has no fair-weather cloud of its own.
+    u.uCoverage!.value = this.cumulus ? 0 : this.data.coverage * weatherParams.coverage;
     u.uGain!.value = weatherParams.brightness;
     u.uFlashGain!.value = weatherParams.lightning;
     this.schedule.advance(time);
@@ -361,6 +384,7 @@ export class WeatherLook {
     }
     const storms = u.uStorms!.value as THREE.Vector4[];
     const info = u.uStormInfo!.value as THREE.Vector4[];
+    let sheetStorms = 0;
     for (let i = 0; i < MAX_STORMS; i++) {
       const e = shown[i];
       if (!e) {
@@ -369,7 +393,10 @@ export class WeatherLook {
       }
       stormCentre(e, time, this.centre);
       storms[i]!.set(this.centre[0], this.centre[1], this.centre[2], e.size);
-      info[i]!.set(stormStrength(e, time), STORM_SHAPE[e.kind], e.spin, Math.cos(e.size));
+      // Thunderstorms are towers among the puffs, where there are puffs.
+      const sheet = !(this.cumulus && e.kind === 'cell');
+      info[i]!.set(sheet ? stormStrength(e, time) : 0, STORM_SHAPE[e.kind], e.spin, Math.cos(e.size));
+      if (sheet) sheetStorms++;
     }
     u.uStormCount!.value = Math.min(shown.length, MAX_STORMS);
 
@@ -381,15 +408,38 @@ export class WeatherLook {
       else slots[i]!.w = 0;
     }
     u.uFlashCount!.value = this.flashCount;
+
+    for (const p of this.puffs) p.animate(time, this.schedule.events, weatherParams.coverage);
+    // A sheet with nothing on it (puffy skies, no cyclone or flash) isn't drawn at all.
+    const sheet = !this.cumulus || sheetStorms > 0 || this.flashCount > 0;
+    for (const m of this.sheets) m.visible = sheet;
   }
 
   /**
-   * The cloud layer: a sphere at the layer's height, `scale` times the
-   * planet-level radii (1 in low orbit, the system view's radius over the
-   * planet level's there), a cube sphere of `segments` cells per cube edge.
-   * `sun` is the star (a point in world space, or a direction), `sunColor` its light.
+   * The clouds as drawn, `scale` times the planet-level radii (1 in low
+   * orbit, the system view's radius over the planet level's there): the
+   * puffy clouds, where the body has them, and the sheet, a cube sphere of
+   * `segments` cells per cube edge at the layer's height. `sun` is the star
+   * (a point in world space, or a direction), `sunColor` its light.
    */
-  createCloudLayer(scale: number, segments: number, sun: AtmosphereSun, sunColor?: THREE.Color): THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial> {
+  createCloudLayer(scale: number, segments: number, sun: AtmosphereSun, sunColor?: THREE.Color): THREE.Group {
+    const group = new THREE.Group();
+    group.name = 'Clouds';
+    group.add(this.createSheet(scale, segments, sun, sunColor));
+    if (this.cumulus) {
+      const puffs = new CumulusClouds(this.cumulus, this.ground, this.uniforms, scale, sun, sunColor);
+      // Drawn just before the sheet: under a cyclone's canopy.
+      puffs.mesh.renderOrder = CLOUD_RENDER_ORDER - 0.05;
+      this.puffs.push(puffs);
+      group.add(puffs.mesh);
+      puffs.animate(this.time, this.schedule.events, weatherParams.coverage);
+    }
+    group.visible = weatherParams.enabled;
+    this.layers.push(group);
+    return group;
+  }
+
+  private createSheet(scale: number, segments: number, sun: AtmosphereSun, sunColor?: THREE.Color): THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial> {
     const material = new THREE.ShaderMaterial({
       vertexShader,
       fragmentShader,
@@ -414,10 +464,10 @@ export class WeatherLook {
       const inside = camera.getWorldPosition(scratchCamera).distanceTo(scratchCentre) < radius * scratchScale.x;
       material.side = inside ? THREE.BackSide : THREE.FrontSide;
     };
-    mesh.name = 'Clouds';
+    mesh.name = 'Cloud sheet';
     mesh.renderOrder = CLOUD_RENDER_ORDER;
-    mesh.visible = weatherParams.enabled;
-    this.layers.push(mesh);
+    mesh.visible = !this.cumulus;
+    this.sheets.push(mesh);
     return mesh;
   }
 }
@@ -427,7 +477,20 @@ export class WeatherLook {
  * activity, whose big eruptions raise ash clouds on bodies with air.
  */
 export function createWeatherLook(config: PlanetConfig, lava: LavaActivity | null): WeatherLook | null {
-  const data = weatherOf(config, globeRadius(config.radius), RELIEF_SCALE);
+  const R = globeRadius(config.radius);
+  const data = weatherOf(config, R, RELIEF_SCALE);
   if (!data) return null;
-  return new WeatherLook(data, lava ? { activity: lava, seed: config.seed } : null);
+  return new WeatherLook(data, lava ? { activity: lava, seed: config.seed } : null, groundOf(config, R));
+}
+
+/** The ground as low orbit draws it (or the sea over it), by direction: where puffy clouds keep above. */
+function groundOf(config: PlanetConfig, R: number): GroundRadius {
+  const sea = config.style.sea !== null;
+  const sample = terrainSampler(R, config.seed, config.style, { noise: surfaceNoise(config, true), reliefScale: RELIEF_SCALE, seaFloor: sea, shape: config.shape });
+  const dir = new THREE.Vector3();
+  const color = new THREE.Color();
+  return (x, y, z) => {
+    const r = sample(dir.set(x, y, z), color);
+    return sea ? Math.max(r, R) : r;
+  };
 }

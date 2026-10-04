@@ -544,6 +544,205 @@ html:not(.touch) .map-panel.folded .map-body {
   cursor: default;
 }
 
+.map-canvas[hidden] {
+  display: none;
+}
+
+/* The planet map's tabs (Map, Species), in its title bar; a dot on Species while the radar tracks an animal. */
+.map-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.map-tabs {
+  display: flex;
+  flex: none;
+  gap: 2px;
+}
+
+.map-tabs[hidden] {
+  display: none;
+}
+
+.map-tabs button {
+  position: relative;
+  padding: 1px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  opacity: 0.75;
+  cursor: pointer;
+}
+
+.map-tabs button:hover {
+  opacity: 1;
+}
+
+.map-tabs button[aria-selected='true'] {
+  border-color: rgba(102, 255, 204, 0.35);
+  background: rgba(102, 255, 204, 0.14);
+  color: #66ffcc;
+  opacity: 1;
+}
+
+.map-tabs.tracking button[data-tab='species']::after {
+  content: '';
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #66ffcc;
+  animation: radar-blip 1.4s ease-out infinite;
+}
+
+html.touch .map-tabs button {
+  padding: 4px 12px;
+}
+
+/* The Species tab: the planet's animals (click one to track it with the radar) and plants. */
+.species-list {
+  max-height: 260px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 4px 6px 8px;
+  background: rgba(8, 14, 28, 0.88);
+  font-size: 12px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(102, 255, 204, 0.35) transparent;
+  touch-action: pan-y;
+}
+
+.species-list[hidden] {
+  display: none;
+}
+
+html.touch .species-list {
+  max-height: min(420px, calc(100vh - 220px));
+  max-height: min(420px, calc(100dvh - 220px));
+}
+
+.species-heading {
+  margin: 6px 4px 2px;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.6;
+}
+
+.species-note {
+  margin: 0 4px 4px;
+  font-size: 11px;
+  line-height: 1.35;
+  opacity: 0.7;
+}
+
+.species-row {
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.species-row.plant {
+  grid-template-columns: 40px minmax(0, 1fr);
+}
+
+.species-row.animal {
+  cursor: pointer;
+}
+
+.species-row.animal:hover {
+  background: rgba(102, 255, 204, 0.08);
+}
+
+.species-row.tracking {
+  border-color: rgba(102, 255, 204, 0.6);
+  background: rgba(102, 255, 204, 0.13);
+}
+
+.species-icon {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+}
+
+.species-icon:not([src]) {
+  visibility: hidden;
+}
+
+.species-label {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.species-name,
+.species-line {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.species-line {
+  font-size: 11px;
+  opacity: 0.65;
+}
+
+.species-status {
+  font-size: 11px;
+  white-space: nowrap;
+  opacity: 0.75;
+}
+
+.species-row.tracking .species-status {
+  color: #66ffcc;
+  opacity: 1;
+}
+
+.species-row.tracking.standby .species-status {
+  color: inherit;
+  opacity: 0.75;
+}
+
+.species-row.tracking .species-status::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: #66ffcc;
+  vertical-align: 1px;
+  animation: radar-blip 1.4s ease-out infinite;
+}
+
+.species-row.tracking.standby .species-status::before {
+  background: rgba(207, 227, 255, 0.4);
+  animation: none;
+}
+
+@keyframes radar-blip {
+  0% {
+    box-shadow: 0 0 0 0 rgba(102, 255, 204, 0.7);
+  }
+  100% {
+    box-shadow: 0 0 0 6px rgba(102, 255, 204, 0);
+  }
+}
+
 /* The menu (Esc or the menu button): pauses the game over a dimmed view. Above everything, maps included. */
 #menu {
   position: fixed;
@@ -720,6 +919,224 @@ html.touch #menu .menu-keys {
   overflow-wrap: anywhere;
   -webkit-user-select: text;
   user-select: text;
+}
+
+/* The release notes (menu → What's new → Release notes, ui/ReleaseNotesDialog.ts): over the menu. */
+#notes {
+  position: fixed;
+  inset: 0;
+  z-index: 1020;
+  display: grid;
+  place-items: center;
+  padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom))
+    max(12px, env(safe-area-inset-left));
+  background: rgba(0, 4, 12, 0.6);
+}
+
+#notes[hidden] {
+  display: none;
+}
+
+#notes-panel {
+  width: min(560px, 100%);
+  max-height: 100%;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px 14px 0;
+  border-radius: 10px;
+  background: rgba(8, 14, 28, 0.97);
+  border: 1px solid rgba(102, 255, 204, 0.35);
+  font-size: 13px;
+}
+
+#notes h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+#notes p {
+  margin: 0;
+  line-height: 1.4;
+}
+
+#notes-build {
+  color: #ffd24a;
+  opacity: 0.9;
+}
+
+#notes-build[hidden] {
+  display: none;
+}
+
+#notes-close {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: #cfe3ff;
+  cursor: pointer;
+}
+
+#notes-close:hover {
+  color: #66ffcc;
+}
+
+/* The releases scroll under the heading; selectable, to quote one. */
+#notes-list {
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding-bottom: 12px;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.notes-release {
+  padding: 10px 0;
+  border-top: 1px solid rgba(102, 255, 204, 0.15);
+}
+
+.notes-release:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.notes-release h3 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.notes-release h3 a {
+  color: #66ffcc;
+  text-decoration: none;
+}
+
+.notes-release h3 a:hover {
+  text-decoration: underline;
+}
+
+.notes-release time {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: normal;
+  opacity: 0.6;
+}
+
+/* The release playing. */
+.notes-playing {
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: rgba(102, 255, 204, 0.18);
+  color: #66ffcc;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.notes-release h4 {
+  margin: 8px 0 2px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+
+.notes-release ul {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+
+.notes-release li {
+  margin: 3px 0;
+  line-height: 1.4;
+}
+
+.notes-release p {
+  opacity: 0.85;
+}
+
+.notes-release li a,
+.notes-release p a {
+  color: #9fd8ff;
+}
+
+.notes-release code {
+  padding: 0 3px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 12px;
+}
+
+/* "Updated to …" when a new release starts for the first time: top centre, under the menu and maps. */
+#notes-notice {
+  position: fixed;
+  top: max(10px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1003;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100vw - 32px);
+  box-sizing: border-box;
+  padding: 5px 6px 5px 14px;
+  border-radius: 20px;
+  border: 1px solid rgba(102, 255, 204, 0.5);
+  background: rgba(8, 14, 28, 0.88);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+#notes-notice[hidden] {
+  display: none;
+}
+
+#notes-notice-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#notes-notice-open {
+  padding: 4px 10px;
+  border-radius: 14px;
+  border: 1px solid rgba(102, 255, 204, 0.5);
+  background: rgba(102, 255, 204, 0.18);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+#notes-notice-open:hover {
+  border-color: rgba(102, 255, 204, 0.9);
+}
+
+#notes-notice-close {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: #cfe3ff;
+  cursor: pointer;
+}
+
+#notes-notice-close:hover {
+  color: #66ffcc;
 }
 
 /* The debug dump's dialog (menu → Save debug dump, F8): over the menu. */
@@ -996,7 +1413,7 @@ html:not([data-ship='surface']):not([data-ship='space']) #touch-map {
 
 /* With the bar up, the HUD's help line wraps before it reaches the bar. */
 html.items:not(.touch) #hud {
-  max-width: calc(50vw - 150px);
+  max-width: calc(50vw - 195px);
 }
 
 #item-hint {
@@ -1082,6 +1499,28 @@ html.items:not(.touch) #hud {
   box-shadow: 0 0 10px rgba(var(--bar), 0.6);
 }
 
+/* A switch (the radar): a light in its corner, lit while it's on. */
+.item-slot.switch::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(207, 227, 255, 0.18);
+}
+
+.item-slot.switch.on {
+  border-color: rgba(102, 255, 204, 0.75);
+  color: #66ffcc;
+}
+
+.item-slot.switch.on::after {
+  background: #66ffcc;
+  box-shadow: 0 0 6px #66ffcc;
+}
+
 .item-slot.unavailable .item-picture {
   opacity: 0.45;
 }
@@ -1135,12 +1574,20 @@ html.touch .item-slot {
   height: 52px;
 }
 
+/* A phone held upright: a full Inventory (the beam, the radar and five stacks) fits across it at 46px. */
+@media (max-width: 440px) {
+  html.touch .item-slot {
+    width: 46px;
+    height: 46px;
+  }
+}
+
 /*
- * A phone on its side or a tablet: the fullest bar (six 52px slots, 356px) fits between the stick (144px from the
+ * A phone on its side or a tablet: the fullest bar (seven 52px slots, 412px) fits between the stick (144px from the
  * left edge, 167px past a notch) and the menu buttons (104px from the right), so it sits at the bottom as with a
  * mouse; lifted above the stick, it would float in the middle of a short screen.
  */
-@media (min-width: 660px) {
+@media (min-width: 700px) {
   html.touch #item-bar {
     bottom: max(16px, env(safe-area-inset-bottom));
   }

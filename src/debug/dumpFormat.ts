@@ -68,7 +68,7 @@ export interface GameState {
   } | null;
   /** The galaxy map, when there. */
   galaxy: { spin: number; current: number; destination: number | null } | null;
-  graphics: { weather: boolean; plants: boolean; wireframe: boolean };
+  graphics: { weather: boolean; plants: boolean; animals?: boolean; wireframe: boolean };
   /**
    * Bodies blown apart by the planet buster (missing in dumps from before it): this system's, each with its
    * blast's system time, and how many there are in the whole game. Also whether one was going off.
@@ -86,6 +86,12 @@ export interface GameState {
     selected: string | null;
     inFlight: { state: string; fate: string | null; species: string }[];
   };
+  /**
+   * The radar: whether it's switched on (the item bar's Radar; missing in dumps from before the switch) and, in low
+   * orbit, the species picked for it (its index in the planet's animals) and how far the nearest is (missing in dumps
+   * from before it).
+   */
+  radar?: { on?: boolean; tracking: number | null; species: string | null; state: string; distance: number | null };
   /** What the DOM overlays showed (text the screenshot's game picture leaves out). */
   ui: {
     touchMode: boolean;
@@ -93,6 +99,8 @@ export interface GameState {
     tooltip: string | null;
     systemMap: boolean;
     planetMap: boolean;
+    /** The planet map's tab on show (missing in dumps from before the Species tab). */
+    mapTab?: 'map' | 'species';
     /** Visible overlay elements and where they are (CSS px): to spot layout problems. */
     overlays: { id: string; rect: [number, number, number, number] }[];
   };
@@ -210,13 +218,20 @@ export function summaryLines(dump: Omit<DebugDump, 'images'>): string[] {
     const moving = s.transitioning ? ` · mid-transition${s.crossfade !== null ? ` (crossfade ${s.crossfade.toFixed(2)})` : ''}` : '';
     lines.push(`Where: ${where(s)} · seed ${s.seed ?? 'default'} · star ${s.star} · t=${time.toFixed(2)} s${moving}`);
     const g = s.graphics;
-    lines.push(`Camera: distance ${s.orbit.distance.toFixed(1)} · fov ${s.camera.fov} · weather ${g.weather ? 'on' : 'off'} · plants ${g.plants ? 'on' : 'off'}${g.wireframe ? ' · wireframe' : ''}`);
+    lines.push(`Camera: distance ${s.orbit.distance.toFixed(1)} · fov ${s.camera.fov} · weather ${g.weather ? 'on' : 'off'} · plants ${g.plants ? 'on' : 'off'}${g.animals === false ? ' · animals off' : ''}${g.wireframe ? ' · wireframe' : ''}`);
     const c = s.cargo;
     if (c && (c.inventory.stacks.length > 0 || c.selected || c.inFlight.length > 0 || c.surface?.planted?.length || c.surface?.removed.length)) {
       const hold = c.inventory.stacks.map((st) => `${st.species.name} ×${st.count}`).join(', ') || 'empty';
       const here = c.surface ? ` · here: ${c.surface.removed.length} taken, ${c.surface.planted?.length ?? 0} set down` : '';
       const air = c.inFlight.length > 0 ? ` · in the air: ${c.inFlight.map((l) => `${l.species} (${l.fate ?? l.state})`).join(', ')}` : '';
       lines.push(`Cargo: ${hold}${c.selected ? ` · armed: ${c.selected}` : ''}${here}${air}`);
+    }
+    const radar = s.radar;
+    if (radar && (radar.tracking !== null || radar.on)) {
+      const power = radar.on === undefined ? '' : radar.on ? 'on' : 'off';
+      const picked = radar.tracking === null ? '' : `tracking ${radar.species ?? `species ${radar.tracking}`}`;
+      const how = radar.distance !== null ? ` · nearest ${radar.distance.toFixed(0)} units away` : radar.tracking !== null && radar.state !== 'standby' ? ` · ${radar.state}` : '';
+      lines.push(`Radar: ${[power, picked].filter(Boolean).join(' · ')}${how}`);
     }
   } else if (dump.stateError) {
     lines.push(`State unavailable: ${dump.stateError}`);

@@ -4,13 +4,14 @@ import type { Input } from '../core/Input';
 import { PLANT_KINDS } from '../gen/plants';
 import type { Tooltip } from '../ui/Tooltip';
 import type { Plantings } from './Plantings';
+import type { SurfaceAnimals } from './SurfaceAnimals';
 import type { SurfaceEntities } from './SurfaceEntities';
 
 /** How far past the ground's hit a plant can still be picked: its crown is wider than a point. */
 const GROUND_SLACK = 1;
 
 /**
- * Shows the plant under the pointer in the tooltip: it proves `pick` works
+ * Shows the plant (or animal) under the pointer in the tooltip: it proves `pick` works
  * (see SurfaceEntities) and gives the ground something to read. Added after
  * the camera, so the ray is this frame's. Only while `active` (the planet
  * level's HUD has the DOM while it is the level on screen).
@@ -29,6 +30,8 @@ export class PlantTooltip implements Entity {
     private readonly plants: SurfaceEntities | null,
     private readonly plantings: Plantings | null,
     private readonly tooltip: Tooltip,
+    /** The animals roaming the body (null where none do): they stand in front of the plants. */
+    private readonly animals: SurfaceAnimals | null,
     /** Where the ray meets the ground (written into the second argument; the distance, or null): plants behind a hill don't count. */
     private readonly groundHit: (ray: THREE.Ray, out: THREE.Vector3) => number | null,
   ) {}
@@ -52,6 +55,14 @@ export class PlantTooltip implements Entity {
       const ground = this.groundHit(ray, this.point);
       // A plant stands on the ground, so it is hit just before the ray reaches it.
       const limit = ground === null ? Infinity : ground + GROUND_SLACK;
+      const animal = this.animals?.pick(ray, limit) ?? null;
+      if (animal) {
+        const { species, scale, doing } = animal;
+        const info = `${species.diet === 'carnivore' ? 'Carnivore' : 'Herbivore'} · ${(species.length * scale).toFixed(1)} u long · ${doing}`;
+        this.tooltip.show(animal.id, species.name, info, pointer.clientX, pointer.clientY, undefined, this.input.touchMode);
+        this.shown = true;
+        return;
+      }
       const hit = this.plants?.pick(ray, limit) ?? null;
       const planted = this.plantings?.pick(ray, hit ? hit.distance : limit) ?? null;
       if (planted) {

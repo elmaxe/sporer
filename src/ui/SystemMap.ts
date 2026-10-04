@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { Entity } from '../core/Entity';
 import type { Input } from '../core/Input';
 import { DEBRIS_REACH, debrisPalette, debrisPosition, generateDebris } from '../gen/debris';
-import { terrainNoise } from '../gen/noise';
+import { surfaceNoise } from '../gen/craters';
 import type { SystemData } from '../gen/system';
 import type { Picker } from '../player/Picker';
 import type { Ship } from '../player/Ship';
@@ -371,6 +371,7 @@ export class SystemMap implements Entity {
       const { config } = d.body;
       const gas = isGas(config) ? gasPainter(config.seed, config.bands, config.size === 'iceGiant') : null;
       const terrain = gas ? null : terrainPainter(config.style, false, config.seed);
+      const noise = surfaceNoise(config, false);
       const tilt = config.tilt ?? 0;
       const cos = Math.cos(tilt);
       const sin = Math.sin(tilt);
@@ -390,7 +391,7 @@ export class SystemMap implements Entity {
           const bx = nx * cos + ny * sin;
           const by = -nx * sin + ny * cos;
           if (gas) gas(bx, by, nz, this.color);
-          else terrain!(terrainNoise(bx, by, nz, config.seed), this.color, bx, by, nz);
+          else terrain!(noise(bx, by, nz, config.seed), this.color, bx, by, nz);
           const lit = Math.max(0, nx * LIGHT.x + ny * LIGHT.y + nz * LIGHT.z);
           this.color.multiplyScalar(NIGHT + (1 - NIGHT) * lit);
           this.color.getRGB(this.srgb, THREE.SRGBColorSpace);

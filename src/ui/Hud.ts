@@ -1,3 +1,4 @@
+import { describeDust } from '../gen/discs';
 import type { Entity } from '../core/Entity';
 import type { Input } from '../core/Input';
 import { describeStars } from '../gen/stars';
@@ -47,7 +48,8 @@ export class Hud implements Entity {
     const planets = system.planets.length === 1 ? '1 planet' : `${system.planets.length} planets`;
     const nebula = system.nebula ? ` · in the ${system.nebula.name}` : '';
     const where = system.stars.length > 0 ? `${describeStars(system.stars)} · ${planets}` : 'Rogue planet · no star';
-    this.locationEl.textContent = `${system.name} · ${where}${nebula}`;
+    const dust = system.dust ? ` · ${describeDust(system.dust)}` : '';
+    this.locationEl.textContent = `${system.name} · ${where}${dust}${nebula}`;
     this.help.refresh(true);
     this.sinceRefresh = REFRESH_SECONDS;
   }
