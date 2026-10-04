@@ -69,8 +69,9 @@ export default defineConfig(({ command }) => {
     build: {
       target: 'es2022',
       chunkSizeWarningLimit: 5000,
-      // The game, the planet lab (lab.html, a tool for making and checking planets), the plant lab (plants.html) and the animal lab (animals.html).
-      rollupOptions: { input: { main: 'index.html', lab: 'lab.html', plants: 'plants.html', animals: 'animals.html' } },
+      // The game, the planet lab (lab.html, a tool for making and checking planets), the plant lab (plants.html), the
+      // animal lab (animals.html) and the star lab (stars.html).
+      rollupOptions: { input: { main: 'index.html', lab: 'lab.html', plants: 'plants.html', animals: 'animals.html', stars: 'stars.html' } },
     },
     test: {
       include: ['tests/**/*.test.ts'],

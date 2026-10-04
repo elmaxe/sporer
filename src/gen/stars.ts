@@ -1,5 +1,6 @@
 import { hslToHex, jitterHsl, type Hsl } from './color';
 import type { Rng } from './rng';
+import type { StarActivity } from './starActivity';
 
 export type SpectralClass = 'O' | 'B' | 'A' | 'F' | 'G' | 'K' | 'M';
 export type StarKind = 'mainSequence' | 'redDwarf' | 'whiteDwarf' | 'redGiant' | 'blueGiant';
@@ -14,6 +15,12 @@ export interface StarData {
   luminosity: number;
   /** Relative to a G-class star = 1. Drives orbital periods. */
   mass: number;
+  /**
+   * How it lives (surface, spots, storms) instead of what its kind and class
+   * give (gen/starActivity.ts): the star lab's edits. Absent for every
+   * generated star.
+   */
+  activity?: StarActivity;
 }
 
 interface StarSpec {
@@ -42,6 +49,16 @@ const OTHER_KINDS: Record<Exclude<StarKind, 'mainSequence'>, StarSpec> = {
   blueGiant: { spectralClass: 'B', radius: [65, 85], luminosity: 20, mass: 10, color: [222, 1, 0.68] },
 };
 
+/** Every kind, and every main-sequence class, in the order tools list them. */
+export const STAR_KINDS: readonly StarKind[] = ['mainSequence', 'redDwarf', 'whiteDwarf', 'redGiant', 'blueGiant'];
+export const MAIN_SEQUENCE_CLASSES: readonly SpectralClass[] = MAIN_SEQUENCE.map(([s]) => s.spectralClass);
+
+/** The base colour (no jitter) of a kind or, on the main sequence, a class, as [hue°, saturation, lightness]. */
+export function starBaseColor(kind: StarKind, spectralClass: SpectralClass): Hsl {
+  if (kind !== 'mainSequence') return OTHER_KINDS[kind].color;
+  return (MAIN_SEQUENCE.find(([s]) => s.spectralClass === spectralClass) ?? MAIN_SEQUENCE[4]!)[0].color;
+}
+
 const KIND_WEIGHTS: readonly (readonly [StarKind, number])[] = [
   ['mainSequence', 60],
   ['redDwarf', 22],
@@ -50,8 +67,13 @@ const KIND_WEIGHTS: readonly (readonly [StarKind, number])[] = [
   ['blueGiant', 4],
 ];
 
-export function generateStar(rng: Rng, kind: StarKind = rng.weighted(KIND_WEIGHTS)): StarData {
-  const spec = kind === 'mainSequence' ? rng.weighted(MAIN_SEQUENCE) : OTHER_KINDS[kind];
+/**
+ * A random star (of `kind`, if given). `spectralClass` picks a main-sequence
+ * star's class instead of drawing it (tools: the star lab; it skips that draw).
+ */
+export function generateStar(rng: Rng, kind: StarKind = rng.weighted(KIND_WEIGHTS), spectralClass?: SpectralClass): StarData {
+  const chosen = kind === 'mainSequence' && spectralClass ? MAIN_SEQUENCE.find(([s]) => s.spectralClass === spectralClass)?.[0] : undefined;
+  const spec = chosen ?? (kind === 'mainSequence' ? rng.weighted(MAIN_SEQUENCE) : OTHER_KINDS[kind]);
   const size = rng.next();
   return {
     kind,

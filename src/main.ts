@@ -1,7 +1,7 @@
 import { Game } from './core/Game';
 import { Debug } from './core/Debug';
 import { Physics } from './physics/Physics';
-import { generateGalaxy, solRef, systemRef } from './gen/galaxy';
+import { DEFAULT_GALAXY_SEED, generateGalaxy, solRef, systemRef } from './gen/galaxy';
 import { loadSurfaceMaps } from './world/surfaceMaps';
 import { geyserKind } from './gen/geysers';
 import { meteorShowers, nextShowerPeak } from './gen/meteors';
@@ -26,8 +26,6 @@ import { registerServiceWorker } from './pwa/serviceWorker';
 // First, so the debug dump has the console's errors from start-up on.
 const consoleLog = installConsoleLog();
 
-const DEFAULT_SEED = '1337';
-
 async function main(): Promise<void> {
   // Saves the game on the device so it starts without internet (production builds).
   void registerServiceWorker();
@@ -35,7 +33,7 @@ async function main(): Promise<void> {
   if (await openChosenVersion()) return;
   // ?seed=<number or any text> picks the galaxy, ?star=<id> jumps to a system (or a rogue planet).
   const params = new URLSearchParams(location.search);
-  const galaxy = generateGalaxy(parseSeed(params.get('seed') ?? DEFAULT_SEED));
+  const galaxy = generateGalaxy(parseSeed(params.get('seed') ?? DEFAULT_GALAXY_SEED));
   // ?star=sol is our own solar system, wherever it is in this galaxy.
   const starParam = params.get('star');
   const start = (starParam?.toLowerCase() === 'sol' && solRef(galaxy)) || (starParam !== null && systemRef(galaxy, Number(starParam))) || findHomeSystem(galaxy);
