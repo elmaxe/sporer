@@ -59,7 +59,7 @@ export class PlantTooltip implements Entity {
       if (animal) {
         const { species, scale, doing } = animal;
         const info = `${species.diet === 'carnivore' ? 'Carnivore' : 'Herbivore'} · ${(species.length * scale).toFixed(1)} u long · ${doing}`;
-        this.tooltip.show(animal.id, species.name, info, pointer.clientX, pointer.clientY, undefined, this.input.touchMode);
+        this.tooltip.show(animal.id, species.name, info, pointer.clientX, pointer.clientY, animal.origin ? `Brought from ${animal.origin}` : undefined, this.input.touchMode);
         this.shown = true;
         return;
       }

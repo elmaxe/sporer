@@ -77,14 +77,16 @@ export interface GameState {
   /** Volcanoes raised by volcano bombs on this system's bodies (missing in dumps from before them), oldest first. */
   volcanoes?: { body: BodyRef; sites: VolcanoSite[] }[];
   /**
-   * The cargo hold and, in low orbit, what the player has done to the body's surface (plants taken, plants
-   * set down), what the beam is armed with and what's in the air (missing in dumps from before the beam).
+   * The cargo hold and, in low orbit, what the player has done to the body's surface (animals and plants taken
+   * or killed, set down), the item armed (the beam, a stack, or a weapon) and what's in the air (missing in dumps
+   * from before the beam), and the laser (missing in dumps from before it).
    */
   cargo?: {
     inventory: InventoryData;
     surface: SurfaceChangesData | null;
     selected: string | null;
-    inFlight: { state: string; fate: string | null; species: string }[];
+    inFlight: { state: string; fate: string | null; species: string; kind?: string }[];
+    laser?: { firing: boolean; killed: number; burning: number };
   };
   /**
    * The radar: whether it's switched on (the item bar's Radar; missing in dumps from before the switch) and, in low
@@ -220,11 +222,14 @@ export function summaryLines(dump: Omit<DebugDump, 'images'>): string[] {
     const g = s.graphics;
     lines.push(`Camera: distance ${s.orbit.distance.toFixed(1)} · fov ${s.camera.fov} · weather ${g.weather ? 'on' : 'off'} · plants ${g.plants ? 'on' : 'off'}${g.animals === false ? ' · animals off' : ''}${g.wireframe ? ' · wireframe' : ''}`);
     const c = s.cargo;
-    if (c && (c.inventory.stacks.length > 0 || c.selected || c.inFlight.length > 0 || c.surface?.planted?.length || c.surface?.removed.length)) {
+    const animalsHere = (c?.surface?.removedAnimals?.length ?? 0) + (c?.surface?.released?.length ?? 0);
+    if (c && (c.inventory.stacks.length > 0 || c.selected || c.inFlight.length > 0 || c.surface?.planted?.length || c.surface?.removed.length || animalsHere > 0)) {
       const hold = c.inventory.stacks.map((st) => `${st.species.name} ×${st.count}`).join(', ') || 'empty';
-      const here = c.surface ? ` · here: ${c.surface.removed.length} taken, ${c.surface.planted?.length ?? 0} set down` : '';
+      const animals = animalsHere > 0 ? `, animals ${c.surface!.removedAnimals?.length ?? 0} taken or killed, ${c.surface!.released?.length ?? 0} set down` : '';
+      const here = c.surface ? ` · here: plants ${c.surface.removed.length} taken or killed, ${c.surface.planted?.length ?? 0} set down${animals}` : '';
       const air = c.inFlight.length > 0 ? ` · in the air: ${c.inFlight.map((l) => `${l.species} (${l.fate ?? l.state})`).join(', ')}` : '';
-      lines.push(`Cargo: ${hold}${c.selected ? ` · armed: ${c.selected}` : ''}${here}${air}`);
+      const laser = c.laser && (c.laser.firing || c.laser.killed > 0) ? ` · laser ${c.laser.firing ? 'firing, ' : ''}${c.laser.killed} killed` : '';
+      lines.push(`Cargo: ${hold}${c.selected ? ` · armed: ${c.selected}` : ''}${here}${air}${laser}`);
     }
     const radar = s.radar;
     if (radar && (radar.tracking !== null || radar.on)) {

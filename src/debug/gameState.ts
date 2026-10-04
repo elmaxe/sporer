@@ -193,8 +193,9 @@ export function captureGameState(game: Game, levels: SceneManager): GameState {
     cargo: {
       inventory: levels.inventory.toJSON(),
       surface: planet ? levels.surfaceChanges.forPlanet(bodyKey(planet.body.config)).toJSON() : null,
-      selected: planet?.cargo?.selected ?? null,
+      selected: planet?.selected ?? null,
       inFlight: planet?.cargo?.inFlight ?? [],
+      laser: planet ? { firing: planet.laser.on, killed: planet.laser.killed, burning: planet.laser.burning } : undefined,
     },
     radar: {
       on: levels.switches.isOn('radar'),
@@ -297,7 +298,7 @@ export async function restoreGameState(game: Game, levels: SceneManager, state: 
   }
   if (state.cargo) {
     levels.inventory.load(state.cargo.inventory);
-    if (state.cargo.inFlight.length > 0) notes.push(`${state.cargo.inFlight.length} plant(s) were on the beam or meeting their fate: left out`);
+    if (state.cargo.inFlight.length > 0) notes.push(`${state.cargo.inFlight.length} animal(s) or plant(s) were on the beam or meeting their fate: left out`);
   }
   if (state.busted?.firing) notes.push(`a planet buster was going off (${state.busted.elapsed?.toFixed(1)} s after firing): restored as busted`);
   const shipState = state.system.ship;

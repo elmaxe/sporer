@@ -24,6 +24,8 @@ rebuild; no code changes needed. Volumes and fades are in `cueParams` (`src/audi
 | `exportBeam/` | The beam lowering cargo from the ship: starts on the press, fades out when it's let go or lands | loop |
 | `dropImpact/` | Cargo hitting the ground: set down by the beam, dropped, or falling from it | one-shot |
 | `radarPing/` | The radar (switched on in the Inventory) sending its waves towards the nearest animal of the species picked on the planet map's Species tab: once per ping, more often and higher the closer they are (played from 0.56× speed far off to 1× right above the animals, so record it at the pitch you want to hear on top of them) | one-shot |
+| `laserBeam/` | The laser (a weapon) firing: starts on the press, fades out when it's let go. The file there is a synthesised placeholder: replace it with your own | loop |
+| `laserHit/` | The laser killing an animal or a plant (once for each). The file there is a synthesised placeholder: replace it with your own | one-shot |
 | `starNear/` | A star close up: grows as the camera nears its surface, taking over from `starFar` | ambient |
 | `starFar/` | A star from across its system: fades with distance, giving way to `starNear` close up | ambient |
 | `shipHum/` | The UFO's own hum, always on | ambient |
