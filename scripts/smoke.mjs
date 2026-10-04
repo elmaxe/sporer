@@ -2620,7 +2620,8 @@ await section('cargo', async () => {
       return null; }`);
     // Beamed up: into a stack of its own, with its picture (the plants above may have filled the hold: emptied first).
     await evaluate(`levels.inventory.load({ stacks: [] })`);
-    await key('Digit1', '1');
+    // (The fling above left the beam armed: a 1 now would put it away.)
+    await evaluate(`planet.select('abduct')`);
     const at = await evaluate(`__animal()`);
     const takenBefore = await evaluate(`${animalChanges}.removedAnimalCount`);
     let up = null;
