@@ -4,6 +4,7 @@ import type { Entity } from '../core/Entity';
 import { HOME_RANGE, PACK_RANGE_FACTOR, HerdPath, type AnimalPlan, type AnimalPose, type HerdData } from '../gen/animals';
 import type { GroundRadius } from '../gen/plants';
 import type { SoundEffects } from '../audio/sfx';
+import type { SurfaceChanges } from '../surface/changes';
 import type { RenderClock } from '../planet/PlanetFrame';
 import type { PlanetShip } from '../planet/PlanetShip';
 import { animalSkeleton } from '../surface/animalLook';
@@ -135,6 +136,8 @@ export class Radar implements Entity {
     /** Whether the radar is switched on (the item bar's Radar): off, it does nothing, whatever is picked. */
     private readonly powered: () => boolean,
     debug: Debug,
+    /** Animals beamed up or killed (`<herd id>:<k>`), which it no longer finds (none in tests). */
+    private readonly changes: Pick<SurfaceChanges, 'removedAnimalCount' | 'isAnimalRemoved'> | null = null,
   ) {
     this.census = new HerdCensus(plan, ground);
     // A herd strays at most its range (a pack's is longer) and its spread from home.
@@ -284,7 +287,9 @@ export class Radar implements Entity {
     let best = Infinity;
     for (const herd of this.candidates) {
       const path = this.pathOf(herd);
+      const removed = this.changes && this.changes.removedAnimalCount > 0 ? this.changes : null;
       for (let k = 0; k < herd.count; k++) {
+        if (removed?.isAnimalRemoved(`${herd.id}:${k}`)) continue;
         path.pose(k, t, pose);
         const d = groundDistance(from, pose, R);
         if (d >= best) continue;

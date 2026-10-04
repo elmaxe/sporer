@@ -53,7 +53,7 @@ async function main(): Promise<void> {
   game.add(new FpsCounter());
   const freeze = game.add(new ViewFreezeControl(game));
   game.add(new TouchControls(game));
-  game.add(new ItemBar(levels, game.input, levels.tooltip, levels.icons.plants));
+  game.add(new ItemBar(levels, game.input, levels.tooltip, levels.icons));
   const debugDump = game.add(new DebugDumpControl(game, gameDumpSource(game, levels), consoleLog, debug));
 
   document.getElementById('loading')?.remove();
