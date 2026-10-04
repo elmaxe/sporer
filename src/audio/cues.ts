@@ -24,6 +24,7 @@ export type SoundCue =
   | 'abductSuccess'
   | 'exportBeam'
   | 'dropImpact'
+  | 'radarPing'
   | 'starNear'
   | 'starFar'
   | 'shipHum';
@@ -45,6 +46,7 @@ export const SOUND_CUES: readonly SoundCue[] = [
   'abductSuccess',
   'exportBeam',
   'dropImpact',
+  'radarPing',
   'starNear',
   'starFar',
   'shipHum',
@@ -142,6 +144,8 @@ export const cueParams: Record<SoundCue, CueSpec> = {
   exportBeam: { ...travel(), fadeIn: 0.1, fadeOut: 0.3 },
   // Cargo landing on the ground: set down by the beam, dropped, or falling from it.
   dropImpact: oneShot(),
+  // The radar pinging the way to the nearest animal of the species it tracks (quicker the closer they are).
+  radarPing: oneShot(),
   // A star close up, as the camera nears its surface (see StarSounds).
   starNear: ambient(0.8),
   // A star from across its system, giving way to starNear close up.

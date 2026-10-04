@@ -7,10 +7,11 @@ const RENDER_SIZE = 160;
 const ICON_SIZE = 80;
 
 /**
- * Pictures of plant species for the item bar's cargo slots: the species'
- * full mesh (the game's own, surface/plantLook.ts) drawn once with the game's
- * renderer into a small transparent image, lit from the upper left, and kept
- * as a data URL per species key.
+ * Pictures of plant species for the item bar's cargo slots and the planet
+ * map's Species tab: the species' full mesh (the game's own,
+ * surface/plantLook.ts) drawn once with the game's renderer into a small
+ * transparent image, lit from the upper left, and kept as a data URL per
+ * species key.
  */
 export class PlantIcons {
   private readonly cache = new Map<string, string>();
@@ -51,42 +52,52 @@ export class PlantIcons {
     camera.position.set(0, centre.y + distance * 0.2, distance).add(new THREE.Vector3(centre.x, 0, centre.z));
     camera.lookAt(centre);
 
-    const target = new THREE.WebGLRenderTarget(RENDER_SIZE, RENDER_SIZE);
-    const previous = renderer.getRenderTarget();
-    const clear = renderer.getClearColor(new THREE.Color());
-    const clearAlpha = renderer.getClearAlpha();
-    renderer.setRenderTarget(target);
-    renderer.setClearColor(0x000000, 0);
-    renderer.clear();
-    renderer.render(scene, camera);
-    const pixels = new Uint8Array(RENDER_SIZE * RENDER_SIZE * 4);
-    renderer.readRenderTargetPixels(target, 0, 0, RENDER_SIZE, RENDER_SIZE, pixels);
-    renderer.setRenderTarget(previous);
-    renderer.setClearColor(clear, clearAlpha);
-    target.dispose();
+    const url = snapshotIcon(renderer, scene, camera);
     geometry.dispose();
     material.dispose();
-
-    // A render target holds linear colour, bottom row first: encode as sRGB, flipped, then draw down to the icon's size.
-    const full = document.createElement('canvas');
-    full.width = full.height = RENDER_SIZE;
-    const image = full.getContext('2d')!.createImageData(RENDER_SIZE, RENDER_SIZE);
-    for (let y = 0; y < RENDER_SIZE; y++) {
-      for (let x = 0; x < RENDER_SIZE; x++) {
-        const from = ((RENDER_SIZE - 1 - y) * RENDER_SIZE + x) * 4;
-        const to = (y * RENDER_SIZE + x) * 4;
-        for (let c = 0; c < 3; c++) image.data[to + c] = SRGB[pixels[from + c]!]!;
-        image.data[to + 3] = pixels[from + 3]!;
-      }
-    }
-    full.getContext('2d')!.putImageData(image, 0, 0);
-    const icon = document.createElement('canvas');
-    icon.width = icon.height = ICON_SIZE;
-    const ctx = icon.getContext('2d')!;
-    ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(full, 0, 0, ICON_SIZE, ICON_SIZE);
-    return icon.toDataURL('image/png');
+    return url;
   }
+}
+
+/**
+ * Draws `scene` from `camera` into a small transparent square image with the
+ * game's renderer (leaving its target and clear colour as they were), as a
+ * PNG data URL: the item bar's and the map's species pictures.
+ */
+export function snapshotIcon(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera): string {
+  const target = new THREE.WebGLRenderTarget(RENDER_SIZE, RENDER_SIZE);
+  const previous = renderer.getRenderTarget();
+  const clear = renderer.getClearColor(new THREE.Color());
+  const clearAlpha = renderer.getClearAlpha();
+  renderer.setRenderTarget(target);
+  renderer.setClearColor(0x000000, 0);
+  renderer.clear();
+  renderer.render(scene, camera);
+  const pixels = new Uint8Array(RENDER_SIZE * RENDER_SIZE * 4);
+  renderer.readRenderTargetPixels(target, 0, 0, RENDER_SIZE, RENDER_SIZE, pixels);
+  renderer.setRenderTarget(previous);
+  renderer.setClearColor(clear, clearAlpha);
+  target.dispose();
+
+  // A render target holds linear colour, bottom row first: encode as sRGB, flipped, then draw down to the icon's size.
+  const full = document.createElement('canvas');
+  full.width = full.height = RENDER_SIZE;
+  const image = full.getContext('2d')!.createImageData(RENDER_SIZE, RENDER_SIZE);
+  for (let y = 0; y < RENDER_SIZE; y++) {
+    for (let x = 0; x < RENDER_SIZE; x++) {
+      const from = ((RENDER_SIZE - 1 - y) * RENDER_SIZE + x) * 4;
+      const to = (y * RENDER_SIZE + x) * 4;
+      for (let c = 0; c < 3; c++) image.data[to + c] = SRGB[pixels[from + c]!]!;
+      image.data[to + 3] = pixels[from + 3]!;
+    }
+  }
+  full.getContext('2d')!.putImageData(image, 0, 0);
+  const icon = document.createElement('canvas');
+  icon.width = icon.height = ICON_SIZE;
+  const ctx = icon.getContext('2d')!;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(full, 0, 0, ICON_SIZE, ICON_SIZE);
+  return icon.toDataURL('image/png');
 }
 
 /** Linear 8-bit → sRGB 8-bit. */

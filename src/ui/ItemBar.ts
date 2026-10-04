@@ -2,14 +2,14 @@ import type { Entity } from '../core/Entity';
 import type { Input } from '../core/Input';
 import type { Inventory } from '../cargo/inventory';
 import { CARGO_STACKS, STACK_SIZE } from '../cargo/inventory';
-import { ITEMS, ITEM_TABS, cargoItem, slotKey, type ItemId, type ItemTab, type ItemUser, type ToolId } from '../combat/items';
+import { ITEMS, ITEM_TABS, cargoItem, slotKey, type ItemId, type ItemSwitches, type ItemTab, type ItemUser, type ToolId } from '../combat/items';
 import { PLANT_KINDS } from '../gen/plants';
 import type { LevelMode } from '../levels/SceneManager';
 import type { PlantIcons } from './plantIcons';
 import type { Tooltip } from './Tooltip';
 
-/** Slots per tab on a mouse screen (empty ones show there's room for more); touch shows only the filled ones. */
-const SLOTS_PER_TAB = 1 + CARGO_STACKS;
+/** Slots per tab on a mouse screen (the Inventory's tools and the hold's stacks; empty ones show there's room for more); touch shows only the filled ones. */
+const SLOTS_PER_TAB = ITEMS.filter((i) => i.tab === 'inventory').length + CARGO_STACKS;
 /** Seconds a hint from clicking an unusable slot stays up. */
 const NOTE_SECONDS = 2.5;
 
@@ -31,6 +31,12 @@ const ICONS: Record<ToolId, string> = {
     '<path d="M8.5 4.6C9 3.1 10.4 2 12 2s3 1.1 3.5 2.6" />' +
     '<path d="M9 9.2 5 21M15 9.2l4 11.8" stroke-dasharray="1.5 2" />' +
     '<path d="M12 21v-3.5M12 17.5l-2.2-.4 1.2-2.1-1.1-.2L12 12l2.1 2.8-1.1.2 1.2 2.1z" /></svg>',
+  radar:
+    '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M3.5 9.5a8 8 0 0 0 11 11z" />' +
+    '<path d="M9 15l4-4" /><circle cx="13.6" cy="10.4" r="1" />' +
+    '<path d="M15.5 6a4 4 0 0 1 2.5 2.5M16.5 2.5a8 8 0 0 1 5 5" />' +
+    '<path d="M7 18.5 5 22h7" /></svg>',
 };
 
 /** What the bar needs to know about the game: where the player is, what can use items there, and what's in the hold. */
@@ -40,6 +46,8 @@ export interface ItemBarSource {
   /** The level the player can use items in now (low orbit), or null. */
   readonly itemUser: ItemUser | null;
   readonly inventory: Inventory;
+  /** Which switch items (the radar) are on: they can be turned on or off anywhere. */
+  readonly switches: ItemSwitches;
 }
 
 /** What a slot shows: a tool, or a stack of cargo. */
@@ -51,16 +59,19 @@ interface SlotItem {
   icon: string;
   /** A cargo stack's count. */
   count: number | null;
+  /** A switch (`ItemDef.switch`): turned on or off, not selected. */
+  switch: boolean;
 }
 
 /**
  * The item bar (#item-bar in index.html): tabs of item slots at the bottom
  * of the screen. Weapons (red) holds the planet buster and the volcano
- * bomb; Inventory (grey) the abduction beam and, after it, the cargo hold's
- * stacks, a plant's picture and count each (cargo/inventory.ts). The bar
+ * bomb; Inventory (grey) the abduction beam, the radar and, after them, the
+ * cargo hold's stacks, a plant's picture and count each (cargo/inventory.ts). The bar
  * takes the colour of the tab on show, its tooltips too. Click a slot or
  * press its number (the tab on show's slots are 1, 2, …) to select the item
- * and again to put it away; Tab switches tabs. What a selected item does is
+ * and again to put it away; a switch (the radar) is turned on or off
+ * instead, anywhere, and keeps its light on while it's on; Tab switches tabs. What a selected item does is
  * up to the level (`ItemUser`): in low orbit the planet buster and the
  * volcano bomb fire at the next click on the planet, the beam lifts the
  * plant held under the pointer, and a stack sets one of its plants down
@@ -138,19 +149,22 @@ export class ItemBar implements Entity {
     // Every tool's status (whichever tab shows), and the cargo stacks' on show; the selected item's hint wins.
     let hint = '';
     let seenSelected = false;
-    const look = (id: ItemId): void => {
+    const look = (id: ItemId, isSwitch = false): void => {
       const status = user ? user.status(id) : null;
       const selected = user?.selected === id;
       seenSelected ||= selected;
       const slot = this.slots.get(id);
       if (slot) {
-        slot.classList.toggle('unavailable', !(status?.available ?? false));
+        // A switch works anywhere: never greyed out, lit while on.
+        const on = isSwitch && this.source.switches.isOn(id as ToolId);
+        slot.classList.toggle('unavailable', !isSwitch && !(status?.available ?? false));
         slot.classList.toggle('selected', selected);
-        slot.setAttribute('aria-pressed', String(selected));
+        slot.classList.toggle('on', on);
+        slot.setAttribute('aria-pressed', String(selected || on));
       }
       if (status?.hint && (selected || !hint)) hint = status.hint;
     };
-    for (const item of ITEMS) look(item.id);
+    for (const item of ITEMS) look(item.id, item.switch);
     for (const item of this.items) if (item.count !== null) look(item.id);
     // A selected cargo stack's hint even when its tab isn't on show.
     const selected = user?.selected;
@@ -185,9 +199,14 @@ export class ItemBar implements Entity {
     this.showTab(ITEM_TABS[(i + (e.shiftKey ? ITEM_TABS.length - 1 : 1)) % ITEM_TABS.length]!.id);
   };
 
-  /** Selects the item, or puts it away if it's selected; says why not if it can't be used here. */
+  /** Selects the item, or puts it away if it's selected; says why not if it can't be used here. A switch is turned on or off. */
   private toggle(item: SlotItem): void {
     const user = this.source.itemUser;
+    if (item.switch) {
+      const on = this.source.switches.flip(item.id as ToolId);
+      this.say(`${item.name} ${on ? 'on' : 'off'}${on && !user ? ': it works in low orbit' : ''}`);
+      return;
+    }
     if (!user) {
       this.say(this.source.transitioning ? '' : `${item.name}: go down to a planet or moon to use it`);
       return;
@@ -219,7 +238,10 @@ export class ItemBar implements Entity {
     const keyLabel = slotKey(index)?.label;
     const press = keyLabel ? `${keyLabel} or click` : 'Click';
     let details: string;
-    if (!user) details = 'Go down to a planet or moon to use it';
+    if (item.switch) {
+      const on = this.source.switches.isOn(item.id as ToolId);
+      details = `${on ? 'On' : 'Off'}${status?.hint ? ` · ${status.hint}` : ''} · ${press} to turn it ${on ? 'off' : 'on'}`;
+    } else if (!user) details = 'Go down to a planet or moon to use it';
     else if (user.selected === item.id) details = `${status?.hint || 'Selected'} · ${press} to put it away`;
     else if (status && !status.available) details = status.reason ?? status.hint;
     else details = `${press} to select`;
@@ -241,7 +263,7 @@ export class ItemBar implements Entity {
 
   /** The items of tab `tab`, in slot order: its tools, then (Inventory) the hold's stacks. */
   private itemsOf(tab: ItemTab): SlotItem[] {
-    const tools: SlotItem[] = ITEMS.filter((i) => i.tab === tab).map((i) => ({ id: i.id, name: i.name, description: i.description, icon: ICONS[i.id], count: null }));
+    const tools: SlotItem[] = ITEMS.filter((i) => i.tab === tab).map((i) => ({ id: i.id, name: i.name, description: i.description, icon: ICONS[i.id], count: null, switch: !!i.switch }));
     if (tab !== 'inventory') return tools;
     const { inventory } = this.source;
     this.inventoryVersion = inventory.version;
@@ -251,6 +273,7 @@ export class ItemBar implements Entity {
       description: `${PLANT_KINDS[s.species.kind].label} from ${s.origin}: set it down with the beam`,
       icon: `<img class="item-picture" src="${this.icons.url(s.key, s.species)}" alt="" draggable="false">`,
       count: s.count,
+      switch: false,
     }));
     return tools.concat(cargo);
   }
@@ -268,7 +291,7 @@ export class ItemBar implements Entity {
     const slots: HTMLElement[] = this.items.map((item, index) => {
       const slot = document.createElement('button');
       slot.type = 'button';
-      slot.className = 'item-slot';
+      slot.className = item.switch ? 'item-slot switch' : 'item-slot';
       slot.dataset.item = item.id;
       const key = slotKey(index);
       slot.setAttribute('aria-label', key ? `${item.name} (${key.label})` : item.name);

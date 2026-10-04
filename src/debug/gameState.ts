@@ -7,6 +7,7 @@ import { bodyLabLink } from '../lab/bodyLink';
 import { lodParams } from '../planet/LodSurface';
 import type { OrbitCamera } from '../player/OrbitCamera';
 import { SurfaceChanges } from '../surface/changes';
+import { animalParams } from '../surface/animalParams';
 import { plantParams } from '../surface/plantParams';
 import type { CelestialBody } from '../world/CelestialBody';
 import type { Planet } from '../world/Planet';
@@ -177,7 +178,7 @@ export function captureGameState(game: Game, levels: SceneManager): GameState {
       levels.mode === 'galaxy'
         ? { spin: galaxy.spin.angle, current: galaxy.ship.current.id, destination: galaxy.ship.destination?.id ?? null }
         : null,
-    graphics: { weather: weatherParams.enabled, plants: plantParams.enabled, wireframe: wireframeParams.enabled },
+    graphics: { weather: weatherParams.enabled, plants: plantParams.enabled, animals: animalParams.enabled, wireframe: wireframeParams.enabled },
     busted: {
       bodies: spinning(world).flatMap((b) =>
         b.blastedAt === null ? [] : [{ body: bodyRef(world, b) ?? { kind: 'planet' as const, index: -1, name: b.name }, time: b.blastedAt }],
@@ -195,12 +196,20 @@ export function captureGameState(game: Game, levels: SceneManager): GameState {
       selected: planet?.cargo?.selected ?? null,
       inFlight: planet?.cargo?.inFlight ?? [],
     },
+    radar: {
+      on: levels.switches.isOn('radar'),
+      tracking: planet?.radar?.tracking ?? null,
+      species: planet?.radar && planet.radar.tracking !== null ? planet.radar.plan.species[planet.radar.tracking]!.name : null,
+      state: planet?.radar?.state ?? 'off',
+      distance: planet?.radar && Number.isFinite(planet.radar.distance) ? planet.radar.distance : null,
+    },
     ui: {
       touchMode: game.input.touchMode,
       hud,
       tooltip,
       systemMap: levels.mode === 'system' && system.map.visible,
       planetMap: !!planet?.map.visible,
+      mapTab: planet?.map.tab ?? 'map',
       overlays: overlays(),
     },
   };
@@ -256,6 +265,8 @@ export async function restoreGameState(game: Game, levels: SceneManager, state: 
   }
   weatherParams.enabled = state.graphics.weather;
   plantParams.enabled = state.graphics.plants;
+  // Older dumps have no animals switch: they were shown with the plants.
+  animalParams.enabled = state.graphics.animals ?? state.graphics.plants;
   wireframeParams.enabled = state.graphics.wireframe;
   if (state.transitioning) notes.push(`taken mid-transition (crossfade ${state.crossfade ?? 'none'}): restored at the ${state.mode} level, settled`);
 
@@ -354,6 +365,15 @@ export async function restoreGameState(game: Game, levels: SceneManager, state: 
   // The HUD and maps refresh on timers that stand still while paused: re-entering the level redraws them now.
   game.level?.exit();
   game.level?.enter();
+  if (state.radar?.on !== undefined) levels.switches.set('radar', state.radar.on);
+  if (planet) {
+    planet.map.setTab(state.ui.mapTab ?? 'map');
+    // The radar surveys the globe a little each frame, and frames stand still: survey it all now.
+    if (state.radar?.tracking != null && planet.radar) {
+      planet.radar.census.finish();
+      planet.radar.track(state.radar.tracking);
+    }
+  }
   await frames(2);
   const map = planet ? planet.map : levels.mode === 'system' ? system.map : null;
   const mapShown = planet ? state.ui.planetMap : state.ui.systemMap;

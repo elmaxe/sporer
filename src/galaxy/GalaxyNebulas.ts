@@ -22,12 +22,19 @@ export const galaxyNebulaParams = {
  * dim (only the glow behind them: each volume adds back the glow between the
  * camera and its dust), and before the stars, which dim themselves behind
  * dark nebulas (see GalaxyMap). The volumes follow the galaxy's rotating root.
+ * The arms' haze is drawn in the same pass (`frame`).
  */
 export class GalaxyNebulas implements Entity {
   private readonly meshes: THREE.Mesh<THREE.IcosahedronGeometry, THREE.ShaderMaterial>[];
   /** The volumes' own scene; `frame` copies the galaxy root's transform. */
   private readonly volumes = new THREE.Scene();
-  private readonly frame = new THREE.Group();
+  /**
+   * Galaxy coordinates in the reduced-resolution pass: other soft volumes
+   * (the arms' haze, see GalaxyDust) are added here to be drawn with the
+   * nebulas, their light encoded in the canvas's colour space. Nebulas dim
+   * what's drawn before them (a lower renderOrder) behind their dust.
+   */
+  readonly frame = new THREE.Group();
   private readonly target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: false });
   private readonly quad: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>;
   private readonly size = new THREE.Vector2();
@@ -47,7 +54,8 @@ export class GalaxyNebulas implements Entity {
     this.frame.matrixAutoUpdate = false;
     this.volumes.add(this.frame);
     // The glow in front of a nebula isn't dimmed by it, only the glow behind.
-    const glows = { glows: galaxyGlows(galaxyRadius), near: GLOW_NEAR };
+    // (Not the nucleus: it only shines from far out, where the nebulas are small.)
+    const glows = { glows: galaxyGlows(galaxyRadius).filter((g) => !g.zoomedOut), near: GLOW_NEAR };
     this.meshes = nebulas.map((n) => {
       const mesh = createNebulaMesh(n, 'map', glows);
       placeNebula(mesh, n);
