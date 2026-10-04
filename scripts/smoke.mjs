@@ -88,7 +88,7 @@
 // herd roams near the ship on the home planet and the tooltip names an animal under the pointer; the planet map's Species
 // tab lists the planet's animals and plants with their pictures and counts the herds; a real click on that herd's species
 // picks it, but the radar stays quiet until the item bar's Radar switch is turned on (a real click): then waves round the
-// ship, close by, whole rings, the radarPing cue pitched up; switched off it goes quiet again, and a second click on the species stops it.
+// ship, close by, whole rings, the radarPing cue at its highest pitch; switched off it goes quiet again, and a second click on the species stops it.
 // Prints JSON with FPS, console errors and screenshot paths. Exit 1 on failure.
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -2048,6 +2048,7 @@ async function runRadar(name) {
     status: document.querySelector('#planet-species .species-row.tracking .species-status')?.textContent ?? '',
     dot: document.getElementById('planet-map-tabs').classList.contains('tracking'), cues: __cues.filter((c) => c === 'radarPing').length,
     rates: __rates.slice(), played: audio.lastPlayed && { name: audio.lastPlayed.name, rate: audio.lastPlayed.rate } })`);
+  r.nearPitch = await evaluate(`import('/src/radar/radarRules.ts').then((m) => m.radarParams.nearPitch)`);
   // Once the "Radar on" note has had its moment, the hint line says what it tracks.
   await until(`document.getElementById('item-hint').textContent.startsWith('Radar: ')`, 20000);
   r.tracking.hint = await evaluate(`document.getElementById('item-hint').textContent`);
@@ -2095,9 +2096,9 @@ async function runRadar(name) {
     r.tracking.visible &&
     r.tracking.dot &&
     r.tracking.cues >= 2 &&
-    // Right above the herd the ping is pitched up, and the audio manager plays it at that rate.
+    // Right above the herd the ping is at its highest (radarParams.nearPitch, or nearly), and the audio manager plays it at that rate.
     r.tracking.rates.length === r.tracking.cues &&
-    r.tracking.rates.every((x) => x > 1.2 && x <= 1.5) &&
+    r.tracking.rates.every((x) => x > r.nearPitch * 0.85 && x <= r.nearPitch + 1e-9) &&
     r.tracking.played?.name === 'radarPing' &&
     Math.abs(r.tracking.played.rate - r.tracking.rates.at(-1)) < 1e-9 &&
     r.stopped.tracking === null &&

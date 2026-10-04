@@ -17,9 +17,9 @@ export const radarParams = {
   /** Ground distances (units) the ping rate and pitch ease between: right below and far away. */
   nearDistance: 15,
   farDistance: 1000,
-  /** The ping's playback rate right above the animals and far away (1 as recorded; 1.5 is a fifth up, 0.84 three semitones down). */
-  nearPitch: 1.5,
-  farPitch: 0.84,
+  /** The ping's playback rate right above the animals and far away (1 as recorded; 0.56 is ten semitones down). */
+  nearPitch: 1,
+  farPitch: 0.56,
   /** The waves' half-angle far away (radians); they close into full rings as the animals come under the ship. */
   farSpread: 0.38,
   /** Ground distances (units) between which the arcs open up into rings. */
