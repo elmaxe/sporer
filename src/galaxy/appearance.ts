@@ -64,6 +64,8 @@ export function galaxyStarSize(ref: StarRef): number {
 /** Glow of the galaxy's disc and of its bulge (the galaxy map's glows, and the band in each system's sky). */
 export const DISC_GLOW_COLOR = '#6f86c8';
 export const BULGE_GLOW_COLOR = '#ffd9a0';
+/** The bright nucleus in the middle of the bulge (the galaxy map only). */
+export const NUCLEUS_GLOW_COLOR = '#fff0d8';
 
 /** A rogue planet's ring on the galaxy map, galaxy units: about a small star's dot. */
 export const ROGUE_DOT_SIZE = 1.1;
@@ -94,18 +96,33 @@ export interface GalaxyGlow {
   color: string;
   faceOnOpacity: number;
   maxBrightness: number;
+  /**
+   * Shines only with the camera this far from the galaxy's centre: off at
+   * the first distance, full at the second (galaxy units).
+   */
+  zoomedOut?: readonly [number, number];
 }
 
 /**
  * The map's glows for a galaxy of radius `r`: faint light over the whole,
- * thin disc and a warmer, brighter, flattened bulge (matching the star
- * distributions in gen/galaxy.ts). Both are symmetric about +Y, so the
- * root's spin doesn't change how their shader sees them. The nebulas use
+ * thin disc, a warmer, brighter, flattened bulge (matching the star
+ * distributions in gen/galaxy.ts) and a small, bright nucleus in its middle
+ * that fades in as the camera pulls out, so the core shines when the whole
+ * galaxy is in view without washing out the view from inside the disc. All are
+ * symmetric about +Y, so the root's spin doesn't change how their shader
+ * sees them. The nebulas use
  * them too, to keep the glow in front of a dark nebula undimmed.
  */
 export function galaxyGlows(r: number): GalaxyGlow[] {
   return [
     { radii: { x: r * 1.3, y: r * 0.06, z: r * 1.3 }, color: DISC_GLOW_COLOR, faceOnOpacity: 0.16, maxBrightness: 0.28 },
     { radii: { x: r * 0.45, y: r * 0.2, z: r * 0.45 }, color: BULGE_GLOW_COLOR, faceOnOpacity: 0.45, maxBrightness: 0.8 },
+    {
+      radii: { x: r * 0.15, y: r * 0.09, z: r * 0.15 },
+      color: NUCLEUS_GLOW_COLOR,
+      faceOnOpacity: 0.6,
+      maxBrightness: 1,
+      zoomedOut: [r * 0.9, r * 1.8],
+    },
   ];
 }

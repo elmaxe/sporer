@@ -17,7 +17,7 @@
 // it there), hovering + clicking the star targets it, the system map shows every planet and moon (hover, click to
 // fly, N folds it), and the galaxy loop works (scroll out to the galaxy, click the nearest star, travel, scroll in to
 // its system, where the ship flies in and hovers straight above the star with the camera over it; the galaxy shows distant
-// galaxies, twinkles, spins and draws binaries as two dots, and picking works while it's turned), a real click on the
+// galaxies, twinkles, spins, draws binaries as two dots and its arms' gas and haze, and picking works while it's turned), a real click on the
 // menu button starts audio and opens the menu (the game pauses; volume sliders and a planet lab link; its Save debug
 // dump opens the dump dialog, where typing a note doesn't reach the game and Save makes the JSON file with the
 // pictures and state, and Esc closes just the dialog; a real Esc closes the menu); then galaxy travel asks for its sound (and the zooms between levels for none), and M mutes. Then the planet loop (hover at
@@ -776,6 +776,7 @@ await section('galaxy', async () => {
       stars: galaxy.stars.length,
       twinkle: level.map.points.material.uniforms.twinkle.value,
       twinkleTime: level.map.points.material.uniforms.time.value,
+      dust: level.dust.counts,
     }), 1000);
   })`);
   // Turn the galaxy well away from its start, so the click below also checks picking and travel while rotated.
@@ -838,6 +839,8 @@ await section('galaxy', async () => {
     galaxyLoop.polish.dots > galaxyLoop.polish.stars &&
     galaxyLoop.polish.twinkle > 0 &&
     galaxyLoop.polish.twinkleTime > 0 &&
+    galaxyLoop.polish.dust.gas > 0 &&
+    galaxyLoop.polish.dust.haze > 0 &&
     galaxyLoop.clicked.destination === galaxyLoop.clicked.nearest &&
     galaxyLoop.heldWhileTravelling &&
     galaxyLoop.zoomedWhileTravelling &&
@@ -1841,8 +1844,8 @@ async function plantLabChecks(page) {
 await section('plants', async () => (plantLab = await runPlantLab()).ok);
 
 /**
- * Touch play on an emulated phone (390x844, real CDP touch events): hold a finger on the star (tooltip), lift
- * (autopilot to it), drag (rotates, no tap), pinch (zoom), Boost (no stick in space), then
+ * Touch play on an emulated phone (390x844, real CDP touch events): no full-screen button, the first tap goes full
+ * screen; hold a finger on the star (tooltip), lift (autopilot to it), drag (rotates, no tap), pinch (zoom), Boost (no stick in space), then
  * pinch in at a planet to descend, tap the globe, and pinch out to the system and on to the galaxy, checking which
  * on-screen controls each level shows.
  */
@@ -1882,7 +1885,8 @@ async function runTouch() {
   const r = {};
 
   r.system = await evaluate(`({ touchMode: game.input.touchMode, help: document.getElementById('hud-help').textContent.startsWith('Tap'),
-    fullscreenButton: getComputedStyle(document.getElementById('fullscreen-toggle')).display !== 'none', ...${controls} })`);
+    fullscreenButton: getComputedStyle(document.getElementById('fullscreen-toggle')).display !== 'none',
+    fullscreen: !!document.fullscreenElement, ...${controls} })`);
   const star = await evaluate(`(() => { const p = world.stars[0].renderPosition.clone().project(game.camera); return [(p.x + 1) / 2 * innerWidth, (1 - p.y) / 2 * innerHeight]; })()`);
   await touch('touchStart', [star]);
   await sleep(300);
@@ -1890,6 +1894,9 @@ async function runTouch() {
   await touch('touchEnd', []);
   await frames();
   r.tap = await evaluate(`({ star: world.stars[0].name, target: ship.targetBody?.name ?? null, tooltipHidden: document.getElementById('tooltip').hidden })`);
+  // The first tap took the page full screen (a phone always plays full screen, so it has no button for it).
+  for (let i = 0; i < 20 && !(await evaluate(`!!document.fullscreenElement`)); i++) await sleep(50);
+  r.fullscreen = await evaluate(`!!document.fullscreenElement`);
 
   const yaw = await evaluate(`levels.systemLevel.orbit.targetYaw`);
   await swipe([[150, 500]], [[250, 500]]);
@@ -1998,7 +2005,9 @@ async function runTouch() {
   r.ok =
     r.system.touchMode &&
     r.system.help &&
-    r.system.fullscreenButton &&
+    !r.system.fullscreenButton &&
+    !r.system.fullscreen &&
+    r.fullscreen &&
     r.system.ship === 'space' &&
     r.system.shown &&
     !r.system.stick &&
