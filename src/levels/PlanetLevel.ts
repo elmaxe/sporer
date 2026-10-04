@@ -45,6 +45,7 @@ import { Level } from './Level';
 import type { SystemLevel } from './SystemLevel';
 import { renderScene } from '../world/wireframe';
 import type { SoundEffects } from '../audio/sfx';
+import { VolcanoSounds } from '../audio/VolcanoSounds';
 import { PlanetBuster } from '../combat/PlanetBuster';
 import { VolcanoBomb } from '../combat/VolcanoBomb';
 import { Laser } from '../combat/Laser';
@@ -150,6 +151,8 @@ export class PlanetLevel extends Level implements ItemUser {
   readonly laser: Laser;
   /** Solid bodies only (and not once busted): the volcanoes raised on it, kept in its change list. */
   volcanoes: Volcanoes | null = null;
+  /** The volcanoes as heard from the camera (wherever they can stand; silent until one does, and while the level isn't the active one). */
+  private volcanoSounds: VolcanoSounds | null = null;
   /** Once busted: its debris field, and the system time of the blast. */
   private debris: DebrisField | null = null;
   private blastTime = 0;
@@ -307,6 +310,8 @@ export class PlanetLevel extends Level implements ItemUser {
         : null);
     // Those raised on earlier visits stand there, risen and settled.
     if (volcanoes) for (const site of changes.volcanoes) volcanoes.add(site, null);
+    // After the volcanoes, so it hears them from where the shaken camera is.
+    this.volcanoSounds = volcanoes ? this.add(new VolcanoSounds(camera, volcanoes, sfx, debug)) : null;
     const plantsSetup = busted ? null : plantSetup(config);
     this.plants = plantsSetup ? this.add(new SurfaceEntities(this.scene, plantsSetup.plan, plantsSetup.ground, camera, changes, debug)) : null;
     this.buryPlants();
@@ -543,10 +548,11 @@ export class PlanetLevel extends Level implements ItemUser {
     this.globe.bust(this.radius * DEBRIS_REACH);
     this.cargo?.clear(false);
     this.laser.clear();
-    for (const entity of [this.eruptions, this.geysers, this.weather, this.comet, this.plants, this.animals, this.radar, this.cargo, this.plantings, this.volcanoes, this.meteors])
+    for (const entity of [this.eruptions, this.geysers, this.weather, this.comet, this.plants, this.animals, this.radar, this.cargo, this.plantings, this.volcanoes, this.volcanoSounds, this.meteors])
       if (entity) this.remove(entity);
     this.eruptions = this.geysers = this.weather = this.comet = this.plants = this.animals = this.radar = this.cargo = this.plantings = this.meteors = null;
     this.volcanoes = null;
+    this.volcanoSounds = null;
     if (this.plantTooltip) {
       this.plantTooltip.deactivate();
       this.remove(this.plantTooltip);
@@ -689,6 +695,7 @@ export class PlanetLevel extends Level implements ItemUser {
     this.hud.activate();
     if (!this.busted) this.map.activate();
     this.plantTooltip?.activate();
+    this.volcanoSounds?.mute(false);
   }
 
   override exit(): void {
@@ -699,5 +706,6 @@ export class PlanetLevel extends Level implements ItemUser {
     this.hud.deactivate();
     this.map.deactivate();
     this.plantTooltip?.deactivate();
+    this.volcanoSounds?.mute(true);
   }
 }

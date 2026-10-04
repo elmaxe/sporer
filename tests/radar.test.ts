@@ -147,12 +147,12 @@ describe('the radar item', () => {
     for (const id of ['planetBuster', 'volcanoBomb', 'abduct'] as const) expect(itemDef(id).switch).toBeFalsy();
   });
 
-  it('starts off and flips on and off', () => {
+  it('starts on and flips off and on', () => {
     const switches = new ItemSwitches();
-    expect(switches.isOn('radar')).toBe(false);
-    expect(switches.flip('radar')).toBe(true);
     expect(switches.isOn('radar')).toBe(true);
     expect(switches.flip('radar')).toBe(false);
+    expect(switches.isOn('radar')).toBe(false);
+    expect(switches.flip('radar')).toBe(true);
     switches.set('radar', true);
     expect(switches.isOn('radar')).toBe(true);
   });
