@@ -147,7 +147,13 @@ describe('LOD surface', () => {
     color.setRGB(1, 1, 1);
     return R * (1 + 0.04 * Math.sin(dir.x * 300) * Math.sin(dir.y * 280 + dir.z * 230));
   };
-  const make = () => new LodSurface(R * 0.92, R * 1.08, bumpy, new THREE.MeshBasicMaterial());
+  // Finer detail where it's sampled finer (as craters are, gen/craters.ts): chunks of different
+  // levels sample the same point differently, so seams and blends can't rely on equal samples.
+  const detailed = (dir: Vec3Like, color: THREE.Color, spacing = 0) => {
+    const fine = spacing > 0 ? THREE.MathUtils.clamp(0.02 / spacing - 1, 0, 1) : 1;
+    return bumpy(dir, color) + R * 0.02 * fine * Math.sin(dir.x * 900 + dir.y * 700) * Math.sin(dir.z * 800);
+  };
+  const make = (sample = bumpy) => new LodSurface(R * 0.92, R * 1.08, sample, new THREE.MeshBasicMaterial());
   const settle = (surface: LodSurface, camera: THREE.Vector3) => {
     // One chunk per update, whatever the machine's speed: the same tree every run.
     const budget = lodParams.budgetMs;
@@ -235,8 +241,11 @@ describe('LOD surface', () => {
     return { checked, collapsed, unmatched: [...segments.values()].filter((n) => n !== 2).length };
   };
 
-  it('has no cracks where chunks of different levels meet: every seam is the same segments on both sides', () => {
-    const surface = make();
+  it.each([
+    ['the same everywhere', bumpy],
+    ['finer where sampled finer', detailed],
+  ])('has no cracks where chunks of different levels meet: every seam is the same segments on both sides (%s)', (_, sample) => {
+    const surface = make(sample);
     const camera = new THREE.Vector3(0.3, 0.4, 1).setLength(R * 1.12);
     expect(settle(surface, camera)).toBe(true);
     const settled = seams(surface, camera.clone().normalize());
@@ -247,8 +256,11 @@ describe('LOD surface', () => {
     surface.dispose();
   });
 
-  it('stays closed while chunks blend in and out', () => {
-    const surface = make();
+  it.each([
+    ['the same everywhere', bumpy],
+    ['finer where sampled finer', detailed],
+  ])('stays closed while chunks blend in and out (%s)', (_, sample) => {
+    const surface = make(sample);
     const camera = new THREE.Vector3(0.3, 0.4, 1).setLength(R * 3);
     expect(settle(surface, camera)).toBe(true);
     // Dive (chunks split below while the ones around, already finer or not, are still blending),
@@ -272,29 +284,19 @@ describe('LOD surface', () => {
   /**
    * Points on chunks' edges drawn by more than one chunk near `up` (inside
    * the horizon) whose normals differ, and how many shared points there were.
-   * Chunk corners aside (and the edge vertices collapsed onto them): where
-   * levels meet, a corner takes one neighbour's normal, which a chunk
-   * touching it only diagonally doesn't know of.
    */
   const normalSeams = (surface: LodSurface, up: THREE.Vector3) => {
     const side = CHUNK_CELLS + 1;
-    const key = (v: THREE.Vector3) => `${v.x},${v.y},${v.z}`;
-    const meshes = drawn(surface);
-    const corners = new Set<string>();
-    const v = new THREE.Vector3();
-    for (const mesh of meshes) {
-      const p = mesh.geometry.getAttribute('position') as THREE.BufferAttribute;
-      for (const i of [0, CHUNK_CELLS, CHUNK_CELLS * side, CHUNK_CELLS * side + CHUNK_CELLS]) corners.add(key(v.fromBufferAttribute(p, i)));
-    }
     const at = new Map<string, Set<string>>();
-    for (const mesh of meshes) {
+    const v = new THREE.Vector3();
+    for (const mesh of drawn(surface)) {
       const p = mesh.geometry.getAttribute('position') as THREE.BufferAttribute;
       const n = mesh.geometry.getAttribute('normal') as THREE.BufferAttribute;
-      for (let e = 0; e < CHUNK_CELLS; e++) {
+      for (let e = 0; e <= CHUNK_CELLS; e++) {
         for (const i of [e, e * side, e * side + CHUNK_CELLS, CHUNK_CELLS * side + e]) {
           v.fromBufferAttribute(p, i);
-          const k = key(v);
-          if (corners.has(k) || v.clone().normalize().dot(up) < Math.cos(0.6)) continue;
+          if (v.clone().normalize().dot(up) < Math.cos(0.6)) continue;
+          const k = `${v.x},${v.y},${v.z}`;
           const normals = at.get(k) ?? new Set<string>();
           normals.add(`${n.getX(i)},${n.getY(i)},${n.getZ(i)}`);
           at.set(k, normals);
@@ -304,8 +306,11 @@ describe('LOD surface', () => {
     return { points: at.size, unmatched: [...at.values()].filter((n) => n.size > 1).length };
   };
 
-  it('shades smoothly: normals follow the slopes, and chunks agree on them where they meet', () => {
-    const surface = make();
+  it.each([
+    ['the same everywhere', bumpy],
+    ['finer where sampled finer', detailed],
+  ])('shades smoothly: normals follow the slopes, and chunks agree on them where they meet (%s)', (_, sample) => {
+    const surface = make(sample);
     const camera = new THREE.Vector3(0.3, 0.4, 1).setLength(R * 1.12);
     expect(settle(surface, camera)).toBe(true);
     const settled = normalSeams(surface, camera.clone().normalize());
@@ -335,6 +340,38 @@ describe('LOD surface', () => {
       expect(normalSeams(surface, camera.clone().normalize()).unmatched).toBe(0);
     }
     lodParams.budgetMs = budget;
+    surface.dispose();
+  });
+
+  it('shows a new chunk first exactly where its parent was, even where it samples finer detail', () => {
+    const surface = make(detailed);
+    expect(settle(surface, new THREE.Vector3(0, 0, R * 20))).toBe(true);
+    // Where every drawn vertex is now, by its direction (geometry.userData.directions).
+    const where = (meshes: THREE.Mesh[]) => {
+      const out = new Map<string, string>();
+      for (const m of meshes) {
+        const d = m.geometry.userData.directions as Float32Array;
+        const p = m.geometry.getAttribute('position');
+        for (let i = 0; i < p.count; i++) out.set(`${d[i * 3]},${d[i * 3 + 1]},${d[i * 3 + 2]}`, `${p.getX(i)},${p.getY(i)},${p.getZ(i)}`);
+      }
+      return out;
+    };
+    const before = where(drawn(surface));
+    const budget = lodParams.budgetMs;
+    lodParams.budgetMs = 1000;
+    const camera = new THREE.Vector3(0, 0, R * 1.3);
+    // Time frozen: the children show, not yet blended at all.
+    for (let i = 0; i < 3; i++) surface.update(camera, 0);
+    lodParams.budgetMs = budget;
+    expect(surface.settled).toBe(false);
+    const after = where(drawn(surface));
+    let shared = 0;
+    for (const [dir, position] of after) {
+      if (!before.has(dir)) continue;
+      shared++;
+      expect(position).toBe(before.get(dir));
+    }
+    expect(shared).toBeGreaterThan(100);
     surface.dispose();
   });
 

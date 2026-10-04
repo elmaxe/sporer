@@ -118,7 +118,7 @@ describe('vents', () => {
     for (const { body, radius, activity } of active) {
       for (const v of activity.vents) {
         expect(Math.hypot(...v.dir)).toBeCloseTo(1, 9);
-        expect(v.base).toBeCloseTo(groundRadius(v.dir, body.seed, body.style, radius, RELIEF), 9);
+        expect(v.base).toBeCloseTo(groundRadius(v.dir, body, radius, RELIEF), 9);
         // Never below the sea (or, without one, far below the reference radius).
         expect(v.base).toBeGreaterThanOrEqual(radius * (body.style.sea === null ? 0.97 : 1));
       }

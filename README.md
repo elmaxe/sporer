@@ -49,7 +49,7 @@ A browser game inspired by the space stage of *Spore*. Fly a UFO through a proce
 
 ## Plant lab
 
-[`plants.html`](https://elmaxe.github.io/sporer/plants.html) grows plant species with the game's own generator and draws them with its own renderer. Every species is generated: conifers, broadleaf trees, palms and shrubs, branching by Leonardo's rule and the golden angle, at four levels of detail. You can edit everything: size, crown, colours, climate, branching, leaves and flowers. Look at one plant (zoom out to watch the game's level-of-detail crossfade), all its levels side by side, or a grove planted by the game's own plant system, with the levels tinted. Use `?gen=<seed>&kind=<tree|largeBush|smallBush>&arch=<conifer|broadleaf|palm|shrub>` to make a set, or `?seed=<galaxy>&star=<id>&planet=<i>` to load a game planet's plants. The planet lab's **Plants** link opens its planet's species.
+[`plants.html`](https://elmaxe.github.io/sporer/plants.html) grows plant species with the game's own generator and draws them with its own renderer. Every species is generated: conifers, broadleaf trees, palms and shrubs, branching by Leonardo's rule and the golden angle, at four levels of detail. You can edit everything: size, crown, colours, climate, branching, leaves and flowers. Look at one plant (zoom out to watch the game's level-of-detail crossfade), all its levels side by side, or a grove planted by the game's own plant system on a whole planet you can zoom out from and turn, with the levels tinted. Use `?gen=<seed>&kind=<tree|largeBush|smallBush>&arch=<conifer|broadleaf|palm|shrub>` to make a set, or `?seed=<galaxy>&star=<id>&planet=<i>` to load a game planet's plants. The planet lab's **Plants** link opens its planet's species.
 
 ## Running it
 

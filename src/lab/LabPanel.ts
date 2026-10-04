@@ -279,6 +279,16 @@ export class LabPanel {
     f.addColor(style, 'low').name('lowland colour').onChange(changed);
     f.addColor(style, 'high').name('highland colour').onChange(changed);
     f.add(style, 'relief', 0, 0.2, 0.001).name('relief (× radius)').onChange(changed);
+    // Impact craters (gen/craters.ts): 1 is airless rock's.
+    const craters = {
+      get cover() {
+        return style.craters ?? 0;
+      },
+      set cover(v: number) {
+        style.craters = v;
+      },
+    };
+    if (this.p.type !== 'gas') f.add(craters, 'cover', 0, 1, 0.01).name('craters').onChange(changed);
   }
 
   /** A small body's shape (gen/shape.ts): new lobes, or the lumps and craters of this one. */
