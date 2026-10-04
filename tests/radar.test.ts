@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { ITEMS, ItemSwitches, itemDef } from '../src/combat/items';
 import { HerdPath, generateHerd, herdGridSize, planAnimals, type AnimalPlan, type AnimalPose } from '../src/gen/animals';
 import { terrainNoise } from '../src/gen/noise';
 import type { GroundRadius } from '../src/gen/plants';
@@ -114,5 +115,24 @@ describe('species tab', () => {
     expect(herdCountText(grazer, 0)).toBe('None found');
     expect(herdCountText(grazer, 3)).toMatch(/^3 (herds|seen)$/);
     expect(describePlant({ kind: 'largeBush', height: 3.14 } as never)).toBe('Large bush · 3.1 m tall');
+  });
+});
+
+describe('the radar item', () => {
+  it('is a switch in the Inventory, right after the beam, and the other tools are not', () => {
+    const inventory = ITEMS.filter((i) => i.tab === 'inventory').map((i) => i.id);
+    expect(inventory).toEqual(['abduct', 'radar']);
+    expect(itemDef('radar').switch).toBe(true);
+    for (const id of ['planetBuster', 'volcanoBomb', 'abduct'] as const) expect(itemDef(id).switch).toBeFalsy();
+  });
+
+  it('starts off and flips on and off', () => {
+    const switches = new ItemSwitches();
+    expect(switches.isOn('radar')).toBe(false);
+    expect(switches.flip('radar')).toBe(true);
+    expect(switches.isOn('radar')).toBe(true);
+    expect(switches.flip('radar')).toBe(false);
+    switches.set('radar', true);
+    expect(switches.isOn('radar')).toBe(true);
   });
 });

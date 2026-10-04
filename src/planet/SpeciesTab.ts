@@ -49,8 +49,10 @@ interface AnimalRow {
 /**
  * The planet map's Species tab (#planet-species): every animal species of the
  * planet, each with its picture, what it is and how many herds the radar's
- * census found, then its plants. Clicking an animal tracks it with the radar
- * (`Radar`), clicking it again stops; the row says how near the nearest is.
+ * census found, then its plants. Clicking an animal picks it for the radar
+ * (`Radar`), clicking it again stops; while the radar is switched on (the
+ * item bar's Radar) it tracks the one picked, and the row says how near the
+ * nearest is.
  * The DOM is shared by every planet level: `attach` fills it, `detach`
  * empties it. Pictures are drawn one a frame, so opening it never stalls.
  */
@@ -71,11 +73,18 @@ export class SpeciesTab {
     private readonly plants: readonly PlantSpecies[],
     private readonly radar: Radar | null,
     private readonly icons: SpeciesIcons | null,
+    /** Whether the radar is switched on (the item bar's Radar). */
+    private readonly powered: () => boolean = () => true,
   ) {}
 
   /** The species tracked by the radar, or null. */
   get tracking(): number | null {
     return this.radar?.tracking ?? null;
+  }
+
+  /** True while the radar tracks the one picked (picked, and switched on). */
+  get active(): boolean {
+    return this.tracking !== null && this.powered();
   }
 
   /** Fills the shared list with this planet's species. */
@@ -170,13 +179,16 @@ export class SpeciesTab {
       let text: string;
       if (on) {
         const state = radar!.state;
-        text = state === 'surveying' ? 'Searching…' : state === 'none' ? 'None found' : `Tracking · ${radar!.proximity}`;
+        text =
+          state === 'standby' ? 'Radar off' : state === 'surveying' ? 'Searching…' : state === 'none' ? 'None found' : `Tracking · ${radar!.proximity}`;
       } else if (census?.done) text = herdCountText(this.animals[i]!, census.herdCount(i));
       else text = '';
       if (text !== row.text) {
         row.text = text;
         row.status.textContent = text;
       }
+      // Picked with the radar switched off: marked, but idle.
+      row.button.classList.toggle('standby', on && radar!.state === 'standby');
       if (row.button.classList.contains('tracking') !== on) {
         row.button.classList.toggle('tracking', on);
         row.button.setAttribute('aria-pressed', String(on));
@@ -184,10 +196,13 @@ export class SpeciesTab {
     }
     if (this.note) {
       const hidden = !animalParams.enabled ? ' Animals are switched off in the menu, so you won’t see them.' : '';
+      const name = tracking === null ? '' : this.animals[tracking]!.name;
       const text =
         tracking === null
-          ? `Pick an animal to track it with the radar.${hidden}`
-          : `The radar’s waves point to the nearest ${this.animals[tracking]!.name}. Pick it again to stop.${hidden}`;
+          ? `Pick an animal to track it with the radar.${this.powered() ? '' : ' Turn the radar on in the Inventory.'}${hidden}`
+          : this.powered()
+            ? `The radar’s waves point to the nearest ${name}. Pick it again to stop.${hidden}`
+            : `The radar is off: turn it on in the Inventory to follow its waves to the nearest ${name}.${hidden}`;
       if (this.note.textContent !== text) this.note.textContent = text;
     }
   }

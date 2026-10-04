@@ -51,7 +51,7 @@ import { volcanoParams } from '../combat/volcano';
 import { Volcanoes } from '../planet/Volcanoes';
 import { hashSeed } from '../gen/rng';
 import { isGas } from '../world/Planet';
-import type { ItemId, ItemStatus, ItemUser } from '../combat/items';
+import type { ItemId, ItemStatus, ItemSwitches, ItemUser } from '../combat/items';
 import { bodyKey } from '../combat/busted';
 import { CargoBeam } from '../cargo/CargoBeam';
 import { bodyGravity } from '../cargo/beam';
@@ -184,6 +184,8 @@ export class PlanetLevel extends Level implements ItemUser {
     private readonly onBust: (blastTime: number) => void,
     /** The ship's cargo hold (kept by the scene manager for the whole game). */
     inventory: Inventory,
+    /** Which switch items are on: the radar tracks only while it is (kept by the scene manager for the whole game). */
+    private readonly switches: ItemSwitches,
     /** Pictures of species for the map's Species tab (none in tests). */
     icons: SpeciesIcons | null = null,
   ) {
@@ -309,7 +311,7 @@ export class PlanetLevel extends Level implements ItemUser {
     this.animals = animalsSetup ? this.add(new SurfaceAnimals(this.scene, animalsSetup.plan, animalsSetup.ground, camera, this.frame, debug)) : null;
     // After the ship and the camera: its waves spread round where the ship is drawn this frame.
     this.radar = animalsSetup
-      ? this.add(new Radar(this.scene, animalsSetup.plan, animalsSetup.ground, this.ship, camera, this.frame, sfx, debug))
+      ? this.add(new Radar(this.scene, animalsSetup.plan, animalsSetup.ground, this.ship, camera, this.frame, sfx, () => switches.isOn('radar'), debug))
       : null;
     this.plantings = busted ? null : this.add(new Plantings(this.scene, changes));
     this.plantTooltip = this.plantings
@@ -410,7 +412,7 @@ export class PlanetLevel extends Level implements ItemUser {
         ? describeShower(this.meteors.shower, airless) + (this.meteors.radiantUp ? '' : ' (radiant below the horizon)')
         : '';
     this.hud = this.add(new PlanetHud(this.ship, `${body.name} · ${body.description}`, input, detail, showerLine));
-    const species = new SpeciesTab(bodyKey(config), animalsSetup?.plan.species ?? [], plantsSetup?.plan.species ?? [], this.radar, icons);
+    const species = new SpeciesTab(bodyKey(config), animalsSetup?.plan.species ?? [], plantsSetup?.plan.species ?? [], this.radar, icons, () => switches.isOn('radar'));
     this.map = this.add(new PlanetMap(config, body.name, this.ship, globe, input, debug, species));
     debug
       .folder('Planet lab')
@@ -454,6 +456,7 @@ export class PlanetLevel extends Level implements ItemUser {
   }
 
   status(item: ItemId): ItemStatus {
+    if (item === 'radar') return this.radarStatus();
     if (item === 'planetBuster') return this.buster.status();
     if (item === 'volcanoBomb') return this.volcanoBomb.status();
     if (this.cargo) return this.cargo.status(item);
@@ -467,6 +470,21 @@ export class PlanetLevel extends Level implements ItemUser {
     if (item === 'planetBuster') this.buster.arm(true);
     if (item === 'volcanoBomb') this.volcanoBomb.arm(true);
     this.cargo?.arm(item === 'planetBuster' || item === 'volcanoBomb' ? null : item);
+  }
+
+  /** The radar's line above the item bar while it's on (a switch: always available). */
+  private radarStatus(): ItemStatus {
+    const radar = this.radar;
+    if (!this.switches.isOn('radar')) return { available: true, hint: '' };
+    if (!radar) return { available: true, hint: 'Radar: no animals live here' };
+    const tracking = radar.tracking;
+    if (tracking === null) return { available: true, hint: "Radar on: pick an animal on the map's Species tab to track it" };
+    const name = radar.plan.species[tracking]!.name;
+    const state = radar.state;
+    return {
+      available: true,
+      hint: state === 'tracking' ? `Radar: the nearest ${name} is ${radar.proximity}` : state === 'none' ? `Radar: no ${name} found here` : `Radar: searching for ${name}…`,
+    };
   }
 
   /** Why a volcano bomb can't be fired here now, or null if it can. */

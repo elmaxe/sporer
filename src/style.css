@@ -712,6 +712,11 @@ html.touch .species-list {
   opacity: 1;
 }
 
+.species-row.tracking.standby .species-status {
+  color: inherit;
+  opacity: 0.75;
+}
+
 .species-row.tracking .species-status::before {
   content: '';
   display: inline-block;
@@ -722,6 +727,11 @@ html.touch .species-list {
   background: #66ffcc;
   vertical-align: 1px;
   animation: radar-blip 1.4s ease-out infinite;
+}
+
+.species-row.tracking.standby .species-status::before {
+  background: rgba(207, 227, 255, 0.4);
+  animation: none;
 }
 
 @keyframes radar-blip {
@@ -1403,7 +1413,7 @@ html:not([data-ship='surface']):not([data-ship='space']) #touch-map {
 
 /* With the bar up, the HUD's help line wraps before it reaches the bar. */
 html.items:not(.touch) #hud {
-  max-width: calc(50vw - 150px);
+  max-width: calc(50vw - 195px);
 }
 
 #item-hint {
@@ -1489,6 +1499,28 @@ html.items:not(.touch) #hud {
   box-shadow: 0 0 10px rgba(var(--bar), 0.6);
 }
 
+/* A switch (the radar): a light in its corner, lit while it's on. */
+.item-slot.switch::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(207, 227, 255, 0.18);
+}
+
+.item-slot.switch.on {
+  border-color: rgba(102, 255, 204, 0.75);
+  color: #66ffcc;
+}
+
+.item-slot.switch.on::after {
+  background: #66ffcc;
+  box-shadow: 0 0 6px #66ffcc;
+}
+
 .item-slot.unavailable .item-picture {
   opacity: 0.45;
 }
@@ -1542,12 +1574,20 @@ html.touch .item-slot {
   height: 52px;
 }
 
+/* A phone held upright: a full Inventory (the beam, the radar and five stacks) fits across it at 46px. */
+@media (max-width: 440px) {
+  html.touch .item-slot {
+    width: 46px;
+    height: 46px;
+  }
+}
+
 /*
- * A phone on its side or a tablet: the fullest bar (six 52px slots, 356px) fits between the stick (144px from the
+ * A phone on its side or a tablet: the fullest bar (seven 52px slots, 412px) fits between the stick (144px from the
  * left edge, 167px past a notch) and the menu buttons (104px from the right), so it sits at the bottom as with a
  * mouse; lifted above the stick, it would float in the middle of a short screen.
  */
-@media (min-width: 660px) {
+@media (min-width: 700px) {
   html.touch #item-bar {
     bottom: max(16px, env(safe-area-inset-bottom));
   }

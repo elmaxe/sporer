@@ -197,6 +197,7 @@ export function captureGameState(game: Game, levels: SceneManager): GameState {
       inFlight: planet?.cargo?.inFlight ?? [],
     },
     radar: {
+      on: levels.switches.isOn('radar'),
       tracking: planet?.radar?.tracking ?? null,
       species: planet?.radar && planet.radar.tracking !== null ? planet.radar.plan.species[planet.radar.tracking]!.name : null,
       state: planet?.radar?.state ?? 'off',
@@ -364,6 +365,7 @@ export async function restoreGameState(game: Game, levels: SceneManager, state: 
   // The HUD and maps refresh on timers that stand still while paused: re-entering the level redraws them now.
   game.level?.exit();
   game.level?.enter();
+  if (state.radar?.on !== undefined) levels.switches.set('radar', state.radar.on);
   if (planet) {
     planet.map.setTab(state.ui.mapTab ?? 'map');
     // The radar surveys the globe a little each frame, and frames stand still: survey it all now.

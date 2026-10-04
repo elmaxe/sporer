@@ -20,7 +20,8 @@ const RADAR_RENDER_ORDER = CLOUD_RENDER_ORDER + 1;
 const COLOR = new THREE.Color('#66ffcc');
 
 /** What the radar is doing, for the Species tab. */
-export type RadarState = 'off' | 'surveying' | 'none' | 'tracking';
+/** `standby`: a species is picked but the radar is switched off (the item bar's Radar), so it does nothing. */
+export type RadarState = 'off' | 'standby' | 'surveying' | 'none' | 'tracking';
 
 const vertexShader = /* glsl */ `
   varying vec2 vP;
@@ -112,6 +113,7 @@ export class Radar implements Entity {
   /** Seconds since each recent ping, newest first. */
   private readonly ages = [-1, -1, -1, -1];
   private pings = 0;
+  private wasPowered = false;
   private readonly paths = new Map<string, HerdPath>();
   private readonly candidates: HerdData[] = [];
   private readonly reach: number;
@@ -130,6 +132,8 @@ export class Radar implements Entity {
     private readonly camera: THREE.Camera,
     private readonly clock: RenderClock,
     private readonly sfx: SoundEffects,
+    /** Whether the radar is switched on (the item bar's Radar): off, it does nothing, whatever is picked. */
+    private readonly powered: () => boolean,
     debug: Debug,
   ) {
     this.census = new HerdCensus(plan, ground);
@@ -189,9 +193,10 @@ export class Radar implements Entity {
     return this.species;
   }
 
-  /** Off, surveying the globe's herds, none of the species found, or tracking the nearest. */
+  /** Nothing picked, picked but switched off, surveying the globe's herds, none of the species found, or tracking the nearest. */
   get state(): RadarState {
     if (this.species === null) return 'off';
+    if (!this.powered()) return 'standby';
     if (!this.census.done) return 'surveying';
     return this._distance === Infinity ? 'none' : 'tracking';
   }
@@ -237,7 +242,7 @@ export class Radar implements Entity {
     if (index === null) return;
     this.surveying = true;
     // Once the globe is surveyed, it knows at once (so the tab never says none were found before it looked).
-    if (this.census.done) {
+    if (this.census.done && this.powered()) {
       this.sinceLook = 0;
       this.look(index);
     }
@@ -246,7 +251,14 @@ export class Radar implements Entity {
   update(frameDt: number): void {
     if (this.surveying && !this.census.done) this.census.step(radarParams.censusBudgetMs);
     for (let i = 0; i < PINGS; i++) if (this.ages[i]! >= 0) this.ages[i]! += frameDt;
-    if (this.species !== null && this.census.done) {
+    const powered = this.powered();
+    if (powered !== this.wasPowered) {
+      // Switched on: it looks and pings at once; switched off: it forgets what it found (the waves out already fade).
+      this.wasPowered = powered;
+      this._distance = Infinity;
+      this.sinceLook = this.sincePing = Infinity;
+    }
+    if (powered && this.species !== null && this.census.done) {
       this.sinceLook += frameDt;
       if (this.sinceLook >= radarParams.lookSeconds) {
         this.sinceLook = 0;

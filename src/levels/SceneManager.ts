@@ -15,7 +15,7 @@ import { Inventory } from '../cargo/inventory';
 import type { SpeciesIcons } from '../planet/SpeciesTab';
 import { AnimalIcons } from '../ui/animalIcons';
 import { PlantIcons } from '../ui/plantIcons';
-import type { ItemUser } from '../combat/items';
+import { ItemSwitches, type ItemUser } from '../combat/items';
 import { GALAXY_VIEW_DISTANCE, GALAXY_VIEW_ELEVATION, GalaxyLevel } from './GalaxyLevel';
 import { PLANET_VIEW_DISTANCE, PlanetLevel } from './PlanetLevel';
 import type { Level } from './Level';
@@ -99,6 +99,8 @@ export class SceneManager implements Entity {
   readonly busted = new BustedBodies();
   /** The ship's cargo hold: plants beamed up, to set down anywhere (cargo/inventory.ts). */
   readonly inventory = new Inventory();
+  /** Which switch items are on (the radar), for the whole game. */
+  readonly switches = new ItemSwitches();
   /** Pictures of plant and animal species (the item bar's cargo, the planet map's Species tab), drawn once each. */
   readonly icons: SpeciesIcons;
   private seamless: SeamlessTransition | null = null;
@@ -529,6 +531,7 @@ export class SceneManager implements Entity {
         body.bust(time);
       },
       this.inventory,
+      this.switches,
       this.icons,
     );
     return this._planetLevel;

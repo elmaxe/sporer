@@ -63,7 +63,7 @@
 // Cargo beam: the item bar's Inventory tab (grey; the bar and its tooltips take the tab's colour) holds the beam;
 // over a forest on the home planet a real 1 arms it, holding the mouse on a tree beams it up (the ship stays) into the
 // hold (a stack with the plant's picture and count), letting go halfway drops it again, holding on bare ground fires
-// the beam there too (and the ship stays), sweeping it over the forest catches several plants, a real 2 selects the stack and
+// the beam there too (and the ship stays), sweeping it over the forest catches several plants, a real 3 selects the stack and
 // holding on the ground sets it down to take root; one dropped with a click falls from the ship (which stays), one set
 // down in the sea drowns; what was taken
 // and planted is still so after leaving and coming back; the cues abductStart, abductBeam, abductSuccess, exportBeam
@@ -86,8 +86,9 @@
 // Animals: in the animal lab every body plan draws at every level of detail, the specimen walks and grazes, zooming out goes
 // through the levels, the line-ups and herds draw, a game planet's animals load, the planet lab links to them; in the game a
 // herd roams near the ship on the home planet and the tooltip names an animal under the pointer; the planet map's Species
-// tab lists the planet's animals and plants with their pictures and counts the herds, and a real click on that herd's
-// species tracks it with the radar: waves round the ship, close by, whole rings, the radarPing cue; a second click stops it.
+// tab lists the planet's animals and plants with their pictures and counts the herds; a real click on that herd's species
+// picks it, but the radar stays quiet until the item bar's Radar switch is turned on (a real click): then waves round the
+// ship, close by, whole rings, the radarPing cue; switched off it goes quiet again, and a second click on the species stops it.
 // Prints JSON with FPS, console errors and screenshot paths. Exit 1 on failure.
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -2029,15 +2030,34 @@ async function runRadar(name) {
     statuses: [...document.querySelectorAll('#planet-species .species-row.animal .species-status')].map((e) => e.textContent),
     herds: planet.radar.census.herds.length })`);
   const index = await evaluate(`planet.animals.plan.species.findIndex((s) => s.name === ${JSON.stringify(name ?? '')})`);
+  // Picked with the radar off: nothing happens.
+  await evaluate(`levels.switches.set('radar', false)`);
   r.picked = await click(`#planet-species .species-row.animal[data-species="${index}"]`);
-  await until(`planet.radar.state === 'tracking' && planet.radar.pingCount >= 2`, 30000);
+  await drawFrames(30);
+  r.standby = await evaluate(`({ state: planet.radar.state, pings: planet.radar.pingCount, visible: planet.radar.visible,
+    status: document.querySelector('#planet-species .species-row.tracking .species-status')?.textContent ?? '', dot: document.getElementById('planet-map-tabs').classList.contains('tracking') })`);
+  // The item bar's Radar, in the Inventory: switched on, it tracks.
+  await click('.item-tab[data-tab=inventory]');
+  r.switchedOn = await click('.item-slot[data-item=radar]');
+  r.slotOn = await evaluate(`document.querySelector('.item-slot[data-item=radar]').classList.contains('on')`);
+  await until(`planet.radar.state === 'tracking' && planet.radar.pingCount >= ${r.standby.pings + 2}`, 30000);
   await drawFrames(4);
   r.tracking = await evaluate(`({ tracking: planet.radar.tracking, state: planet.radar.state, distance: planet.radar.distance, proximity: planet.radar.proximity,
     visible: planet.radar.visible, pings: planet.radar.pingCount, row: document.querySelector('#planet-species .species-row.tracking')?.dataset.species ?? null,
     status: document.querySelector('#planet-species .species-row.tracking .species-status')?.textContent ?? '',
     dot: document.getElementById('planet-map-tabs').classList.contains('tracking'), cues: __cues.filter((c) => c === 'radarPing').length })`);
+  // Once the "Radar on" note has had its moment, the hint line says what it tracks.
+  await until(`document.getElementById('item-hint').textContent.startsWith('Radar: ')`, 20000);
+  r.tracking.hint = await evaluate(`document.getElementById('item-hint').textContent`);
   r.screenshot = join(outDir, 'radar.png');
   writeFileSync(r.screenshot, await page.screenshot());
+  // Switched off again: no more pings, the waves die away.
+  await click('.item-slot[data-item=radar]');
+  const pings = await evaluate(`planet.radar.pingCount`);
+  await until(`!planet.radar.visible`, 20000);
+  await drawFrames(30);
+  r.switchedOff = await evaluate(`({ state: planet.radar.state, more: planet.radar.pingCount - ${pings}, visible: planet.radar.visible, on: levels.switches.isOn('radar') })`);
+  await click('.item-tab[data-tab=weapons]');
   await click(`#planet-species .species-row.animal[data-species="${index}"]`);
   r.stopped = await evaluate(`({ tracking: planet.radar.tracking, state: planet.radar.state, row: !!document.querySelector('#planet-species .species-row.tracking') })`);
   await click('#planet-map-tabs button[data-tab=map]');
@@ -2054,6 +2074,18 @@ async function runRadar(name) {
     r.list.herds > 0 &&
     index >= 0 &&
     r.picked &&
+    r.standby.state === 'standby' &&
+    r.standby.pings === 0 &&
+    !r.standby.visible &&
+    r.standby.status === 'Radar off' &&
+    !r.standby.dot &&
+    r.switchedOn &&
+    r.slotOn &&
+    /^Radar: the nearest .+ is (right here|close)$/.test(r.tracking.hint) &&
+    r.switchedOff.state === 'standby' &&
+    r.switchedOff.more === 0 &&
+    !r.switchedOff.visible &&
+    !r.switchedOff.on &&
     r.tracking.tracking === index &&
     r.tracking.row === String(index) &&
     r.tracking.distance < 60 &&
@@ -2489,8 +2521,8 @@ await section('cargo', async () => {
     await until(`planet.cargo.inFlight.length === 0`, 20000);
     sweep = { most, removed: (await removedCount()) - removed };
   }
-  // Select the stack (2) and hold on the ground: it's set down and takes root.
-  await key('Digit2', '2');
+  // Select the stack (3, after the beam and the radar) and hold on the ground: it's set down and takes root.
+  await key('Digit3', '3');
   const exportArmed = await evaluate(`planet.selected`);
   const stackBefore = await evaluate(`levels.inventory.stacks[0].count`);
   const totalBefore = await evaluate(`levels.inventory.total`);
@@ -2508,7 +2540,7 @@ await section('cargo', async () => {
   await key('Digit1', '1');
   await beamUp();
   await beamUp();
-  await key('Digit2', '2');
+  await key('Digit3', '3');
   const spot = await evaluate(`__ground('land', 8, 35)`);
   await mouse('mouseMoved', spot);
   await mouse('mousePressed', spot);
@@ -2517,7 +2549,7 @@ await section('cargo', async () => {
   await until(`planet.cargo.inFlight.length === 0`, 20000);
   dropped.shipStayed = !(await evaluate(`planet.ship.enRoute`));
   // The other set down in the sea: it drowns.
-  if (!(await evaluate(`planet.selected`))) await key('Digit2', '2');
+  if (!(await evaluate(`planet.selected`))) await key('Digit3', '3');
   const sea = await evaluate(`__ground('sea', 8, 68)`);
   let drown = null;
   if (sea) {

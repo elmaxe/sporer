@@ -376,7 +376,7 @@ export class PlanetMap implements Entity {
     this.setShown((!this.input.touchMode || this.open) && !this.input.blocked);
     if (this.species) {
       this.species.update(frameDt);
-      this.tabs?.classList.toggle('tracking', this.species.tracking !== null);
+      this.tabs?.classList.toggle('tracking', this.species.active);
     }
     if (!this.drawing) return;
 
