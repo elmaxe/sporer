@@ -3,7 +3,7 @@ import type { SoundEffects } from '../audio/sfx';
 import type { Debug } from '../core/Debug';
 import type { Input } from '../core/Input';
 import { generateDistantGalaxies } from '../gen/distantGalaxies';
-import { generateDust, generateDustLanes, generateHaze, type GalaxyData, type StarRef } from '../gen/galaxy';
+import { generateDust, generateHaze, type GalaxyData, type StarRef } from '../gen/galaxy';
 import type { SystemData } from '../gen/system';
 import { DistantGalaxies } from '../galaxy/DistantGalaxies';
 import { GalaxyDust } from '../galaxy/GalaxyDust';
@@ -62,7 +62,7 @@ export class GalaxyLevel extends Level {
   readonly spin: GalaxySpin;
   readonly distantGalaxies: DistantGalaxies;
   readonly nebulas: GalaxyNebulas;
-  /** The arms' gas, haze and dust lanes. */
+  /** The arms' gas and haze. */
   readonly dust: GalaxyDust;
   private readonly hud: GalaxyHud;
   private readonly light: THREE.HemisphereLight;
@@ -96,7 +96,7 @@ export class GalaxyLevel extends Level {
     this.dust = this.add(
       new GalaxyDust(
         this.root,
-        { gas: generateDust(galaxy), haze: generateHaze(galaxy), lanes: generateDustLanes(galaxy) },
+        { gas: generateDust(galaxy), haze: generateHaze(galaxy) },
         galaxy.radius,
         this.nebulas.frame,
         debug,

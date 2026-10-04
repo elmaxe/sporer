@@ -22,7 +22,7 @@ export const galaxyNebulaParams = {
  * dim (only the glow behind them: each volume adds back the glow between the
  * camera and its dust), and before the stars, which dim themselves behind
  * dark nebulas (see GalaxyMap). The volumes follow the galaxy's rotating root.
- * The arms' haze and dust lanes are drawn in the same pass (`frame`).
+ * The arms' haze is drawn in the same pass (`frame`).
  */
 export class GalaxyNebulas implements Entity {
   private readonly meshes: THREE.Mesh<THREE.IcosahedronGeometry, THREE.ShaderMaterial>[];
@@ -30,10 +30,9 @@ export class GalaxyNebulas implements Entity {
   private readonly volumes = new THREE.Scene();
   /**
    * Galaxy coordinates in the reduced-resolution pass: other soft volumes
-   * (the arms' haze and dust lanes, see GalaxyDust) are added here to be
-   * drawn with the nebulas, their light encoded in the canvas's colour space
-   * and their transmittance multiplied into alpha. Nebulas dim what's drawn
-   * before them (a lower renderOrder) behind their dust.
+   * (the arms' haze, see GalaxyDust) are added here to be drawn with the
+   * nebulas, their light encoded in the canvas's colour space. Nebulas dim
+   * what's drawn before them (a lower renderOrder) behind their dust.
    */
   readonly frame = new THREE.Group();
   private readonly target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: false });

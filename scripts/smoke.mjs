@@ -17,7 +17,7 @@
 // it there), hovering + clicking the star targets it, the system map shows every planet and moon (hover, click to
 // fly, N folds it), and the galaxy loop works (scroll out to the galaxy, click the nearest star, travel, scroll in to
 // its system, where the ship flies in and hovers straight above the star with the camera over it; the galaxy shows distant
-// galaxies, twinkles, spins, draws binaries as two dots and its arms' gas, haze and dust lanes, and picking works while it's turned), a real click on the
+// galaxies, twinkles, spins, draws binaries as two dots and its arms' gas and haze, and picking works while it's turned), a real click on the
 // menu button starts audio and opens the menu (the game pauses; volume sliders and a planet lab link; its Save debug
 // dump opens the dump dialog, where typing a note doesn't reach the game and Save makes the JSON file with the
 // pictures and state, and Esc closes just the dialog; a real Esc closes the menu); then galaxy travel asks for its sound (and the zooms between levels for none), and M mutes. Then the planet loop (hover at
@@ -841,7 +841,6 @@ await section('galaxy', async () => {
     galaxyLoop.polish.twinkleTime > 0 &&
     galaxyLoop.polish.dust.gas > 0 &&
     galaxyLoop.polish.dust.haze > 0 &&
-    galaxyLoop.polish.dust.lanes > 0 &&
     galaxyLoop.clicked.destination === galaxyLoop.clicked.nearest &&
     galaxyLoop.heldWhileTravelling &&
     galaxyLoop.zoomedWhileTravelling &&
