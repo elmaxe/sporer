@@ -4,6 +4,7 @@ import { celsius, describeAtmosphere } from '../gen/climate';
 import { EARTH_RADIUS_KM, atmosphereLook, scaleHeight } from '../gen/atmosphere';
 import { shapeExtents } from '../gen/shape';
 import { plantLabLink } from '../plantlab/labPlants';
+import { animalLabLink } from '../animallab/labAnimals';
 import { describeLab, isSmallKind, labClimateData, labEarthRadii, labLife } from './labPlanet';
 import { formatChance, type LifeEstimate } from '../gen/life';
 import type { PlanetLab } from './PlanetLab';
@@ -23,6 +24,8 @@ export class LabInfo implements Entity {
   private readonly back = document.createElement('a');
   /** To the plant lab with this planet's species (shown when it has plants). */
   private readonly plants = document.createElement('a');
+  /** To the animal lab with this planet's species (shown when it has animals). */
+  private readonly animals = document.createElement('a');
   private readonly details = document.createElement('button');
   private readonly head = document.createElement('div');
   private readonly table = document.createElement('table');
@@ -44,9 +47,12 @@ export class LabInfo implements Entity {
     this.plants.className = 'lab-back';
     this.plants.textContent = 'Plants';
     this.plants.title = "This planet's plant species in the plant lab";
+    this.animals.className = 'lab-back';
+    this.animals.textContent = 'Animals';
+    this.animals.title = "This planet's animal species in the animal lab";
     const links = document.createElement('div');
     links.className = 'lab-links';
-    links.append(this.back, this.plants);
+    links.append(this.back, this.plants, this.animals);
     top.append(links, this.details);
     this.help.className = 'lab-help';
     this.root.append(top, this.head, this.table, this.help);
@@ -75,6 +81,13 @@ export class LabInfo implements Entity {
       const s = this.lab.source;
       const from = s && s.comet === undefined && s.asteroid === undefined ? { seed: s.seed, star: s.star, planet: s.planet, moon: s.moon } : null;
       this.plants.href = plantLabLink(plants.plan.species, plants.plan.tier, plants.plan.seed, from, location.href);
+    }
+    const animals = this.lab.level?.animals;
+    this.animals.hidden = !animals;
+    if (animals) {
+      const s = this.lab.source;
+      const from = s && s.comet === undefined && s.asteroid === undefined ? { seed: s.seed, star: s.star, planet: s.planet, moon: s.moon } : null;
+      this.animals.href = animalLabLink(animals.plan.species, animals.plan.tier, animals.plan.seed, animals.plan.gravity, from, location.href);
     }
     this.touch = null;
     this.render();
@@ -191,6 +204,11 @@ export class LabInfo implements Entity {
       ]);
     } else if (view.view === 'globe' && planet.type !== 'gas' && !planet.shape) {
       rows.push(['Plants', 'none']);
+    }
+    const animals = level?.animals;
+    if (animals) {
+      const st = animals.stats();
+      rows.push(['Animals', `${animals.plan.species.length} species · ${st.animals} in ${st.herds} herds near · ${st.drawn} drawn · ${st.walking} walking, ${st.grazing} grazing`]);
     }
     if (planet.rings) {
       const rocks = level?.globe?.rings;

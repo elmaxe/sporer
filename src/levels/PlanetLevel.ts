@@ -32,6 +32,8 @@ import { flightAltitude, maxLookUpAt, minPitchAt, zoomCurveParams, zoomFraction 
 import type { SurfaceChanges } from '../surface/changes';
 import { PlantTooltip } from '../surface/PlantTooltip';
 import { plantSetup } from '../surface/plantSetup';
+import { animalSetup } from '../surface/animalSetup';
+import { SurfaceAnimals } from '../surface/SurfaceAnimals';
 import { SurfaceEntities } from '../surface/SurfaceEntities';
 import type { Tooltip } from '../ui/Tooltip';
 import { cometParams } from '../world/Comet';
@@ -128,6 +130,8 @@ export class PlanetLevel extends Level implements ItemUser {
   private readonly now = new THREE.Vector3();
   /** Habitable bodies (T1 and up) only: plants standing on the ground (see gen/plants.ts). */
   plants: SurfaceEntities | null = null;
+  /** The animals roaming it (gen/animals.ts), where plants grow. */
+  animals: SurfaceAnimals | null = null;
   /** Plants the player set down here that took root (not once busted). */
   plantings: Plantings | null = null;
   private plantTooltip: PlantTooltip | null = null;
@@ -295,9 +299,11 @@ export class PlanetLevel extends Level implements ItemUser {
     const plantsSetup = busted ? null : plantSetup(config);
     this.plants = plantsSetup ? this.add(new SurfaceEntities(this.scene, plantsSetup.plan, plantsSetup.ground, camera, changes, debug)) : null;
     this.buryPlants();
+    const animalsSetup = busted ? null : animalSetup(config, plantsSetup);
+    this.animals = animalsSetup ? this.add(new SurfaceAnimals(this.scene, animalsSetup.plan, animalsSetup.ground, camera, this.frame, debug)) : null;
     this.plantings = busted ? null : this.add(new Plantings(this.scene, changes));
     this.plantTooltip = this.plantings
-      ? this.add(new PlantTooltip(camera, input, this.plants, this.plantings, tooltip, (ray, out) => globe.groundHit(ray, out)))
+      ? this.add(new PlantTooltip(camera, input, this.plants, this.plantings, tooltip, this.animals, (ray, out) => globe.groundHit(ray, out)))
       : null;
     const events = { fire: (time: number) => this.fire(time), blast: () => this.blast(), done: () => this.settled() };
     this.buster = this.add(new PlanetBuster(this.scene, this.frame, camera, input, globe, this.ship.object, sfx, events, busted, debug));
@@ -496,9 +502,9 @@ export class PlanetLevel extends Level implements ItemUser {
   private blast(): void {
     this.globe.bust(this.radius * DEBRIS_REACH);
     this.cargo?.clear(false);
-    for (const entity of [this.eruptions, this.geysers, this.weather, this.comet, this.plants, this.cargo, this.plantings, this.volcanoes, this.meteors])
+    for (const entity of [this.eruptions, this.geysers, this.weather, this.comet, this.plants, this.animals, this.cargo, this.plantings, this.volcanoes, this.meteors])
       if (entity) this.remove(entity);
-    this.eruptions = this.geysers = this.weather = this.comet = this.plants = this.cargo = this.plantings = this.meteors = null;
+    this.eruptions = this.geysers = this.weather = this.comet = this.plants = this.animals = this.cargo = this.plantings = this.meteors = null;
     this.volcanoes = null;
     if (this.plantTooltip) {
       this.plantTooltip.deactivate();
