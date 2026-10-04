@@ -17,7 +17,7 @@
 // it there), hovering + clicking the star targets it, the system map shows every planet and moon (hover, click to
 // fly, N folds it), and the galaxy loop works (scroll out to the galaxy, click the nearest star, travel, scroll in to
 // its system, where the ship flies in and hovers straight above the star with the camera over it; the galaxy shows distant
-// galaxies, twinkles, spins and draws binaries as two dots, and picking works while it's turned), a real click on the
+// galaxies, twinkles, spins, draws binaries as two dots and its arms' gas and haze, and picking works while it's turned), a real click on the
 // menu button starts audio and opens the menu (the game pauses; volume sliders and a planet lab link; its Save debug
 // dump opens the dump dialog, where typing a note doesn't reach the game and Save makes the JSON file with the
 // pictures and state, and Esc closes just the dialog; a real Esc closes the menu); then galaxy travel asks for its sound (and the zooms between levels for none), and M mutes. Then the planet loop (hover at
@@ -69,8 +69,8 @@
 // and planted is still so after leaving and coming back; the cues abductStart, abductBeam, abductSuccess, exportBeam
 // and dropImpact are asked for.
 // Volcano bomb: pressing 2 in the system says where to use it; in low orbit over a solid planet a real 2 arms it and a
-// real click on the ground fires it: a volcano rises there (the ground under it is higher, the ship flies over it), the
-// cues go fire → rise, the bomb stays armed for another; over a gas giant it can't be used; the system view's globe
+// real click on the ground fires it: a volcano rises there (the ground under it is higher, the ship flies over it; its
+// cone is one chunk seen from afar and splits into finer ones next to it, like the terrain), the cues go fire → rise, the bomb stays armed for another; over a gas giant it can't be used; the system view's globe
 // shows it, it's still there (risen) when the planet is visited again, and on the globe after a trip to the galaxy.
 // Planet buster (last, as it leaves a moon of the home system busted): the item bar shows in the system with the
 // buster unusable (pressing 1 says where to use it); in low orbit over a moon, a real 1 arms it and a real click on the
@@ -779,6 +779,7 @@ await section('galaxy', async () => {
       stars: galaxy.stars.length,
       twinkle: level.map.points.material.uniforms.twinkle.value,
       twinkleTime: level.map.points.material.uniforms.time.value,
+      dust: level.dust.counts,
     }), 1000);
   })`);
   // Turn the galaxy well away from its start, so the click below also checks picking and travel while rotated.
@@ -841,6 +842,8 @@ await section('galaxy', async () => {
     galaxyLoop.polish.dots > galaxyLoop.polish.stars &&
     galaxyLoop.polish.twinkle > 0 &&
     galaxyLoop.polish.twinkleTime > 0 &&
+    galaxyLoop.polish.dust.gas > 0 &&
+    galaxyLoop.polish.dust.haze > 0 &&
     galaxyLoop.clicked.destination === galaxyLoop.clicked.nearest &&
     galaxyLoop.heldWhileTravelling &&
     galaxyLoop.zoomedWhileTravelling &&
@@ -2598,6 +2601,20 @@ await section('volcano', async () => {
       aboveSea: planet.groundRadius(c) > (planet.globe.seaRadius ?? 0),
       shipAbove: ship.length() - planet.groundRadius(ship.clone().normalize()), saved: levels.surfaceChanges.forPlanet(__volcanic.name + ':' + __volcanic.config.seed).volcanoes.length };
   })()`);
+  // Its cone is refined near the camera like the terrain: one chunk from far off, finer chunks next to it.
+  await evaluate(`(() => {
+    const v = planet.volcanoes.shapes[0];
+    window.__zoom = planet.orbit.zoom;
+    planet.orbit.setFocus(v.centre.clone().multiplyScalar(planet.groundRadius(v.centre)));
+    planet.orbit.setDistance(v.baseRadius * 15);
+  })()`);
+  await drawFrames(3);
+  const lodFar = { settled: await until(`planet.volcanoes.settled`, 30000), ...(await evaluate(`planet.volcanoes.lodStats()[0]`)) };
+  await evaluate(`planet.orbit.setDistance(planet.volcanoes.shapes[0].baseRadius * 0.4)`);
+  await drawFrames(3);
+  const lodNear = { settled: await until(`planet.volcanoes.settled`, 30000), ...(await evaluate(`planet.volcanoes.lodStats()[0]`)) };
+  await evaluate(`(() => { planet.orbit.setFocus(null); planet.orbit.setDistance(__zoom); })()`);
+  const lod = { far: lodFar, near: lodNear };
   const heard = (await evaluate(`__cues`)).filter((c) => c.startsWith('volcano'));
   await evaluate(`levels.leavePlanet()`);
   await until(`levels.mode === 'system' && !levels.transitioning`, 60000);
@@ -2615,7 +2632,7 @@ await section('volcano', async () => {
   await evaluate(`levels.toSystem()`);
   await until(`levels.mode === 'system' && !levels.transitioning`, 60000);
   const rebuilt = await evaluate(`[...world.planets, ...world.moons].find((b) => b.name === __volcanic.name)?.volcanoSites.length`);
-  volcano = { inSpace, gas, armed, fired, landed, risen, after, heard, systemView, revisit, rebuilt };
+  volcano = { inSpace, gas, armed, fired, landed, risen, after, lod, heard, systemView, revisit, rebuilt };
   volcano.ok =
     inSpace.slots === 2 &&
     /down to a planet or moon/.test(inSpace.hint) &&
@@ -2634,6 +2651,11 @@ await section('volcano', async () => {
     after.selected === 'volcanoBomb' &&
     after.available &&
     after.saved === 1 &&
+    lod.far.settled &&
+    lod.far.chunks === 1 &&
+    lod.near.settled &&
+    lod.near.chunks > 4 &&
+    lod.near.maxDepth >= 2 &&
     heard.join(',') === 'volcanoFire,volcanoRise' &&
     systemView === 1 &&
     revisit.count === 1 &&
