@@ -1,12 +1,16 @@
 import type { VolcanoSite } from '../combat/volcano';
+import type { AnimalSpecies } from '../gen/animals';
 import type { PlantSpecies } from '../gen/plants';
 
 /**
  * What the player has done to a planet's surface entities, kept outside the
- * planet level (which is built afresh on each visit): a removed plant stays
- * gone after leaving and coming back, a plant set down by the cargo beam
- * stays where it took root, and a volcano raised by a volcano bomb stands. Generated plants are the same every time (see
- * gen/plants.ts), so these lists are all that save/load will need.
+ * planet level (which is built afresh on each visit): a removed plant or
+ * animal (beamed up, or killed by the laser) stays gone after leaving and
+ * coming back, a plant set down by the cargo beam stays where it took root,
+ * an animal set down roams round where it landed, and a volcano raised by a
+ * volcano bomb stands. Generated plants and herds are the same every time
+ * (see gen/plants.ts, gen/animals.ts), so these lists are all that save/load
+ * will need.
  */
 export interface SurfaceChangesData {
   /** Ids of removed plants (generated or planted). */
@@ -15,6 +19,29 @@ export interface SurfaceChangesData {
   planted?: PlantedPlant[];
   /** Volcanoes raised by volcano bombs, in the order they were (older saves have none). */
   volcanoes?: VolcanoSite[];
+  /** Ids of removed animals of the body's own herds (`<herd id>:<k>`; older saves have none). */
+  removedAnimals?: string[];
+  /** Animals set down here that live here now (removed ones left out). */
+  released?: ReleasedAnimal[];
+}
+
+/** An animal the player set down that lives here now: its species (from wherever it lived) and the home it roams round. */
+export interface ReleasedAnimal {
+  /** `released:<n>`, unique on its body; the animal itself is `<id>:0`. */
+  readonly id: string;
+  /** The species' key in the cargo hold (cargo/inventory.ts `animalKey`). */
+  readonly speciesKey: string;
+  readonly species: AnimalSpecies;
+  /** The body it came from (for the tooltip). */
+  readonly origin: string;
+  /** Unit direction from the body's centre (body frame) where it landed: its home. */
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  /** Multiplies the species' length. */
+  readonly scale: number;
+  /** Its own stream for its wanderings. */
+  readonly seed: number;
 }
 
 /** A plant the player set down that took root: its species (from wherever it grew) and where it stands. */
@@ -38,12 +65,16 @@ export interface PlantedPlant {
 }
 
 export const PLANTED_PREFIX = 'planted:';
+export const RELEASED_PREFIX = 'released:';
 
 export class SurfaceChanges {
   private readonly removed = new Set<string>();
   private readonly planted = new Map<string, PlantedPlant>();
   private nextPlanted = 0;
   private readonly _volcanoes: VolcanoSite[] = [];
+  private readonly removedAnimals = new Set<string>();
+  private readonly released = new Map<string, ReleasedAnimal>();
+  private nextReleased = 0;
 
   isRemoved(id: string): boolean {
     return this.removed.has(id);
@@ -77,6 +108,38 @@ export class SurfaceChanges {
     return record;
   }
 
+  isAnimalRemoved(id: string): boolean {
+    return this.removedAnimals.has(id);
+  }
+
+  /** Records an animal's removal (`<herd id>:<k>`); false if it already was. A released animal is forgotten altogether. */
+  removeAnimal(id: string): boolean {
+    if (id.startsWith(RELEASED_PREFIX)) return this.released.delete(id.slice(0, id.lastIndexOf(':')));
+    if (this.removedAnimals.has(id)) return false;
+    this.removedAnimals.add(id);
+    return true;
+  }
+
+  get removedAnimalCount(): number {
+    return this.removedAnimals.size;
+  }
+
+  /** The animals set down here that live here now. */
+  get releasedAnimals(): IterableIterator<ReleasedAnimal> {
+    return this.released.values();
+  }
+
+  get releasedCount(): number {
+    return this.released.size;
+  }
+
+  /** Records an animal set down here that lives here now (its id is given here) and returns it. */
+  release(a: Omit<ReleasedAnimal, 'id'>): ReleasedAnimal {
+    const record: ReleasedAnimal = { ...a, id: `${RELEASED_PREFIX}${this.nextReleased++}` };
+    this.released.set(record.id, record);
+    return record;
+  }
+
   /** The volcanoes raised on the planet, oldest first. */
   get volcanoes(): readonly VolcanoSite[] {
     return this._volcanoes;
@@ -88,7 +151,13 @@ export class SurfaceChanges {
   }
 
   toJSON(): SurfaceChangesData {
-    return { removed: [...this.removed], planted: [...this.planted.values()], volcanoes: this._volcanoes.map((v) => ({ ...v })) };
+    return {
+      removed: [...this.removed],
+      planted: [...this.planted.values()],
+      volcanoes: this._volcanoes.map((v) => ({ ...v })),
+      removedAnimals: [...this.removedAnimals],
+      released: [...this.released.values()],
+    };
   }
 
   static fromJSON(data: SurfaceChangesData): SurfaceChanges {
@@ -100,6 +169,12 @@ export class SurfaceChanges {
       if (Number.isInteger(n)) changes.nextPlanted = Math.max(changes.nextPlanted, n + 1);
     }
     for (const v of data.volcanoes ?? []) changes.addVolcano(v);
+    for (const id of data.removedAnimals ?? []) changes.removedAnimals.add(id);
+    for (const a of data.released ?? []) {
+      changes.released.set(a.id, a);
+      const n = Number(a.id.slice(RELEASED_PREFIX.length));
+      if (Number.isInteger(n)) changes.nextReleased = Math.max(changes.nextReleased, n + 1);
+    }
     return changes;
   }
 }

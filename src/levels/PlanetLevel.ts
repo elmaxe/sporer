@@ -47,6 +47,7 @@ import { renderScene } from '../world/wireframe';
 import type { SoundEffects } from '../audio/sfx';
 import { PlanetBuster } from '../combat/PlanetBuster';
 import { VolcanoBomb } from '../combat/VolcanoBomb';
+import { Laser } from '../combat/Laser';
 import { volcanoParams } from '../combat/volcano';
 import { Volcanoes } from '../planet/Volcanoes';
 import { hashSeed } from '../gen/rng';
@@ -145,6 +146,8 @@ export class PlanetLevel extends Level implements ItemUser {
   readonly buster: PlanetBuster;
   /** The volcano bomb, fired from here at solid ground (not on giants or once busted). */
   readonly volcanoBomb: VolcanoBomb;
+  /** The laser, killing the animals and plants it touches. */
+  readonly laser: Laser;
   /** Solid bodies only (and not once busted): the volcanoes raised on it, kept in its change list. */
   volcanoes: Volcanoes | null = null;
   /** Once busted: its debris field, and the system time of the blast. */
@@ -308,10 +311,10 @@ export class PlanetLevel extends Level implements ItemUser {
     this.plants = plantsSetup ? this.add(new SurfaceEntities(this.scene, plantsSetup.plan, plantsSetup.ground, camera, changes, debug)) : null;
     this.buryPlants();
     const animalsSetup = busted ? null : animalSetup(config, plantsSetup);
-    this.animals = animalsSetup ? this.add(new SurfaceAnimals(this.scene, animalsSetup.plan, animalsSetup.ground, camera, this.frame, debug)) : null;
+    this.animals = animalsSetup ? this.add(new SurfaceAnimals(this.scene, animalsSetup.plan, animalsSetup.ground, camera, this.frame, debug, changes)) : null;
     // After the ship and the camera: its waves spread round where the ship is drawn this frame.
     this.radar = animalsSetup
-      ? this.add(new Radar(this.scene, animalsSetup.plan, animalsSetup.ground, this.ship, camera, this.frame, sfx, () => switches.isOn('radar'), debug))
+      ? this.add(new Radar(this.scene, animalsSetup.plan, animalsSetup.ground, this.ship, camera, this.frame, sfx, () => switches.isOn('radar'), debug, changes))
       : null;
     this.plantings = busted ? null : this.add(new Plantings(this.scene, changes));
     this.plantTooltip = this.plantings
@@ -319,6 +322,10 @@ export class PlanetLevel extends Level implements ItemUser {
       : null;
     const events = { fire: (time: number) => this.fire(time), blast: () => this.blast(), done: () => this.settled() };
     this.buster = this.add(new PlanetBuster(this.scene, this.frame, camera, input, globe, this.ship.object, sfx, events, busted, debug));
+    // Before the beam and the picker: a press the laser takes is neither (the beam takes every press it sees).
+    this.laser = this.add(
+      new Laser(this.scene, camera, input, globe, this.ship, this, sfx, () => (this.busy ? 'Not while the planet buster goes off' : null), bodyKey(config), debug),
+    );
     // Before the picker: a press the beam takes isn't a click that flies the ship.
     const world = { climate: config.climate ?? null, weather: weatherKind(config.type, config.climate) };
     this.cargo = this.plantings
@@ -331,6 +338,7 @@ export class PlanetLevel extends Level implements ItemUser {
             this.ship,
             this.plants,
             this.plantings,
+            this.animals,
             inventory,
             { key: bodyKey(config), name: body.name, world, gravity: bodyGravity(config) },
             sfx,
@@ -450,15 +458,16 @@ export class PlanetLevel extends Level implements ItemUser {
     return this.globe.busted;
   }
 
-  /** The item bar's view of this level: the planet buster and the volcano bomb can be fired from here, and the beam used. */
+  /** The item bar's view of this level: the planet buster, the volcano bomb and the laser can be fired from here, and the beam used. */
   get selected(): ItemId | null {
-    return this.buster.armed ? 'planetBuster' : this.volcanoBomb.armed ? 'volcanoBomb' : (this.cargo?.selected ?? null);
+    return this.buster.armed ? 'planetBuster' : this.volcanoBomb.armed ? 'volcanoBomb' : this.laser.armed ? 'laser' : (this.cargo?.selected ?? null);
   }
 
   status(item: ItemId): ItemStatus {
     if (item === 'radar') return this.radarStatus();
     if (item === 'planetBuster') return this.buster.status();
     if (item === 'volcanoBomb') return this.volcanoBomb.status();
+    if (item === 'laser') return this.laser.status();
     if (this.cargo) return this.cargo.status(item);
     return { available: false, hint: '', reason: item === 'abduct' ? 'Nothing left here to beam up' : 'Nothing here to set it down on' };
   }
@@ -467,9 +476,11 @@ export class PlanetLevel extends Level implements ItemUser {
     // The weapons put away before the one chosen is armed (they share the aiming cursor), and before the beam, so its cursor isn't undone.
     if (item !== 'planetBuster') this.buster.arm(false);
     if (item !== 'volcanoBomb') this.volcanoBomb.arm(false);
+    if (item !== 'laser') this.laser.arm(false);
     if (item === 'planetBuster') this.buster.arm(true);
     if (item === 'volcanoBomb') this.volcanoBomb.arm(true);
-    this.cargo?.arm(item === 'planetBuster' || item === 'volcanoBomb' ? null : item);
+    if (item === 'laser') this.laser.arm(true);
+    this.cargo?.arm(item === 'planetBuster' || item === 'volcanoBomb' || item === 'laser' ? null : item);
   }
 
   /** The radar's line above the item bar while it's on (a switch: always available). */
@@ -531,6 +542,7 @@ export class PlanetLevel extends Level implements ItemUser {
   private blast(): void {
     this.globe.bust(this.radius * DEBRIS_REACH);
     this.cargo?.clear(false);
+    this.laser.clear();
     for (const entity of [this.eruptions, this.geysers, this.weather, this.comet, this.plants, this.animals, this.radar, this.cargo, this.plantings, this.volcanoes, this.meteors])
       if (entity) this.remove(entity);
     this.eruptions = this.geysers = this.weather = this.comet = this.plants = this.animals = this.radar = this.cargo = this.plantings = this.meteors = null;
@@ -682,6 +694,7 @@ export class PlanetLevel extends Level implements ItemUser {
   override exit(): void {
     this.buster.arm(false);
     this.volcanoBomb.arm(false);
+    this.laser.arm(false);
     this.cargo?.arm(null);
     this.hud.deactivate();
     this.map.deactivate();

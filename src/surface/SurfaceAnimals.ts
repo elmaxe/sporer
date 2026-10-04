@@ -11,6 +11,8 @@ import { viewFreeze } from '../world/viewFreeze';
 import { ANIMAL_LODS, FADE_START, addAnimationAttributes, animalMotion, animalSkeleton, createAnimalGeometry, createAnimalMaterial, setAnimalTint, type AnimalUniforms } from './animalLook';
 import { ANIMAL_LOD_COUNT } from './animalMesh';
 import { addAnimalDebug, animalParams } from './animalParams';
+import type { ReleasedAnimal, SurfaceChanges } from './changes';
+import { createAnimalObject, type AnimalObject } from './liveAnimal';
 
 /** The camera must move this far (units) before herd cells are looked at again. */
 const SCAN_DISTANCE = 6;
@@ -21,6 +23,12 @@ const FIRST_CAPACITY = 32;
 /** An animal's own size: its species' length times this, from its id. */
 const MIN_SCALE = 0.85;
 const MAX_SCALE = 1.15;
+/** An animal set down roams this far round where it landed (units). */
+const RELEASED_RANGE = 0.5 * HOME_RANGE;
+/** In a cell's `gone`: drawn, removed for good, or out of the batches as an object of its own (`promote`). */
+const HERE = 0;
+const REMOVED = 1;
+const HELD = 2;
 
 /** The animal a ray hit. The same object every time: read it before the next `pick`. */
 export interface AnimalHit {
@@ -31,13 +39,42 @@ export interface AnimalHit {
   distance: number;
   /** Walking, trotting, grazing or resting, for the tooltip. */
   doing: string;
+  /** Where it was brought from, if the player set it down here, and its species' key in the cargo hold; else null. */
+  origin: string | null;
+  speciesKey: string | null;
+  /** Where it stands (body frame, on the ground): its base, drawn this frame. */
+  readonly position: THREE.Vector3;
 }
 
-/** A loaded herd cell: its herd (or none) and where its animals were last drawn. */
+/** An animal taken out of the herds' batches as an object of its own (see `SurfaceAnimals.promote`). */
+export interface LiveAnimal {
+  readonly id: string;
+  readonly species: AnimalSpecies;
+  /** Where it was brought from, if the player set it down here; else null. */
+  readonly origin: string | null;
+  /** Its size (times the species' length). */
+  readonly scale: number;
+  /** Placed, turned and scaled where it stood, walking as it was, in the level's scene: move it, lift it, hit it. Its holder disposes it. */
+  readonly look: AnimalObject;
+  /** It is gone for good: recorded as removed in the planet's change list. */
+  destroy(): void;
+  /** Put it back in its herd (where the clock has it now). */
+  restore(): void;
+}
+
+/** A loaded herd cell (or an animal set down here): its herd (or none) and where its animals were last drawn. */
 interface HerdCell {
   readonly key: string;
   readonly herd: HerdData | null;
   readonly path: HerdPath | null;
+  /** Its species, and the batches it's drawn in. */
+  readonly species: AnimalSpecies | null;
+  readonly row: Batch[] | null;
+  /** Where its animal was brought from (an animal set down here) and its species' key in the hold, or null. */
+  readonly origin: string | null;
+  readonly speciesKey: string | null;
+  /** Per animal: HERE, REMOVED or HELD. */
+  readonly gone: Uint8Array;
   /** The herd's home on the ground and how far its animals can be from it (units). */
   readonly centre: THREE.Vector3;
   readonly bound: number;
@@ -108,6 +145,20 @@ export class SurfaceAnimals implements Entity {
   private pending = 0;
   private lastRange = 1;
   private readonly counts = { walking: 0, grazing: 0, drawn: 0 };
+  /** Animals set down here, by their record's id (always loaded: there are few). */
+  private readonly released = new Map<string, HerdCell>();
+  /** The batches of species brought from elsewhere, by species key, with their geometries. */
+  private readonly foreign = new Map<string, { row: Batch[]; geometries: THREE.BufferGeometry[] }>();
+  /** Animals out of the batches as objects of their own (`promote`). */
+  private readonly held = new Set<string>();
+  private readonly basis = new THREE.Matrix4();
+  private readonly xAxis = new THREE.Vector3();
+  private readonly yAxis = new THREE.Vector3();
+  private readonly zAxis = new THREE.Vector3();
+  /** `pick`'s nearest so far: its cell, index and distance along the ray. */
+  private best = Infinity;
+  private found: HerdCell | null = null;
+  private foundIndex = 0;
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -116,6 +167,8 @@ export class SurfaceAnimals implements Entity {
     private readonly cameraSource: THREE.Camera,
     private readonly clock: RenderClock,
     debug: Debug,
+    /** The planet's change list: removed animals stay gone, and those set down here roam it (none in the labs). */
+    private readonly changes: SurfaceChanges | null = null,
   ) {
     const R = plan.radius;
     const n = (this.gridSize = herdGridSize(R));
@@ -148,10 +201,61 @@ export class SurfaceAnimals implements Entity {
       }
       this.batches.push(row);
     }
-    this.hit = { id: '', species: plan.species[0]!, scale: 1, distance: 0, doing: '' };
+    this.hit = { id: '', species: plan.species[0]!, scale: 1, distance: 0, doing: '', origin: null, speciesKey: null, position: new THREE.Vector3() };
     this.object.name = 'Animals';
     scene.add(this.object);
     addAnimalDebug(debug);
+    if (changes) for (const a of changes.releasedAnimals) this.release(a);
+  }
+
+  /** An animal set down here that lives here now: recorded in the planet's change list and drawn roaming round where it landed. */
+  settle(a: Omit<ReleasedAnimal, 'id' | 'seed'>): ReleasedAnimal | null {
+    if (!this.changes) return null;
+    const record = this.changes.release({ ...a, seed: hashSeed(this.plan.seed, 'released', this.changes.releasedCount, a.x, a.y) & 0x7fffffff });
+    this.release(record);
+    return record;
+  }
+
+  /** Draws an animal set down here (recorded in the change list as `record`), roaming round where it landed. */
+  private release(record: ReleasedAnimal): void {
+    const species = record.species;
+    let foreign = this.foreign.get(record.speciesKey);
+    if (!foreign) {
+      const motion = animalMotion(species, this.plan.gravity);
+      const geometries = Array.from({ length: ANIMAL_LOD_COUNT }, (_, lod) => createAnimalGeometry(species, lod));
+      const row = geometries.map((geometry, lod) => {
+        const { material, uniforms } = createAnimalMaterial(lod, species, motion);
+        return { ...this.createMesh(geometry, material, 4), geometry, material, uniforms, lod, count: 0 };
+      });
+      this.foreign.set(record.speciesKey, (foreign = { row, geometries }));
+    }
+    // A herd of one, of a plan whose only species is its own, on this body's ground and gravity.
+    const plan: AnimalPlan = { ...this.plan, species: [species] };
+    const herd: HerdData = {
+      id: record.id,
+      species: 0,
+      count: 1,
+      home: { x: record.x, y: record.y, z: record.z },
+      range: RELEASED_RANGE,
+      slot: 30 + (record.seed % 40),
+      offset: record.seed % 1000,
+      seed: record.seed,
+    };
+    this.released.set(record.id, {
+      key: record.id,
+      herd,
+      path: new HerdPath(plan, this.ground, herd, animalSkeleton(species)),
+      species,
+      row: foreign.row,
+      origin: record.origin,
+      speciesKey: record.speciesKey,
+      gone: new Uint8Array([this.held.has(`${record.id}:0`) ? HELD : HERE]),
+      centre: new THREE.Vector3(record.x, record.y, record.z).multiplyScalar(this.plan.radius),
+      bound: RELEASED_RANGE + species.length * 2,
+      drawn: new Float32Array(3).fill(NaN),
+      scales: new Float32Array([record.scale]),
+      poses: [{ x: 0, y: 0, z: 0, hx: 0, hy: 0, hz: 1, cycle: 0, stride: 0, trot: 0, graze: 0, idle: 0 }],
+    });
   }
 
   private createMesh(geometry: THREE.BufferGeometry, material: THREE.Material, capacity: number): Pick<Batch, 'mesh' | 'anim' | 'idle'> {
@@ -262,10 +366,20 @@ export class SurfaceAnimals implements Entity {
     const scales = new Float32Array(count);
     for (let k = 0; k < count; k++) scales[k] = MIN_SCALE + ((hashSeed(herd!.seed, 'size', k) & 0xffff) / 0x10000) * (MAX_SCALE - MIN_SCALE);
     const species = herd ? this.plan.species[herd.species]! : null;
+    const gone = new Uint8Array(count);
+    for (let k = 0; k < count; k++) {
+      const id = `${herd!.id}:${k}`;
+      gone[k] = this.held.has(id) ? HELD : this.changes?.isAnimalRemoved(id) ? REMOVED : HERE;
+    }
     return {
       key,
       herd,
       path: herd && species ? new HerdPath(this.plan, this.ground, herd, animalSkeleton(species)) : null,
+      species,
+      row: species ? this.batches[species.index]! : null,
+      origin: null,
+      speciesKey: null,
+      gone,
       centre: herd ? new THREE.Vector3(herd.home.x, herd.home.y, herd.home.z).multiplyScalar(R) : new THREE.Vector3(x, y, z).multiplyScalar(R),
       bound: herd ? herd.range + (species!.length * 1.7 * Math.sqrt(count + 1) + species!.length) : 0,
       drawn: new Float32Array(count * 3).fill(NaN),
@@ -278,71 +392,80 @@ export class SurfaceAnimals implements Entity {
   private draw(): void {
     const { plan, camera } = this;
     const R = plan.radius;
-    const range = animalParams.range;
     for (const row of this.batches) for (const b of row) b.count = 0;
+    for (const { row } of this.foreign.values()) for (const b of row) b.count = 0;
     this.counts.walking = this.counts.grazing = this.counts.drawn = 0;
     // The view's frustum in the body frame (none while the view is frozen: everything in reach is posed, to see from outside).
     const cam = this.cameraSource;
     this.viewProjection.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse).multiply(this.object.matrixWorld);
     this.frustum.setFromProjectionMatrix(this.viewProjection);
     const t = this.clock.renderTime;
-    const pose = this.pose;
     const camLen = camera.length();
     // Past the horizon: further round than the sea-level horizon plus the highest ground's and an animal's height.
     const horizon = Math.acos(Math.min(1, R / Math.max(camLen, R))) + Math.acos(Math.min(1, R / (plan.peak + this.tallest)));
     const cosHorizon = Math.cos(Math.min(Math.PI, horizon)) * camLen;
-    for (const cell of this.cells.values()) {
-      const { herd, path } = cell;
-      if (!herd || !path) continue;
-      cell.drawn.fill(NaN);
-      const s = plan.species[herd.species]!;
-      const reach = ANIMAL_LODS[ANIMAL_LODS.length - 1]! * s.length * MAX_SCALE * range;
-      const d = camera.distanceTo(cell.centre);
-      if (d - cell.bound > reach) continue;
-      this.sphere.set(cell.centre, cell.bound + s.length * 2);
-      if (!viewFreeze.enabled && !this.frustum.intersectsSphere(this.sphere)) continue;
-      const row = this.batches[herd.species]!;
-      for (let k = 0; k < herd.count; k++) {
-        path.pose(k, t, pose);
-        if (pose.x * camera.x + pose.y * camera.y + pose.z * camera.z < cosHorizon) continue;
-        let r = this.ground(pose);
-        if (plan.sea && r < R) r = R;
-        const scale = cell.scales[k]!;
-        const px = pose.x * r;
-        const py = pose.y * r;
-        const pz = pose.z * r;
-        const dist = Math.hypot(px - camera.x, py - camera.y, pz - camera.z) / (s.length * scale * range);
-        if (dist > ANIMAL_LODS[ANIMAL_LODS.length - 1]!) continue;
-        Object.assign(cell.poses[k]!, pose);
-        cell.drawn[k * 3] = px;
-        cell.drawn[k * 3 + 1] = py;
-        cell.drawn[k * 3 + 2] = pz;
-        this.counts.drawn++;
-        if (pose.stride > 0.05) this.counts.walking++;
-        if (pose.graze > 0.5) this.counts.grazing++;
-        for (let lod = 0; lod < ANIMAL_LOD_COUNT; lod++) {
-          // A level draws from where the one before starts fading to where it has faded out itself.
-          const from = lod === 0 ? -Infinity : ANIMAL_LODS[lod - 1]! * FADE_START;
-          if (dist < from || dist > ANIMAL_LODS[lod]!) continue;
-          this.write(row[lod]!, pose, px, py, pz, scale);
-        }
+    for (const cell of this.cells.values()) this.drawCell(cell, t, cosHorizon);
+    for (const cell of this.released.values()) this.drawCell(cell, t, cosHorizon);
+    for (const row of this.batches) this.upload(row);
+    for (const { row } of this.foreign.values()) this.upload(row);
+  }
+
+  /** Poses a cell's animals in view now into their batches, and keeps where each was drawn. */
+  private drawCell(cell: HerdCell, t: number, cosHorizon: number): void {
+    const { plan, camera, pose } = this;
+    const R = plan.radius;
+    const range = animalParams.range;
+    const { herd, path, species: s, row } = cell;
+    if (!herd || !path || !s || !row) return;
+    cell.drawn.fill(NaN);
+    const reach = ANIMAL_LODS[ANIMAL_LODS.length - 1]! * s.length * MAX_SCALE * range;
+    const d = camera.distanceTo(cell.centre);
+    if (d - cell.bound > reach) return;
+    this.sphere.set(cell.centre, cell.bound + s.length * 2);
+    if (!viewFreeze.enabled && !this.frustum.intersectsSphere(this.sphere)) return;
+    for (let k = 0; k < herd.count; k++) {
+      if (cell.gone[k] !== HERE) continue;
+      path.pose(k, t, pose);
+      if (pose.x * camera.x + pose.y * camera.y + pose.z * camera.z < cosHorizon) continue;
+      let r = this.ground(pose);
+      if (plan.sea && r < R) r = R;
+      const scale = cell.scales[k]!;
+      const px = pose.x * r;
+      const py = pose.y * r;
+      const pz = pose.z * r;
+      const dist = Math.hypot(px - camera.x, py - camera.y, pz - camera.z) / (s.length * scale * range);
+      if (dist > ANIMAL_LODS[ANIMAL_LODS.length - 1]!) continue;
+      Object.assign(cell.poses[k]!, pose);
+      cell.drawn[k * 3] = px;
+      cell.drawn[k * 3 + 1] = py;
+      cell.drawn[k * 3 + 2] = pz;
+      this.counts.drawn++;
+      if (pose.stride > 0.05) this.counts.walking++;
+      if (pose.graze > 0.5) this.counts.grazing++;
+      for (let lod = 0; lod < ANIMAL_LOD_COUNT; lod++) {
+        // A level draws from where the one before starts fading to where it has faded out itself.
+        const from = lod === 0 ? -Infinity : ANIMAL_LODS[lod - 1]! * FADE_START;
+        if (dist < from || dist > ANIMAL_LODS[lod]!) continue;
+        this.write(row[lod]!, pose, px, py, pz, scale);
       }
     }
-    for (const row of this.batches) {
-      for (const b of row) {
-        b.mesh.count = b.count;
-        b.mesh.visible = b.count > 0;
-        if (b.count === 0) continue;
-        b.mesh.instanceMatrix.clearUpdateRanges();
-        b.mesh.instanceMatrix.addUpdateRange(0, b.count * 16);
-        b.mesh.instanceMatrix.needsUpdate = true;
-        b.anim.clearUpdateRanges();
-        b.anim.addUpdateRange(0, b.count * 4);
-        b.anim.needsUpdate = true;
-        b.idle.clearUpdateRanges();
-        b.idle.addUpdateRange(0, b.count);
-        b.idle.needsUpdate = true;
-      }
+  }
+
+  /** Hands a row's batches, as written this frame, to the GPU. */
+  private upload(row: Batch[]): void {
+    for (const b of row) {
+      b.mesh.count = b.count;
+      b.mesh.visible = b.count > 0;
+      if (b.count === 0) continue;
+      b.mesh.instanceMatrix.clearUpdateRanges();
+      b.mesh.instanceMatrix.addUpdateRange(0, b.count * 16);
+      b.mesh.instanceMatrix.needsUpdate = true;
+      b.anim.clearUpdateRanges();
+      b.anim.addUpdateRange(0, b.count * 4);
+      b.anim.needsUpdate = true;
+      b.idle.clearUpdateRanges();
+      b.idle.addUpdateRange(0, b.count);
+      b.idle.needsUpdate = true;
     }
   }
 
@@ -409,15 +532,17 @@ export class SurfaceAnimals implements Entity {
         b.mesh.visible = false;
       }
     }
+    for (const cell of this.released.values()) cell.drawn.fill(NaN);
   }
 
-  /** Where each loaded herd's first animal is now (body frame, on the ground), nearest the camera first. */
+  /** Where each loaded herd's first animal still there is now (body frame, on the ground), nearest the camera first. */
   herdPositions(): THREE.Vector3[] {
     const out: { p: THREE.Vector3; d: number }[] = [];
     const t = this.clock.renderTime;
     for (const cell of this.cells.values()) {
-      if (!cell.path) continue;
-      const pose = cell.path.pose(0, t, this.pose);
+      const k = cell.gone.indexOf(HERE);
+      if (!cell.path || k < 0) continue;
+      const pose = cell.path.pose(k, t, this.pose);
       let r = this.ground(pose);
       if (this.plan.sea && r < this.plan.radius) r = this.plan.radius;
       const p = new THREE.Vector3(pose.x, pose.y, pose.z).multiplyScalar(r);
@@ -433,45 +558,147 @@ export class SurfaceAnimals implements Entity {
    */
   pick(ray: THREE.Ray, maxDistance = Infinity): AnimalHit | null {
     if (!animalParams.enabled) return null;
-    let best = maxDistance;
-    let found = false;
-    const { sphere, entry, hit } = this;
-    for (const cell of this.cells.values()) {
-      const { herd } = cell;
-      if (!herd) continue;
-      const s = this.plan.species[herd.species]!;
-      for (let k = 0; k < herd.count; k++) {
-        const x = cell.drawn[k * 3]!;
-        if (Number.isNaN(x)) continue;
-        const p = cell.poses[k]!;
-        const size = s.length * cell.scales[k]!;
-        // About the middle of the body, half its length up.
-        sphere.center.set(x, cell.drawn[k * 3 + 1]!, cell.drawn[k * 3 + 2]!).addScaledVector(entry.set(p.x, p.y, p.z), size * 0.4);
-        sphere.radius = size * 0.6;
-        const at = ray.intersectSphere(sphere, entry);
-        if (!at) continue;
-        const distance = at.distanceTo(ray.origin);
-        if (distance >= best) continue;
-        best = distance;
-        found = true;
-        hit.id = `${herd.id}:${k}`;
-        hit.species = s;
-        hit.scale = cell.scales[k]!;
-        hit.distance = distance;
-        hit.doing = p.stride > 0.05 ? (p.trot > 0.5 ? 'trotting' : 'walking') : p.graze > 0.3 ? 'grazing' : 'resting';
-      }
+    this.best = maxDistance;
+    this.found = null;
+    for (const cell of this.cells.values()) this.pickIn(cell, ray);
+    for (const cell of this.released.values()) this.pickIn(cell, ray);
+    const found = this.found;
+    if (!found) return null;
+    this.fill(found, this.foundIndex, this.best);
+    return this.hit;
+  }
+
+  private pickIn(cell: HerdCell, ray: THREE.Ray): void {
+    const { herd, species: s } = cell;
+    if (!herd || !s) return;
+    const { sphere, entry } = this;
+    for (let k = 0; k < herd.count; k++) {
+      const x = cell.drawn[k * 3]!;
+      if (Number.isNaN(x) || cell.gone[k] !== HERE) continue;
+      const p = cell.poses[k]!;
+      const size = s.length * cell.scales[k]!;
+      // About the middle of the body, half its length up.
+      sphere.center.set(x, cell.drawn[k * 3 + 1]!, cell.drawn[k * 3 + 2]!).addScaledVector(entry.set(p.x, p.y, p.z), size * 0.4);
+      sphere.radius = size * 0.6;
+      const at = ray.intersectSphere(sphere, entry);
+      if (!at) continue;
+      const distance = at.distanceTo(ray.origin);
+      if (distance >= this.best) continue;
+      this.best = distance;
+      this.found = cell;
+      this.foundIndex = k;
     }
-    return found ? hit : null;
+  }
+
+  /** Writes animal `k` of `cell` (drawn this frame) into the reused hit. */
+  private fill(cell: HerdCell, k: number, distance: number): AnimalHit {
+    const { hit } = this;
+    const p = cell.poses[k]!;
+    hit.id = `${cell.herd!.id}:${k}`;
+    hit.species = cell.species!;
+    hit.scale = cell.scales[k]!;
+    hit.distance = distance;
+    hit.doing = p.stride > 0.05 ? (p.trot > 0.5 ? 'trotting' : 'walking') : p.graze > 0.3 ? 'grazing' : 'resting';
+    hit.origin = cell.origin;
+    hit.speciesKey = cell.speciesKey;
+    hit.position.set(cell.drawn[k * 3]!, cell.drawn[k * 3 + 1]!, cell.drawn[k * 3 + 2]!);
+    return hit;
+  }
+
+  /**
+   * Calls `visit` for each animal drawn this frame whose body is under a disc
+   * `radius` wide round `point` on the ground (a beam's foot), in the
+   * planet's body frame. `hit.distance` is its base's distance from `point`;
+   * `hit` is reused, so read it in `visit`. `visit` may promote the animal.
+   */
+  within(point: THREE.Vector3, radius: number, visit: (hit: AnimalHit) => void): void {
+    if (!animalParams.enabled) return;
+    for (const cell of this.cells.values()) this.withinIn(cell, point, radius, visit);
+    for (const cell of this.released.values()) this.withinIn(cell, point, radius, visit);
+  }
+
+  private withinIn(cell: HerdCell, point: THREE.Vector3, radius: number, visit: (hit: AnimalHit) => void): void {
+    const { herd, species: s } = cell;
+    if (!herd || !s || cell.centre.distanceTo(point) > cell.bound + radius + s.length * MAX_SCALE) return;
+    for (let k = 0; k < herd.count; k++) {
+      const x = cell.drawn[k * 3]!;
+      if (Number.isNaN(x) || cell.gone[k] !== HERE) continue;
+      const d = this.entry.set(x, cell.drawn[k * 3 + 1]!, cell.drawn[k * 3 + 2]!).distanceTo(point);
+      // Under it if its middle is, or half its body.
+      if (d > radius + 0.25 * s.length * cell.scales[k]!) continue;
+      visit(this.fill(cell, k, d));
+    }
+  }
+
+  /**
+   * Takes an animal drawn this frame out of the herds' batches and gives it
+   * back as an object of its own, standing and walking as it was, for a beam
+   * to lift or a weapon to hit. `destroy()` removes it for good (recorded in
+   * the planet's change list), `restore()` puts it back in its herd. Null if
+   * there's no such animal drawn now, or it's held already.
+   */
+  promote(id: string): LiveAnimal | null {
+    const cut = id.lastIndexOf(':');
+    const herdId = id.slice(0, cut);
+    const k = Number(id.slice(cut + 1));
+    const cell = this.released.get(herdId) ?? this.cells.get(herdId);
+    if (!cell || !cell.herd || !cell.species || !(k >= 0 && k < cell.herd.count) || cell.gone[k] !== HERE) return null;
+    const x = cell.drawn[k * 3]!;
+    if (Number.isNaN(x)) return null;
+    const p = cell.poses[k]!;
+    const scale = cell.scales[k]!;
+    const look = createAnimalObject(cell.species, this.plan.gravity);
+    const o = look.object;
+    o.position.set(x, cell.drawn[k * 3 + 1]!, cell.drawn[k * 3 + 2]!);
+    // x = up × forward, y = up, z = forward, as the batches have it.
+    this.yAxis.set(p.x, p.y, p.z);
+    this.zAxis.set(p.hx, p.hy, p.hz);
+    this.xAxis.crossVectors(this.yAxis, this.zAxis);
+    o.quaternion.setFromRotationMatrix(this.basis.makeBasis(this.xAxis, this.yAxis, this.zAxis));
+    o.scale.setScalar(scale);
+    look.move(p.cycle, p.stride, p.trot, p.graze, p.idle);
+    this.scene.add(o);
+    this.held.add(id);
+    cell.gone[k] = HELD;
+    const changes = this.changes;
+    let live = true;
+    // The cell may have been dropped and made again since: find it afresh.
+    const mark = (state: number): void => {
+      const now = this.released.get(herdId) ?? this.cells.get(herdId);
+      if (now && k < now.gone.length) now.gone[k] = state;
+    };
+    return {
+      id,
+      species: cell.species,
+      origin: cell.origin,
+      scale,
+      look,
+      destroy: () => {
+        if (!live) return;
+        live = false;
+        this.held.delete(id);
+        changes?.removeAnimal(id);
+        if (this.released.has(herdId)) this.released.delete(herdId);
+        else mark(REMOVED);
+      },
+      restore: () => {
+        if (!live) return;
+        live = false;
+        this.held.delete(id);
+        mark(HERE);
+      },
+    };
   }
 
   dispose(): void {
     this.scene.remove(this.object);
-    for (const row of this.batches) {
+    for (const row of [...this.batches, ...[...this.foreign.values()].map((f) => f.row)]) {
       for (const b of row) {
         b.mesh.dispose();
         b.material.dispose();
       }
     }
     for (const row of this.geometries) for (const g of row) g.dispose();
+    for (const f of this.foreign.values()) for (const g of f.geometries) g.dispose();
   }
 }

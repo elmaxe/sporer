@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { beamEase, beamParams, beamScale, bodyGravity, carriedScale, fallGravity, fallScale, stepFall, tripTime } from '../src/cargo/beam';
-import { CARGO_STACKS, Inventory, STACK_SIZE, speciesKey } from '../src/cargo/inventory';
+import { CARGO_STACKS, Inventory, STACK_SIZE, animalKey, cargoSize, speciesKey } from '../src/cargo/inventory';
+import { animalFate, describeAnimalFate, type Fate } from '../src/cargo/animalFate';
+import { planAnimals } from '../src/gen/animals';
 import { FREEZING, IGNITION_TEMPERATURE, landingTemperature, plantFate, type FateWorld } from '../src/cargo/plantFate';
 import { generateGalaxy, solRef } from '../src/gen/galaxy';
 import { MIN_ARC_GRAVITY } from '../src/gen/lavaActivity';
@@ -20,6 +22,7 @@ const world = (name: string): FateWorld => {
 };
 const species = (kind: 'tree' | 'largeBush' | 'smallBush', i = 0): PlantSpecies => generateSpecies(new Rng(42).fork('s', i), i, kind, 120, 3);
 const tree = species('tree');
+const plant = (s: PlantSpecies) => ({ kind: 'plant' as const, species: s });
 const shrub = species('smallBush', 1);
 const DEG = Math.PI / 180;
 
@@ -79,11 +82,11 @@ describe('the cargo hold', () => {
   it('stacks a species, caps each stack and the number of stacks', () => {
     const inv = new Inventory();
     const a = speciesKey('home', 0);
-    for (let i = 0; i < STACK_SIZE; i++) expect(inv.add(a, tree, 'Home')).not.toBeNull();
+    for (let i = 0; i < STACK_SIZE; i++) expect(inv.add(a, plant(tree), 'Home')).not.toBeNull();
     expect(inv.stack(a)!.count).toBe(STACK_SIZE);
     expect(inv.canAdd(a)).toBe(false);
-    expect(inv.add(a, tree, 'Home')).toBeNull();
-    for (let s = 1; s < CARGO_STACKS; s++) expect(inv.add(speciesKey('home', s), shrub, 'Home')).not.toBeNull();
+    expect(inv.add(a, plant(tree), 'Home')).toBeNull();
+    for (let s = 1; s < CARGO_STACKS; s++) expect(inv.add(speciesKey('home', s), plant(shrub), 'Home')).not.toBeNull();
     expect(inv.canAdd(speciesKey('elsewhere', 0))).toBe(false);
     expect(inv.canAdd(speciesKey('home', 1))).toBe(true);
     expect(inv.full).toBe(false);
@@ -93,7 +96,7 @@ describe('the cargo hold', () => {
   it('counts the plants still on their way up when the beam catches several at once', () => {
     const inv = new Inventory();
     const a = speciesKey('home', 0);
-    for (let i = 0; i < STACK_SIZE - 2; i++) inv.add(a, tree, 'Home');
+    for (let i = 0; i < STACK_SIZE - 2; i++) inv.add(a, plant(tree), 'Home');
     // Two more of a fit; a third on the way would overflow its stack.
     expect(inv.canAddAfter(a, [])).toBe(true);
     expect(inv.canAddAfter(a, [a])).toBe(true);
@@ -111,8 +114,8 @@ describe('the cargo hold', () => {
   it('takes one at a time, drops an empty stack, and round-trips through JSON', () => {
     const inv = new Inventory();
     const k = speciesKey('home', 3);
-    inv.add(k, tree, 'Home');
-    inv.add(k, tree, 'Home');
+    inv.add(k, plant(tree), 'Home');
+    inv.add(k, plant(tree), 'Home');
     const v = inv.version;
     expect(inv.take(k)!.count).toBe(1);
     expect(inv.version).toBeGreaterThan(v);
@@ -138,6 +141,93 @@ describe('the cargo hold', () => {
     expect(back.plantedCount).toBe(2);
     // A removed planted plant is forgotten, not listed as removed.
     expect(back.isRemoved(p.id)).toBe(false);
+  });
+});
+
+const animals = planAnimals({ seed: 7, tier: 3, temperature: 288, gravity: 1, radius: 400, peak: 420, sea: true })!.species;
+const grazer = animals.find((a) => a.diet === 'herbivore')!;
+const animal = { kind: 'animal' as const, species: grazer };
+
+describe('animals in the hold', () => {
+  it('stacks an animal species apart from the plant with the same index', () => {
+    const inv = new Inventory();
+    expect(animalKey('home', 0)).not.toBe(speciesKey('home', 0));
+    inv.add(speciesKey('home', 0), plant(tree), 'Home');
+    inv.add(animalKey('home', 0), animal, 'Home');
+    inv.add(animalKey('home', 0), animal, 'Home');
+    expect(inv.stacks.length).toBe(2);
+    expect(inv.stack(animalKey('home', 0))!.count).toBe(2);
+    expect(inv.stack(animalKey('home', 0))!.kind).toBe('animal');
+    expect(inv.total).toBe(3);
+  });
+
+  it('round-trips animals through JSON, and loads an older save (plants with no kind) as plants', () => {
+    const inv = new Inventory();
+    inv.add(animalKey('home', 1), animal, 'Home');
+    inv.add(speciesKey('home', 1), plant(shrub), 'Home');
+    const copy = new Inventory();
+    copy.load(JSON.parse(JSON.stringify(inv.toJSON())));
+    const a = copy.stack(animalKey('home', 1))!;
+    expect(a.kind).toBe('animal');
+    expect(a.species.name).toBe(grazer.name);
+    expect(copy.stack(speciesKey('home', 1))!.kind).toBe('plant');
+    const old = new Inventory();
+    old.load({ stacks: [{ key: 'home#0', species: tree, origin: 'Home', count: 3 }] });
+    expect(old.stack('home#0')!.kind).toBe('plant');
+    expect(old.total).toBe(3);
+  });
+
+  it('sizes an animal from its skeleton: as tall as its back or head, its reach its longest way', () => {
+    const { height, radius } = cargoSize(animal);
+    expect(height).toBeGreaterThan(0.3 * grazer.length);
+    expect(height).toBeLessThan(1.5 * grazer.length);
+    expect(radius).toBeGreaterThanOrEqual(0.4 * grazer.length);
+    expect(radius).toBeLessThan(1.5 * grazer.length);
+    expect(cargoSize(plant(tree))).toEqual({ height: tree.height, radius: tree.crownRadius });
+  });
+});
+
+describe('what becomes of an animal set down', () => {
+  it('roams where it can live and plants grow, starves where none do, and meets a plant\'s hazards', () => {
+    const earth = world('Earth');
+    const lat = Math.asin(0.3);
+    const fine = animalFate('land', earth, lat, grazer, true);
+    expect(fine).toBe(plantFate('land', earth, lat, grazer));
+    if (fine === 'root') expect(animalFate('land', earth, lat, grazer, false)).toBe('starve');
+    expect(animalFate('sea', earth, 0, grazer, true)).toBe('drown');
+    expect(animalFate('lava', earth, 0, grazer, true)).toBe('burn');
+    expect(animalFate('land', world('Moon'), 0, grazer, true)).toBe('wither');
+    expect(animalFate('clouds', world('Jupiter'), 0, grazer, true)).toBe('sink');
+    // Somewhere in its own window on Earth it lives.
+    const fates = [0, 15, 30, 45, 60].map((d) => animalFate('land', earth, d * DEG, grazer, true));
+    expect(fates).toContain('root');
+  });
+
+  it('has words for every fate', () => {
+    const fates: Fate[] = ['root', 'drown', 'burn', 'char', 'freeze', 'wither', 'dissolve', 'sink', 'starve'];
+    for (const f of fates) expect(describeAnimalFate(f, 'Grazer')).toMatch(/^Grazer /);
+  });
+});
+
+describe('animals removed and set down in the surface change list', () => {
+  it('keeps removed animals and those set down, with fresh ids, across save/load', () => {
+    const changes = new SurfaceChanges();
+    expect(changes.removeAnimal('0:1:2:3')).toBe(true);
+    expect(changes.removeAnimal('0:1:2:3')).toBe(false);
+    const a = changes.release({ speciesKey: animalKey('far', 0), species: grazer, origin: 'Far', x: 0, y: 1, z: 0, scale: 1, seed: 5 });
+    expect(a.id).toMatch(/^released:/);
+    const back = SurfaceChanges.fromJSON(JSON.parse(JSON.stringify(changes.toJSON())));
+    expect(back.isAnimalRemoved('0:1:2:3')).toBe(true);
+    expect(back.releasedCount).toBe(1);
+    expect([...back.releasedAnimals][0]!.species.name).toBe(grazer.name);
+    const b = back.release({ speciesKey: animalKey('far', 0), species: grazer, origin: 'Far', x: 1, y: 0, z: 0, scale: 1, seed: 6 });
+    expect(b.id).not.toBe(a.id);
+    // Removing an animal set down (its animal is `<id>:0`) forgets it rather than listing it.
+    expect(back.removeAnimal(`${a.id}:0`)).toBe(true);
+    expect(back.releasedCount).toBe(1);
+    expect(back.isAnimalRemoved(`${a.id}:0`)).toBe(false);
+    // Older saves have no animal changes.
+    expect(SurfaceChanges.fromJSON({ removed: [] }).removedAnimalCount).toBe(0);
   });
 });
 

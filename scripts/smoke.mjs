@@ -67,7 +67,11 @@
 // holding on the ground sets it down to take root; one dropped with a click falls from the ship (which stays), one set
 // down in the sea drowns; what was taken
 // and planted is still so after leaving and coming back; the cues abductStart, abductBeam, abductSuccess, exportBeam
-// and dropImpact are asked for.
+// and dropImpact are asked for (all that with the animals hidden, so only plants are caught). Then with the animals
+// shown, over a herd: holding the beam on an animal beams it up into its own stack (an animal's picture), and set down
+// on the ground it roams there; Tab and a real 3 arm the laser (Weapons' third slot), and holding it on an animal and on
+// a tree kills them (recorded as removed, burning away), with the laserBeam and laserHit cues; the animals taken or
+// killed and the one set down are still so after leaving and coming back.
 // Volcano bomb: pressing 2 in the system says where to use it; in low orbit over a solid planet a real 2 arms it and a
 // real click on the ground fires it: a volcano rises there (the ground under it is higher, the ship flies over it; its
 // cone is one chunk seen from afar and splits into finer ones next to it, like the terrain), the cues go fire → rise, the bomb stays armed for another; over a gas giant it can't be used; the system view's globe
@@ -2569,6 +2573,9 @@ await section('cargo', async () => {
     audio.play = (c) => (__cues.push(c), play(c));
     audio.start = (c) => (__cues.push(c), start(c));
   })()`);
+  // The plants first, with the animals hidden (a herd under the beam would be caught too).
+  const animalSwitch = (on) => evaluate(`import('/src/surface/animalParams.ts').then((m) => { m.animalParams.enabled = ${on}; })`);
+  await animalSwitch(false);
   // The bar's tabs: Weapons (red) on show, the Inventory (grey) a click away; the whole bar takes the tab's colour.
   const weaponsBorder = await evaluate(`getComputedStyle(document.querySelector('.item-panel')).borderTopColor`);
   await mouse('mouseMoved', await centreOf('.item-tab[data-tab=inventory]'));
@@ -2607,7 +2614,7 @@ await section('cargo', async () => {
     window.__tree = (min, max) => { const c = planet.cargo; let best = null;
       for (let y = 0.6; y > -0.8; y -= 0.03) for (let x = -0.8; x < 0.5; x += 0.03) {
         c.raycaster.setFromCamera(c.ndc.set(x, y), game.camera); const t = c.pickPlant(c.raycaster.ray); const d = t && t.base.distanceTo(c.hold);
-        if (t && t.species.kind === 'tree' && d > min && d < max && (!best || Math.abs(y) < best.d)) best = { d: Math.abs(y), ...at(x, y) }; }
+        if (t && t.cargo.kind === 'plant' && t.cargo.species.kind === 'tree' && d > min && d < max && (!best || Math.abs(y) < best.d)) best = { d: Math.abs(y), ...at(x, y) }; }
       return best; };
     window.__ground = (want, min, max) => { const c = planet.cargo; const out = c.point.clone();
       for (let y = 0.5; y > -0.9; y -= 0.03) for (let x = -0.6; x < 0.6; x += 0.03) {
@@ -2742,17 +2749,97 @@ await section('cargo', async () => {
       fling.ahead = await evaluate(`(() => { const r = __fling.from.length(); return __landed.clone().sub(__fling.from.clone().normalize()).multiplyScalar(r).dot(__fling.across); })()`);
     }
   }
-  // What was planted and taken stays when the planet is left and visited again.
+  // The animals: shown again, over a herd, close in.
+  await animalSwitch(true);
+  const herd = await evaluate(`(async () => { const g = await import('/src/gen/animals.ts'); const A = planet.animals; if (!A) return null; const n = g.herdGridSize(A.plan.radius);
+    for (let f = 0; f < 6; f++) for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) { const h = g.generateHerd(A.plan, A.ground, f, i, j);
+      if (h && h.count >= 4) { const pose = {}; new g.HerdPath(A.plan, A.ground, h, { hipHeight: 1 }).pose(0, planet.frame.renderTime, pose); const e1 = {}, e2 = {}; g.tangentBasis(pose, e1, e2);
+        planet.ship.placeAt(new (planet.ship.up.constructor)(pose.x + e1.x * 0.02, pose.y + e1.y * 0.02, pose.z + e1.z * 0.02).normalize()); return { species: A.plan.species[h.species].name, count: h.count }; } }
+    return null; })()`);
+  const herdKey = await evaluate(`planet.cargo.body.key`);
+  const animalChanges = `levels.surfaceChanges.forPlanet(${JSON.stringify(herdKey)})`;
+  let animals = null;
+  if (herd) {
+    await evaluate(`planet.orbit.zoomTo(22)`);
+    await sleep(1500);
+    await until(`planet.animals.settled`, 30000);
+    await until(`Math.abs(planet.ship.radius - planet.ship.goalRadius) < 0.2`, 120000);
+    await drawFrames(10);
+    // The screen point of the nearest animal still there (its body, a little above its feet).
+    await evaluate(`window.__animal = () => { const A = planet.animals; const v = new (planet.ship.up.constructor)(); const rect = game.renderer.domElement.getBoundingClientRect();
+      for (const p of A.herdPositions()) { v.copy(p).addScaledVector(p.clone().normalize(), 0.6); A.object.localToWorld(v); const s = v.clone().project(game.camera);
+        if (Math.abs(s.x) < 0.8 && Math.abs(s.y) < 0.8 && s.z < 1) return { x: rect.left + ((s.x + 1) / 2) * rect.width, y: rect.top + ((1 - s.y) / 2) * rect.height }; }
+      return null; }`);
+    // Beamed up: into a stack of its own, with its picture (the plants above may have filled the hold: emptied first).
+    await evaluate(`levels.inventory.load({ stacks: [] })`);
+    // (The fling above left the beam armed: a 1 now would put it away.)
+    await evaluate(`planet.select('abduct')`);
+    const at = await evaluate(`__animal()`);
+    const takenBefore = await evaluate(`${animalChanges}.removedAnimalCount`);
+    let up = null;
+    if (at) {
+      await mouse('mouseMoved', at);
+      await mouse('mousePressed', at);
+      await until(`levels.inventory.stacks.some((s) => s.kind === 'animal') && planet.cargo.lifting === 0`, 30000).catch(() => {});
+      await mouse('mouseReleased', at);
+      await until(`planet.cargo.inFlight.length === 0`, 20000);
+      up = await evaluate(`(() => { const s = levels.inventory.stacks.find((s) => s.kind === 'animal'); return s && { key: s.key, name: s.species.name, count: s.count,
+        img: document.querySelector('.item-slot[data-item="cargo:' + s.key + '"] img')?.src.slice(0, 22) }; })()`);
+      if (up) up.taken = (await evaluate(`${animalChanges}.removedAnimalCount`)) - takenBefore;
+    }
+    // Set down on land: it roams there.
+    let release = null;
+    const spot = up && (await evaluate(`__ground('land', 8, 35)`));
+    if (spot) {
+      const before = await evaluate(`${animalChanges}.releasedCount`);
+      await evaluate(`planet.select('cargo:' + ${JSON.stringify(up.key)})`);
+      await mouse('mouseMoved', spot);
+      await mouse('mousePressed', spot);
+      await until(`!planet.cargo.beaming`, 60000);
+      await mouse('mouseReleased', spot);
+      await until(`planet.cargo.inFlight.length === 0`, 20000);
+      release = { released: (await evaluate(`${animalChanges}.releasedCount`)) - before, hint: await evaluate(`document.getElementById('item-hint').textContent`) };
+    }
+    // The laser: Tab to the Weapons, a real 3 arms it; held on an animal, then on a tree, it kills them.
+    if (await evaluate(`document.getElementById('item-bar').dataset.tab !== 'weapons'`)) await key('Tab', 'Tab');
+    await key('Digit3', '3');
+    const laserArmed = await evaluate(`({ selected: planet.selected, cursor: document.body.classList.contains('aiming'), hint: document.getElementById('item-hint').textContent })`);
+    const fire = async (target, what) => {
+      if (!target) return null;
+      const killed = await evaluate(`planet.laser.killed`);
+      await mouse('mouseMoved', target);
+      await mouse('mousePressed', target);
+      await drawFrames(3);
+      const on = await evaluate(`({ on: planet.laser.on, beam: planet.laser.look.core.visible, ship: planet.ship.enRoute })`);
+      await until(`planet.laser.killed > ${killed}`, 20000).catch(() => {});
+      await mouse('mouseReleased', target);
+      await drawFrames(3);
+      return { what, ...on, killed: (await evaluate(`planet.laser.killed`)) - killed, burning: await evaluate(`planet.laser.burning`), off: !(await evaluate(`planet.laser.on`)) };
+    };
+    const animalKills = await evaluate(`${animalChanges}.removedAnimalCount`);
+    const shotAnimal = await fire(await evaluate(`__animal()`), 'animal');
+    const killedAnimals = (await evaluate(`${animalChanges}.removedAnimalCount`)) - animalKills;
+    const plantKills = await removedCount();
+    const shotTree = await fire(await evaluate(`__tree(0, 200)`), 'tree');
+    const killedPlants = (await removedCount()) - plantKills;
+    await until(`planet.laser.burning === 0`, 20000).catch(() => {});
+    animals = { herd, up, release, laserArmed, shotAnimal, killedAnimals, shotTree, killedPlants, burnt: await evaluate(`planet.laser.burning === 0`) };
+  }
+  // What was planted and taken stays when the planet is left and visited again (the animals too).
   const planted = await evaluate(`planet.plantings.count`);
+  const animalsBefore = await evaluate(`({ removed: ${animalChanges}.removedAnimalCount, released: ${animalChanges}.releasedCount })`);
   await evaluate(`levels.leavePlanet()`);
   await until(`levels.mode === 'system' && !levels.transitioning`, 60000);
   await evaluate(`(() => { ship.parkAt(__home); levels.toPlanet(__home); })()`);
   await until(`levels.mode === 'planet' && !levels.transitioning`, 60000);
-  const revisit = { planted: await evaluate(`planet.plantings.count`), removed: await evaluate(`levels.surfaceChanges.forPlanet(planet.cargo.body.key).removedCount`) };
+  const revisit = { planted: await evaluate(`planet.plantings.count`), removed: await evaluate(`levels.surfaceChanges.forPlanet(planet.cargo.body.key).removedCount`),
+    animals: await evaluate(`({ removed: ${animalChanges}.removedAnimalCount, released: ${animalChanges}.releasedCount })`), animalsBefore };
   await evaluate(`levels.leavePlanet()`);
   await until(`levels.mode === 'system' && !levels.transitioning`, 60000);
-  const cues = (await evaluate(`__cues`)).filter((c) => /^(abduct|export|drop)/.test(c));
-  cargo = { tabs, weaponsBorder, tooltip, forest, armed, up, hold, letGo, empty, sweep, setDown, dropped, drown, fling, planted, revisit, cues };
+  const allCues = await evaluate(`__cues`);
+  const cues = allCues.filter((c) => /^(abduct|export|drop)/.test(c));
+  const laserCues = allCues.filter((c) => /^laser/.test(c));
+  cargo = { tabs, weaponsBorder, tooltip, forest, armed, up, hold, letGo, empty, sweep, setDown, dropped, drown, fling, planted, animals, revisit, cues, laserCues };
   cargo.ok =
     tabs.tab === 'inventory' &&
     tabs.border !== weaponsBorder &&
@@ -2792,7 +2879,29 @@ await section('cargo', async () => {
     cues.includes('abductBeam') &&
     cues.includes('abductSuccess') &&
     cues.includes('exportBeam') &&
-    cues.includes('dropImpact');
+    cues.includes('dropImpact') &&
+    !!animals &&
+    // Animals of a herd stand close: the beam may catch more than one, all into the one stack.
+    animals.up?.taken >= 1 &&
+    animals.up.count === animals.up.taken &&
+    animals.up.img === 'data:image/png;base64,' &&
+    animals.release?.released === 1 &&
+    /roam/.test(animals.release.hint) &&
+    animals.laserArmed.selected === 'laser' &&
+    animals.laserArmed.cursor &&
+    /hold to fire the laser/.test(animals.laserArmed.hint) &&
+    animals.shotAnimal?.on === true &&
+    animals.shotAnimal.beam &&
+    !animals.shotAnimal.ship &&
+    animals.shotAnimal.off &&
+    animals.killedAnimals >= 1 &&
+    animals.shotTree?.on === true &&
+    animals.killedPlants >= 1 &&
+    animals.burnt &&
+    revisit.animals.removed === revisit.animalsBefore.removed &&
+    revisit.animals.released === revisit.animalsBefore.released &&
+    laserCues.includes('laserBeam') &&
+    laserCues.includes('laserHit');
   return cargo.ok;
 });
 
