@@ -220,6 +220,11 @@ export class LabInfo implements Entity {
     } else if (view.view === 'globe' && planet.type !== 'gas' && !planet.shape) {
       rows.push(['Plants', 'none']);
     }
+    const rocks = level?.rocks;
+    if (rocks) {
+      const st = rocks.stats();
+      rows.push(['Rocks', st.cells ? `${st.rocks} in ${st.cells} cells · ${st.drawn} drawn` : 'none near (come closer to the ground)']);
+    }
     const animals = level?.animals;
     if (animals) {
       const st = animals.stats();

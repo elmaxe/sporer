@@ -189,3 +189,74 @@ export function stormWind(kind: string, strength: number): number {
   return (STORM_WIND[kind] ?? 0) * Math.max(0, Math.min(1, strength));
 }
 
+
+// --- Shore waves (shoaling) ---
+
+/**
+ * McCowan's (1894) breaker index: a wave breaks in water about this much
+ * deeper than it is high (H_b / h_b ≈ 0.78), so in the surf zone its height
+ * is capped at it. See docs/research/sea-waves.md.
+ */
+export const BREAKER_INDEX = 0.78;
+
+/**
+ * Wavenumber (1/m) of a wave of angular frequency `omega` in water `depth`
+ * metres deep, from the dispersion relation ω² = g k tanh(k h) by Fenton &
+ * McKee's (1990) explicit approximation, k h = k₀h · coth((k₀h)^¾)^⅔ (k₀ the
+ * deep-water ω²/g). The shader mirrors it.
+ */
+export function shoalWavenumber(omega: number, depth: number, gravity = STANDARD_GRAVITY): number {
+  const k0 = (omega * omega) / gravity;
+  const x = k0 * Math.max(depth, 1e-9);
+  return k0 * Math.pow(1 / Math.tanh(Math.pow(x, 0.75)), 2 / 3);
+}
+
+/**
+ * How much higher a wave is in water `depth` m deep than in deep water, by
+ * energy flux: K_s = √(c_g0 / c_g), c_g = (ω/k)·½(1 + 2kh / sinh 2kh), which
+ * with ω² = g k₀ is √(k / (k₀ (1 + 2kh / sinh 2kh))). Green's law (h^−¼) in
+ * the shallows. The shader mirrors it.
+ */
+export function shoalingCoefficient(omega: number, depth: number, gravity = STANDARD_GRAVITY): number {
+  const k0 = (omega * omega) / gravity;
+  const k = shoalWavenumber(omega, depth, gravity);
+  const kh2 = 2 * k * Math.max(depth, 1e-9);
+  const g = kh2 > 30 ? 0 : kh2 / Math.sinh(kh2);
+  return Math.sqrt(k / (k0 * (1 + g)));
+}
+
+/**
+ * The phase (radians) a wave of `omega` gains running out from the
+ * waterline to `depth` metres over a seabed sloping `slope` (m of depth per
+ * m out): θ(d) = ∫₀^d k(h) dh / slope. Its crests lie along the depth
+ * contours (a wave refracts until it does) and bunch up as the water shoals.
+ * Integrated in s = √h, where the shallow-water k ∝ h^−½ is smooth.
+ */
+export function shorePhase(omega: number, depth: number, slope: number, gravity = STANDARD_GRAVITY): number {
+  if (depth <= 0) return 0;
+  const steps = 64;
+  const top = Math.sqrt(depth);
+  let sum = 0;
+  for (let i = 0; i < steps; i++) {
+    const s = ((i + 0.5) / steps) * top;
+    sum += shoalWavenumber(omega, s * s, gravity) * 2 * s;
+  }
+  return (sum * top) / steps / slope;
+}
+
+/** The two swells that run up a shore: at the spectrum's peak and a shorter one, each with half the energy of a sea of significant height H⅓. */
+export const SHORE_SWELLS = [1, 1.3] as const;
+
+export interface ShoreSwell {
+  /** Angular frequency, rad/s. */
+  omega: number;
+  /** Height in deep water, m. */
+  height: number;
+}
+
+/** The swells running up a sea's shores at its wind (none when calm). */
+export function shoreSwells(waves: SeaWaves): ShoreSwell[] {
+  if (waves.peakOmega <= 0) return [];
+  const height = significantHeight(waves.wind, waves.gravity) / Math.SQRT2;
+  return SHORE_SWELLS.map((f) => ({ omega: waves.peakOmega * f, height }));
+}

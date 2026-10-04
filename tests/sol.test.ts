@@ -132,7 +132,10 @@ describe('the Sol system', () => {
     expect(geyserKind('lava', moon('Io').climate)).toBe('sulphur');
     expect(geyserKind('ice', moon('Enceladus').climate)).toBe('cryo');
     expect(geyserKind('ice', moon('Triton').climate)).toBe('cryo');
-    expect(geyserKind('barren', moon('Moon').climate)).toBeNull();
+    // The Moon's 16–21 mW/m² is enough for the stylised fumaroles (it does still vent radon and argon, faintly).
+    expect(geyserKind('barren', moon('Moon').climate)).toBe('fumarole');
+    // Mars has air: none.
+    expect(geyserKind('desert', planet('Mars').climate)).toBeNull();
   });
 
   it('gives the moons in a planet\'s equator its tilt', () => {

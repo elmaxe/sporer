@@ -7,13 +7,17 @@ import {
   WAVES_PER_SET,
   WAVE_SETS,
   WHITECAP,
+  BREAKER_INDEX,
   coxMunkSlope,
   drawnVariance,
   seaWaves,
+  shorePhase,
+  shoreSwells,
   stormWind,
   wavelength,
   wavePhase,
   type SeaWaves,
+  type ShoreSwell,
 } from '../gen/waves';
 import { MAX_STORMS, stormCentre, stormStrength, type StormEvent } from '../gen/weather';
 import type { PlanetConfig } from './Planet';
@@ -61,6 +65,23 @@ export const waveParams = {
   seabed: '#d8c49a',
   /** Surf: how deep (units) the foam along the shore reaches. */
   surfDepth: 0.25,
+  /** Swells running up to the shore, refracted so their crests follow the depth contours, slowing, steepening and breaking as the water shoals. */
+  shore: true,
+  /**
+   * The seabed's slope the shore swells are spaced for (m of depth per m out;
+   * a sandy beach's is a few per cent): where the drawn seabed is steeper
+   * their crests come closer, where it's flatter they spread out.
+   */
+  shoreSlope: 0.08,
+  /** Stylised: how much steeper the shore swells are drawn than their height says (they'd hardly show from the UFO's height). */
+  shoreSteep: 1.5,
+  /** The ship's downwash on the water below it: a flattened, misty disc, a ring of spray and ripples running out. */
+  downwash: true,
+  /** It starts this high above the water (units) and is at its strongest this low (the ship's lowest is 3). */
+  downwashFrom: 16,
+  downwashTo: 4,
+  /** How far out the downwash spreads, in the ship's radii. */
+  downwashReach: 2.2,
   /** Crests lit from behind by a low sun (stylised strength). */
   glow: 1.5,
 };
@@ -68,6 +89,12 @@ export const waveParams = {
 /** The wave fronts' bend: how far, and over how long a stretch, in the spectrum's peak wavelengths. */
 const WARP_SHARE = 0.6;
 const WARP_SIZE = 2;
+/** Depths the shore swells' phase is tabulated at. */
+const SHORE_STEPS = 32;
+/** The ship's radius, units (the UFO is ~4 wide). */
+const SHIP_RADIUS = 2;
+/** The downwash's ripples: wavelength (m, at metresPerUnit) and how far out (in its reach) they run before dying away. */
+const RIPPLE_LENGTH = 6;
 /** How many waves the shader holds. */
 const WAVES = WAVES_PER_SET * WAVE_SETS;
 /** Foam's colour (stylised: a bright, slightly blue white). */
@@ -100,11 +127,24 @@ const SEA_WAVES_GLSL = /* glsl */ `
   uniform vec3 uSeaSeabed;
   uniform vec3 uSeaFoam;
   uniform float uSeaGlow;
+  // Shore swells: each one's phase (radians) at evenly spaced depths; x: depth step (units), y: deepest (units),
+  // z: metres per unit, w: on (0 or 1); per swell: its phase now (radians), deep-water height (units), k0 (1/m), and
+  // the slope they're spaced for, the steepening.
+  uniform vec2 uSeaShoreTable[${SHORE_STEPS}];
+  uniform vec4 uSeaShore;
+  uniform vec4 uSeaShoreWave;
+  uniform vec2 uSeaShoreK0;
+  uniform vec2 uSeaShoreSpacing;
+  // The ship's downwash: the point under it on the sea (body frame) and its strength, then the ripples' wavenumber
+  // (1/units) and phase now, the disc's radius (units), and a clock (s, wrapped).
+  uniform vec4 uSeaShip;
+  uniform vec4 uSeaShipWave;
   uniform vec3 uSeaCamera;
   uniform vec3 uSeaSun;
   uniform vec3 uSeaSunLight;
   varying vec3 vSeaPos;
   varying float vSeaDepth;
+  varying vec2 vSeaSlope;
   varying mat3 vSeaNormalMatrix;
 
   float seaCoxMunk(float wind) { return ${COX_MUNK[0]} + ${COX_MUNK[1]} * wind; }
@@ -148,6 +188,17 @@ const SEA_WAVES_GLSL = /* glsl */ `
     }
     return r;
   }
+
+  // Fenton & McKee's wavenumber (1/m) in water h metres deep (gen/waves.ts shoalWavenumber) and the shoaling coefficient.
+  float seaShoalK(float k0, float h) {
+    float x = pow(k0 * max(h, 1e-4), 0.75);
+    return k0 * pow(1.0 / tanh(min(x, 9.0)), 2.0 / 3.0);
+  }
+  float seaShoaling(float k0, float k, float h) {
+    float kh2 = 2.0 * k * max(h, 1e-4);
+    float g = kh2 > 30.0 ? 0.0 : kh2 / sinh(kh2);
+    return sqrt(k / (k0 * (1.0 + g)));
+  }
 `;
 
 const SEA_FRAGMENT = /* glsl */ `
@@ -162,6 +213,15 @@ const SEA_FRAGMENT = /* glsl */ `
     // The slopes follow the wind as Cox & Munk's do (the drawn waves keep their lengths).
     float f = uSeaWind > 0.0 ? seaCoxMunk(wind) / seaCoxMunk(uSeaWind) * mix(1.0, uSeaSlicks.z, slick) : 1.0;
     float amp = sqrt(f);
+    // The ship's downwash: flattens the waves in a disc under it (and roughens it with spray, below).
+    vec3 shipOff = vSeaPos - uSeaShip.xyz;
+    shipOff -= n * dot(n, shipOff);
+    float shipR = length(shipOff);
+    float shipDisc = uSeaShip.w * (1.0 - smoothstep(0.6, 1.3, shipR / uSeaShipWave.z));
+    // Near the shore the swells take over from the wind's waves (gen/waves.ts shorePhase).
+    float shoreDepth = max(vSeaDepth, 0.0);
+    float shoreW = uSeaShore.w * (1.0 - smoothstep(0.5 * uSeaShore.y, uSeaShore.y, shoreDepth));
+    amp *= (1.0 - 0.7 * shipDisc) * (1.0 - 0.6 * shoreW);
     // Each plane where it faces the surface, renormalised so the blend keeps the waves' variance.
     vec3 b = max(pow(abs(n), vec3(4.0)) - 0.02, 0.0);
     b /= b.x + b.y + b.z;
@@ -182,11 +242,70 @@ const SEA_FRAGMENT = /* glsl */ `
       hVar *= keep * keep;
       crest *= keep;
     }
+    // Shore swells: crests along the depth contours, running in to the waterline, slower, shorter and steeper as
+    // the water shoals, capped at McCowan's breaker index (the surf zone) where they break.
+    float breaking = 0.0;
+    float shoreCrest = 0.0;
+    if (shoreW > 0.0) {
+      // The depth's gradient along the surface (the seabed's slope east and north, see seaDepthFrame); the frame
+      // turns about the poles, so the swells fade out there.
+      vec3 east = normalize(cross(vec3(0.0, 1.0, 0.0), n));
+      vec3 north = cross(n, east);
+      vec3 gradD = (vSeaSlope.x * east + vSeaSlope.y * north) * (1.0 - smoothstep(0.97, 0.995, abs(n.y)));
+      float steep = length(gradD);
+      float x = clamp(shoreDepth / uSeaShore.x, 0.0, float(${SHORE_STEPS - 1}) - 0.001);
+      int i0 = int(floor(x));
+      vec2 th = mix(uSeaShoreTable[i0], uSeaShoreTable[i0 + 1], fract(x));
+      float hm = shoreDepth * uSeaShore.z;
+      // Along the shore the swells drift in and out of step, so the crests aren't one long line.
+      vec3 wq = vSeaPos * 0.035;
+      float wob = 6.2832 * (valueNoise(wq) - 0.5);
+      float wob2 = 6.2832 * (valueNoise(wq * 1.7 + 9.1) - 0.5);
+      for (int s = 0; s < 2; s++) {
+        float k0 = s == 0 ? uSeaShoreK0.x : uSeaShoreK0.y;
+        float h0 = s == 0 ? uSeaShoreWave.z : uSeaShoreWave.w;
+        float k = seaShoalK(k0, hm);
+        float hgt = h0 * seaShoaling(k0, k, hm);
+        float cap = ${BREAKER_INDEX} * shoreDepth;
+        breaking = max(breaking, smoothstep(0.85, 1.15, hgt / max(cap, 1e-4)));
+        hgt = min(hgt, cap);
+        float ph = (s == 0 ? th.x + uSeaShoreWave.x + wob : th.y + uSeaShoreWave.y + wob2);
+        // Its slope along the ground: d(phase)/d(depth) is k / the slope it's spaced for, in depth units.
+        float kd = k * uSeaShore.z / uSeaShoreSpacing.x;
+        // Fades out as its crests come closer than a few pixels.
+        float lambda = 6.2832 / max(kd * steep, 1e-4);
+        float fade = smoothstep(uSeaFade.x * fp, uSeaFade.y * fp, lambda);
+        g += gradD * (-0.5 * hgt * kd * sin(ph) * uSeaShoreSpacing.y * fade * shoreW);
+        h += 0.5 * hgt * cos(ph) * fade * shoreW;
+        shoreCrest = max(shoreCrest, smoothstep(0.55, 0.95, cos(ph)) * fade);
+      }
+    }
+    // The downwash's ripples running out from under the ship, and the spray it raises.
+    float shipSpray = 0.0;
+    if (uSeaShip.w > 0.0) {
+      vec3 radial = shipOff / max(shipR, 1e-4);
+      float q = shipR / uSeaShipWave.z;
+      float env = uSeaShip.w * smoothstep(0.5, 1.1, q) * exp(-1.5 * max(q - 1.0, 0.0));
+      float ph = uSeaShipWave.x * shipR - uSeaShipWave.y;
+      g += radial * (0.35 * env * cos(ph));
+      // A ring of spray at the disc's edge, torn and blowing outward, and mist over the disc.
+      // Two layers of noise sliding outward, each over a short stretch and crossfaded, so it flows without smearing.
+      float tear = 0.0;
+      for (int l = 0; l < 2; l++) {
+        float cyc = fract(uSeaShipWave.w * 0.6 + 0.5 * float(l));
+        vec3 sq = vSeaPos * 1.3 - radial * cyc * 2.5 + float(l) * 7.3;
+        tear += (1.0 - abs(2.0 * cyc - 1.0)) * (valueNoise(sq) * 0.65 + valueNoise(sq * 2.3 + 3.7) * 0.35);
+      }
+      float ring = exp(-pow((q - 1.05) / 0.28, 2.0));
+      shipSpray = uSeaShip.w * clamp(ring * smoothstep(0.3, 0.7, tear) * 1.2 + 0.25 * shipDisc * tear, 0.0, 1.0);
+    }
     // The height's gradient along the surface tips the normal against it; Gerstner's term narrows the crests.
     g -= n * dot(n, g);
     normal = normalize(vSeaNormalMatrix * (n * max(1.0 - uSeaCrests * crest, 0.2) - g));
     // What isn't drawn is roughness: GGX's alpha (roughness²) is about the RMS slope.
     roughnessFactor = sqrt(sqrt(max(f * uSeaSlope - drawn, ${COX_MUNK[0]})));
+    // The downwash's disc is ruffled by the wind it blows.
+    roughnessFactor = mix(roughnessFactor, 0.55, shipDisc);
 
     // Shallow water: the seabed shows through, tinted by the water it's seen through.
     vec3 hue = diffuseColor.rgb / max(max(diffuseColor.r, diffuseColor.g), max(diffuseColor.b, 1e-3));
@@ -202,11 +321,15 @@ const SEA_FRAGMENT = /* glsl */ `
       float c = seaPhi(crest * inversesqrt(drawn));
       caps = mix(cover, smoothstep(1.0 - 1.6 * cover, 1.0 - 0.4 * cover, c), clamp(drawn / all, 0.0, 1.0));
     }
-    // Surf: bands of foam running up to the shore at the swell's pace.
+    // Surf: foam on the breaking swells' crests and the wash at the waterline (or, without them, bands running in at
+    // the swell's pace).
     float surf = 1.0 - smoothstep(0.0, uSeaShallow.y, depth);
     float bands = 0.5 + 0.5 * sin(depth / uSeaShallow.y * 9.42 + uSeaShallow.z + 3.0 * valueNoise(vSeaPos * 0.8));
-    surf *= mix(0.6, mix(0.3, 1.0, bands), near);
-    float foam = clamp(max(caps, surf), 0.0, 1.0);
+    float churn = valueNoise(vSeaPos * 1.7 + vec3(uSeaShallow.z)) * 0.6 + 0.4;
+    surf = uSeaShore.w > 0.0
+      ? max(surf * mix(0.45, 0.9, churn), breaking * shoreCrest * churn) * mix(0.75, 1.0, near)
+      : surf * mix(0.6, mix(0.3, 1.0, bands), near);
+    float foam = clamp(max(max(caps, surf), shipSpray), 0.0, 1.0);
     diffuseColor.rgb = mix(diffuseColor.rgb, uSeaFoam, foam);
     roughnessFactor = mix(roughnessFactor, 1.0, foam);
 
@@ -251,11 +374,22 @@ export class SeaWaveLook {
     uSeaSeabed: { value: new THREE.Color() },
     uSeaFoam: { value: FOAM },
     uSeaGlow: { value: 0 },
+    uSeaShoreTable: { value: Array.from({ length: SHORE_STEPS }, () => new THREE.Vector2()) },
+    uSeaShore: { value: new THREE.Vector4() },
+    uSeaShoreWave: { value: new THREE.Vector4() },
+    uSeaShoreK0: { value: new THREE.Vector2(1, 1) },
+    uSeaShoreSpacing: { value: new THREE.Vector2(1, 1) },
+    uSeaShip: { value: new THREE.Vector4() },
+    uSeaShipWave: { value: new THREE.Vector4(1, 0, 1, 0) },
     uSeaCamera: { value: new THREE.Vector3() },
     uSeaSun: { value: new THREE.Vector3(0, 1, 0) },
     uSeaSunLight: { value: new THREE.Color(1, 1, 1) },
   };
   private waves: SeaWaves | null = null;
+  private swells: ShoreSwell[] = [];
+  /** The ship's downwash: where it is over the sea (sea frame) and how strong (0 to 1), set each frame by `setShip`. */
+  private readonly shipPoint = new THREE.Vector3();
+  private shipStrength = 0;
   /** The tunables the waves were made with. */
   private made = '';
   private readonly centre: [number, number, number] = [0, 0, 0];
@@ -279,7 +413,7 @@ export class SeaWaveLook {
     const p = waveParams;
     const u = this.uniforms;
     const wind = p.enabled && this.air ? p.wind : 0;
-    const key = `${wind}/${p.metresPerUnit}/${p.shortest}/${p.wavelets}`;
+    const key = `${wind}/${p.metresPerUnit}/${p.shortest}/${p.wavelets}/${p.shoreSlope}`;
     if (key !== this.made) this.make(wind, key);
     const waves = this.waves!;
     waves.sets.forEach((set, s) => set.forEach((w, i) => (u.uSeaPhase.value[s * WAVES_PER_SET + i] = wavePhase(w, time))));
@@ -294,6 +428,22 @@ export class SeaWaveLook {
     // The surf comes in at the swell's pace (the spectrum's peak), its phase wrapped like the waves'.
     const surf = waves.peakOmega > 0 ? (waves.peakOmega * time) % (Math.PI * 2) : 0;
     u.uSeaShallow.value.set(p.shallowDepth, p.surfDepth, surf);
+    // The shore swells run in at their own pace (phases wrapped like the waves').
+    const shore = p.shore && this.swells.length === 2;
+    u.uSeaShore.value.w = shore ? 1 : 0;
+    if (shore) {
+      const [a, b] = this.swells as [ShoreSwell, ShoreSwell];
+      u.uSeaShoreWave.value.set((a.omega * time) % (Math.PI * 2), (b.omega * time) % (Math.PI * 2), a.height / p.metresPerUnit, b.height / p.metresPerUnit);
+      u.uSeaShoreSpacing.value.set(p.shoreSlope, p.shoreSteep);
+    }
+    // The downwash: ripples of RIPPLE_LENGTH running out at their deep-water speed.
+    const ship = p.downwash ? this.shipStrength : 0;
+    u.uSeaShip.value.set(this.shipPoint.x, this.shipPoint.y, this.shipPoint.z, ship);
+    if (ship > 0) {
+      const k = (Math.PI * 2) / RIPPLE_LENGTH;
+      const omega = Math.sqrt(this.gravity * k);
+      u.uSeaShipWave.value.set(k * p.metresPerUnit, (omega * time) % (Math.PI * 2), SHIP_RADIUS * p.downwashReach, time % 1000);
+    }
     let count = 0;
     if (wind > 0 && storms && weatherParams.enabled) {
       for (const e of storms) {
@@ -308,10 +458,45 @@ export class SeaWaveLook {
     u.uSeaStormCount.value = count;
   }
 
+  /**
+   * The ship over the sea: `point` its position (sea frame) and `height` above
+   * the water (units), or null when it isn't over water. Its downwash grows as
+   * it comes down (waveParams.downwashFrom to downwashTo).
+   */
+  setShip(point: THREE.Vector3 | null, height: number): void {
+    const p = waveParams;
+    if (!point || !this.air) {
+      this.shipStrength = 0;
+      return;
+    }
+    this.shipStrength = 1 - THREE.MathUtils.smoothstep(height, p.downwashTo, p.downwashFrom);
+    this.shipPoint.copy(point);
+  }
+
+  /** How strong the ship's downwash on the water is now (0 to 1). */
+  get downwash(): number {
+    return waveParams.downwash ? this.shipStrength : 0;
+  }
+
   private make(wind: number, key: string): void {
     const p = waveParams;
     const u = this.uniforms;
     const waves = (this.waves = seaWaves(this.seed, wind, this.gravity, p.shortest));
+    // The shore swells' phase at depths out to where the peak swell stops feeling the bottom (half its deep-water length).
+    this.swells = shoreSwells(waves);
+    if (this.swells.length === 2) {
+      const [a, b] = this.swells as [ShoreSwell, ShoreSwell];
+      const deepest = wavelength(a.omega, this.gravity) / 2 / p.metresPerUnit;
+      const step = deepest / (SHORE_STEPS - 1);
+      u.uSeaShore.value.set(step, deepest, p.metresPerUnit, 1);
+      u.uSeaShoreK0.value.set((a.omega * a.omega) / this.gravity, (b.omega * b.omega) / this.gravity);
+      u.uSeaShoreTable.value.forEach((v, i) => {
+        const depth = i * step * p.metresPerUnit;
+        v.set(shorePhase(a.omega, depth, p.shoreSlope, this.gravity), shorePhase(b.omega, depth, p.shoreSlope, this.gravity));
+      });
+    } else {
+      u.uSeaShore.value.set(1, 1, p.metresPerUnit, 0);
+    }
     this.made = key;
     u.uSeaWind.value = wind;
     u.uSeaSlope.value = seaSlope(waves, p.wavelets);
@@ -345,15 +530,29 @@ export class SeaWaveLook {
           #endif
           varying vec3 vSeaPos;
           varying float vSeaDepth;
+          varying vec2 vSeaSlope;
           varying mat3 vSeaNormalMatrix;`,
         )
-        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSeaPos = position;\nvSeaDepth = color.r;\nvSeaNormalMatrix = normalMatrix;');
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSeaPos = position;\nvSeaDepth = color.r;\nvSeaSlope = color.gb;\nvSeaNormalMatrix = normalMatrix;');
       shader.fragmentShader = shader.fragmentShader
         .replace('#include <common>', `#include <common>\n${VALUE_NOISE_GLSL}\n${SEA_WAVES_GLSL}`)
         .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>\n${SEA_FRAGMENT}`);
     };
     material.customProgramCacheKey = () => 'sea-waves';
   }
+}
+
+/**
+ * The directions east and north at unit `dir` (body frame, the spin axis +y)
+ * that the sea's depth gradient is given in (the shader builds the same):
+ * undefined at the poles.
+ */
+export function seaDepthFrame(dir: { x: number; y: number; z: number }, east: THREE.Vector3, north: THREE.Vector3): void {
+  east.set(dir.z, 0, -dir.x);
+  const l = east.length();
+  if (l < 1e-9) east.set(1, 0, 0);
+  else east.divideScalar(l);
+  north.set(dir.x, dir.y, dir.z).cross(east);
 }
 
 /** The whole sea's mean square slope at the waves' wind: Cox & Munk's, or (without the wavelets) a calm sea's plus the drawn waves'. */
@@ -430,5 +629,12 @@ export function addWaveDebug(debug: Debug): void {
   f?.add(waveParams, 'shallowDepth', 0.05, 5, 0.05);
   f?.addColor(waveParams, 'seabed');
   f?.add(waveParams, 'surfDepth', 0, 1, 0.01);
+  f?.add(waveParams, 'shore');
+  f?.add(waveParams, 'shoreSlope', 0.005, 0.5, 0.005);
+  f?.add(waveParams, 'shoreSteep', 0, 6, 0.1);
+  f?.add(waveParams, 'downwash');
+  f?.add(waveParams, 'downwashFrom', 4, 60, 1);
+  f?.add(waveParams, 'downwashTo', 0, 20, 0.5);
+  f?.add(waveParams, 'downwashReach', 0.5, 5, 0.1);
   f?.add(waveParams, 'glow', 0, 3, 0.05);
 }

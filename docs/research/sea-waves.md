@@ -109,3 +109,103 @@ for (const U of [3, 5, 7, 10, 14]) {
 - Monahan & O'Muircheartaigh's fit is extrapolated past 17 m/s, so the storm seas' cover (up to 58% at hurricane force) is a stretch of the data.
 - Volcanoes raised later (the volcano bomb) don't change the water's depth: it's sampled from the terrain as generated, so a new volcanic island has no shallows or surf.
 - Methane seas (Titan's lakes) are drawn as ice. How rough real methane seas are wasn't looked up.
+
+# Shore swells and the ship's downwash
+
+## Question
+
+A follow-up asked for waves that flow in towards the shore, and for visible effects on the water when the UFO hovers low over it. That needs:
+
+1. **How a swell changes as the water shoals**: its wavenumber at a depth, how much higher it grows, where it breaks.
+2. **Which way its crests turn** near a coast.
+3. **What a hovering rotor's downwash does to water** below it.
+
+It feeds `gen/waves.ts` (`shoalWavenumber`, `shoalingCoefficient`, `shorePhase`, `shoreSwells`, `BREAKER_INDEX`), `world/seaWaves.ts` (the shore swells and downwash in the sea's shader) and `planet/ShipWake.ts` (the downwash's strength and spray).
+
+## Sources
+
+All accessed 2026-10-04.
+
+- **Fenton, *Coastal and Ocean Engineering* lecture notes**, §4.5 (https://johndfenton.com/Lectures/Coastal-and-Ocean-Engineering/Coastal-and-Ocean.pdf, pp. 44–48):
+  - The dispersion relation is "σ = √(gk tanh kd)".
+  - The shoaling coefficient is "H/H0 = √(cg0/cg) = Ks", with Ks = (tanh kd (1 + 2kd/sinh 2kd))^−½.
+  - Ks "starts to decrease … after d/λ0 ≈ 0.5" and "at about d/λ0 ≈ 0.16 the function has a minimum".
+  - Green's law: "H/H0 = Ks ≈ (λ0/8πd)^{1/4} … height varies like d^{−1/4}".
+  - Refraction: "k sin θ = Constant … This is Snell's law … As the wave speed is smaller in shallower water, then so is the angle the waves make to the normal to the beach", which "tends to align the wave front to the depth contours".
+- **Fenton & McKee's explicit approximation**, as given in Fenton's notes and his 2006 note (https://johndfenton.com/Papers/Dispersion-Relation.pdf):
+  - kd = (σ²d/g)·(coth((σ√(d/g))^{3/2}))^{2/3}, i.e. k₀h · coth((k₀h)^¾)^⅔.
+  - "accurate to within 1.5% over all wavelengths … exact in both long wave … and short wave … limits".
+- **Senthilkumar 2016**, *Proc. Estonian Acad. Sci.* (https://kirj.ee/public/proceedings_pdf/2016/issue_4/proc-2016-4-414-430.pdf): "McCowan [1894] theoretically defined the breaker depth index as Hb/hb = 0.78 for a solitary wave … most commonly used in engineering practice as a first estimate".
+- **Goda 2010**, *Coast. Eng. J.*: the breaker index is wrongly "thought to be a fixed value, such as 0.78"; it varies "about 6% for the slope of zero to 1/50 and 14% for the slope of 1/10".
+- **Coastal Wiki, "Breaker index"**: Battjes (1974), "γb = 1.06 + 0.14 ln ξb".
+- **Tanner et al., NASA Langley**, rotor outwash (https://ntrs.nasa.gov/api/citations/20160006428/downloads/20160006428.pdf):
+  - "peak mean outwash velocities occurring at radial stations between 1.7 and 1.8 r/R regardless of rotor height".
+  - "maximum velocities in the wall jet are nearly twice the hover inflow velocities at the lowest rotor height".
+- **USFS rotor-wash guide** (https://www.fs.usda.gov/rm/fire/pubs/pdfpubs/user_gd/ug-15.pdf): a Black Hawk "would have to be well over 160 feet to achieve a rotor wash less than 30 mph".
+- **Fitzpatrick, *Fluid Mechanics*** (as above): deep-water gravity waves have a phase speed of √(gλ/2π).
+
+## Measurements
+
+Fenton & McKee against the exact dispersion relation (Newton's method), over k₀h from 0.001 to 20:
+- The largest error is **1.63% at k₀h = 0.34**, a little over the 1.5% quoted. `tests/waves.test.ts` holds it to 1.7%.
+
+Shoaling coefficient (the game's `shoalingCoefficient`) against Green's law:
+
+| d/λ0 | Ks | Green (λ0/8πd)^¼ |
+|---|---|---|
+| 0.01 | 1.430 | 1.412 |
+| 0.02 | 1.218 | 1.188 |
+| 0.05 | 1.013 | 0.944 |
+| 0.1 | 0.925 | 0.794 |
+| 0.16 | 0.913 | 0.706 |
+| 0.3 | 0.958 | 0.603 |
+| 0.5 | 0.995 | 0.531 |
+
+- The minimum is 0.912 at d/λ0 = 0.145. Fenton's minimum is at 0.16; the approximation's k moves it slightly.
+- Green's law holds only in the shallowest water, as Fenton says.
+
+The game's breeze, 7 m/s:
+- The peak swell is ω = 1.20 rad/s, λ0 = 42.8 m, H⅓ = 1.10 m.
+- Each shore swell carries H⅓/√2 = 0.78 m, so it breaks at about 1.0 m of water (0.78 / 0.78).
+
+| depth | λ | Ks |
+|---|---|---|
+| 21 m | 42.2 m | 0.994 |
+| 10 m | 39.0 m | 0.934 |
+| 5 m | 32.4 m | 0.916 |
+| 2 m | 22.4 m | 1.025 |
+| 1 m | 16.2 m | 1.177 |
+| 0.5 m | 11.5 m | 1.378 |
+
+## Game mapping
+
+- **Two swells run in to every shore.** One is at the spectrum's peak, the other 1.3× its frequency. Each has half the energy of a sea of significant height H⅓ (`shoreSwells`; the split is stylised), so together their heights add in quadrature to H⅓.
+- **Crests follow the depth contours** (Fenton: refraction "tends to align the wave front to the depth contours"). The phase depends only on the depth: θ(d) = ∫₀^d k(h) dh / s.
+  - s is `waveParams.shoreSlope` (0.08), the seabed slope the swells are spaced for. On that slope the crests are a wavelength apart. On a steeper drawn seabed they bunch, on a flatter one they spread.
+  - The phase is tabulated at 32 depths, out to half the peak swell's deep-water length (where Ks ≈ 1 and the swell stops feeling the bottom).
+  - Adding ωt to the phase moves crests to smaller θ, which means shallower water: they run in to the shore.
+  - Two slow noises along the coast shift each swell in and out of step, so the crests aren't one endless line.
+- **Height and breaking.** The height in the shader is H₀·Ks, with Ks from Fenton & McKee's k.
+  - It is capped at McCowan's 0.78 × the depth. Past the cap the swell breaks, and its crests are foam (`breaking`).
+  - At the waterline the wash foams too.
+  - The swells take over from the wind's waves as the water shoals: those are damped by up to 60% within the swells' depth.
+- **Depth and its slope.** The sea's chunks carry the depth in their vertex colour's red, as before.
+  - They also carry the seabed's slope, east and north, in green and blue (`seaDepthFrame`). It is measured over the chunk's own sample spacing by `PlanetGlobe`'s water sampler.
+  - So the crests' direction is smooth across triangles. Screen-space derivatives showed every facet.
+  - The frame turns about the poles, so the swells fade out within ~10° of them.
+- **Stylised.**
+  - The swells are drawn `shoreSteep` (1.5×) steeper than their height gives, so they show from the UFO's height.
+  - The relief is exaggerated (RELIEF_SCALE), so drawn depths are deeper than the real coast they stand for.
+- **Downwash.** No source quantified spray height or ring size for a rotor over water. The look is stylised on the outwash's shape, peaking at 1.7–1.8 rotor radii out (Tanner et al.):
+  - A disc 2.2 ship radii across (`downwashReach`) where the wind's waves are flattened by up to 70% and the water is ruffled (rougher).
+  - A torn ring of spray at its edge, the noise sliding outward in two crossfaded layers.
+  - Mist over the disc.
+  - Ripples running out beyond it: 6 m waves at their deep-water speed √(gλ/2π), dying away in a radius or two.
+  - Spray puffs thrown from the ring's edge (`ShipWake`), blowing outward and falling back.
+- **Strength.** The downwash starts 16 units over the water and is full by 4. The ship's lowest is 3. That is 4 to 1 hull diameters, consistent with the USFS guide's large rotor wash from well over its rotor diameter up. Nothing over land, and nothing on airless seas (no air to blow).
+
+## Open questions
+
+- The breaker index varies with slope and steepness (Battjes: 0.74–1.16 for ξ from 0.1 to 2). 0.78 is used everywhere.
+- The crests' spacing assumes one seabed slope. A local slope from the baked gradient would space them by distance from the shore, but jumps where the slope changes.
+- No source gives spray onset height or ring size for a rotor over water. Both are stylised.
