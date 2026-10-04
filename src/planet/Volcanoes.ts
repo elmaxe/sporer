@@ -7,10 +7,9 @@ import { Rng } from '../gen/rng';
 import { MarkerRing } from '../player/MarkerRing';
 import { CLOUD_RENDER_ORDER } from '../world/weatherLook';
 import { createGlowTexture } from '../world/glowTexture';
-import { GROUND_LAYER } from '../world/groundDepth';
-import { VolcanoMesh } from '../world/volcanoMesh';
 import type { GroundRelief } from './PlanetGlobe';
 import type { RenderClock } from './PlanetFrame';
+import { VolcanoSurface } from './VolcanoSurface';
 
 export const volcanoLookParams = {
   /** Lava blob size, planet units (grows with the globes). */
@@ -25,9 +24,8 @@ export const volcanoLookParams = {
   shake: 0.5,
 };
 
-/** Rings and segments of a volcano's mesh (a polar grid round the summit). */
-const RINGS = 40;
-const SEGMENTS = 72;
+/** Milliseconds per frame spent building the volcanoes' chunks (each builds at least one it wants). */
+const BUILD_BUDGET_MS = 2;
 /** Lava blobs and ash puffs per volcano. */
 const BLOBS = 220;
 const PUFFS = 110;
@@ -43,6 +41,7 @@ const drawingSize = new THREE.Vector2();
 
 /** What the volcanoes need from the globe they stand on (see PlanetGlobe). */
 export interface VolcanoGround {
+  /** Sea level (a small body's longest reach): the terrain's cells are sized on it. */
   readonly radius: number;
   readonly seaRadius: number | null;
   terrainRadius(dir: THREE.Vector3, color: THREE.Color): number;
@@ -167,14 +166,13 @@ const ASH_FRAGMENT = /* glsl */ `
 
 /** One volcano's meshes and particles, in the body frame. */
 class VolcanoView {
-  readonly mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
   readonly vent = new THREE.Group();
   private readonly blobs: THREE.Points<THREE.BufferGeometry, THREE.ShaderMaterial>;
   private readonly ash: THREE.Points<THREE.BufferGeometry, THREE.ShaderMaterial>;
   private readonly glow: THREE.Sprite;
   private readonly flash: THREE.Sprite;
   private readonly ring: MarkerRing;
-  private readonly cone: VolcanoMesh;
+  readonly cone: VolcanoSurface;
   /** The ground's radius at the summit. */
   private readonly summit: number;
   private readonly ringPoint = new THREE.Vector3();
@@ -189,16 +187,17 @@ class VolcanoView {
   ) {
     const terrain = new THREE.Color();
     this.summit = ground.terrainRadius(shape.centre, terrain);
-    this.cone = new VolcanoMesh(shape, RINGS, SEGMENTS, {
-      ground: (dir, color) => ground.terrainRadius(dir, color),
-      rise: (_dir, s, azimuth) => shape.height * shape.profile(s, azimuth),
-      footSink: FOOT_SINK,
-    });
-    this.mesh = this.cone.mesh;
+    this.cone = new VolcanoSurface(
+      shape,
+      {
+        ground: (dir, color) => ground.terrainRadius(dir, color),
+        rise: (_dir, s, azimuth) => shape.height * shape.profile(s, azimuth),
+        footSink: FOOT_SINK,
+      },
+      ground.radius,
+    );
     const rng = new Rng(shape.site.seed ^ 0x3c6e);
     const c = volcanoParams.craterShare;
-    // The air's haze stops at it, as at the ground.
-    this.mesh.layers.enable(GROUND_LAYER);
 
     // The vent: its frame has y up out of the summit (the particles work in it).
     this.vent.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), shape.centre);
@@ -297,16 +296,21 @@ class VolcanoView {
     this.flash.visible = false;
     this.vent.add(this.blobs, this.ash, this.glow);
     this.ring = new MarkerRing(scene, '#ffb070', 0, 0.12);
-    scene.add(this.mesh, this.vent, this.flash);
+    scene.add(this.cone.object, this.vent, this.flash);
   }
 
-  /** Poses it at the level's clock `time`; `sun` is the light on the ash (colour × strength). */
-  update(time: number, sun: THREE.Color, frameDt: number): void {
+  /**
+   * Poses it at the level's clock `time` for a camera at `camera` (its cone's
+   * chunks built until `deadline`, see VolcanoSurface); `sun` is the light on
+   * the ash (colour × strength).
+   */
+  update(time: number, sun: THREE.Color, frameDt: number, camera: THREE.Vector3, deadline: number): void {
     const age = time - this.bornAt;
     const shape = this.shape;
     shape.growth = volcanoGrowth(age);
     this.cone.setGrowth(shape.growth);
     this.cone.animate(time, age, volcanoLookParams.lava);
+    this.cone.update(camera, frameDt, deadline);
     const strength = eruptionStrength(Number.isFinite(age) ? age : 1e9);
     const H = shape.height;
     // The vent sits on the crater floor, rising with the cone.
@@ -374,6 +378,7 @@ export class Volcanoes implements Entity {
   private readonly glowTexture = createGlowTexture();
   private readonly light = new THREE.Color();
   private readonly toCamera = new THREE.Vector3();
+  private readonly cameraAt = new THREE.Vector3();
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -409,6 +414,16 @@ export class Volcanoes implements Entity {
     return this.views.map((v) => v.shape);
   }
 
+  /** Each cone's chunks drawn now (see VolcanoSurface), for automation. */
+  lodStats(): ReturnType<VolcanoSurface['stats']>[] {
+    return this.views.map((v) => v.cone.stats());
+  }
+
+  /** True when every cone has the chunks the camera wants (for automation). */
+  get settled(): boolean {
+    return this.views.every((v) => v.cone.settled);
+  }
+
   /**
    * Raises a volcano at `site`, born at the level's clock time `bornAt`
    * (null: it stood there before the visit, risen and settled).
@@ -434,6 +449,9 @@ export class Volcanoes implements Entity {
   update(frameDt: number): void {
     if (this.views.length === 0) return;
     const time = this.clock.renderTime;
+    // The camera before it shakes, in the body frame (the scene's space).
+    const camera = this.camera.getWorldPosition(this.cameraAt);
+    const deadline = performance.now() + BUILD_BUDGET_MS;
     // The ash is lit by the sun on its side of the globe, dimly by the ambient light on the night side.
     let shake = 0;
     for (const v of this.views) {
@@ -442,7 +460,7 @@ export class Volcanoes implements Entity {
       // Ash is dark however bright the sun: no brighter than lit grey.
       const top = Math.max(this.light.r, this.light.g, this.light.b);
       if (top > ASH_MAX_LIGHT) this.light.multiplyScalar(ASH_MAX_LIGHT / top);
-      v.update(time, this.light, frameDt);
+      v.update(time, this.light, frameDt, camera, deadline);
       const age = time - v.bornAt;
       if (age >= 0 && age < volcanoParams.growTime + 2) {
         // Rumbling as it rises, the stronger the nearer the camera is.
