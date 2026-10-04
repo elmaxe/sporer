@@ -42,7 +42,7 @@ export interface Burn {
 export function burnAt(age: number, duration: number, out: Burn): Burn {
   const u = Math.max(0, age / duration);
   out.char = smooth(0, 0.35, u);
-  out.glow = smooth(0, 0.08, u) * (1 - smooth(0.45, 0.9, u));
+  out.glow = smooth(0, 0.08, u) * (1 - smooth(0.2, 0.6, u));
   out.topple = smooth(0, 0.22, u);
   out.gone = smooth(0.5, 1, u);
   out.done = u >= 1;

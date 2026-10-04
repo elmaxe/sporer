@@ -371,7 +371,7 @@ export class Laser implements Entity {
     // Embers glowing through the char: a deep orange, dim enough that the black shows.
     d.material.emissive.set('#ff3c00');
     const flicker = 0.75 + 0.25 * Math.sin(d.age * 23) * Math.sin(d.age * 7.1);
-    d.material.emissiveIntensity = 0.4 * b.glow * flicker;
+    d.material.emissiveIntensity = 0.25 * b.glow * flicker;
     const o = d.object;
     this.up.copy(d.foot).normalize();
     if (d.animal) {
