@@ -83,6 +83,9 @@
 // Plant lab (plants.html): every architecture grows and draws at every level of detail, each level cheaper than the
 // last, zooming out on one plant goes through the levels (the game's crossfade) and past the last one, the line-up and
 // the grove (the game's own plant system) draw, close up and as a whole planet, a game planet's plants load, the planet lab links to its plants.
+// Animals: in the animal lab every body plan draws at every level of detail, the specimen walks and grazes, zooming out goes
+// through the levels, the line-ups and herds draw, a game planet's animals load, the planet lab links to them; in the game a
+// herd roams near the ship on the home planet and the tooltip names an animal under the pointer.
 // Prints JSON with FPS, console errors and screenshot paths. Exit 1 on failure.
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -91,7 +94,7 @@ import { launch, sleep, StallError } from './lib/browser.mjs';
 
 const args = process.argv.slice(2);
 const option = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
-const SECTIONS = ['core', 'galaxy', 'nebulas', 'rogues', 'dust', 'audio', 'planet', 'types', 'lab', 'plants', 'touch', 'cargo', 'volcano', 'buster'];
+const SECTIONS = ['core', 'galaxy', 'nebulas', 'rogues', 'dust', 'audio', 'planet', 'types', 'lab', 'plants', 'animals', 'touch', 'cargo', 'volcano', 'buster'];
 const only = option('--only')?.split(',');
 if (only?.some((name) => !SECTIONS.includes(name))) {
   console.error(`--only takes some of: ${SECTIONS.join(', ')}`);
@@ -1844,6 +1847,167 @@ async function plantLabChecks(page) {
 await section('plants', async () => (plantLab = await runPlantLab()).ok);
 
 /**
+ * Animals: in the animal lab (animals.html, a browser of its own), every body plan grows and draws at every level of
+ * detail (each cheaper than the one before), the specimen walks and grazes and zooming out on it passes through every
+ * level and past the last, the line-ups draw, the herds view roams with the game's SurfaceAnimals, a game planet's
+ * animals load and the planet lab's Animals link opens them; then in the game, on the home system's habitable planet,
+ * a herd is drawn near the ship, walking or grazing, and hovering an animal names it in the tooltip.
+ */
+async function runAnimalLab() {
+  const own = await launch({ width: 1280, height: 720 });
+  try {
+    return await animalLabChecks(own);
+  } finally {
+    errors.push(...own.errors.map((e) => `animal lab: ${e}`));
+    await own.close();
+  }
+}
+
+async function animalLabChecks(page) {
+  const evaluate = page.tryEvaluate;
+  const r = { plans: [] };
+  if (!(await page.goto(pageUrl('animals.html?gen=3'), `typeof window.animalLab !== 'undefined' && animalLab.ready`, 30000))) return { ok: false, started: false };
+  const brightness = `(() => {
+    game.redraw();
+    const gl = game.renderer.getContext(), w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
+    const px = new Uint8Array(w * h * 4);
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    let sum = 0, n = 0;
+    for (let y = Math.floor(h * 0.3); y < h * 0.7; y += 4) for (let x = Math.floor(w * 0.4); x < w * 0.6; x += 4) {
+      const i = 4 * (y * w + x); sum += px[i] + px[i + 1] + px[i + 2]; n++;
+    }
+    return +(sum / (3 * n)).toFixed(1);
+  })()`;
+  for (const plan of ['quadruped', 'hexapod', 'biped']) {
+    r.plans.push(
+      await evaluate(`(async () => {
+        await animalLab.generate(5, { plan: '${plan}' });
+        await animalLab.setView({ view: 'specimen', lod: 0, pace: 'stand' });
+        await animalLab.look(60, 15, 2.4);
+        const levels = [];
+        for (const lod of [0, 1, 2]) {
+          await animalLab.setView({ lod });
+          levels.push({ lod, triangles: animalLab.level.lods[lod].triangles, brightness: ${brightness} });
+        }
+        return { plan: animalLab.species.form.plan, legs: animalLab.level.skeleton.legs.filter((l) => !l.arm).length, levels };
+      })()`),
+    );
+  }
+  // Walking round its circle: it moves, its legs swing (the drawn picture changes between frames as it goes).
+  r.walk = await evaluate(`(async () => {
+    await animalLab.generate(5, { plan: 'quadruped' });
+    await animalLab.setView({ view: 'specimen', lod: 'auto', pace: 'walk' });
+    const at = () => animalLab.level.posed[0].mesh.instanceMatrix.array.slice(12, 15);
+    const a = at();
+    await new Promise((ok) => setTimeout(ok, 1500));
+    const b = at();
+    return { moved: +Math.hypot(b[0] - a[0], b[2] - a[2]).toFixed(2), stride: +animalLab.level.posed[0].anim.array[1].toFixed(2) };
+  })()`);
+  r.graze = await evaluate(`(async () => { await animalLab.setView({ pace: 'graze' }); await new Promise((ok) => setTimeout(ok, 4000)); return +animalLab.level.posed[0].anim.array[3].toFixed(2); })()`);
+  // Zooming out with the game's own levels and fade: through every level, then gone.
+  r.zoom = await evaluate(`(async () => {
+    await animalLab.setView({ pace: 'stand' });
+    const seen = [];
+    for (const d of [3, 20, 50, 160]) {
+      await animalLab.look(0, 10, d);
+      await new Promise((ok) => setTimeout(ok, 1200));
+      seen.push(animalLab.level.lodNow().lod);
+    }
+    return seen;
+  })()`);
+  r.lineup = await evaluate(`(async () => { await animalLab.setView({ view: 'lineup', lod: 0 }); return { meshes: animalLab.level.posed.length, brightness: ${brightness} }; })()`);
+  r.species = await evaluate(`(async () => { await animalLab.setView({ view: 'species' }); return { meshes: animalLab.level.posed.length, set: animalLab.state.species.length }; })()`);
+  r.herds = await evaluate(`(async () => {
+    await animalLab.setView({ view: 'herds', showLods: true });
+    await animalLab.lookAtHerd();
+    await animalLab.look(0, 35, 30);
+    await new Promise((ok) => setTimeout(ok, 1500));
+    return animalLab.level.herds.stats();
+  })()`);
+  r.screenshot = join(outDir, 'animal-lab.png');
+  writeFileSync(r.screenshot, await page.screenshot());
+  await evaluate(`animalLab.setView({ view: 'specimen', showLods: false })`);
+  r.loaded = await evaluate(`(async () => {
+    await animalLab.load('1337', ${PLANT_STAR}, ${PLANT_PLANET});
+    return { species: animalLab.state.species.length, tier: animalLab.state.tier, source: animalLab.state.source, gravity: animalLab.view.gravity, hash: location.hash.length };
+  })()`);
+  if (!(await page.goto(pageUrl(`lab.html?seed=1337&star=${PLANT_STAR}&planet=${PLANT_PLANET}`), `typeof window.lab !== 'undefined' && lab.ready`, 30000))) return { ...r, ok: false };
+  const link = await evaluate(`(() => { const a = [...document.querySelectorAll('#lab-info a')].find((x) => x.textContent === 'Animals'); return a && !a.hidden ? a.href : null; })()`);
+  r.linked = link
+    ? (await page.goto(link, `typeof window.animalLab !== 'undefined' && animalLab.ready`, 30000)) &&
+      (await evaluate(`({ species: animalLab.state.species.length, source: animalLab.state.source })`))
+    : null;
+  r.ok =
+    r.plans.length === 3 &&
+    r.plans.every(
+      (a, i) =>
+        a.plan === ['quadruped', 'hexapod', 'biped'][i] &&
+        a.legs === [4, 6, 2][i] &&
+        a.levels.every((l, k) => l.triangles > 0 && l.brightness > 20 && (k === 0 || l.triangles < a.levels[k - 1].triangles)),
+    ) &&
+    r.walk.moved > 0.2 &&
+    r.walk.stride > 0.5 &&
+    r.graze > 0 &&
+    JSON.stringify(r.zoom) === JSON.stringify([0, 1, 2, 3]) &&
+    r.lineup.meshes === 3 &&
+    r.lineup.brightness > 20 &&
+    r.species.meshes === r.species.set &&
+    r.herds.herds > 5 &&
+    r.herds.drawn > 0 &&
+    r.herds.walking + r.herds.grazing > 0 &&
+    r.loaded.species > 0 &&
+    r.loaded.source?.star === PLANT_STAR &&
+    r.loaded.hash > 100 &&
+    r.linked?.species === r.loaded.species &&
+    r.linked.source?.planet === PLANT_PLANET;
+  return r;
+}
+
+async function runGameAnimals() {
+  if (!(await page.goto(url, READY, 60000))) return { ok: false };
+  await drawFrames(20);
+  await evaluate(`(() => { const p = world.planets.find((b) => b.config.climate && b.config.climate.habitability >= 2 && b.config.climate.insolation > 0); ship.parkAt(p); levels.toPlanet(p); })()`);
+  await until(`levels.mode === 'planet' && !levels.transitioning`, 60000);
+  // Over the first herd of four or more, a little to its side, zoomed in.
+  const r = { named: false };
+  r.found = await evaluate(`(async () => { const g = await import('/src/gen/animals.ts'); const A = planet.animals; if (!A) return null; const n = g.herdGridSize(A.plan.radius);
+    for (let f = 0; f < 6; f++) for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) { const h = g.generateHerd(A.plan, A.ground, f, i, j);
+      if (h && h.count >= 4) { const pose = {}; new g.HerdPath(A.plan, A.ground, h, { hipHeight: 1 }).pose(0, planet.frame.renderTime, pose); const e1 = {}, e2 = {}; g.tangentBasis(pose, e1, e2);
+        planet.ship.placeAt(new (planet.ship.up.constructor)(pose.x + e1.x * 0.012, pose.y + e1.y * 0.012, pose.z + e1.z * 0.012).normalize()); return { species: A.plan.species[h.species].name, count: h.count }; } }
+    return null; })()`);
+  await evaluate(`planet.orbit.zoomTo(10)`);
+  await sleep(2000);
+  await until(`planet.animals.settled`, 30000);
+  await until(`Math.abs(planet.ship.radius - planet.ship.goalRadius) < 0.05`, 30000);
+  await drawFrames(10);
+  r.stats = await evaluate(`planet.animals.stats()`);
+  // Hover the nearest drawn animal (aimed and moved to in one go, as the camera may still ease): the tooltip names it.
+  for (let i = 0; i < 6 && !r.named; i++) {
+    r.tooltip = await evaluate(`new Promise((resolve) => {
+      const A = planet.animals; const v = new (planet.ship.up.constructor)(); const canvas = game.renderer.domElement; const rect = canvas.getBoundingClientRect();
+      let at = null;
+      for (const p of A.herdPositions()) { v.copy(p).addScaledVector(p.clone().normalize(), 0.4); A.object.localToWorld(v); const s = v.clone().project(game.camera);
+        if (Math.abs(s.x) < 0.9 && Math.abs(s.y) < 0.9 && s.z < 1) { at = { clientX: rect.left + ((s.x + 1) / 2) * rect.width, clientY: rect.top + ((1 - s.y) / 2) * rect.height, bubbles: true }; break; } }
+      if (!at) return resolve(null);
+      canvas.dispatchEvent(new PointerEvent('pointermove', at));
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve(document.getElementById('tooltip').hidden ? null : document.getElementById('tooltip-name').textContent)));
+    })`);
+    r.named = (await evaluate(`planet.animals.plan.species.map((s) => s.name)`)).includes(r.tooltip);
+  }
+  r.screenshot = join(outDir, 'animals.png');
+  writeFileSync(r.screenshot, await page.screenshot());
+  r.ok = !!r.found && r.stats.herds > 0 && r.stats.drawn > 0 && r.stats.drawCalls > 0 && r.named;
+  return r;
+}
+let animalLab = null;
+let gameAnimals = null;
+await section('animals', async () => {
+  animalLab = await runAnimalLab();
+  gameAnimals = await runGameAnimals();
+  return animalLab.ok && gameAnimals.ok;
+});
+
+/**
  * Touch play on an emulated phone (390x844, real CDP touch events): no full-screen button, the first tap goes full
  * screen; hold a finger on the star (tooltip), lift (autopilot to it), drag (rotates, no tap), pinch (zoom), Boost (no stick in space), then
  * pinch in at a planet to descend, tap the globe, and pinch out to the system and on to the galaxy, checking which
@@ -2620,7 +2784,7 @@ const ok = started && !stalled && Object.keys(sections).length > 0 && Object.val
 console.error(`[smoke] ${ok ? 'ok' : 'FAILED'} in ${Math.round((Date.now() - T0) / 1000)} s${errors.length ? `, ${errors.length} console errors` : ''}`);
 console.log(
   JSON.stringify(
-    { ok, started, stalled, sections, before, after, autopilot, pick, systemMap, sky, living, comet, belt, galaxyLoop, nebulas, rogues, dust, seamless, audio, planetLoop, heldZoom, cometLoop, asteroidLoops, planetTypes, touch, touchLab, cargo, volcano, buster, lab, plantLab, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
+    { ok, started, stalled, sections, before, after, autopilot, pick, systemMap, sky, living, comet, belt, galaxyLoop, nebulas, rogues, dust, seamless, audio, planetLoop, heldZoom, cometLoop, asteroidLoops, planetTypes, touch, touchLab, cargo, volcano, buster, lab, plantLab, animalLab, gameAnimals, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
     null,
     2,
   ),
