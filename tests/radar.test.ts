@@ -5,7 +5,8 @@ import { terrainNoise } from '../src/gen/noise';
 import type { GroundRadius } from '../src/gen/plants';
 import { describeAnimal, describePlant, herdCountText } from '../src/planet/SpeciesTab';
 import { HerdCensus } from '../src/radar/census';
-import { candidateHerds, groundDistance, pingInterval, proximity, radarParams, waveSpread } from '../src/radar/radarRules';
+import { candidateHerds, groundDistance, pingInterval, pingPitch, proximity, radarParams, waveSpread } from '../src/radar/radarRules';
+import { MAX_RATE, MIN_RATE, playbackRate } from '../src/audio/sfx';
 
 const RADIUS = 400;
 const PEAK = RADIUS * 1.08;
@@ -73,6 +74,26 @@ describe('radar rules', () => {
     expect(spreads.at(-1)).toBeCloseTo(radarParams.farSpread);
   });
 
+  it('pings higher the closer the animals are, evenly in semitones, within what a one-shot can play', () => {
+    const distances = [0, 15, 30, 60, 120, 250, 500, 1000, 3000];
+    const pitches = distances.map((d) => pingPitch(d));
+    for (let i = 1; i < distances.length; i++) expect(pitches[i]).toBeLessThanOrEqual(pitches[i - 1]!);
+    expect(pitches[0]).toBeCloseTo(radarParams.nearPitch);
+    expect(pitches.at(-1)).toBeCloseTo(radarParams.farPitch);
+    // Halfway along the log scale of distance is halfway in semitones: the geometric mean of the ends.
+    const middle = Math.sqrt(radarParams.nearDistance * radarParams.farDistance);
+    expect(pingPitch(middle)).toBeCloseTo(Math.sqrt(radarParams.nearPitch * radarParams.farPitch));
+    for (const p of pitches) expect(playbackRate(p)).toBe(p);
+  });
+
+  it("keeps a one-shot's playback rate to two octaves either way", () => {
+    expect(playbackRate(undefined)).toBe(1);
+    expect(playbackRate(1.5)).toBe(1.5);
+    expect(playbackRate(10)).toBe(MAX_RATE);
+    expect(playbackRate(0.01)).toBe(MIN_RATE);
+    for (const bad of [0, -1, NaN, Infinity]) expect(playbackRate(bad)).toBe(1);
+  });
+
   it('measures along the ground and words it', () => {
     expect(groundDistance({ x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }, RADIUS)).toBeCloseTo((Math.PI / 2) * RADIUS);
     expect(groundDistance({ x: 1, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, RADIUS)).toBe(0);
@@ -134,5 +155,32 @@ describe('the radar item', () => {
     expect(switches.flip('radar')).toBe(false);
     switches.set('radar', true);
     expect(switches.isOn('radar')).toBe(true);
+  });
+});
+
+describe('pitched one-shots', () => {
+  it("play at the rate asked for, lasting that much less (CuePlayer on a stand-in audio context)", async () => {
+    const { CuePlayer } = await import('../src/audio/CuePlayer');
+    const { SOUND_CUES } = await import('../src/audio/cues');
+    const sources: { playbackRate: { value: number }; started: number | null }[] = [];
+    const node = () => ({ connect: (n: unknown) => n, disconnect() {} });
+    const ctx = {
+      currentTime: 0,
+      decodeAudioData: async () => ({ duration: 2, numberOfChannels: 1 }),
+      createBufferSource: () => {
+        const s = { ...node(), buffer: null, playbackRate: { value: 1 }, onended: null, started: null as number | null, start(t: number) { s.started = t; } };
+        sources.push(s);
+        return s;
+      },
+      createGain: () => ({ ...node(), gain: { value: 1 } }),
+    };
+    const data = Object.fromEntries(SOUND_CUES.map((c) => [c, c === 'radarPing' ? [Promise.resolve(new ArrayBuffer(8))] : []]));
+    const player = new CuePlayer(ctx as never, { sfx: node() as never, ambience: node() as never }, data as never);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(player.variantCount('radarPing')).toBe(1);
+    expect(player.play('radarPing', 1.5)).toBeCloseTo(2 / 1.5);
+    expect(sources.at(-1)!.playbackRate.value).toBe(1.5);
+    expect(player.play('radarPing')).toBe(2);
+    expect(sources.at(-1)!.playbackRate.value).toBe(1);
   });
 });

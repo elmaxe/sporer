@@ -9,7 +9,7 @@ import type { PlanetShip } from '../planet/PlanetShip';
 import { animalSkeleton } from '../surface/animalLook';
 import { CLOUD_RENDER_ORDER } from '../world/weatherLook';
 import { HerdCensus } from './census';
-import { candidateHerds, groundDistance, pingInterval, proximity, radarParams, waveSpread } from './radarRules';
+import { candidateHerds, groundDistance, pingInterval, pingPitch, proximity, radarParams, waveSpread } from './radarRules';
 
 /** Pings whose waves can be on screen at once (the shader's loop). */
 const PINGS = 4;
@@ -86,8 +86,8 @@ const fragmentShader = /* glsl */ `
  * nearest the ship (their paths are pure functions of the clock, so this is
  * where they really are) and keeps the nearest animal. Every ping sends
  * waves out round the ship along the ground towards it, with the
- * `radarPing` cue: arcs far off, quicker and wider as it comes closer, whole
- * rings with the animals right below. Cosmetic: nothing it does changes the
+ * `radarPing` cue: arcs far off, quicker, wider and higher-pitched as it
+ * comes closer, whole rings with the animals right below. Cosmetic: nothing it does changes the
  * game, so it runs in `update`.
  */
 export class Radar implements Entity {
@@ -175,6 +175,8 @@ export class Radar implements Entity {
     f?.add(radarParams, 'farInterval', 0.5, 5);
     f?.add(radarParams, 'nearDistance', 1, 100);
     f?.add(radarParams, 'farDistance', 100, 3000);
+    f?.add(radarParams, 'nearPitch', 0.25, 4);
+    f?.add(radarParams, 'farPitch', 0.25, 4);
     f?.add(radarParams, 'farSpread', 0.1, Math.PI);
     f?.add(radarParams, 'ringDistance', 0, 100);
     f?.add(radarParams, 'openDistance', 20, 500);
@@ -307,7 +309,8 @@ export class Radar implements Entity {
     this.pings++;
     for (let i = PINGS - 1; i > 0; i--) this.ages[i] = this.ages[i - 1]!;
     this.ages[0] = 0;
-    this.sfx.play('radarPing');
+    // Higher the closer, like a sonar's.
+    this.sfx.play('radarPing', { rate: pingPitch(this._distance) });
   }
 
   /** The disc round the ship in the ground's tangent plane, +x towards the target, sized by the camera's distance. */

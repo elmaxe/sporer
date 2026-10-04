@@ -23,10 +23,13 @@ rebuild; no code changes needed. Volumes and fades are in `cueParams` (`src/audi
 | `abductSuccess/` | Something reaching the ship and going into the inventory | one-shot |
 | `exportBeam/` | The beam lowering cargo from the ship: starts on the press, fades out when it's let go or lands | loop |
 | `dropImpact/` | Cargo hitting the ground: set down by the beam, dropped, or falling from it | one-shot |
-| `radarPing/` | The radar (switched on in the Inventory) sending its waves towards the nearest animal of the species picked on the planet map's Species tab: once per ping, more often the closer they are | one-shot |
+| `radarPing/` | The radar (switched on in the Inventory) sending its waves towards the nearest animal of the species picked on the planet map's Species tab: once per ping, more often and higher the closer they are (played from 0.84× to 1.5× speed, so record it at the pitch you want from mid-distance) | one-shot |
 | `starNear/` | A star close up: grows as the camera nears its surface, taking over from `starFar` | ambient |
 | `starFar/` | A star from across its system: fades with distance, giving way to `starNear` close up | ambient |
 | `shipHum/` | The UFO's own hum, always on | ambient |
+
+One-shots can be pitched as they play: the game can ask for a playback rate (`play(cue, { rate })`; 1 as
+recorded, 2 an octave higher and twice as quick, kept within 0.25–4). Only `radarPing` uses it so far.
 
 Ambient cues play on the **Ambience** channel (its slider), the rest on Effects. They loop the same way, but
 the game sets their loudness as it goes: the two star loops are mixed from the camera's distance to the star

@@ -88,7 +88,7 @@
 // herd roams near the ship on the home planet and the tooltip names an animal under the pointer; the planet map's Species
 // tab lists the planet's animals and plants with their pictures and counts the herds; a real click on that herd's species
 // picks it, but the radar stays quiet until the item bar's Radar switch is turned on (a real click): then waves round the
-// ship, close by, whole rings, the radarPing cue; switched off it goes quiet again, and a second click on the species stops it.
+// ship, close by, whole rings, the radarPing cue pitched up; switched off it goes quiet again, and a second click on the species stops it.
 // Prints JSON with FPS, console errors and screenshot paths. Exit 1 on failure.
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -2018,7 +2018,8 @@ async function runRadar(name) {
     await drawFrames(2);
     return true;
   };
-  await evaluate(`(() => { window.__cues = []; const play = audio.play.bind(audio); audio.play = (c) => (__cues.push(c), play(c)); })()`);
+  await evaluate(`(() => { window.__cues = []; window.__rates = []; const play = audio.play.bind(audio);
+    audio.play = (c, o) => (__cues.push(c), c === 'radarPing' && __rates.push(o?.rate), play(c, o)); })()`);
   // The debug panel sits over the map's title bar: out of the way meanwhile.
   await evaluate(`document.querySelectorAll('.lil-gui.lil-auto-place').forEach((e) => (e.style.visibility = 'hidden'))`);
   r.tab = await click('#planet-map-tabs button[data-tab=species]');
@@ -2045,7 +2046,8 @@ async function runRadar(name) {
   r.tracking = await evaluate(`({ tracking: planet.radar.tracking, state: planet.radar.state, distance: planet.radar.distance, proximity: planet.radar.proximity,
     visible: planet.radar.visible, pings: planet.radar.pingCount, row: document.querySelector('#planet-species .species-row.tracking')?.dataset.species ?? null,
     status: document.querySelector('#planet-species .species-row.tracking .species-status')?.textContent ?? '',
-    dot: document.getElementById('planet-map-tabs').classList.contains('tracking'), cues: __cues.filter((c) => c === 'radarPing').length })`);
+    dot: document.getElementById('planet-map-tabs').classList.contains('tracking'), cues: __cues.filter((c) => c === 'radarPing').length,
+    rates: __rates.slice(), played: audio.lastPlayed && { name: audio.lastPlayed.name, rate: audio.lastPlayed.rate } })`);
   // Once the "Radar on" note has had its moment, the hint line says what it tracks.
   await until(`document.getElementById('item-hint').textContent.startsWith('Radar: ')`, 20000);
   r.tracking.hint = await evaluate(`document.getElementById('item-hint').textContent`);
@@ -2093,6 +2095,11 @@ async function runRadar(name) {
     r.tracking.visible &&
     r.tracking.dot &&
     r.tracking.cues >= 2 &&
+    // Right above the herd the ping is pitched up, and the audio manager plays it at that rate.
+    r.tracking.rates.length === r.tracking.cues &&
+    r.tracking.rates.every((x) => x > 1.2 && x <= 1.5) &&
+    r.tracking.played?.name === 'radarPing' &&
+    Math.abs(r.tracking.played.rate - r.tracking.rates.at(-1)) < 1e-9 &&
     r.stopped.tracking === null &&
     r.stopped.state === 'off' &&
     !r.stopped.row &&

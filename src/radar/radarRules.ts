@@ -2,8 +2,8 @@ import type { HerdData } from '../gen/animals';
 import type { Vec3Like } from '../world/cubeSphereMath';
 
 /*
- * The radar's rules, pure: how often it pings and how wide its waves fan out
- * for how far away the tracked animals are, which herds are worth posing to
+ * The radar's rules, pure: how often it pings, how high its ping sounds and
+ * how wide its waves fan out for how far away the tracked animals are, which herds are worth posing to
  * find the nearest, and the word the Species tab shows for the distance.
  * Distances are along the ground, in planet-level units (an Earth-sized
  * globe's radius is 400; a herd roams a few dozen units from home).
@@ -14,9 +14,12 @@ export const radarParams = {
   /** Seconds between pings with the animals right below the ship, and far away. */
   nearInterval: 0.7,
   farInterval: 2.4,
-  /** Ground distances (units) the ping rate eases between: right below and far away. */
+  /** Ground distances (units) the ping rate and pitch ease between: right below and far away. */
   nearDistance: 15,
   farDistance: 1000,
+  /** The ping's playback rate right above the animals and far away (1 as recorded; 1.5 is a fifth up, 0.84 three semitones down). */
+  nearPitch: 1.5,
+  farPitch: 0.84,
   /** The waves' half-angle far away (radians); they close into full rings as the animals come under the ship. */
   farSpread: 0.38,
   /** Ground distances (units) between which the arcs open up into rings. */
@@ -56,6 +59,16 @@ function smoothstep(a: number, b: number, v: number): number {
 /** Seconds to the next ping with the nearest animal `distance` units away along the ground: quicker the closer. */
 export function pingInterval(distance: number, p = radarParams): number {
   return p.nearInterval + (p.farInterval - p.nearInterval) * logShare(distance, p.nearDistance, p.farDistance);
+}
+
+/**
+ * The ping's playback rate with the nearest animal `distance` units away:
+ * higher the closer, eased on the same log scale of the distance as the
+ * ping rate, and evenly in semitones (geometrically in rate) between them.
+ */
+export function pingPitch(distance: number, p = radarParams): number {
+  const s = logShare(distance, p.nearDistance, p.farDistance);
+  return p.nearPitch * (p.farPitch / p.nearPitch) ** s;
 }
 
 /** The waves' half-angle (radians) with the nearest animal `distance` units away: narrow arcs far off, whole rings right above it. */
