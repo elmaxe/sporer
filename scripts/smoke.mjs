@@ -2729,8 +2729,9 @@ await section('cargo', async () => {
     cues.includes('exportBeam') &&
     cues.includes('dropImpact') &&
     !!animals &&
-    animals.up?.taken === 1 &&
-    animals.up.count >= 1 &&
+    // Animals of a herd stand close: the beam may catch more than one, all into the one stack.
+    animals.up?.taken >= 1 &&
+    animals.up.count === animals.up.taken &&
     animals.up.img === 'data:image/png;base64,' &&
     animals.release?.released === 1 &&
     /roam/.test(animals.release.hint) &&
