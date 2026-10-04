@@ -17,7 +17,7 @@ import type { Landing } from '../cargo/plantFate';
 import { LodSurface, addCraterDebug, addLodDebug } from './LodSurface';
 import type { RenderClock } from './PlanetFrame';
 import { RingRocks } from './RingRocks';
-import { createSeaWaves, addWaveDebug, seaDepthFrame, type SeaWaveLook } from '../world/seaWaves';
+import { createSeaWaves, addWaveDebug, seaClear, seaDepthFrame, waveParams, type SeaWaveLook } from '../world/seaWaves';
 
 // Mountains' exaggeration up close lives in frame.ts (the system view's clouds need it too); re-exported here.
 export { RELIEF_SCALE };
@@ -114,7 +114,8 @@ export class PlanetGlobe implements Entity {
     this.surface = new LodSurface(gas ? R : floorRadius(R, style, RELIEF_SCALE, seaFloor, config.shape != null), this.top, this.sample, material, {
       smooth: gas ? 'outline' : null,
       // The opaque sea hides the sea floor's chunks that lie wholly under it.
-      hiddenBelow: seaFloor ? R : -Infinity,
+      // Clear water shows its shallows' floor (world/seaWaves.ts), down to where it's opaque.
+      hiddenBelow: seaFloor ? R - (seaClear(config) ? waveParams.clearDepth : 0) : -Infinity,
     });
     this.object.add(this.surface.object);
     addLodDebug(debug);
@@ -293,8 +294,14 @@ function createWater(type: PlanetConfig['type'], color: string, radius: number, 
         return radius;
       }
     : () => radius;
-  // Drawn first, so the sea floor under it is rejected by the depth test rather than shaded.
-  return new LodSurface(radius, radius, sample, material, { smooth: 'coast', renderOrder: SEA_RENDER_ORDER, name: 'Sea' });
+  // Drawn first, so the sea floor under it is rejected by the depth test rather than shaded (a clear sea is drawn
+  // after the ground, being see-through); its shallows split finely, for the shore swells.
+  return new LodSurface(radius, radius, sample, material, {
+    smooth: 'coast',
+    renderOrder: SEA_RENDER_ORDER,
+    shallow: waves?.shallowDepth ?? -Infinity,
+    name: 'Sea',
+  });
 }
 
 /** The lava sea: a fixed smooth sphere at sea level with the animated lava (see world/lavaMaterial.ts). */

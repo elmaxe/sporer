@@ -3,6 +3,7 @@ import type { Debug } from '../core/Debug';
 import { WIND_MIN_PRESSURE } from '../gen/geysers';
 import {
   COX_MUNK,
+  peakOmega,
   STANDARD_GRAVITY,
   WAVES_PER_SET,
   WAVE_SETS,
@@ -23,6 +24,7 @@ import { MAX_STORMS, stormCentre, stormStrength, type StormEvent } from '../gen/
 import type { PlanetConfig } from './Planet';
 import { VALUE_NOISE_GLSL } from './noiseGlsl';
 import { weatherParams } from './weatherLook';
+import { lodParams } from '../planet/LodSurface';
 
 /** Tunables of the sea's waves (debug panel: Sea waves). They take effect on the next frame. */
 export const waveParams = {
@@ -47,9 +49,14 @@ export const waveParams = {
   /** A wave fades out between these many pixels long (and shorter), its slope going into the roughness. */
   fadeFrom: 12,
   fadeTo: 4,
-  /** Waves are drawn out to this far from the camera (units) and gone by `farTo`: from high up the sea shows only its glint. */
-  farFrom: 50,
-  farTo: 110,
+  /**
+   * Waves are drawn out to this far from the camera (units) and gone by
+   * `farTo`, fading evenly in the log of the distance (a fade over a fixed
+   * span drew a hard edge round the camera at a low angle): from high up the
+   * sea shows only its glint.
+   */
+  farFrom: 80,
+  farTo: 600,
   /** Slicks: the share of the sea where the waves are calmed (stylised), and their slope there (Cox & Munk: slicks cut it 2–3×). */
   slicks: 0.3,
   slickSlope: 1 / 2.5,
@@ -59,10 +66,19 @@ export const waveParams = {
   crests: 1,
   /** Whitecaps on the crests, as many as Monahan & O'Muircheartaigh's fit gives at the wind. */
   whitecaps: true,
-  /** Shallow water: the depth (units) over which the seabed's light fades by e (stylised: the relief is exaggerated). */
-  shallowDepth: 1.5,
-  /** The seabed seen through shallow water (stylised: a pale sand). */
-  seabed: '#d8c49a',
+  /**
+   * Clear water: the depth (units) over which the seabed's light fades by e
+   * through the water (stylised: the relief is exaggerated). The sea is
+   * see-through over its shallows and opaque by `clearDepth`.
+   */
+  clarity: 1.1,
+  clearDepth: 5,
+  /** How deep (units) the water's colour goes from its shallows' to its deep's. */
+  deepDepth: 12,
+  /** The sky's light reflected off the water, by Fresnel (stylised strength; none without air). */
+  sky: 0.45,
+  /** Wave crests lit through from inside, lighter than the troughs (stylised strength). */
+  scatter: 0.35,
   /** Surf: how deep (units) the foam along the shore reaches. */
   surfDepth: 0.25,
   /** Swells running up to the shore, refracted so their crests follow the depth contours, slowing, steepening and breaking as the water shoals. */
@@ -72,7 +88,7 @@ export const waveParams = {
    * a sandy beach's is a few per cent): where the drawn seabed is steeper
    * their crests come closer, where it's flatter they spread out.
    */
-  shoreSlope: 0.08,
+  shoreSlope: 0.3,
   /** Stylised: how much steeper the shore swells are drawn than their height says (they'd hardly show from the UFO's height). */
   shoreSteep: 1.5,
   /** The ship's downwash on the water below it: a flattened, misty disc, a ring of spray and ripples running out. */
@@ -124,7 +140,10 @@ const SEA_WAVES_GLSL = /* glsl */ `
   uniform float uSeaWhitecaps;
   // Shallow water and surf: e-folding depth, surf depth (units), the surf's phase.
   uniform vec3 uSeaShallow;
-  uniform vec3 uSeaSeabed;
+  // Clear water: e-folding depth, opaque by, the deep colour's depth (units); the sky's reflected light; crests' scatter.
+  uniform vec3 uSeaClear;
+  uniform vec3 uSeaSky;
+  uniform float uSeaScatter;
   uniform vec3 uSeaFoam;
   uniform float uSeaGlow;
   // Shore swells: each one's phase (radians) at evenly spaced depths; x: depth step (units), y: deepest (units),
@@ -135,6 +154,8 @@ const SEA_WAVES_GLSL = /* glsl */ `
   uniform vec4 uSeaShoreWave;
   uniform vec2 uSeaShoreK0;
   uniform vec2 uSeaShoreSpacing;
+  // The sea's triangles over its shallows subtend about this angle from the camera (LodSurface splits them as the ground's).
+  uniform float uSeaCell;
   // The ship's downwash: the point under it on the sea (body frame) and its strength, then the ripples' wavenumber
   // (1/units) and phase now, the disc's radius (units), and a clock (s, wrapped).
   uniform vec4 uSeaShip;
@@ -202,9 +223,10 @@ const SEA_WAVES_GLSL = /* glsl */ `
 `;
 
 const SEA_FRAGMENT = /* glsl */ `
+  float seaAlpha = 1.0;
   {
     vec3 n = normalize(vSeaPos);
-    float near = 1.0 - smoothstep(uSeaFar.x, uSeaFar.y, length(vSeaPos - uSeaCamera));
+    float near = 1.0 - smoothstep(0.0, 1.0, log(max(length(vSeaPos - uSeaCamera), uSeaFar.x) / uSeaFar.x) / log(uSeaFar.y / uSeaFar.x));
     float fp = length(fwidth(vSeaPos));
     float wind = seaWindAt(n);
     // Slicks calm the sea in patches, where no storm blows them away.
@@ -259,8 +281,10 @@ const SEA_FRAGMENT = /* glsl */ `
       float hm = shoreDepth * uSeaShore.z;
       // Along the shore the swells drift in and out of step, so the crests aren't one long line.
       vec3 wq = vSeaPos * 0.035;
-      float wob = 6.2832 * (valueNoise(wq) - 0.5);
-      float wob2 = 6.2832 * (valueNoise(wq * 1.7 + 9.1) - 0.5);
+      // And a finer wiggle, so the crests don't run dead straight across a triangle of the chunk.
+      float wiggle = 1.4 * (valueNoise(vSeaPos * 0.45 + 4.4) - 0.5);
+      float wob = 6.2832 * (valueNoise(wq) - 0.5) + wiggle;
+      float wob2 = 6.2832 * (valueNoise(wq * 1.7 + 9.1) - 0.5) + wiggle;
       for (int s = 0; s < 2; s++) {
         float k0 = s == 0 ? uSeaShoreK0.x : uSeaShoreK0.y;
         float h0 = s == 0 ? uSeaShoreWave.z : uSeaShoreWave.w;
@@ -274,7 +298,9 @@ const SEA_FRAGMENT = /* glsl */ `
         float kd = k * uSeaShore.z / uSeaShoreSpacing.x;
         // Fades out as its crests come closer than a few pixels.
         float lambda = 6.2832 / max(kd * steep, 1e-4);
-        float fade = smoothstep(uSeaFade.x * fp, uSeaFade.y * fp, lambda);
+        // ...or than a few of the sea's triangles: the depth is linear across each, so the crests kink at their edges.
+        float cell = uSeaCell * length(vSeaPos - uSeaCamera);
+        float fade = smoothstep(uSeaFade.x * fp, uSeaFade.y * fp, lambda) * smoothstep(3.0 * cell, 6.0 * cell, lambda);
         g += gradD * (-0.5 * hgt * kd * sin(ph) * uSeaShoreSpacing.y * fade * shoreW);
         h += 0.5 * hgt * cos(ph) * fade * shoreW;
         shoreCrest = max(shoreCrest, smoothstep(0.55, 0.95, cos(ph)) * fade);
@@ -285,19 +311,23 @@ const SEA_FRAGMENT = /* glsl */ `
     if (uSeaShip.w > 0.0) {
       vec3 radial = shipOff / max(shipR, 1e-4);
       float q = shipR / uSeaShipWave.z;
-      float env = uSeaShip.w * smoothstep(0.5, 1.1, q) * exp(-1.5 * max(q - 1.0, 0.0));
-      float ph = uSeaShipWave.x * shipR - uSeaShipWave.y;
-      g += radial * (0.35 * env * cos(ph));
+      // A few rings running out, bent and broken by noise, dying away within a radius or so; gone when too fine to draw.
+      float bend = 1.6 * valueNoise(vSeaPos * 0.7 + 2.3);
+      float ph = uSeaShipWave.x * (shipR + bend) - uSeaShipWave.y;
+      float patchy = mix(0.35, 1.0, smoothstep(0.2, 0.75, valueNoise(vSeaPos * 0.45 + 8.1)));
+      float env = uSeaShip.w * smoothstep(0.6, 1.1, q) * exp(-2.5 * max(q - 1.0, 0.0)) * patchy;
+      float rfade = smoothstep(uSeaFade.x * fp, uSeaFade.y * fp, 6.2832 / uSeaShipWave.x);
+      g += radial * (0.2 * env * rfade * cos(ph));
       // A ring of spray at the disc's edge, torn and blowing outward, and mist over the disc.
       // Two layers of noise sliding outward, each over a short stretch and crossfaded, so it flows without smearing.
       float tear = 0.0;
       for (int l = 0; l < 2; l++) {
         float cyc = fract(uSeaShipWave.w * 0.6 + 0.5 * float(l));
-        vec3 sq = vSeaPos * 1.3 - radial * cyc * 2.5 + float(l) * 7.3;
+        vec3 sq = vSeaPos * 2.2 - radial * cyc * 3.0 + float(l) * 7.3;
         tear += (1.0 - abs(2.0 * cyc - 1.0)) * (valueNoise(sq) * 0.65 + valueNoise(sq * 2.3 + 3.7) * 0.35);
       }
-      float ring = exp(-pow((q - 1.05) / 0.28, 2.0));
-      shipSpray = uSeaShip.w * clamp(ring * smoothstep(0.3, 0.7, tear) * 1.2 + 0.25 * shipDisc * tear, 0.0, 1.0);
+      float ring = exp(-pow((q - 1.0 - 0.15 * bend) / 0.25, 2.0));
+      shipSpray = uSeaShip.w * clamp(ring * smoothstep(0.3, 0.7, tear) * 1.6 + 0.25 * shipDisc * smoothstep(0.4, 0.8, tear), 0.0, 1.0);
     }
     // The height's gradient along the surface tips the normal against it; Gerstner's term narrows the crests.
     g -= n * dot(n, g);
@@ -307,10 +337,17 @@ const SEA_FRAGMENT = /* glsl */ `
     // The downwash's disc is ruffled by the wind it blows.
     roughnessFactor = mix(roughnessFactor, 0.55, shipDisc);
 
-    // Shallow water: the seabed shows through, tinted by the water it's seen through.
-    vec3 hue = diffuseColor.rgb / max(max(diffuseColor.r, diffuseColor.g), max(diffuseColor.b, 1e-3));
+    // The water's own colour: brighter and greener over its shallows, darker over the deep.
     float depth = max(vSeaDepth, 0.0);
-    diffuseColor.rgb = mix(diffuseColor.rgb, uSeaSeabed * mix(vec3(1.0), hue, 0.75), exp(-depth / uSeaShallow.x));
+    vec3 seaHue = diffuseColor.rgb;
+    vec3 shallowHue = seaHue * vec3(0.75, 1.3, 1.15) + vec3(0.02, 0.05, 0.04);
+    diffuseColor.rgb = mix(shallowHue, seaHue * 0.6, smoothstep(0.0, uSeaClear.z, depth));
+    // Crests lit through from inside, lighter than the troughs.
+    float lift = hVar > 0.0 ? clamp(h * inversesqrt(hVar) * 0.5, -1.0, 1.0) : 0.0;
+    diffuseColor.rgb *= 1.0 + uSeaScatter * lift;
+    // Clear water: the seabed shows through, fading by e every clarity units deeper, opaque by clearDepth.
+    seaAlpha = 1.0 - exp(-depth / uSeaClear.x);
+    seaAlpha = mix(seaAlpha, 1.0, smoothstep(0.5 * uSeaClear.y, uSeaClear.y, depth));
 
     // Whitecaps: the steepest crests (the slope-weighted crest term, which the short waves lead), as much of the sea
     // as Monahan & O'Muircheartaigh's fit says; where the waves are too small to draw, their share spread evenly.
@@ -327,7 +364,7 @@ const SEA_FRAGMENT = /* glsl */ `
     float bands = 0.5 + 0.5 * sin(depth / uSeaShallow.y * 9.42 + uSeaShallow.z + 3.0 * valueNoise(vSeaPos * 0.8));
     float churn = valueNoise(vSeaPos * 1.7 + vec3(uSeaShallow.z)) * 0.6 + 0.4;
     surf = uSeaShore.w > 0.0
-      ? max(surf * mix(0.45, 0.9, churn), breaking * shoreCrest * churn) * mix(0.75, 1.0, near)
+      ? max(surf * mix(0.45, 0.9, churn), breaking * shoreCrest * smoothstep(0.35, 0.85, churn) * 0.8) * mix(0.75, 1.0, near)
       : surf * mix(0.6, mix(0.3, 1.0, bands), near);
     float foam = clamp(max(max(caps, surf), shipSpray), 0.0, 1.0);
     diffuseColor.rgb = mix(diffuseColor.rgb, uSeaFoam, foam);
@@ -339,9 +376,18 @@ const SEA_FRAGMENT = /* glsl */ `
     vec3 lt = uSeaSun - n * dot(n, uSeaSun);
     float facing = max(dot(vt, lt) * inversesqrt(max(dot(vt, vt) * dot(lt, lt), 1e-8)), 0.0);
     float up = dot(n, uSeaSun);
-    float lift = hVar > 0.0 ? clamp(h * inversesqrt(hVar) * 0.5, 0.0, 1.0) : 0.0;
-    float glow = uSeaGlow * pow(facing, 4.0) * smoothstep(-0.02, 0.08, up) * (1.0 - smoothstep(0.25, 0.6, up)) * lift * (1.0 - foam);
+    float glow = uSeaGlow * pow(facing, 4.0) * smoothstep(-0.02, 0.08, up) * (1.0 - smoothstep(0.25, 0.6, up)) * max(lift, 0.0) * (1.0 - foam);
     totalEmissiveRadiance += glow * uSeaSunLight * diffuseColor.rgb * vec3(0.6, 1.3, 1.1);
+    // The sky reflected by Fresnel (Schlick, water's 0.02 head on): the sea brightens towards the horizon and every
+    // wave facing away catches it. Lit where the sky over it is (day side, dusk), none without air.
+    float cosView = clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0);
+    float fresnel = 0.02 + 0.98 * pow(1.0 - cosView, 5.0);
+    float skyLit = smoothstep(-0.12, 0.3, up);
+    vec3 skyLight = uSeaSky * uSeaSunLight * skyLit * fresnel * (1.0 - foam);
+    totalEmissiveRadiance += skyLight;
+    // See-through where shallow: foam, the glint and the sky's reflection stay (they're light off the surface).
+    float shine = dot(skyLight + glow * uSeaSunLight * diffuseColor.rgb, vec3(0.3, 0.59, 0.11));
+    seaAlpha = max(max(seaAlpha, foam), clamp(shine * 1.5, 0.0, 1.0));
   }
 `;
 
@@ -371,7 +417,9 @@ export class SeaWaveLook {
     uSeaCrests: { value: 0 },
     uSeaWhitecaps: { value: 0 },
     uSeaShallow: { value: new THREE.Vector3() },
-    uSeaSeabed: { value: new THREE.Color() },
+    uSeaClear: { value: new THREE.Vector3(1, 5, 12) },
+    uSeaSky: { value: new THREE.Color(0, 0, 0) },
+    uSeaScatter: { value: 0 },
     uSeaFoam: { value: FOAM },
     uSeaGlow: { value: 0 },
     uSeaShoreTable: { value: Array.from({ length: SHORE_STEPS }, () => new THREE.Vector2()) },
@@ -380,6 +428,7 @@ export class SeaWaveLook {
     uSeaShoreK0: { value: new THREE.Vector2(1, 1) },
     uSeaShoreSpacing: { value: new THREE.Vector2(1, 1) },
     uSeaShip: { value: new THREE.Vector4() },
+    uSeaCell: { value: lodParams.cellAngle },
     uSeaShipWave: { value: new THREE.Vector4(1, 0, 1, 0) },
     uSeaCamera: { value: new THREE.Vector3() },
     uSeaSun: { value: new THREE.Vector3(0, 1, 0) },
@@ -403,9 +452,22 @@ export class SeaWaveLook {
     /** Unit direction to the sun and its light (colour × intensity), in the sea's frame (read every frame). */
     sun: THREE.Vector3,
     sunLight: THREE.Color,
+    /** The sky's colour (its atmosphere's), reflected by the water; black without air. */
+    private readonly skyColor = new THREE.Color(0, 0, 0),
   ) {
     this.uniforms.uSeaSun.value = sun;
     this.uniforms.uSeaSunLight.value = sunLight;
+  }
+
+  /**
+   * How deep (units) the water is where the shore swells still run: half the
+   * peak swell's deep-water length (as `make` tabulates it). The sea's chunks
+   * that shallow split as finely as the ground (LodSurfaceOptions.shallow).
+   */
+  get shallowDepth(): number {
+    const p = waveParams;
+    const wind = p.enabled && this.air ? p.wind : 0;
+    return wind > 0 ? wavelength(peakOmega(wind, this.gravity), this.gravity) / 2 / p.metresPerUnit : 0;
   }
 
   /** Shows the waves at system time `time`, seen from `camera` (in the sea's frame), with `storms` under way. */
@@ -422,12 +484,15 @@ export class SeaWaveLook {
     u.uSeaSlicks.value.set(1 / p.slickSize, wind > 0 ? p.slicks : 0, p.slickSlope);
     u.uSeaCrests.value = p.crests;
     u.uSeaWhitecaps.value = p.whitecaps && wind > 0 ? 1 : 0;
-    u.uSeaSeabed.value.set(p.seabed);
+    u.uSeaClear.value.set(p.clarity, Math.max(p.clearDepth, p.clarity), p.deepDepth);
+    u.uSeaSky.value.copy(this.skyColor).multiplyScalar(p.sky);
+    u.uSeaScatter.value = p.scatter;
+    u.uSeaCell.value = lodParams.cellAngle;
     u.uSeaGlow.value = wind > 0 ? p.glow : 0;
     u.uSeaCamera.value.copy(camera);
     // The surf comes in at the swell's pace (the spectrum's peak), its phase wrapped like the waves'.
     const surf = waves.peakOmega > 0 ? (waves.peakOmega * time) % (Math.PI * 2) : 0;
-    u.uSeaShallow.value.set(p.shallowDepth, p.surfDepth, surf);
+    u.uSeaShallow.value.set(p.clarity, p.surfDepth, surf);
     // The shore swells run in at their own pace (phases wrapped like the waves').
     const shore = p.shore && this.swells.length === 2;
     u.uSeaShore.value.w = shore ? 1 : 0;
@@ -536,8 +601,11 @@ export class SeaWaveLook {
         .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSeaPos = position;\nvSeaDepth = color.r;\nvSeaSlope = color.gb;\nvSeaNormalMatrix = normalMatrix;');
       shader.fragmentShader = shader.fragmentShader
         .replace('#include <common>', `#include <common>\n${VALUE_NOISE_GLSL}\n${SEA_WAVES_GLSL}`)
-        .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>\n${SEA_FRAGMENT}`);
+        .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>\n${SEA_FRAGMENT}`)
+        .replace('#include <opaque_fragment>', 'diffuseColor.a = seaAlpha;\n#include <opaque_fragment>');
     };
+    // See-through over the shallows: drawn after the ground under it (see PlanetGlobe's water).
+    material.transparent = true;
     material.customProgramCacheKey = () => 'sea-waves';
   }
 }
@@ -569,10 +637,18 @@ function seaWater(config: PlanetConfig): { gravity: number; air: boolean } | nul
   return { gravity: (climate?.gravity ?? 1) * STANDARD_GRAVITY, air: (climate?.pressure ?? 1) >= WIND_MIN_PRESSURE };
 }
 
+/** Whether a body's sea is clear water (see-through over its shallows): one with waves. */
+export function seaClear(config: PlanetConfig): boolean {
+  return seaWater(config) !== null;
+}
+
 /** The waves of a body's water sea (null for ice, lava and bodies without one). */
 export function createSeaWaves(config: PlanetConfig, sun: THREE.Vector3, sunLight: THREE.Color): SeaWaveLook | null {
   const water = seaWater(config);
-  return water ? new SeaWaveLook(config.seed, water.gravity, water.air, sun, sunLight) : null;
+  if (!water) return null;
+  // The sky's colour, linear; none without air (or none to speak of).
+  const sky = water.air && config.atmosphere ? new THREE.Color(config.atmosphere) : new THREE.Color(0, 0, 0);
+  return new SeaWaveLook(config.seed, water.gravity, water.air, sun, sunLight, sky);
 }
 
 /**
@@ -626,8 +702,11 @@ export function addWaveDebug(debug: Debug): void {
   f?.add(waveParams, 'slickSize', 5, 200, 1);
   f?.add(waveParams, 'crests', 0, 1, 0.05);
   f?.add(waveParams, 'whitecaps');
-  f?.add(waveParams, 'shallowDepth', 0.05, 5, 0.05);
-  f?.addColor(waveParams, 'seabed');
+  f?.add(waveParams, 'clarity', 0.05, 5, 0.05);
+  f?.add(waveParams, 'clearDepth', 0.5, 20, 0.5);
+  f?.add(waveParams, 'deepDepth', 1, 60, 1);
+  f?.add(waveParams, 'sky', 0, 2, 0.05);
+  f?.add(waveParams, 'scatter', 0, 1, 0.05);
   f?.add(waveParams, 'surfDepth', 0, 1, 0.01);
   f?.add(waveParams, 'shore');
   f?.add(waveParams, 'shoreSlope', 0.005, 0.5, 0.005);

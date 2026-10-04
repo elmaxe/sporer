@@ -181,7 +181,7 @@ The game's breeze, 7 m/s:
 
 - **Two swells run in to every shore.** One is at the spectrum's peak, the other 1.3× its frequency. Each has half the energy of a sea of significant height H⅓ (`shoreSwells`; the split is stylised), so together their heights add in quadrature to H⅓.
 - **Crests follow the depth contours** (Fenton: refraction "tends to align the wave front to the depth contours"). The phase depends only on the depth: θ(d) = ∫₀^d k(h) dh / s.
-  - s is `waveParams.shoreSlope` (0.08), the seabed slope the swells are spaced for. On that slope the crests are a wavelength apart. On a steeper drawn seabed they bunch, on a flatter one they spread.
+  - s is `waveParams.shoreSlope` (0.3), the seabed slope the swells are spaced for. The drawn seabed's relief is exaggerated (RELIEF_SCALE), so its slopes are steep: at 0.08 the crests came out a quarter of their true length apart. On that slope the crests are a wavelength apart. On a steeper drawn seabed they bunch, on a flatter one they spread.
   - The phase is tabulated at 32 depths, out to half the peak swell's deep-water length (where Ks ≈ 1 and the swell stops feeling the bottom).
   - Adding ωt to the phase moves crests to smaller θ, which means shallower water: they run in to the shore.
   - Two slow noises along the coast shift each swell in and out of step, so the crests aren't one endless line.
@@ -192,6 +192,7 @@ The game's breeze, 7 m/s:
 - **Depth and its slope.** The sea's chunks carry the depth in their vertex colour's red, as before.
   - They also carry the seabed's slope, east and north, in green and blue (`seaDepthFrame`). It is measured over the chunk's own sample spacing by `PlanetGlobe`'s water sampler.
   - So the crests' direction is smooth across triangles. Screen-space derivatives showed every facet.
+  - The depth itself is still linear across each of the sea's triangles, so the crests kink at their edges. The sea's chunks over water shallower than the swells' reach split as finely as the ground (`LodSurfaceOptions.shallow`, by `lodParams.cellAngle`). A swell fades out where its crests come closer than about four triangles (the triangles subtend `cellAngle` from the camera), which is past ~25 units from the camera at the default breeze.
   - The frame turns about the poles, so the swells fade out within ~10° of them.
 - **Stylised.**
   - The swells are drawn `shoreSteep` (1.5×) steeper than their height gives, so they show from the UFO's height.
@@ -209,3 +210,28 @@ The game's breeze, 7 m/s:
 - The breaker index varies with slope and steepness (Battjes: 0.74–1.16 for ξ from 0.1 to 2). 0.78 is used everywhere.
 - The crests' spacing assumes one seabed slope. A local slope from the baked gradient would space them by distance from the shore, but jumps where the slope changes.
 - No source gives spray onset height or ring size for a rotor over water. Both are stylised.
+
+# The water's look: clear shallows, depth, the sky
+
+## Question
+
+A player found the sea "one solid colour" and asked for something translucent, and two dumps showed a hard edge round the camera where the drawn waves stopped. This section records the stylised look that answers both; it uses no new real-world numbers beyond Fresnel's.
+
+## Sources
+
+- **Schlick's approximation** of Fresnel reflectance, F = F₀ + (1 − F₀)(1 − cos θ)⁵, with water's head-on F₀ = ((n − 1)/(n + 1))² = ((1.333 − 1)/(1.333 + 1))² = 0.0204 for n = 1.333 (computed).
+
+## Game mapping (all stylised)
+
+- **The waves' far fade** runs evenly in the log of the distance, from `farFrom` 80 to `farTo` 600 units. Fading linearly over 50–110 units drew a hard rim round the camera at a low angle, where that whole span covers a few pixel rows. The waves too small for the pixels fade out anyway (`fadeFrom`, `fadeTo`), so the far ones cost little.
+- **Clear shallows.** The water sea is drawn see-through after the ground. Its alpha is 1 − e^(−depth / `clarity`) (1.1 units), opaque by `clearDepth` (5 units).
+  - The terrain's chunks are hidden only where they lie wholly deeper than that (`hiddenBelow`), so the shallows' floor is there to see.
+  - Foam, the sun's glint and the sky's reflection stay opaque: they're light off the surface.
+- **The floor** under a sea is painted sand along the shore, a pale sand with a fifth of the low ground's colour in it. It gives way to the sea's colour by 30% of the way to the deepest floor (`terrainPainter`, with `seaFloor`).
+- **The water's colour** goes from a brighter, greener shallows hue to 0.6× the sea's colour over `deepDepth` (12 units).
+- **Wave crests** are lit through from inside, ±`scatter` (35%) by the drawn height over its RMS.
+- **The sky is reflected** by Schlick's Fresnel with F₀ = 0.02.
+  - The sky's light is the atmosphere's colour × the sun's light × `sky` (0.45).
+  - It is lit where the sky over the water is (the day side and dusk) and is none without air.
+  - So the sea brightens to the horizon, and every wave turned away from the camera catches it.
+- **The downwash's ripples** fade out where they're too fine to draw, are bent and broken by noise, and die away within about a radius past the disc. Before, they ran out as regular, aliasing bands.

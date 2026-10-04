@@ -61,10 +61,16 @@ export type TerrainPainter = (n: number, out: THREE.Color, x: number, y: number,
  * `seed`: a real body's (gen/realSurface.ts) ground takes its colour map's
  * colour at the point's direction (x, y, z) instead of the height ramp.
  */
+/** The sea floor's sand along the shore (stylised), and how deep (a share of the deepest floor) it gives way to the sea's colour. */
+const SEABED_SAND = '#d8c49a';
+const SAND_DEPTH = 0.3;
+
 export function terrainPainter(style: PlanetStyle, seaFloor = false, seed?: number): TerrainPainter {
   const sea = style.sea === null ? null : new THREE.Color(style.sea);
   const low = new THREE.Color(style.low);
   const high = new THREE.Color(style.high);
+  // A pale sand, a little of the low ground's colour in it.
+  const sand = new THREE.Color(SEABED_SAND).lerp(low, 0.2);
   // Without a sea, terrain spans the full noise range [-1, 1].
   const base = sea === null ? -1 : style.seaLevel;
   const real = seed === undefined ? undefined : realSurface(seed);
@@ -72,7 +78,12 @@ export function terrainPainter(style: PlanetStyle, seaFloor = false, seed?: numb
   return (n, out, x, y, z) => {
     const underwater = sea !== null && n < base;
     const height = !underwater ? (n - base) / (1 - base) : seaFloor ? (n - base) / (base + 1) : 0;
-    if (underwater) out.copy(sea).multiplyScalar(seaFloor ? 0.75 + 0.25 * height : 1);
+    // The floor under a sea (seen through clear shallows in low orbit): sand along the shore, going to the sea's own
+    // colour, darkened, further out.
+    if (underwater) {
+      if (seaFloor) out.lerpColors(sand, sea, Math.min(1, -height / SAND_DEPTH)).multiplyScalar(0.85 + 0.15 * height);
+      else out.copy(sea);
+    }
     else if (real) out.setRGB(...surfaceColor(real, x, y, z, rgb), THREE.SRGBColorSpace);
     else out.lerpColors(low, high, height);
     return height;
