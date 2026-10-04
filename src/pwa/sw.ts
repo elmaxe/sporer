@@ -53,8 +53,9 @@ sw.addEventListener('fetch', (event) => {
   url.hash = '';
   if (request.mode === 'navigate' && url.pathname.endsWith('/')) url.pathname += 'index.html';
   if (OWN.has(url.href)) event.respondWith(fromCache(request, url.href));
-  // The list of versions for the menu's picker (ui/versions.ts): the latest, else the last one seen.
-  else if (url.pathname.endsWith('/versions.json')) event.respondWith(networkFirst(request, url.href));
+  // The list of versions for the menu's picker (ui/versions.ts) and the release notes (ui/releaseNotes.ts):
+  // the latest, else the last one seen.
+  else if (/\/(versions|releases)\.json$/.test(url.pathname)) event.respondWith(networkFirst(request, url.href));
 });
 
 async function saveAll(): Promise<void> {

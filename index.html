@@ -39,6 +39,10 @@
     <div id="planet-map" class="map-panel" hidden>
       <div class="map-head">
         <span id="planet-map-title" class="map-title"></span>
+        <div id="planet-map-tabs" class="map-tabs" role="tablist" hidden>
+          <button type="button" role="tab" data-tab="map" aria-selected="true">Map</button>
+          <button type="button" role="tab" data-tab="species" aria-selected="false">Species</button>
+        </div>
         <button id="planet-map-toggle" class="map-toggle" type="button" aria-expanded="true">
           <svg class="fold" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6" /></svg>
           <svg class="close" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18" /></svg>
@@ -46,6 +50,7 @@
       </div>
       <div class="map-body">
         <canvas id="planet-map-marks" class="map-canvas"></canvas>
+        <div id="planet-species" class="species-list" hidden></div>
       </div>
     </div>
     <div id="system-map" class="map-panel" hidden>
@@ -109,14 +114,20 @@
           <button id="menu-fps" class="menu-button" type="button" aria-pressed="false">Show FPS</button>
           <button id="graphics-weather" class="menu-button" type="button" aria-pressed="true">Weather: on</button>
           <button id="graphics-plants" class="menu-button" type="button" aria-pressed="true">Plants: on</button>
+          <button id="graphics-animals" class="menu-button" type="button" aria-pressed="true">Animals: on</button>
           <button id="graphics-wireframe" class="menu-button" type="button" aria-pressed="false">Wireframe: off</button>
           <button id="graphics-freeze" class="menu-button" type="button" aria-pressed="false">Freeze view: off</button>
-          <p>Weather is clouds, storms, rain and lightning; plants stand on habitable planets in low orbit (off by default on phones). Turn them off if the game runs slowly. Wireframe draws the planets, moons and ship as their triangles (turn Weather off to see under the clouds). Freeze view (F) keeps what's drawn as it was for the camera then, and outlines what that camera saw, while you turn and zoom the camera to look at it from outside.</p>
+          <p>Weather is clouds, storms, rain and lightning; plants stand and animals roam on habitable planets in low orbit (both off by default on phones). Turn them off if the game runs slowly. Wireframe draws the planets, moons and ship as their triangles (turn Weather off to see under the clouds). Freeze view (F) keeps what's drawn as it was for the camera then, and outlines what that camera saw, while you turn and zoom the camera to look at it from outside.</p>
         </section>
         <section id="menu-lab-section">
           <h3>Planet lab</h3>
           <p>Build any planet or moon, change everything about it and look at it up close.</p>
           <a id="menu-lab" class="menu-button" href="lab.html" target="_blank" rel="noopener">Open the planet lab</a>
+        </section>
+        <section id="menu-stars-section">
+          <h3>Star lab</h3>
+          <p>Change a star's kind, size, colour and storms, and roll or tune the system round it.</p>
+          <a id="menu-stars" class="menu-button" href="stars.html" target="_blank" rel="noopener">Open the star lab</a>
         </section>
         <section id="menu-dump-section">
           <h3>Report a problem</h3>
@@ -128,6 +139,11 @@
           <p id="menu-refresh-status"></p>
           <button id="menu-refresh" class="menu-button" type="button">Refresh</button>
         </section>
+        <section id="menu-notes-section" hidden>
+          <h3>What's new</h3>
+          <p id="menu-notes-latest"></p>
+          <button id="menu-notes" class="menu-button" type="button">Release notes</button>
+        </section>
         <section id="menu-version-section" hidden>
           <h3>Version</h3>
           <p>Play the release, the preview of what's coming next, or a pull request's build. An app added to the home screen opens the one you pick from then on.</p>
@@ -136,6 +152,25 @@
         <p class="menu-keys">Esc: menu · M: mute · F: freeze view · F8: debug dump</p>
         <p id="menu-build" class="menu-build"></p>
       </div>
+    </div>
+    <div id="notes" role="dialog" aria-modal="true" aria-labelledby="notes-title" hidden>
+      <div id="notes-panel">
+        <div class="menu-head">
+          <h2 id="notes-title">What's new</h2>
+          <button id="notes-close" type="button" aria-label="Close release notes">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18" /></svg>
+          </button>
+        </div>
+        <p id="notes-build" hidden></p>
+        <div id="notes-list"></div>
+      </div>
+    </div>
+    <div id="notes-notice" role="status" hidden>
+      <span id="notes-notice-text"></span>
+      <button id="notes-notice-open" type="button">What's new</button>
+      <button id="notes-notice-close" type="button" aria-label="Dismiss">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18" /></svg>
+      </button>
     </div>
     <div id="dump" role="dialog" aria-modal="true" aria-labelledby="dump-title" hidden>
       <div id="dump-panel">

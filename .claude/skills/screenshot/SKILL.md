@@ -30,6 +30,8 @@ npm run shot -- --out <dir> --clean [--sheet] [--star <id>] <steps...>
 - **`--dump <file>`**: restore a debug dump's state (the player's `sporer-dump-*.json`, see `debug-dump`) at its page size and quality, then run the steps (default `shot:restored`). The game is left paused there.
 - **`--lab [<query>]`**: shoot the planet lab (`lab.html`) instead of the game, e.g. `--lab "gen=7&type=ice&kind=moon"` or `--lab "seed=1337&star=5&planet=2"`. See *The planet lab* below.
 - **`--plants [<query>]`**: shoot the plant lab (`plants.html`), e.g. `--plants "gen=4&kind=tree&arch=palm&view=lineup"` or `--plants "seed=1337&star=6&planet=0"`. See *The plant lab* below.
+- **`--animals [<query>]`**: shoot the animal lab (`animals.html`), e.g. `--animals "gen=4&diet=carnivore&plan=biped&pace=trot"` or `--animals "seed=1337&star=6&planet=0&view=herds"`. See *The animal lab* below.
+- **`--stars [<query>]`**: shoot the star lab (`stars.html`), e.g. `--stars "gen=4&kind=redGiant"` or `--stars "seed=1337&star=6&view=system"`. See *The star lab* below.
 
 Steps run in order. With no steps, you get `shot:view`.
 
@@ -163,6 +165,51 @@ npm run shot -- --out $OUT --clean --sheet --plants "gen=4&kind=tree&arch=palm&v
 npm run shot -- --out $OUT --clean --sheet --plants "gen=7&kind=tree&arch=broadleaf" "js:plantLab.look(0, 10, 2)" shot:near "js:plantLab.look(0, 10, 20)" wait:1000 shot:mid "js:plantLab.look(0, 10, 34)" wait:1000 shot:far
 # A grove from the UFO's height, levels tinted
 npm run shot -- --out $OUT --clean --plants "gen=12&view=grove" "js:plantLab.setView({ showLods: true })" "js:plantLab.look(0, 25, 80)" settle shot:grove
+```
+
+## The animal lab
+
+For how animals look and move (bodies, coats, the walk and trot, grazing, levels of detail, herds), shoot the animal lab: it grows the species you ask for with the game's own code (`gen/animalForm.ts`, `gen/animals.ts`, `surface/animalMesh.ts`) and draws and walks them with the game's shader (`surface/animalLook.ts`). The page has `game` and `animalLab` (`src/animallab/AnimalLab.ts`); every call returns a promise that resolves once it's drawn, and `settle` waits for `animalLab.ready`.
+
+| Call | Does |
+|---|---|
+| `animalLab.generate(seed, { tier, diet, plan })` | a new set of species, as a planet of that tier has (diet: herbivore, carnivore; plan: quadruped, hexapod, biped) |
+| `animalLab.load(galaxySeed, star, planet, moon?, species?)` | a game planet's animals (and its gravity) |
+| `animalLab.select(i)` | show and edit species `i` of the set |
+| `animalLab.set({ length: 4, form: { neckLength: 0.8 } })`, `animalLab.setForm({ pattern: 'stripes' })` | edit the selected species |
+| `animalLab.setBodyPlan('hexapod')`, `animalLab.reroll()` | another body plan, or new proportions of the same one (the coat kept) |
+| `animalLab.setView({ view: 'specimen' \| 'lineup' \| 'species' \| 'herds', pace: 'stand' \| 'graze' \| 'walk' \| 'trot', speed, gravity, lod: 'auto' \| 0..2, showLods, wireframe, skeleton })` | what to show and what the specimen does (it walks round a circle and the camera follows) |
+| `animalLab.look(yaw, pitch, distance)`, `animalLab.lookAtHerd(i)` | camera (degrees; distance in the animal's lengths, the herds' in units), or over the i-th nearest herd |
+| `animalLab.level.lods`, `.skeleton`, `.gait`, `.lodNow()`, `.herds.stats()` | what got built: triangles per level, the skeleton, speeds and strides, the level at the camera now, the herds' counts |
+
+```bash
+# The whole set side by side, then one animal trotting, side on
+npm run shot -- --out $OUT --clean --sheet --animals "gen=11&view=species" "js:animalLab.look(30, 12, 9)" settle shot:set "js:animalLab.setView({ view: 'specimen', pace: 'trot' })" "js:animalLab.look(-90, 8, 2.2)" wait:2000 shot:trot
+# Herds roaming the lab's planet, from the UFO's height
+npm run shot -- --out $OUT --clean --animals "gen=11&view=herds" settle "js:animalLab.look(30, 35, 25)" settle shot:herd
+```
+
+## The star lab
+
+For how stars look (surface, spots, corona, prominences and flares, binaries) and for whole systems (how the generator lays them out, with the system tuner's changes), shoot the star lab: it draws with the game's own `StarSystem`. The page has `game` and `starLab` (`src/starlab/StarLab.ts`); every call returns a promise that resolves once it's drawn, and `settle` waits for `starLab.ready`.
+
+| Call | Does |
+|---|---|
+| `starLab.generate(seed, { kind, spectralClass, binary, young })` | a new star (or pair) and system (kind: mainSequence, redDwarf, whiteDwarf, redGiant, blueGiant) |
+| `starLab.load(galaxySeed, star)` | a game system's star(s) and seed (`star`: an id, or `'sol'`) |
+| `starLab.setStar({ kind, spectralClass, color, radius, luminosity, mass })` | edit the selected star (a new kind or class starts from that kind's typical star); `select(i)` picks the companion |
+| `starLab.setActivity({ spots: 1, flare: { chance: 1 } })`, `resetActivity()`, `rerollLook()` | how it lives (gen/starActivity.ts), back to its kind's, or another look round its kind's |
+| `starLab.setBinary(true)`, `setYoung(true)`, `rerollSystem(seed?)` | a companion, a protoplanetary disc, another system round the same star |
+| `starLab.setTuning({ planets: 9, spacing: 0.6, moons: 2, comets: 4, mainBelt: true, debris: false })` | the system tuner (`null` puts one back to as drawn) |
+| `starLab.setView({ view: 'star' \| 'system', speed, trails, starfield, wireframe })` | what to show; `speed: 0` stops time |
+| `starLab.focus(name)`, `look(yaw, pitch, distance)`, `setTime(t)` | follow a body (null: the whole system), place the camera (degrees, units), jump the clock |
+| `starLab.system`, `starLab.level.world` | the system as generated, and the `StarSystem` drawing it |
+
+```bash
+# A red dwarf covered in spots, flaring
+npm run shot -- --out $OUT --clean --stars "gen=5&kind=redDwarf" "js:starLab.setActivity({ spots: 1, flare: { chance: 1, interval: 1 } })" "js:starLab.setTime(120)" settle shot:dwarf
+# A game system whole, then with nine planets packed close
+npm run shot -- --out $OUT --clean --stars "seed=1337&star=6&view=system" shot:system "js:starLab.setTuning({ planets: 9, spacing: 0.5 })" shot:tuned
 ```
 
 ## Tips

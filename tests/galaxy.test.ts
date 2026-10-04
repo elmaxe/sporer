@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { binaryLayout, galaxyMemberSize, galaxyStarSize } from '../src/galaxy/appearance';
+import { binaryLayout, galaxyGlows, galaxyMemberSize, galaxyStarSize } from '../src/galaxy/appearance';
 import { pickPoint } from '../src/galaxy/pickPoint';
-import { generateDust, generateGalaxy, type StarRef } from '../src/gen/galaxy';
+import { generateDust, generateGalaxy, generateHaze, type StarRef } from '../src/gen/galaxy';
 import type { StarData, StarKind } from '../src/gen/stars';
 
 describe('galaxyStarSize', () => {
@@ -126,13 +126,15 @@ describe('generateDust', () => {
     for (const c of dust) expect(Math.abs(c.position.y)).toBeLessThan(galaxy.radius * 0.15);
   });
 
-  it('shapes clouds as flat ellipsoids lying along their arm', () => {
+  it('shapes clouds as puffy ellipsoids lying along their arm', () => {
     const dust = generateDust(galaxy, 500);
     const t = { x: 0, z: 0 };
     let aligned = 0;
     for (const c of dust) {
       expect(c.length).toBeGreaterThan(c.width);
       expect(c.width).toBeGreaterThan(c.thickness);
+      // Thick enough to still read as a cloud seen edge-on.
+      expect(c.thickness).toBeGreaterThan(c.width * 0.35);
       // Direction of the arm here, from two nearby points on the same arm curve.
       const theta = Math.atan2(c.position.z, c.position.x);
       const d = Math.hypot(c.position.x, c.position.z);
@@ -146,5 +148,51 @@ describe('generateDust', () => {
       if (cos > Math.cos(0.5)) aligned++;
     }
     expect(aligned / dust.length).toBeGreaterThan(0.9);
+  });
+});
+
+/** Angle (radians) from the nearest arm's centreline at `p`'s radius. */
+function armOffset(galaxy: ReturnType<typeof generateGalaxy>, p: { x: number; z: number }): number {
+  const t = (Math.hypot(p.x, p.z) / galaxy.radius - 0.08) / 0.92;
+  let best = Infinity;
+  for (let arm = 0; arm < galaxy.arms; arm++) {
+    const centre = galaxy.armOffset + (arm / galaxy.arms) * Math.PI * 2 + t * galaxy.twist;
+    const diff = Math.atan2(Math.sin(Math.atan2(p.z, p.x) - centre), Math.cos(Math.atan2(p.z, p.x) - centre));
+    best = Math.min(best, Math.abs(diff));
+  }
+  return best;
+}
+
+describe('generateHaze', () => {
+  const galaxy = generateGalaxy(1337, 10);
+
+  it('is deterministic', () => {
+    expect(generateHaze(galaxy, 30)).toEqual(generateHaze(galaxy, 30));
+  });
+
+  it('wraps the arms in big, thick clouds', () => {
+    const haze = generateHaze(galaxy, 300);
+    const gas = generateDust(galaxy, 300);
+    const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+    expect(mean(haze.map((c) => c.width))).toBeGreaterThan(2 * mean(gas.map((c) => c.width)));
+    expect(mean(haze.map((c) => c.thickness))).toBeGreaterThan(2.5 * mean(gas.map((c) => c.thickness)));
+    const near = haze.filter((c) => armOffset(galaxy, c.position) < 0.5).length / haze.length;
+    expect(near).toBeGreaterThan(0.8);
+  });
+});
+
+describe('galaxyGlows', () => {
+  it('has a nucleus inside the bulge that only shines from outside the galaxy', () => {
+    const r = 1000;
+    const [disc, bulge, nucleus] = galaxyGlows(r);
+    expect(disc!.zoomedOut).toBeUndefined();
+    expect(bulge!.zoomedOut).toBeUndefined();
+    expect(nucleus!.radii.x).toBeLessThan(bulge!.radii.x / 2);
+    expect(nucleus!.radii.y).toBeLessThan(bulge!.radii.y);
+    // Off over most of the disc, full once the whole galaxy is in view.
+    const [off, full] = nucleus!.zoomedOut!;
+    expect(off).toBeGreaterThan(r * 0.5);
+    expect(full).toBeGreaterThan(off);
+    expect(full).toBeLessThan(r * 2.6);
   });
 });
