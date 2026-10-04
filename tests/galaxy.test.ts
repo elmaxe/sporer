@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { binaryLayout, galaxyMemberSize, galaxyStarSize } from '../src/galaxy/appearance';
+import { binaryLayout, galaxyGlows, galaxyMemberSize, galaxyStarSize } from '../src/galaxy/appearance';
 import { pickPoint } from '../src/galaxy/pickPoint';
 import { generateDust, generateGalaxy, generateHaze, type StarRef } from '../src/gen/galaxy';
 import type { StarData, StarKind } from '../src/gen/stars';
@@ -178,5 +178,21 @@ describe('generateHaze', () => {
     expect(mean(haze.map((c) => c.thickness))).toBeGreaterThan(2.5 * mean(gas.map((c) => c.thickness)));
     const near = haze.filter((c) => armOffset(galaxy, c.position) < 0.5).length / haze.length;
     expect(near).toBeGreaterThan(0.8);
+  });
+});
+
+describe('galaxyGlows', () => {
+  it('has a nucleus inside the bulge that only shines from outside the galaxy', () => {
+    const r = 1000;
+    const [disc, bulge, nucleus] = galaxyGlows(r);
+    expect(disc!.zoomedOut).toBeUndefined();
+    expect(bulge!.zoomedOut).toBeUndefined();
+    expect(nucleus!.radii.x).toBeLessThan(bulge!.radii.x / 2);
+    expect(nucleus!.radii.y).toBeLessThan(bulge!.radii.y);
+    // Off over most of the disc, full once the whole galaxy is in view.
+    const [off, full] = nucleus!.zoomedOut!;
+    expect(off).toBeGreaterThan(r * 0.5);
+    expect(full).toBeGreaterThan(off);
+    expect(full).toBeLessThan(r * 2.6);
   });
 });

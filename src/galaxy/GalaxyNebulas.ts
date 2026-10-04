@@ -54,7 +54,8 @@ export class GalaxyNebulas implements Entity {
     this.frame.matrixAutoUpdate = false;
     this.volumes.add(this.frame);
     // The glow in front of a nebula isn't dimmed by it, only the glow behind.
-    const glows = { glows: galaxyGlows(galaxyRadius), near: GLOW_NEAR };
+    // (Not the nucleus: it only shines from far out, where the nebulas are small.)
+    const glows = { glows: galaxyGlows(galaxyRadius).filter((g) => !g.zoomedOut), near: GLOW_NEAR };
     this.meshes = nebulas.map((n) => {
       const mesh = createNebulaMesh(n, 'map', glows);
       placeNebula(mesh, n);
