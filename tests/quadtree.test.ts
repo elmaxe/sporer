@@ -54,6 +54,25 @@ describe('cube sphere quadtree', () => {
     }
   });
 
+  it('folds a point just off a face over its edge onto the next face’s grid point, to the bit', () => {
+    const n = CHUNK_CELLS;
+    const p: FacePoint = { face: 0, s: 0, t: 0 };
+    for (let face = 0; face < 6; face++) {
+      for (let edge = 0 as Edge; edge < 4; edge++) {
+        edgeNeighbour(face, 0, 0, 0, edge, p);
+        // The neighbour face's points one cell in from its border.
+        const inside = new Set<string>();
+        for (let e = 0; e <= n; e++) {
+          for (const [i, j] of [[e, 1], [e, n - 1], [1, e], [n - 1, e]]) inside.add(key(faceGridPoint(p.face, i!, j!, n, point())));
+        }
+        for (let e = 0; e <= n; e++) {
+          const [i, j] = edge === 0 ? [-1, e] : edge === 1 ? [n + 1, e] : edge === 2 ? [e, -1] : [e, n + 1];
+          expect(inside.has(key(faceGridPoint(face, i, j, n, point())))).toBe(true);
+        }
+      }
+    }
+  });
+
   it('finds the neighbour inside the same face next door', () => {
     const p: FacePoint = { face: 0, s: 0, t: 0 };
     edgeNeighbour(2, 3, 4, 5, 1, p);
@@ -262,16 +281,78 @@ describe('LOD surface', () => {
     surface.dispose();
   });
 
+  /**
+   * Points on chunks' edges drawn by more than one chunk near `up` (inside
+   * the horizon) whose normals differ, and how many shared points there were.
+   */
+  const normalSeams = (surface: LodSurface, up: THREE.Vector3) => {
+    const side = CHUNK_CELLS + 1;
+    const at = new Map<string, Set<string>>();
+    const v = new THREE.Vector3();
+    for (const mesh of drawn(surface)) {
+      const p = mesh.geometry.getAttribute('position') as THREE.BufferAttribute;
+      const n = mesh.geometry.getAttribute('normal') as THREE.BufferAttribute;
+      for (let e = 0; e <= CHUNK_CELLS; e++) {
+        for (const i of [e, e * side, e * side + CHUNK_CELLS, CHUNK_CELLS * side + e]) {
+          v.fromBufferAttribute(p, i);
+          if (v.clone().normalize().dot(up) < Math.cos(0.6)) continue;
+          const k = `${v.x},${v.y},${v.z}`;
+          const normals = at.get(k) ?? new Set<string>();
+          normals.add(`${n.getX(i)},${n.getY(i)},${n.getZ(i)}`);
+          at.set(k, normals);
+        }
+      }
+    }
+    return { points: at.size, unmatched: [...at.values()].filter((n) => n.size > 1).length };
+  };
+
+  it.each([
+    ['the same everywhere', bumpy],
+    ['finer where sampled finer', detailed],
+  ])('shades smoothly: normals follow the slopes, and chunks agree on them where they meet (%s)', (_, sample) => {
+    const surface = make(sample);
+    const camera = new THREE.Vector3(0.3, 0.4, 1).setLength(R * 1.12);
+    expect(settle(surface, camera)).toBe(true);
+    const settled = normalSeams(surface, camera.clone().normalize());
+    expect(settled.points).toBeGreaterThan(1000);
+    expect(settled.unmatched).toBe(0);
+    // Tilted off the vertical by the bumps (not a sphere's normals).
+    let tilt = 0;
+    let count = 0;
+    const p = new THREE.Vector3();
+    const n = new THREE.Vector3();
+    for (const mesh of drawn(surface)) {
+      const position = mesh.geometry.getAttribute('position') as THREE.BufferAttribute;
+      const normal = mesh.geometry.getAttribute('normal') as THREE.BufferAttribute;
+      for (let i = 0; i < position.count; i++) {
+        tilt += n.fromBufferAttribute(normal, i).angleTo(p.fromBufferAttribute(position, i));
+        count++;
+      }
+    }
+    expect(tilt / count).toBeGreaterThan(0.1);
+    // And while chunks blend in and out.
+    const budget = lodParams.budgetMs;
+    lodParams.budgetMs = 0;
+    for (let i = 0; i < 120; i++) {
+      if (i < 60) camera.applyAxisAngle(new THREE.Vector3(1, 0, 0), 0.004);
+      else camera.setLength(R * (1.12 + (i - 60) * 0.03));
+      surface.update(camera, 0.03);
+      expect(normalSeams(surface, camera.clone().normalize()).unmatched).toBe(0);
+    }
+    lodParams.budgetMs = budget;
+    surface.dispose();
+  });
+
   it('shows a new chunk first exactly where its parent was, even where it samples finer detail', () => {
     const surface = make(detailed);
     expect(settle(surface, new THREE.Vector3(0, 0, R * 20))).toBe(true);
-    // Where every drawn vertex is now, by its direction (the chunks keep it as the normal).
+    // Where every drawn vertex is now, by its direction (geometry.userData.directions).
     const where = (meshes: THREE.Mesh[]) => {
       const out = new Map<string, string>();
       for (const m of meshes) {
-        const n = m.geometry.getAttribute('normal');
+        const d = m.geometry.userData.directions as Float32Array;
         const p = m.geometry.getAttribute('position');
-        for (let i = 0; i < n.count; i++) out.set(`${n.getX(i)},${n.getY(i)},${n.getZ(i)}`, `${p.getX(i)},${p.getY(i)},${p.getZ(i)}`);
+        for (let i = 0; i < p.count; i++) out.set(`${d[i * 3]},${d[i * 3 + 1]},${d[i * 3 + 2]}`, `${p.getX(i)},${p.getY(i)},${p.getZ(i)}`);
       }
       return out;
     };

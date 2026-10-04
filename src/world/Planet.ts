@@ -174,7 +174,7 @@ export class Planet implements Entity, CelestialBody {
       gas
         ? createGasGeometry(radius, seed, config.bands, GAS_SEGMENTS, config.size === 'iceGiant')
         : createTerrainGeometry(radius, seed, style, { segments: terrainSegments(config, this.lava !== null), noise: surfaceNoise(config, false), shape: config.shape }),
-      new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: !gas, roughness: 0.9 }),
+      new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 }),
     );
     // Lava seas glow on the terrain's own flat sea.
     this.lava?.paintTerrain(this.surface.material, radius);
