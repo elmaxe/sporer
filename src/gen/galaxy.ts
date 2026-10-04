@@ -11,7 +11,11 @@ import { generateCompanion, generateStar, type StarData } from './stars';
 export const GALAXY_RADIUS = 1000;
 export const DEFAULT_STAR_COUNT = 4000;
 export const DEFAULT_DUST_COUNT = 1200;
-const BINARY_CHANCE = 0.15;
+/** The galaxy the game opens without a ?seed (as the URL's text). */
+export const DEFAULT_GALAXY_SEED = '1337';
+
+/** Share of systems with two stars. */
+export const BINARY_CHANCE = 0.15;
 
 /**
  * A star as seen on the galaxy map. Only this is generated up front; the

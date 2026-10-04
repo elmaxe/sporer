@@ -13,6 +13,8 @@
 //                      --plants "seed=1337&star=5&planet=1&species=2"; drive it with js:plantLab.set(...) and the like
 //   --animals [<query>] the animal lab (animals.html), e.g. --animals "gen=4&diet=carnivore&plan=biped&pace=trot" or
 //                      --animals "seed=1337&star=6&planet=0&view=herds"; drive it with js:animalLab.set(...) and the like
+//   --stars [<query>]  the star lab (stars.html), e.g. --stars "gen=4&kind=redGiant&view=system" or --stars
+//                      "seed=1337&star=5" (a game system; star=sol our own); drive it with js:starLab.setStar(...) and the like
 //   --out <dir>        where PNGs go (default: a new temp dir); created if missing
 //   --size <w>x<h>     page size in CSS pixels (default 1280x720)
 //   --phone            an emulated phone: 390x844 (unless --size), mobile, touch events (the game's touch mode)
@@ -25,6 +27,8 @@
 //                      (a phone's in --phone mode) and quality, then restore its state (level, body, clocks,
 //                      ship, camera, graphics switches) and leave the game paused there; the notes on what
 //                      couldn't be matched are the first result. With no steps: shot:restored. See debug-dump.
+//                      A dump taken in the planet or plant lab opens that lab at its #hash (the exact planet or
+//                      plants and view) and restores its camera (and the planet lab's clock and UFO).
 //
 // Steps, run in order (with no steps: shot:view):
 //   shot:<name>                  screenshot → <name>.png
@@ -52,11 +56,13 @@
 //   goto:<url or ?params>        load another page (e.g. goto:?star=2) and wait for the game
 //
 // Page globals (dev build): game, levels, galaxy, ship, world, system, planet, audio, menu, debugDump, generateSystem.
-// In the lab: game and lab (src/lab/PlanetLab.ts: lab.set, setView, generate, load, look, setTime, ...);
-// settle there waits for lab.ready (the latest edit built and drawn). In the plant lab: game and plantLab
+// In the lab: game, debugDump and lab (src/lab/PlanetLab.ts: lab.set, setView, generate, load, look, setTime, ...);
+// settle there waits for lab.ready (the latest edit built and drawn). In the plant lab: game, debugDump and plantLab
 // (src/plantlab/PlantLab.ts: plantLab.set, setForm, select, setView, generate, load, look, ...), settle waits for plantLab.ready.
 // In the animal lab: game and animalLab (src/animallab/AnimalLab.ts: animalLab.set, setForm, select, setBodyPlan, setView,
 // generate, load, look, ...), settle waits for animalLab.ready.
+// In the star lab: game and starLab (src/starlab/StarLab.ts: starLab.setStar, setActivity, setTuning, setView, generate,
+// load, focus, look, setTime, ...), settle waits for starLab.ready.
 // Prints JSON: { ok, failure, out, shots, results, errors } (errors: console errors/warnings/exceptions).
 // A failing step stops the run, saves failure.png and exits 1.
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -82,6 +88,9 @@ for (let i = 0; i < args.length; i++) {
     opts.lab = true;
     // An optional query right after it (anything not starting with -- and not a step).
     if (i + 1 < args.length && !args[i + 1].startsWith('--') && !/^[a-z]+(:|$)/.test(args[i + 1])) opts.labQuery = args[++i];
+  } else if (a === '--stars') {
+    opts.stars = true;
+    if (i + 1 < args.length && !args[i + 1].startsWith('--') && !/^[a-z]+(:|$)/.test(args[i + 1])) opts.starsQuery = args[++i];
   } else if (a === '--animals') {
     opts.animals = true;
     if (i + 1 < args.length && !args[i + 1].startsWith('--') && !/^[a-z]+(:|$)/.test(args[i + 1])) opts.animalsQuery = args[++i];
@@ -102,10 +111,17 @@ for (let i = 0; i < args.length; i++) {
   else steps.push(a);
 }
 if (opts.dump) {
-  const { state, device, url: dumpUrl } = opts.dump;
-  if (!state) throw new Error(`The dump has no game state (${opts.dump.stateError ?? 'unknown why'})`);
-  if (state.seed !== null) opts.params.seed ??= state.seed;
-  opts.params.star ??= String(state.star);
+  const { state, lab, device, url: dumpUrl } = opts.dump;
+  if (lab) {
+    // A lab's dump: that lab, at the dump's planet or plants (its #hash).
+    if (lab.page === 'plant-lab') opts.plants = true;
+    else opts.lab = true;
+    opts.hash = lab.hash;
+  } else {
+    if (!state) throw new Error(`The dump has no game state (${opts.dump.stateError ?? 'unknown why'})`);
+    if (state.seed !== null) opts.params.seed ??= state.seed;
+    opts.params.star ??= String(state.star);
+  }
   if (new URL(dumpUrl).searchParams.get('quality') === 'low') opts.params.quality = 'low';
   if (device.touch) opts.phone = true;
   if (!args.includes('--size')) opts.size = device.viewport.join('x');
@@ -115,7 +131,9 @@ if (steps.length === (opts.dump ? 1 : 0)) steps.push(opts.dump ? 'shot:restored'
 
 if (opts.phone && !args.includes('--size') && !opts.dump) opts.size = '390x844';
 const [width, height] = opts.size.split('x').map(Number);
-const page_ = opts.animals
+const page_ = opts.stars
+  ? `stars.html${opts.starsQuery ? `?${opts.starsQuery.replace(/^\?/, '')}` : ''}`
+  : opts.animals
   ? `animals.html${opts.animalsQuery ? `?${opts.animalsQuery.replace(/^\?/, '')}` : ''}`
   : opts.plants
   ? `plants.html${opts.plantsQuery ? `?${opts.plantsQuery.replace(/^\?/, '')}` : ''}`
@@ -124,10 +142,11 @@ const page_ = opts.animals
     : '';
 const url = new URL(page_, opts.url);
 for (const [k, v] of Object.entries(opts.params)) url.searchParams.set(k, v);
+if (opts.hash) url.hash = opts.hash;
 /** True once the page's game (or the lab) is running. */
-const STARTED = `typeof window.lab !== 'undefined' || typeof window.plantLab !== 'undefined' || typeof window.animalLab !== 'undefined' || (typeof window.levels !== 'undefined' && typeof window.ship !== 'undefined')`;
+const STARTED = `typeof window.lab !== 'undefined' || typeof window.plantLab !== 'undefined' || typeof window.animalLab !== 'undefined' || typeof window.starLab !== 'undefined' || (typeof window.levels !== 'undefined' && typeof window.ship !== 'undefined')`;
 /** True when nothing is changing: no level transition in the game, the latest edit built and drawn in the lab. */
-const SETTLED = `typeof window.animalLab !== 'undefined' ? animalLab.ready : typeof window.plantLab !== 'undefined' ? plantLab.ready : typeof window.lab !== 'undefined' ? lab.ready : !levels.transitioning`;
+const SETTLED = `typeof window.starLab !== 'undefined' ? starLab.ready : typeof window.animalLab !== 'undefined' ? animalLab.ready : typeof window.plantLab !== 'undefined' ? plantLab.ready : typeof window.lab !== 'undefined' ? lab.ready : !levels.transitioning`;
 const out = resolve(opts.out ?? mkdtempSync(join(tmpdir(), 'spore2-shots-')));
 mkdirSync(out, { recursive: true });
 
@@ -325,7 +344,7 @@ async function run(step) {
       });
       return;
     case 'restore':
-      results.push({ step, value: await page.evaluate(`debugDump.restore(${JSON.stringify(opts.dump.state)})`, 300000) });
+      results.push({ step, value: await page.evaluate(`debugDump.restore(${JSON.stringify(opts.dump.lab ?? opts.dump.state)})`, 300000) });
       return;
     case 'goto': {
       const next = new URL(rest, url);

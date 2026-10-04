@@ -17,6 +17,8 @@ export class PlantLabInfo implements Entity {
   private readonly back = document.createElement('a');
   private readonly planet = document.createElement('a');
   private readonly details = document.createElement('button');
+  /** Opens the debug dump (DebugDumpControl finds it by its id). */
+  private readonly report = document.createElement('button');
   private readonly head = document.createElement('div');
   private readonly table = document.createElement('table');
   private readonly help = document.createElement('div');
@@ -36,9 +38,14 @@ export class PlantLabInfo implements Entity {
     this.details.type = 'button';
     this.details.className = 'lab-details';
     this.details.addEventListener('click', this.onDetails);
+    this.report.type = 'button';
+    this.report.id = 'lab-dump';
+    this.report.className = 'lab-back';
+    this.report.textContent = 'Report';
+    this.report.title = 'Save a debug dump (F8): the screen, your marks and a note, and these plants, in one file to send';
     const links = document.createElement('div');
     links.className = 'lab-links';
-    links.append(this.back, this.planet);
+    links.append(this.back, this.planet, this.report);
     top.append(links, this.details);
     this.help.className = 'lab-help';
     this.root.append(top, this.head, this.table, this.help);

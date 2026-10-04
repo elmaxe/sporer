@@ -31,6 +31,7 @@ npm run shot -- --out <dir> --clean [--sheet] [--star <id>] <steps...>
 - **`--lab [<query>]`**: shoot the planet lab (`lab.html`) instead of the game, e.g. `--lab "gen=7&type=ice&kind=moon"` or `--lab "seed=1337&star=5&planet=2"`. See *The planet lab* below.
 - **`--plants [<query>]`**: shoot the plant lab (`plants.html`), e.g. `--plants "gen=4&kind=tree&arch=palm&view=lineup"` or `--plants "seed=1337&star=6&planet=0"`. See *The plant lab* below.
 - **`--animals [<query>]`**: shoot the animal lab (`animals.html`), e.g. `--animals "gen=4&diet=carnivore&plan=biped&pace=trot"` or `--animals "seed=1337&star=6&planet=0&view=herds"`. See *The animal lab* below.
+- **`--stars [<query>]`**: shoot the star lab (`stars.html`), e.g. `--stars "gen=4&kind=redGiant"` or `--stars "seed=1337&star=6&view=system"`. See *The star lab* below.
 
 Steps run in order. With no steps, you get `shot:view`.
 
@@ -186,6 +187,29 @@ For how animals look and move (bodies, coats, the walk and trot, grazing, levels
 npm run shot -- --out $OUT --clean --sheet --animals "gen=11&view=species" "js:animalLab.look(30, 12, 9)" settle shot:set "js:animalLab.setView({ view: 'specimen', pace: 'trot' })" "js:animalLab.look(-90, 8, 2.2)" wait:2000 shot:trot
 # Herds roaming the lab's planet, from the UFO's height
 npm run shot -- --out $OUT --clean --animals "gen=11&view=herds" settle "js:animalLab.look(30, 35, 25)" settle shot:herd
+```
+
+## The star lab
+
+For how stars look (surface, spots, corona, prominences and flares, binaries) and for whole systems (how the generator lays them out, with the system tuner's changes), shoot the star lab: it draws with the game's own `StarSystem`. The page has `game` and `starLab` (`src/starlab/StarLab.ts`); every call returns a promise that resolves once it's drawn, and `settle` waits for `starLab.ready`.
+
+| Call | Does |
+|---|---|
+| `starLab.generate(seed, { kind, spectralClass, binary, young })` | a new star (or pair) and system (kind: mainSequence, redDwarf, whiteDwarf, redGiant, blueGiant) |
+| `starLab.load(galaxySeed, star)` | a game system's star(s) and seed (`star`: an id, or `'sol'`) |
+| `starLab.setStar({ kind, spectralClass, color, radius, luminosity, mass })` | edit the selected star (a new kind or class starts from that kind's typical star); `select(i)` picks the companion |
+| `starLab.setActivity({ spots: 1, flare: { chance: 1 } })`, `resetActivity()`, `rerollLook()` | how it lives (gen/starActivity.ts), back to its kind's, or another look round its kind's |
+| `starLab.setBinary(true)`, `setYoung(true)`, `rerollSystem(seed?)` | a companion, a protoplanetary disc, another system round the same star |
+| `starLab.setTuning({ planets: 9, spacing: 0.6, moons: 2, comets: 4, mainBelt: true, debris: false })` | the system tuner (`null` puts one back to as drawn) |
+| `starLab.setView({ view: 'star' \| 'system', speed, trails, starfield, wireframe })` | what to show; `speed: 0` stops time |
+| `starLab.focus(name)`, `look(yaw, pitch, distance)`, `setTime(t)` | follow a body (null: the whole system), place the camera (degrees, units), jump the clock |
+| `starLab.system`, `starLab.level.world` | the system as generated, and the `StarSystem` drawing it |
+
+```bash
+# A red dwarf covered in spots, flaring
+npm run shot -- --out $OUT --clean --stars "gen=5&kind=redDwarf" "js:starLab.setActivity({ spots: 1, flare: { chance: 1, interval: 1 } })" "js:starLab.setTime(120)" settle shot:dwarf
+# A game system whole, then with nine planets packed close
+npm run shot -- --out $OUT --clean --stars "seed=1337&star=6&view=system" shot:system "js:starLab.setTuning({ planets: 9, spacing: 0.5 })" shot:tuned
 ```
 
 ## Tips

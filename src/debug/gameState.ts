@@ -14,7 +14,9 @@ import type { Planet } from '../world/Planet';
 import type { StarSystem } from '../world/StarSystem';
 import { weatherParams } from '../world/weatherLook';
 import { wireframeParams } from '../world/wireframe';
+import type { DumpSource } from './DebugDump';
 import type { BodyRef, GameState, Quat4, Vec3 } from './dumpFormat';
+import { frames, overlayRects } from './page';
 
 /**
  * Reads the game's state into a debug dump (`captureGameState`) and puts the
@@ -99,18 +101,6 @@ const OVERLAYS = [
   'menu-toggle',
   'fps',
 ];
-
-function overlays(): GameState['ui']['overlays'] {
-  const out: GameState['ui']['overlays'] = [];
-  for (const id of OVERLAYS) {
-    const el = document.getElementById(id);
-    if (!el || el.hidden) continue;
-    const r = el.getBoundingClientRect();
-    if (r.width === 0 || r.height === 0) continue;
-    out.push({ id, rect: [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)] });
-  }
-  return out;
-}
 
 /** Everything a debug dump records about where the game is. */
 export function captureGameState(game: Game, levels: SceneManager): GameState {
@@ -211,17 +201,10 @@ export function captureGameState(game: Game, levels: SceneManager): GameState {
       systemMap: levels.mode === 'system' && system.map.visible,
       planetMap: !!planet?.map.visible,
       mapTab: planet?.map.tab ?? 'map',
-      overlays: overlays(),
+      overlays: overlayRects(OVERLAYS),
     },
   };
 }
-
-const frames = (n: number) =>
-  new Promise<void>((resolve) => {
-    let i = 0;
-    const tick = () => (++i >= n ? resolve() : requestAnimationFrame(tick));
-    requestAnimationFrame(tick);
-  });
 
 async function settle(levels: SceneManager): Promise<void> {
   for (let i = 0; i < 6000 && levels.transitioning; i++) await frames(1);
@@ -385,4 +368,9 @@ export async function restoreGameState(game: Game, levels: SceneManager, state: 
   }
   await frames(4);
   return notes;
+}
+
+/** The game as the debug dump's source: its levels' state, captured and restored. */
+export function gameDumpSource(game: Game, levels: SceneManager): DumpSource {
+  return { app: 'game', capture: () => captureGameState(game, levels), restore: (state) => restoreGameState(game, levels, state) };
 }
