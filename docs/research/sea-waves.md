@@ -223,7 +223,7 @@ A player found the sea "one solid colour" and asked for something translucent, a
 
 ## Game mapping (all stylised)
 
-- **The waves' far fade** runs evenly in the log of the distance, from `farFrom` 80 to `farTo` 600 units. Fading linearly over 50–110 units drew a hard rim round the camera at a low angle, where that whole span covers a few pixel rows. The waves too small for the pixels fade out anyway (`fadeFrom`, `fadeTo`), so the far ones cost little.
+- **The waves' far fade** runs evenly in the log of the distance, from `farFrom` 80 to `farTo` 600 units. Fading linearly over 50–110 units drew a hard rim round the camera at a low angle, where that whole span covers a few pixel rows. The waves too small for the pixels fade out anyway (`fadeFrom`, `fadeTo`), so the far ones cost little. They also fade out as the camera climbs from `highFrom` 50 to `highTo` 130 units over the water: without that, the 600-unit reach drew stripes of waves over the whole sea when zoomed out.
 - **Clear shallows.** The water sea is drawn see-through after the ground. It blends without being three's `transparent`, at render order 0.5 (`CLEAR_SEA_RENDER_ORDER`): three draws transparent things after every opaque one, the atmosphere's haze among them. A transparent sea covered the haze, and the sea turned a dark, unhazed navy. Its alpha is 1 − e^(−depth / `clarity`) (1.1 units), opaque by `clearDepth` (5 units).
   - The terrain's chunks are hidden only where they lie wholly deeper than that (`hiddenBelow`), so the shallows' floor is there to see.
   - Foam, the sun's glint and the sky's reflection stay opaque: they're light off the surface.

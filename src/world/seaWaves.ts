@@ -57,6 +57,13 @@ export const waveParams = {
    */
   farFrom: 80,
   farTo: 600,
+  /**
+   * ...and only while the camera is low: they fade out as it climbs from
+   * `highFrom` to `highTo` units over the water, so zoomed out (or in high
+   * orbit) the sea shows only its sheen and glint, never stripes of waves.
+   */
+  highFrom: 50,
+  highTo: 130,
   /** Slicks: the share of the sea where the waves are calmed (stylised), and their slope there (Cox & Munk: slicks cut it 2–3×). */
   slicks: 0.3,
   slickSlope: 1 / 2.5,
@@ -143,6 +150,7 @@ const SEA_WAVES_GLSL = /* glsl */ `
   // Wavelengths in pixels over which a wave fades out (to, from); distances (units) over which they all do.
   uniform vec2 uSeaFade;
   uniform vec2 uSeaFar;
+  uniform vec2 uSeaHigh;
   // Slicks: 1/size, share, slope factor.
   uniform vec3 uSeaSlicks;
   uniform float uSeaCrests;
@@ -237,6 +245,9 @@ const SEA_FRAGMENT = /* glsl */ `
   {
     vec3 n = normalize(vSeaPos);
     float near = 1.0 - smoothstep(0.0, 1.0, log(max(length(vSeaPos - uSeaCamera), uSeaFar.x) / uSeaFar.x) / log(uSeaFar.y / uSeaFar.x));
+    // Gone as the camera climbs high over the water (its height over the sea's sphere here).
+    float low = 1.0 - smoothstep(uSeaHigh.x, uSeaHigh.y, length(uSeaCamera) - length(vSeaPos));
+    near *= low;
     float fp = length(fwidth(vSeaPos));
     float wind = seaWindAt(n);
     // Slicks calm the sea in patches, where no storm blows them away.
@@ -252,7 +263,7 @@ const SEA_FRAGMENT = /* glsl */ `
     float shipDisc = uSeaShip.w * (1.0 - smoothstep(0.6, 1.3, shipR / uSeaShipWave.z));
     // Near the shore the swells take over from the wind's waves (gen/waves.ts shorePhase).
     float shoreDepth = max(vSeaDepth, 0.0);
-    float shoreW = uSeaShore.w * (1.0 - smoothstep(0.5 * uSeaShore.y, uSeaShore.y, shoreDepth));
+    float shoreW = uSeaShore.w * (1.0 - smoothstep(0.5 * uSeaShore.y, uSeaShore.y, shoreDepth)) * low;
     amp *= (1.0 - 0.7 * shipDisc) * (1.0 - 0.6 * shoreW);
     // Each plane where it faces the surface, renormalised so the blend keeps the waves' variance.
     vec3 b = max(pow(abs(n), vec3(4.0)) - 0.02, 0.0);
@@ -424,6 +435,7 @@ export class SeaWaveLook {
     uSeaWarp: { value: new THREE.Vector2() },
     uSeaFade: { value: new THREE.Vector2() },
     uSeaFar: { value: new THREE.Vector2() },
+    uSeaHigh: { value: new THREE.Vector2() },
     uSeaSlicks: { value: new THREE.Vector3() },
     uSeaCrests: { value: 0 },
     uSeaWhitecaps: { value: 0 },
@@ -493,6 +505,7 @@ export class SeaWaveLook {
     waves.sets.forEach((set, s) => set.forEach((w, i) => (u.uSeaPhase.value[s * WAVES_PER_SET + i] = wavePhase(w, time))));
     u.uSeaFade.value.set(p.fadeTo, Math.max(p.fadeFrom, p.fadeTo + 0.5));
     u.uSeaFar.value.set(p.farFrom, Math.max(p.farTo, p.farFrom + 1));
+    u.uSeaHigh.value.set(p.highFrom, Math.max(p.highTo, p.highFrom + 1));
     u.uSeaSlicks.value.set(1 / p.slickSize, wind > 0 ? p.slicks : 0, p.slickSlope);
     u.uSeaCrests.value = p.crests;
     u.uSeaWhitecaps.value = p.whitecaps && wind > 0 ? 1 : 0;
@@ -716,6 +729,8 @@ export function addWaveDebug(debug: Debug): void {
   f?.add(waveParams, 'fadeTo', 0.5, 20, 0.5);
   f?.add(waveParams, 'farFrom', 5, 400, 5);
   f?.add(waveParams, 'farTo', 10, 800, 5);
+  f?.add(waveParams, 'highFrom', 5, 400, 5);
+  f?.add(waveParams, 'highTo', 10, 800, 5);
   f?.add(waveParams, 'slicks', 0, 1, 0.01);
   f?.add(waveParams, 'slickSlope', 0.1, 1, 0.01);
   f?.add(waveParams, 'slickSize', 5, 200, 1);
