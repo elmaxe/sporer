@@ -1,3 +1,4 @@
+import { waveParams } from './world/seaWaves';
 import { Game } from './core/Game';
 import { Debug } from './core/Debug';
 import { Physics } from './physics/Physics';
@@ -62,7 +63,7 @@ async function main(): Promise<void> {
   // Handles for poking at the game from the browser console / automation.
   // ship / world / system follow the current system level, planet the planet level (or null).
   if (import.meta.env.DEV) {
-    Object.assign(window, { game, galaxy, levels, audio, menu, debugDump, freeze, generateSystem, geyserKind, weatherKind, volcanicLightning, meteorShowers, nextShowerPeak });
+    Object.assign(window, { game, galaxy, levels, audio, menu, debugDump, freeze, generateSystem, geyserKind, weatherKind, volcanicLightning, meteorShowers, nextShowerPeak, waveParams });
     Object.defineProperties(window, {
       ship: { get: () => levels.systemLevel.ship, configurable: true },
       world: { get: () => levels.systemLevel.world, configurable: true },

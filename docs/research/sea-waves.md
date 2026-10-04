@@ -224,14 +224,14 @@ A player found the sea "one solid colour" and asked for something translucent, a
 ## Game mapping (all stylised)
 
 - **The waves' far fade** runs evenly in the log of the distance, from `farFrom` 80 to `farTo` 600 units. Fading linearly over 50–110 units drew a hard rim round the camera at a low angle, where that whole span covers a few pixel rows. The waves too small for the pixels fade out anyway (`fadeFrom`, `fadeTo`), so the far ones cost little.
-- **Clear shallows.** The water sea is drawn see-through after the ground. Its alpha is 1 − e^(−depth / `clarity`) (1.1 units), opaque by `clearDepth` (5 units).
+- **Clear shallows.** The water sea is drawn see-through after the ground. It blends without being three's `transparent`, at render order 0.5 (`CLEAR_SEA_RENDER_ORDER`): three draws transparent things after every opaque one, the atmosphere's haze among them. A transparent sea covered the haze, and the sea turned a dark, unhazed navy. Its alpha is 1 − e^(−depth / `clarity`) (1.1 units), opaque by `clearDepth` (5 units).
   - The terrain's chunks are hidden only where they lie wholly deeper than that (`hiddenBelow`), so the shallows' floor is there to see.
   - Foam, the sun's glint and the sky's reflection stay opaque: they're light off the surface.
 - **The floor** under a sea is painted sand along the shore, a pale sand with a fifth of the low ground's colour in it. It gives way to the sea's colour by 30% of the way to the deepest floor (`terrainPainter`, with `seaFloor`).
-- **The water's colour** goes from a brighter, greener shallows hue to 0.6× the sea's colour over `deepDepth` (12 units).
-- **Wave crests** are lit through from inside, ±`scatter` (35%) by the drawn height over its RMS.
+- **The water's colour** goes from a brighter, greener shallows hue to `deep` (0.75) × the sea's colour over `deepDepth` (12 units).
+- **Wave crests** are lit through from inside, ±`scatter` (20%) by the drawn height over its RMS.
 - **The sky is reflected** by Schlick's Fresnel with F₀ = 0.02.
-  - The sky's light is the atmosphere's colour × the sun's light × `sky` (0.45).
+  - The sky's light is the atmosphere's colour × the sun's light × `sky` (0.35), reflected off a normal tilted only half as far as the waves tilt it (`skyWaves`), so the sheen stays smooth.
   - It is lit where the sky over the water is (the day side and dusk) and is none without air.
   - So the sea brightens to the horizon, and every wave turned away from the camera catches it.
 - **The downwash's ripples** fade out where they're too fine to draw, are bent and broken by noise, and die away within about a radius past the disc. Before, they ran out as regular, aliasing bands.

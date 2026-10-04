@@ -73,12 +73,15 @@ export const waveParams = {
    */
   clarity: 1.1,
   clearDepth: 5,
-  /** How deep (units) the water's colour goes from its shallows' to its deep's. */
+  /** How deep (units) the water's colour goes from its shallows' to its deep's, and how dark the deep is (× the sea's colour). */
   deepDepth: 12,
+  deep: 0.75,
+  /** How much the waves tilt the sky's reflection (1: all of it; less keeps the sky's sheen smooth). */
+  skyWaves: 0.5,
   /** The sky's light reflected off the water, by Fresnel (stylised strength; none without air). */
-  sky: 0.45,
+  sky: 0.35,
   /** Wave crests lit through from inside, lighter than the troughs (stylised strength). */
-  scatter: 0.35,
+  scatter: 0.2,
   /** Surf: how deep (units) the foam along the shore reaches. */
   surfDepth: 0.25,
   /** Swells running up to the shore, refracted so their crests follow the depth contours, slowing, steepening and breaking as the water shoals. */
@@ -101,6 +104,12 @@ export const waveParams = {
   /** Crests lit from behind by a low sun (stylised strength). */
   glow: 1.5,
 };
+
+/**
+ * A clear sea's render order: after the ground it's seen through (0), before
+ * the atmosphere's haze over it (ATMOSPHERE_RENDER_ORDER, 1).
+ */
+export const CLEAR_SEA_RENDER_ORDER = 0.5;
 
 /** The wave fronts' bend: how far, and over how long a stretch, in the spectrum's peak wavelengths. */
 const WARP_SHARE = 0.6;
@@ -143,6 +152,7 @@ const SEA_WAVES_GLSL = /* glsl */ `
   // Clear water: e-folding depth, opaque by, the deep colour's depth (units); the sky's reflected light; crests' scatter.
   uniform vec3 uSeaClear;
   uniform vec3 uSeaSky;
+  uniform vec2 uSeaDeep;
   uniform float uSeaScatter;
   uniform vec3 uSeaFoam;
   uniform float uSeaGlow;
@@ -341,7 +351,7 @@ const SEA_FRAGMENT = /* glsl */ `
     float depth = max(vSeaDepth, 0.0);
     vec3 seaHue = diffuseColor.rgb;
     vec3 shallowHue = seaHue * vec3(0.75, 1.3, 1.15) + vec3(0.02, 0.05, 0.04);
-    diffuseColor.rgb = mix(shallowHue, seaHue * 0.6, smoothstep(0.0, uSeaClear.z, depth));
+    diffuseColor.rgb = mix(shallowHue, seaHue * uSeaDeep.x, smoothstep(0.0, uSeaClear.z, depth));
     // Crests lit through from inside, lighter than the troughs.
     float lift = hVar > 0.0 ? clamp(h * inversesqrt(hVar) * 0.5, -1.0, 1.0) : 0.0;
     diffuseColor.rgb *= 1.0 + uSeaScatter * lift;
@@ -380,7 +390,8 @@ const SEA_FRAGMENT = /* glsl */ `
     totalEmissiveRadiance += glow * uSeaSunLight * diffuseColor.rgb * vec3(0.6, 1.3, 1.1);
     // The sky reflected by Fresnel (Schlick, water's 0.02 head on): the sea brightens towards the horizon and every
     // wave facing away catches it. Lit where the sky over it is (day side, dusk), none without air.
-    float cosView = clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0);
+    vec3 skyNormal = normalize(mix(normalize(vSeaNormalMatrix * n), normal, uSeaDeep.y));
+    float cosView = clamp(dot(skyNormal, normalize(vViewPosition)), 0.0, 1.0);
     float fresnel = 0.02 + 0.98 * pow(1.0 - cosView, 5.0);
     float skyLit = smoothstep(-0.12, 0.3, up);
     vec3 skyLight = uSeaSky * uSeaSunLight * skyLit * fresnel * (1.0 - foam);
@@ -419,6 +430,7 @@ export class SeaWaveLook {
     uSeaShallow: { value: new THREE.Vector3() },
     uSeaClear: { value: new THREE.Vector3(1, 5, 12) },
     uSeaSky: { value: new THREE.Color(0, 0, 0) },
+    uSeaDeep: { value: new THREE.Vector2(0.6, 1) },
     uSeaScatter: { value: 0 },
     uSeaFoam: { value: FOAM },
     uSeaGlow: { value: 0 },
@@ -487,6 +499,7 @@ export class SeaWaveLook {
     u.uSeaClear.value.set(p.clarity, Math.max(p.clearDepth, p.clarity), p.deepDepth);
     u.uSeaSky.value.copy(this.skyColor).multiplyScalar(p.sky);
     u.uSeaScatter.value = p.scatter;
+    u.uSeaDeep.value.set(p.deep, p.skyWaves);
     u.uSeaCell.value = lodParams.cellAngle;
     u.uSeaGlow.value = wind > 0 ? p.glow : 0;
     u.uSeaCamera.value.copy(camera);
@@ -604,8 +617,14 @@ export class SeaWaveLook {
         .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>\n${SEA_FRAGMENT}`)
         .replace('#include <opaque_fragment>', 'diffuseColor.a = seaAlpha;\n#include <opaque_fragment>');
     };
-    // See-through over the shallows: drawn after the ground under it (see PlanetGlobe's water).
-    material.transparent = true;
+    // See-through over the shallows, blended over the ground under it. Not `transparent`: three draws those after
+    // everything opaque, the atmosphere's haze among them (ATMOSPHERE_RENDER_ORDER), which the sea would then cover.
+    // Instead it stays in the opaque list, after the ground and before the haze (CLEAR_SEA_RENDER_ORDER).
+    material.blending = THREE.CustomBlending;
+    material.blendSrc = THREE.SrcAlphaFactor;
+    material.blendDst = THREE.OneMinusSrcAlphaFactor;
+    material.blendSrcAlpha = THREE.OneFactor;
+    material.blendDstAlpha = THREE.OneMinusSrcAlphaFactor;
     material.customProgramCacheKey = () => 'sea-waves';
   }
 }
@@ -705,6 +724,8 @@ export function addWaveDebug(debug: Debug): void {
   f?.add(waveParams, 'clarity', 0.05, 5, 0.05);
   f?.add(waveParams, 'clearDepth', 0.5, 20, 0.5);
   f?.add(waveParams, 'deepDepth', 1, 60, 1);
+  f?.add(waveParams, 'deep', 0.2, 1.2, 0.05);
+  f?.add(waveParams, 'skyWaves', 0, 1, 0.05);
   f?.add(waveParams, 'sky', 0, 2, 0.05);
   f?.add(waveParams, 'scatter', 0, 1, 0.05);
   f?.add(waveParams, 'surfDepth', 0, 1, 0.01);

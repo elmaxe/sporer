@@ -17,7 +17,7 @@ import type { Landing } from '../cargo/plantFate';
 import { LodSurface, addCraterDebug, addLodDebug } from './LodSurface';
 import type { RenderClock } from './PlanetFrame';
 import { RingRocks } from './RingRocks';
-import { createSeaWaves, addWaveDebug, seaClear, seaDepthFrame, waveParams, type SeaWaveLook } from '../world/seaWaves';
+import { CLEAR_SEA_RENDER_ORDER, createSeaWaves, addWaveDebug, seaClear, seaDepthFrame, waveParams, type SeaWaveLook } from '../world/seaWaves';
 
 // Mountains' exaggeration up close lives in frame.ts (the system view's clouds need it too); re-exported here.
 export { RELIEF_SCALE };
@@ -294,11 +294,11 @@ function createWater(type: PlanetConfig['type'], color: string, radius: number, 
         return radius;
       }
     : () => radius;
-  // Drawn first, so the sea floor under it is rejected by the depth test rather than shaded (a clear sea is drawn
-  // after the ground, being see-through); its shallows split finely, for the shore swells.
+  // Drawn first, so the sea floor under it is rejected by the depth test rather than shaded; a clear sea is drawn
+  // after the ground, being see-through. Its shallows split finely, for the shore swells.
   return new LodSurface(radius, radius, sample, material, {
     smooth: 'coast',
-    renderOrder: SEA_RENDER_ORDER,
+    renderOrder: waves ? CLEAR_SEA_RENDER_ORDER : SEA_RENDER_ORDER,
     shallow: waves?.shallowDepth ?? -Infinity,
     name: 'Sea',
   });
