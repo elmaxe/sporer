@@ -23,6 +23,7 @@ rebuild; no code changes needed. Volumes and fades are in `cueParams` (`src/audi
 | `abductSuccess/` | Something reaching the ship and going into the inventory | one-shot |
 | `exportBeam/` | The beam lowering cargo from the ship: starts on the press, fades out when it's let go or lands | loop |
 | `dropImpact/` | Cargo hitting the ground: set down by the beam, dropped, or falling from it | one-shot |
+| `radarPing/` | The radar sending its waves towards the nearest animal of the species it tracks (the planet map's Species tab): once per ping, more often the closer they are | one-shot |
 | `starNear/` | A star close up: grows as the camera nears its surface, taking over from `starFar` | ambient |
 | `starFar/` | A star from across its system: fades with distance, giving way to `starNear` close up | ambient |
 | `shipHum/` | The UFO's own hum, always on | ambient |

@@ -85,7 +85,9 @@
 // the grove (the game's own plant system) draw, close up and as a whole planet, a game planet's plants load, the planet lab links to its plants.
 // Animals: in the animal lab every body plan draws at every level of detail, the specimen walks and grazes, zooming out goes
 // through the levels, the line-ups and herds draw, a game planet's animals load, the planet lab links to them; in the game a
-// herd roams near the ship on the home planet and the tooltip names an animal under the pointer.
+// herd roams near the ship on the home planet and the tooltip names an animal under the pointer; the planet map's Species
+// tab lists the planet's animals and plants with their pictures and counts the herds, and a real click on that herd's
+// species tracks it with the radar: waves round the ship, close by, whole rings, the radarPing cue; a second click stops it.
 // Prints JSON with FPS, console errors and screenshot paths. Exit 1 on failure.
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -1996,7 +1998,75 @@ async function runGameAnimals() {
   }
   r.screenshot = join(outDir, 'animals.png');
   writeFileSync(r.screenshot, await page.screenshot());
-  r.ok = !!r.found && r.stats.herds > 0 && r.stats.drawn > 0 && r.stats.drawCalls > 0 && r.named;
+  r.radar = await runRadar(r.found?.species);
+  r.ok = !!r.found && r.stats.herds > 0 && r.stats.drawn > 0 && r.stats.drawCalls > 0 && r.named && r.radar.ok;
+  return r;
+}
+
+/**
+ * The planet map's Species tab and the radar, over the herd `name` runGameAnimals found: real clicks on the tab and on
+ * the species' row (which unlock audio, so the radarPing cue is asked for).
+ */
+async function runRadar(name) {
+  const r = {};
+  const click = async (selector) => {
+    const at = await evaluate(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) return null; e.scrollIntoView({ block: 'nearest' });
+      const b = e.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`);
+    if (!at) return false;
+    for (const type of ['mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, ...at, button: 'left', buttons: type === 'mousePressed' ? 1 : 0, clickCount: 1 });
+    await drawFrames(2);
+    return true;
+  };
+  await evaluate(`(() => { window.__cues = []; const play = audio.play.bind(audio); audio.play = (c) => (__cues.push(c), play(c)); })()`);
+  // The debug panel sits over the map's title bar: out of the way meanwhile.
+  await evaluate(`document.querySelectorAll('.lil-gui.lil-auto-place').forEach((e) => (e.style.visibility = 'hidden'))`);
+  r.tab = await click('#planet-map-tabs button[data-tab=species]');
+  await until(`planet.radar.census.done && [...document.querySelectorAll('#planet-species .species-icon')].every((i) => i.src.startsWith('data:image/png'))`, 30000);
+  await drawFrames(20);
+  r.list = await evaluate(`({ tab: planet.map.tab, drawing: planet.map.drawing, shown: !document.getElementById('planet-species').hidden,
+    animals: document.querySelectorAll('#planet-species .species-row.animal').length, plants: document.querySelectorAll('#planet-species .species-row.plant').length,
+    species: planet.animals.plan.species.length, plantSpecies: planet.plants?.plan.species.length ?? 0,
+    statuses: [...document.querySelectorAll('#planet-species .species-row.animal .species-status')].map((e) => e.textContent),
+    herds: planet.radar.census.herds.length })`);
+  const index = await evaluate(`planet.animals.plan.species.findIndex((s) => s.name === ${JSON.stringify(name ?? '')})`);
+  r.picked = await click(`#planet-species .species-row.animal[data-species="${index}"]`);
+  await until(`planet.radar.state === 'tracking' && planet.radar.pingCount >= 2`, 30000);
+  await drawFrames(4);
+  r.tracking = await evaluate(`({ tracking: planet.radar.tracking, state: planet.radar.state, distance: planet.radar.distance, proximity: planet.radar.proximity,
+    visible: planet.radar.visible, pings: planet.radar.pingCount, row: document.querySelector('#planet-species .species-row.tracking')?.dataset.species ?? null,
+    status: document.querySelector('#planet-species .species-row.tracking .species-status')?.textContent ?? '',
+    dot: document.getElementById('planet-map-tabs').classList.contains('tracking'), cues: __cues.filter((c) => c === 'radarPing').length })`);
+  r.screenshot = join(outDir, 'radar.png');
+  writeFileSync(r.screenshot, await page.screenshot());
+  await click(`#planet-species .species-row.animal[data-species="${index}"]`);
+  r.stopped = await evaluate(`({ tracking: planet.radar.tracking, state: planet.radar.state, row: !!document.querySelector('#planet-species .species-row.tracking') })`);
+  await click('#planet-map-tabs button[data-tab=map]');
+  r.back = await evaluate(`({ tab: planet.map.tab, drawing: planet.map.drawing, shown: !document.getElementById('planet-species').hidden })`);
+  await evaluate(`document.querySelectorAll('.lil-gui.lil-auto-place').forEach((e) => (e.style.visibility = ''))`);
+  r.ok =
+    r.tab &&
+    r.list.tab === 'species' &&
+    !r.list.drawing &&
+    r.list.shown &&
+    r.list.animals === r.list.species &&
+    r.list.plants === r.list.plantSpecies &&
+    r.list.statuses.every((t) => /^(\d+ (herds?|packs?|seen)|None found)$/.test(t)) &&
+    r.list.herds > 0 &&
+    index >= 0 &&
+    r.picked &&
+    r.tracking.tracking === index &&
+    r.tracking.row === String(index) &&
+    r.tracking.distance < 60 &&
+    /^Tracking · (right here|close)$/.test(r.tracking.status) &&
+    r.tracking.visible &&
+    r.tracking.dot &&
+    r.tracking.cues >= 2 &&
+    r.stopped.tracking === null &&
+    r.stopped.state === 'off' &&
+    !r.stopped.row &&
+    r.back.tab === 'map' &&
+    r.back.drawing &&
+    !r.back.shown;
   return r;
 }
 let animalLab = null;

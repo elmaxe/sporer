@@ -544,6 +544,195 @@ html:not(.touch) .map-panel.folded .map-body {
   cursor: default;
 }
 
+.map-canvas[hidden] {
+  display: none;
+}
+
+/* The planet map's tabs (Map, Species), in its title bar; a dot on Species while the radar tracks an animal. */
+.map-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.map-tabs {
+  display: flex;
+  flex: none;
+  gap: 2px;
+}
+
+.map-tabs[hidden] {
+  display: none;
+}
+
+.map-tabs button {
+  position: relative;
+  padding: 1px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  opacity: 0.75;
+  cursor: pointer;
+}
+
+.map-tabs button:hover {
+  opacity: 1;
+}
+
+.map-tabs button[aria-selected='true'] {
+  border-color: rgba(102, 255, 204, 0.35);
+  background: rgba(102, 255, 204, 0.14);
+  color: #66ffcc;
+  opacity: 1;
+}
+
+.map-tabs.tracking button[data-tab='species']::after {
+  content: '';
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #66ffcc;
+  animation: radar-blip 1.4s ease-out infinite;
+}
+
+html.touch .map-tabs button {
+  padding: 4px 12px;
+}
+
+/* The Species tab: the planet's animals (click one to track it with the radar) and plants. */
+.species-list {
+  max-height: 260px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 4px 6px 8px;
+  background: rgba(8, 14, 28, 0.88);
+  font-size: 12px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(102, 255, 204, 0.35) transparent;
+  touch-action: pan-y;
+}
+
+.species-list[hidden] {
+  display: none;
+}
+
+html.touch .species-list {
+  max-height: min(420px, calc(100vh - 220px));
+  max-height: min(420px, calc(100dvh - 220px));
+}
+
+.species-heading {
+  margin: 6px 4px 2px;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.6;
+}
+
+.species-note {
+  margin: 0 4px 4px;
+  font-size: 11px;
+  line-height: 1.35;
+  opacity: 0.7;
+}
+
+.species-row {
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.species-row.plant {
+  grid-template-columns: 40px minmax(0, 1fr);
+}
+
+.species-row.animal {
+  cursor: pointer;
+}
+
+.species-row.animal:hover {
+  background: rgba(102, 255, 204, 0.08);
+}
+
+.species-row.tracking {
+  border-color: rgba(102, 255, 204, 0.6);
+  background: rgba(102, 255, 204, 0.13);
+}
+
+.species-icon {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+}
+
+.species-icon:not([src]) {
+  visibility: hidden;
+}
+
+.species-label {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.species-name,
+.species-line {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.species-line {
+  font-size: 11px;
+  opacity: 0.65;
+}
+
+.species-status {
+  font-size: 11px;
+  white-space: nowrap;
+  opacity: 0.75;
+}
+
+.species-row.tracking .species-status {
+  color: #66ffcc;
+  opacity: 1;
+}
+
+.species-row.tracking .species-status::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: #66ffcc;
+  vertical-align: 1px;
+  animation: radar-blip 1.4s ease-out infinite;
+}
+
+@keyframes radar-blip {
+  0% {
+    box-shadow: 0 0 0 0 rgba(102, 255, 204, 0.7);
+  }
+  100% {
+    box-shadow: 0 0 0 6px rgba(102, 255, 204, 0);
+  }
+}
+
 /* The menu (Esc or the menu button): pauses the game over a dimmed view. Above everything, maps included. */
 #menu {
   position: fixed;

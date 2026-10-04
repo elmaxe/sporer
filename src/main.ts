@@ -17,7 +17,6 @@ import { GameMenu } from './ui/GameMenu';
 import { FpsCounter } from './ui/FpsCounter';
 import { ViewFreezeControl } from './ui/ViewFreezeControl';
 import { ItemBar } from './ui/ItemBar';
-import { PlantIcons } from './ui/plantIcons';
 import { GraphicsSettingsControl, loadGraphicsSettings } from './ui/GraphicsSettings';
 import { installConsoleLog } from './debug/consoleLog';
 import { DebugDumpControl } from './debug/DebugDump';
@@ -55,7 +54,7 @@ async function main(): Promise<void> {
   game.add(new FpsCounter());
   const freeze = game.add(new ViewFreezeControl(game));
   game.add(new TouchControls(game));
-  game.add(new ItemBar(levels, game.input, levels.tooltip, new PlantIcons(game.renderer)));
+  game.add(new ItemBar(levels, game.input, levels.tooltip, levels.icons.plants));
   const debugDump = game.add(new DebugDumpControl(game, levels, consoleLog, debug));
 
   document.getElementById('loading')?.remove();

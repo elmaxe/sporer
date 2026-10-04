@@ -26,6 +26,8 @@ import { PlanetLights } from '../planet/PlanetLights';
 import { PlanetMap } from '../planet/PlanetMap';
 import { PlanetPicker } from '../planet/PlanetPicker';
 import { PlanetShip } from '../planet/PlanetShip';
+import { SpeciesTab, type SpeciesIcons } from '../planet/SpeciesTab';
+import { Radar } from '../radar/Radar';
 import { maxViewDistance, travelScale } from '../planet/frame';
 import { OrbitCamera, type OrbitParams } from '../player/OrbitCamera';
 import { flightAltitude, maxLookUpAt, minPitchAt, zoomCurveParams, zoomFraction } from '../player/zoomCurve';
@@ -132,6 +134,8 @@ export class PlanetLevel extends Level implements ItemUser {
   plants: SurfaceEntities | null = null;
   /** The animals roaming it (gen/animals.ts), where plants grow. */
   animals: SurfaceAnimals | null = null;
+  /** The radar, tracking a species of those animals picked on the map's Species tab (not once busted). */
+  radar: Radar | null = null;
   /** Plants the player set down here that took root (not once busted). */
   plantings: Plantings | null = null;
   private plantTooltip: PlantTooltip | null = null;
@@ -180,6 +184,8 @@ export class PlanetLevel extends Level implements ItemUser {
     private readonly onBust: (blastTime: number) => void,
     /** The ship's cargo hold (kept by the scene manager for the whole game). */
     inventory: Inventory,
+    /** Pictures of species for the map's Species tab (none in tests). */
+    icons: SpeciesIcons | null = null,
   ) {
     super();
     this.frame = this.add(new PlanetFrame(body, system.world.time, debug));
@@ -301,6 +307,10 @@ export class PlanetLevel extends Level implements ItemUser {
     this.buryPlants();
     const animalsSetup = busted ? null : animalSetup(config, plantsSetup);
     this.animals = animalsSetup ? this.add(new SurfaceAnimals(this.scene, animalsSetup.plan, animalsSetup.ground, camera, this.frame, debug)) : null;
+    // After the ship and the camera: its waves spread round where the ship is drawn this frame.
+    this.radar = animalsSetup
+      ? this.add(new Radar(this.scene, animalsSetup.plan, animalsSetup.ground, this.ship, camera, this.frame, sfx, debug))
+      : null;
     this.plantings = busted ? null : this.add(new Plantings(this.scene, changes));
     this.plantTooltip = this.plantings
       ? this.add(new PlantTooltip(camera, input, this.plants, this.plantings, tooltip, this.animals, (ray, out) => globe.groundHit(ray, out)))
@@ -400,7 +410,8 @@ export class PlanetLevel extends Level implements ItemUser {
         ? describeShower(this.meteors.shower, airless) + (this.meteors.radiantUp ? '' : ' (radiant below the horizon)')
         : '';
     this.hud = this.add(new PlanetHud(this.ship, `${body.name} · ${body.description}`, input, detail, showerLine));
-    this.map = this.add(new PlanetMap(config, body.name, this.ship, globe, input, debug));
+    const species = new SpeciesTab(bodyKey(config), animalsSetup?.plan.species ?? [], plantsSetup?.plan.species ?? [], this.radar, icons);
+    this.map = this.add(new PlanetMap(config, body.name, this.ship, globe, input, debug, species));
     debug
       .folder('Planet lab')
       ?.add({ open: () => window.open(this.labLink(), '_blank') }, 'open')
@@ -502,9 +513,9 @@ export class PlanetLevel extends Level implements ItemUser {
   private blast(): void {
     this.globe.bust(this.radius * DEBRIS_REACH);
     this.cargo?.clear(false);
-    for (const entity of [this.eruptions, this.geysers, this.weather, this.comet, this.plants, this.animals, this.cargo, this.plantings, this.volcanoes, this.meteors])
+    for (const entity of [this.eruptions, this.geysers, this.weather, this.comet, this.plants, this.animals, this.radar, this.cargo, this.plantings, this.volcanoes, this.meteors])
       if (entity) this.remove(entity);
-    this.eruptions = this.geysers = this.weather = this.comet = this.plants = this.animals = this.cargo = this.plantings = this.meteors = null;
+    this.eruptions = this.geysers = this.weather = this.comet = this.plants = this.animals = this.radar = this.cargo = this.plantings = this.meteors = null;
     this.volcanoes = null;
     if (this.plantTooltip) {
       this.plantTooltip.deactivate();

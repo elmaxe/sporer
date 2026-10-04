@@ -86,6 +86,8 @@ export interface GameState {
     selected: string | null;
     inFlight: { state: string; fate: string | null; species: string }[];
   };
+  /** In low orbit, the radar: the species it tracks (its index in the planet's animals) and how far the nearest is (missing in dumps from before it). */
+  radar?: { tracking: number | null; species: string | null; state: string; distance: number | null };
   /** What the DOM overlays showed (text the screenshot's game picture leaves out). */
   ui: {
     touchMode: boolean;
@@ -93,6 +95,8 @@ export interface GameState {
     tooltip: string | null;
     systemMap: boolean;
     planetMap: boolean;
+    /** The planet map's tab on show (missing in dumps from before the Species tab). */
+    mapTab?: 'map' | 'species';
     /** Visible overlay elements and where they are (CSS px): to spot layout problems. */
     overlays: { id: string; rect: [number, number, number, number] }[];
   };
@@ -217,6 +221,10 @@ export function summaryLines(dump: Omit<DebugDump, 'images'>): string[] {
       const here = c.surface ? ` · here: ${c.surface.removed.length} taken, ${c.surface.planted?.length ?? 0} set down` : '';
       const air = c.inFlight.length > 0 ? ` · in the air: ${c.inFlight.map((l) => `${l.species} (${l.fate ?? l.state})`).join(', ')}` : '';
       lines.push(`Cargo: ${hold}${c.selected ? ` · armed: ${c.selected}` : ''}${here}${air}`);
+    }
+    const radar = s.radar;
+    if (radar && radar.tracking !== null) {
+      lines.push(`Radar: tracking ${radar.species ?? `species ${radar.tracking}`}${radar.distance !== null ? ` · nearest ${radar.distance.toFixed(0)} units away` : ` · ${radar.state}`}`);
     }
   } else if (dump.stateError) {
     lines.push(`State unavailable: ${dump.stateError}`);
