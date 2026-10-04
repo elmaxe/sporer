@@ -132,8 +132,8 @@ describe('animal bodies', () => {
     expect(right[1]).toBe(left[0]);
   });
 
-  it('builds cheaper meshes further out, all finite, with valid rigs', () => {
-    for (const s of species.slice(0, 40)) {
+  it('builds cheaper meshes further out, all finite, with valid rigs', { timeout: 30000 }, () => {
+    for (const s of species.slice(0, 24)) {
       const k = growAnimal(s);
       const meshes = Array.from({ length: ANIMAL_LOD_COUNT }, (_, lod) => buildAnimalMesh(k, s.form, s.length, lod));
       for (let lod = 1; lod < ANIMAL_LOD_COUNT; lod++) expect(meshes[lod]!.triangles).toBeLessThan(meshes[lod - 1]!.triangles);

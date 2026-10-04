@@ -94,6 +94,8 @@ export class SurfaceAnimals implements Entity {
   private readonly batches: Batch[][] = [];
   private readonly maxReach: number;
   private readonly maxBound: number;
+  /** The tallest an animal stands (units, a generous two lengths of the longest). */
+  private readonly tallest: number;
   private readonly camera = new THREE.Vector3();
   private readonly lastScan = new THREE.Vector3(Infinity, 0, 0);
   private readonly pose: AnimalPose = { x: 0, y: 0, z: 0, hx: 0, hy: 0, hz: 1, cycle: 0, stride: 0, trot: 0, graze: 0, idle: 0 };
@@ -132,6 +134,7 @@ export class SurfaceAnimals implements Entity {
     }
     const longest = Math.max(...plan.species.map((s) => s.length)) * MAX_SCALE;
     this.maxReach = ANIMAL_LODS[ANIMAL_LODS.length - 1]! * longest;
+    this.tallest = longest * 2;
     // A herd strays from its cell's centre by the cell, its range and its spread.
     this.maxBound = HERD_CELL_SIZE * 0.8 + Math.max(...plan.species.map((s) => s.length * 1.7 * Math.sqrt(s.herdMax + 1))) + HOME_RANGE * PACK_RANGE_FACTOR;
     this.geometries = plan.species.map((s) => Array.from({ length: ANIMAL_LOD_COUNT }, (_, lod) => createAnimalGeometry(s, lod)));
@@ -285,6 +288,9 @@ export class SurfaceAnimals implements Entity {
     const t = this.clock.renderTime;
     const pose = this.pose;
     const camLen = camera.length();
+    // Past the horizon: further round than the sea-level horizon plus the highest ground's and an animal's height.
+    const horizon = Math.acos(Math.min(1, R / Math.max(camLen, R))) + Math.acos(Math.min(1, R / (plan.peak + this.tallest)));
+    const cosHorizon = Math.cos(Math.min(Math.PI, horizon)) * camLen;
     for (const cell of this.cells.values()) {
       const { herd, path } = cell;
       if (!herd || !path) continue;
@@ -298,8 +304,7 @@ export class SurfaceAnimals implements Entity {
       const row = this.batches[herd.species]!;
       for (let k = 0; k < herd.count; k++) {
         path.pose(k, t, pose);
-        // Past the horizon (the ground's own radius at the animal's spot below the camera's tangent).
-        if ((pose.x * camera.x + pose.y * camera.y + pose.z * camera.z) * R < (R * R) / camLen - s.length * 4 && camLen > R) continue;
+        if (pose.x * camera.x + pose.y * camera.y + pose.z * camera.z < cosHorizon) continue;
         let r = this.ground(pose);
         if (plan.sea && r < R) r = R;
         const scale = cell.scales[k]!;
@@ -319,7 +324,7 @@ export class SurfaceAnimals implements Entity {
           // A level draws from where the one before starts fading to where it has faded out itself.
           const from = lod === 0 ? -Infinity : ANIMAL_LODS[lod - 1]! * FADE_START;
           if (dist < from || dist > ANIMAL_LODS[lod]!) continue;
-          this.write(row[lod]!, pose, px, py, pz, scale * s.length > 0 ? scale : 1);
+          this.write(row[lod]!, pose, px, py, pz, scale);
         }
       }
     }
