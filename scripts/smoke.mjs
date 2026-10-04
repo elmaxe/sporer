@@ -1841,8 +1841,8 @@ async function plantLabChecks(page) {
 await section('plants', async () => (plantLab = await runPlantLab()).ok);
 
 /**
- * Touch play on an emulated phone (390x844, real CDP touch events): hold a finger on the star (tooltip), lift
- * (autopilot to it), drag (rotates, no tap), pinch (zoom), Boost (no stick in space), then
+ * Touch play on an emulated phone (390x844, real CDP touch events): no full-screen button, the first tap goes full
+ * screen; hold a finger on the star (tooltip), lift (autopilot to it), drag (rotates, no tap), pinch (zoom), Boost (no stick in space), then
  * pinch in at a planet to descend, tap the globe, and pinch out to the system and on to the galaxy, checking which
  * on-screen controls each level shows.
  */
@@ -1882,7 +1882,8 @@ async function runTouch() {
   const r = {};
 
   r.system = await evaluate(`({ touchMode: game.input.touchMode, help: document.getElementById('hud-help').textContent.startsWith('Tap'),
-    fullscreenButton: getComputedStyle(document.getElementById('fullscreen-toggle')).display !== 'none', ...${controls} })`);
+    fullscreenButton: getComputedStyle(document.getElementById('fullscreen-toggle')).display !== 'none',
+    fullscreen: !!document.fullscreenElement, ...${controls} })`);
   const star = await evaluate(`(() => { const p = world.stars[0].renderPosition.clone().project(game.camera); return [(p.x + 1) / 2 * innerWidth, (1 - p.y) / 2 * innerHeight]; })()`);
   await touch('touchStart', [star]);
   await sleep(300);
@@ -1890,6 +1891,9 @@ async function runTouch() {
   await touch('touchEnd', []);
   await frames();
   r.tap = await evaluate(`({ star: world.stars[0].name, target: ship.targetBody?.name ?? null, tooltipHidden: document.getElementById('tooltip').hidden })`);
+  // The first tap took the page full screen (a phone always plays full screen, so it has no button for it).
+  for (let i = 0; i < 20 && !(await evaluate(`!!document.fullscreenElement`)); i++) await sleep(50);
+  r.fullscreen = await evaluate(`!!document.fullscreenElement`);
 
   const yaw = await evaluate(`levels.systemLevel.orbit.targetYaw`);
   await swipe([[150, 500]], [[250, 500]]);
@@ -1998,7 +2002,9 @@ async function runTouch() {
   r.ok =
     r.system.touchMode &&
     r.system.help &&
-    r.system.fullscreenButton &&
+    !r.system.fullscreenButton &&
+    !r.system.fullscreen &&
+    r.fullscreen &&
     r.system.ship === 'space' &&
     r.system.shown &&
     !r.system.stick &&
