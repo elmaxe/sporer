@@ -722,6 +722,224 @@ html.touch #menu .menu-keys {
   user-select: text;
 }
 
+/* The release notes (menu → What's new → Release notes, ui/ReleaseNotesDialog.ts): over the menu. */
+#notes {
+  position: fixed;
+  inset: 0;
+  z-index: 1020;
+  display: grid;
+  place-items: center;
+  padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom))
+    max(12px, env(safe-area-inset-left));
+  background: rgba(0, 4, 12, 0.6);
+}
+
+#notes[hidden] {
+  display: none;
+}
+
+#notes-panel {
+  width: min(560px, 100%);
+  max-height: 100%;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px 14px 0;
+  border-radius: 10px;
+  background: rgba(8, 14, 28, 0.97);
+  border: 1px solid rgba(102, 255, 204, 0.35);
+  font-size: 13px;
+}
+
+#notes h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+#notes p {
+  margin: 0;
+  line-height: 1.4;
+}
+
+#notes-build {
+  color: #ffd24a;
+  opacity: 0.9;
+}
+
+#notes-build[hidden] {
+  display: none;
+}
+
+#notes-close {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: #cfe3ff;
+  cursor: pointer;
+}
+
+#notes-close:hover {
+  color: #66ffcc;
+}
+
+/* The releases scroll under the heading; selectable, to quote one. */
+#notes-list {
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding-bottom: 12px;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.notes-release {
+  padding: 10px 0;
+  border-top: 1px solid rgba(102, 255, 204, 0.15);
+}
+
+.notes-release:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.notes-release h3 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.notes-release h3 a {
+  color: #66ffcc;
+  text-decoration: none;
+}
+
+.notes-release h3 a:hover {
+  text-decoration: underline;
+}
+
+.notes-release time {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: normal;
+  opacity: 0.6;
+}
+
+/* The release playing. */
+.notes-playing {
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: rgba(102, 255, 204, 0.18);
+  color: #66ffcc;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.notes-release h4 {
+  margin: 8px 0 2px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+
+.notes-release ul {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+
+.notes-release li {
+  margin: 3px 0;
+  line-height: 1.4;
+}
+
+.notes-release p {
+  opacity: 0.85;
+}
+
+.notes-release li a,
+.notes-release p a {
+  color: #9fd8ff;
+}
+
+.notes-release code {
+  padding: 0 3px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 12px;
+}
+
+/* "Updated to …" when a new release starts for the first time: top centre, under the menu and maps. */
+#notes-notice {
+  position: fixed;
+  top: max(10px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1003;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100vw - 32px);
+  box-sizing: border-box;
+  padding: 5px 6px 5px 14px;
+  border-radius: 20px;
+  border: 1px solid rgba(102, 255, 204, 0.5);
+  background: rgba(8, 14, 28, 0.88);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+#notes-notice[hidden] {
+  display: none;
+}
+
+#notes-notice-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#notes-notice-open {
+  padding: 4px 10px;
+  border-radius: 14px;
+  border: 1px solid rgba(102, 255, 204, 0.5);
+  background: rgba(102, 255, 204, 0.18);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+#notes-notice-open:hover {
+  border-color: rgba(102, 255, 204, 0.9);
+}
+
+#notes-notice-close {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: #cfe3ff;
+  cursor: pointer;
+}
+
+#notes-notice-close:hover {
+  color: #66ffcc;
+}
+
 /* The debug dump's dialog (menu → Save debug dump, F8): over the menu. */
 #dump {
   position: fixed;

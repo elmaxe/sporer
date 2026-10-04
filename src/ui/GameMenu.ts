@@ -4,6 +4,7 @@ import type { SceneManager } from '../levels/SceneManager';
 import { Planet } from '../world/Planet';
 import { buildInfo, formatBuildInfo } from './buildInfo';
 import { RefreshControl } from './RefreshControl';
+import { ReleaseNotesDialog } from './ReleaseNotesDialog';
 import { VersionPicker } from './VersionPicker';
 
 /**
@@ -18,7 +19,8 @@ import { VersionPicker } from './VersionPicker';
  * by debug/DebugDump.ts), the Refresh button (RefreshControl.ts: reloads,
  * with the newest version, and says whether the game is saved for offline
  * play), the Version picker (VersionPicker.ts: the release,
- * the preview or a pull request's build), and at the bottom which build is running
+ * the preview or a pull request's build), What's new (ReleaseNotesDialog.ts:
+ * the latest release and a button for every release's notes), and at the bottom which build is running
  * (branch · build number · commit, see buildInfo.ts). Esc, Resume, × or a
  * click beside the panel closes it.
  */
@@ -30,6 +32,7 @@ export class GameMenu {
   private readonly lab = document.getElementById('menu-lab') as HTMLAnchorElement;
   private readonly refresh = new RefreshControl();
   private readonly versions = new VersionPicker();
+  private readonly notes = new ReleaseNotesDialog(() => this.open());
 
   constructor(
     private readonly game: Game,
@@ -54,6 +57,7 @@ export class GameMenu {
     this.lab.href = body ? bodyLabLink(body) : new URL('lab.html', location.href).href;
     this.lab.textContent = body ? `Open ${body.name} in the planet lab` : 'Open the planet lab';
     void this.versions.refresh();
+    void this.notes.refresh();
     this.refresh.check();
     this.root.hidden = false;
     this.toggle.setAttribute('aria-expanded', 'true');
@@ -63,6 +67,7 @@ export class GameMenu {
 
   hide(): void {
     if (!this.isOpen) return;
+    this.notes.hide();
     this.root.hidden = true;
     this.toggle.setAttribute('aria-expanded', 'false');
     this.game.paused = false;
@@ -72,6 +77,7 @@ export class GameMenu {
 
   dispose(): void {
     this.hide();
+    this.notes.dispose();
     this.versions.dispose();
     this.refresh.dispose();
     this.toggle.removeEventListener('click', this.onToggle);
