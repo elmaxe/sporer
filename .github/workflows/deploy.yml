@@ -4,8 +4,9 @@
 #   https://elmaxe.github.io/sporer/pr/<n>/     every open pull request (from this repository, not forks),
 #                                               linked from a comment on it; removed when it's closed or merged
 # The builds live together on the gh-pages branch (scripts/pages-publish.sh), with versions.json listing them
-# for the game's version picker (the menu's Version section). Running this workflow by hand on a tag
-# republishes that release, e.g. to roll back.
+# for the game's version picker (the menu's Version section), and releases.json holding the GitHub Releases'
+# notes for the game's What's new (updated at every publish, and on its own when a release is published,
+# edited or deleted). Running this workflow by hand on a tag republishes that release, e.g. to roll back.
 # One-time repo setting: Settings → Pages → Source: Deploy from a branch → gh-pages, / (root).
 name: Deploy to GitHub Pages
 
@@ -15,6 +16,8 @@ on:
     tags: ['v*']
   pull_request:
     types: [opened, synchronize, reopened, edited, closed]
+  release:
+    types: [published, edited, deleted]
   workflow_dispatch:
 
 permissions:
@@ -22,8 +25,9 @@ permissions:
   pull-requests: write
 
 # A newer push to the same branch, tag or pull request cancels its older run; others publish side by side.
+# A release's notes have a group of their own, so they never cancel the publishing of its tag.
 concurrency:
-  group: deploy-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || github.ref }}
+  group: deploy-${{ github.event_name == 'release' && 'notes' || github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -37,9 +41,10 @@ env:
 jobs:
   deploy:
     # Forks' pull requests get a read-only token, so they're checked by their own CI only. A title edit
-    # only needs the new label, which a rebuild gives.
+    # only needs the new label, which a rebuild gives. A release's event only updates the notes (the notes job).
     if: >-
-      github.event_name != 'pull_request' || (github.event.action != 'closed' &&
+      github.event_name == 'push' || github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && github.event.action != 'closed' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       (github.event.action != 'edited' || github.event.changes.title))
     runs-on: ubuntu-latest
@@ -100,3 +105,13 @@ jobs:
         run: scripts/pages-publish.sh "pr/$PR"
       - name: Say so on the pull request
         run: scripts/pages-pr-comment.sh "$PR" "The preview of this pull request has been removed."
+
+  notes:
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - name: Update the release notes
+        run: scripts/pages-publish.sh notes
