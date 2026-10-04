@@ -18,6 +18,7 @@ import {
 } from './equalEarth';
 import type { PlanetGlobe } from './PlanetGlobe';
 import type { PlanetShip } from './PlanetShip';
+import type { SpeciesTab } from './SpeciesTab';
 
 /** Tunables (debug: *Planet map*). */
 export const planetMapParams = {
@@ -48,6 +49,11 @@ const PATH_SAMPLES = 48;
 const TOGGLE_KEY = 'KeyN';
 const STORAGE_KEY = 'spore2.map';
 const ACCENT = '#66ffcc';
+
+/** The map panel's tabs: the map itself, or the planet's species (SpeciesTab). */
+export type MapTab = 'map' | 'species';
+/** The tab last shown, kept from planet to planet. */
+let lastTab: MapTab = 'map';
 
 const vertexShader = /* glsl */ `
   varying vec2 vUv;
@@ -146,7 +152,9 @@ const fragmentShader = /* glsl */ `
  * glow in step with it. On top: the sun, the ship and its heading, and the
  * autopilot's destination and great-circle path. Click or tap it to fly
  * there; N (or its button) folds the desktop panel away, remembered in
- * localStorage.
+ * localStorage. Given a `SpeciesTab`, the title bar has two tabs, Map and
+ * Species (the planet's animals and plants, which the radar tracks); the
+ * tab picked is kept from planet to planet.
  *
  * The terrain is baked on the CPU a few rows per frame into a texture; the
  * level draws the map into the game's canvas under the panel (`render`),
@@ -160,6 +168,10 @@ export class PlanetMap implements Entity {
   private readonly toggle = document.getElementById('planet-map-toggle') as HTMLButtonElement;
   private readonly marksCanvas = document.getElementById('planet-map-marks') as HTMLCanvasElement;
   private readonly mapButton = document.getElementById('touch-map') as HTMLButtonElement;
+  /** The tab bar (none in the planet lab's page). */
+  private readonly tabs = document.getElementById('planet-map-tabs');
+  private readonly tabButtons: HTMLButtonElement[] = this.tabs ? [...this.tabs.querySelectorAll<HTMLButtonElement>('button[data-tab]')] : [];
+  private _tab: MapTab = 'map';
   private readonly width: number;
   private readonly height: number;
   /** Canvas pixels per projection unit. */
@@ -213,6 +225,8 @@ export class PlanetMap implements Entity {
     private readonly globe: PlanetGlobe,
     private readonly input: Input,
     debug: Debug,
+    /** The Species tab, if the map has one (the game's; not the planet lab's). */
+    private readonly species: SpeciesTab | null = null,
   ) {
     // Baked for the size it will mostly be shown at (the touch overlay is bigger).
     const pixelRatio = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
@@ -268,9 +282,31 @@ export class PlanetMap implements Entity {
     return this.bakedRows >= this.height;
   }
 
-  /** True while the map is on screen. */
+  /** True while the panel is open on screen (on either tab). */
   get visible(): boolean {
     return this.shown && !this.hidesBody;
+  }
+
+  /** True while the map itself is drawn (the panel open on the Map tab). */
+  get drawing(): boolean {
+    return this.visible && this._tab === 'map';
+  }
+
+  /** The tab on show. */
+  get tab(): MapTab {
+    return this._tab;
+  }
+
+  /** Shows tab `tab` (the map only, without a Species tab). */
+  setTab(tab: MapTab): void {
+    if (!this.species) tab = 'map';
+    this._tab = tab;
+    if (this.active) lastTab = tab;
+    for (const b of this.tabButtons) b.setAttribute('aria-selected', String(b.dataset.tab === tab));
+    this.marksCanvas.hidden = tab !== 'map';
+    this.species?.show(this.active && tab === 'species');
+    this.rectDirty = true;
+    this.sinceMarks = Infinity;
   }
 
   /** The desktop panel folded down to its title bar. */
@@ -299,6 +335,12 @@ export class PlanetMap implements Entity {
     this.mapButton.addEventListener('click', this.onMapButton);
     this.marksCanvas.addEventListener('click', this.onClick);
     window.addEventListener('resize', this.onResize);
+    if (this.tabs) this.tabs.hidden = !this.species;
+    if (this.species) {
+      this.species.attach();
+      for (const b of this.tabButtons) b.addEventListener('click', this.onTab);
+    }
+    this.setTab(lastTab);
     this.sinceMarks = Infinity;
     this.rectDirty = true;
   }
@@ -311,6 +353,10 @@ export class PlanetMap implements Entity {
     this.mapButton.removeEventListener('click', this.onMapButton);
     this.marksCanvas.removeEventListener('click', this.onClick);
     window.removeEventListener('resize', this.onResize);
+    for (const b of this.tabButtons) b.removeEventListener('click', this.onTab);
+    this.species?.detach();
+    this.marksCanvas.hidden = false;
+    this.tabs?.classList.remove('tracking');
   }
 
   update(frameDt: number): void {
@@ -328,7 +374,11 @@ export class PlanetMap implements Entity {
     }
     // Touch players open it from the Map button; never while zooming in or out (input is blocked then).
     this.setShown((!this.input.touchMode || this.open) && !this.input.blocked);
-    if (!this.visible) return;
+    if (this.species) {
+      this.species.update(frameDt);
+      this.tabs?.classList.toggle('tracking', this.species.active);
+    }
+    if (!this.drawing) return;
 
     if (!this.baked) {
       this.bake();
@@ -347,7 +397,7 @@ export class PlanetMap implements Entity {
 
   /** Draws the map into the game's canvas, under the panel. Called by the level after its scene. */
   render(renderer: THREE.WebGLRenderer): void {
-    if (!this.visible) return;
+    if (!this.drawing) return;
     if (this.rectDirty) this.measure(renderer.domElement);
     const { x, y, w, h } = this.rect;
     if (w <= 0 || h <= 0) return;
@@ -619,6 +669,11 @@ export class PlanetMap implements Entity {
 
   private onMapButton = () => {
     if (!this.input.blocked) this.setOpen(!this.open);
+  };
+
+  private onTab = (e: Event) => {
+    const tab = (e.currentTarget as HTMLElement).dataset.tab;
+    if (tab === 'map' || tab === 'species') this.setTab(tab);
   };
 
   private onResize = () => {
