@@ -36,12 +36,15 @@ body.lab #stats {
 #lab-info .lab-top {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
+  gap: 6px;
   margin-bottom: 2px;
 }
 
+/* Up to five links (game, star, plants, animals, report): a second row when they don't fit, never a broken label. */
 #lab-info .lab-links {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
@@ -54,6 +57,7 @@ body.lab #stats {
   color: #66ffcc;
   font: inherit;
   text-decoration: none;
+  white-space: nowrap;
   cursor: pointer;
 }
 

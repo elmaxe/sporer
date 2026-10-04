@@ -30,6 +30,8 @@ export class LabInfo implements Entity {
   /** To the star lab at the system the planet came from (shown when it came from one). */
   private readonly star = document.createElement('a');
   private readonly details = document.createElement('button');
+  /** Opens the debug dump (DebugDumpControl finds it by its id). */
+  private readonly report = document.createElement('button');
   private readonly head = document.createElement('div');
   private readonly table = document.createElement('table');
   private readonly help = document.createElement('div');
@@ -56,9 +58,14 @@ export class LabInfo implements Entity {
     this.star.className = 'lab-back';
     this.star.textContent = 'Star';
     this.star.title = "This planet's star and system in the star lab";
+    this.report.type = 'button';
+    this.report.id = 'lab-dump';
+    this.report.className = 'lab-back';
+    this.report.textContent = 'Report';
+    this.report.title = 'Save a debug dump (F8): the screen, your marks and a note, and this planet, in one file to send';
     const links = document.createElement('div');
     links.className = 'lab-links';
-    links.append(this.back, this.star, this.plants, this.animals);
+    links.append(this.back, this.star, this.plants, this.animals, this.report);
     top.append(links, this.details);
     this.help.className = 'lab-help';
     this.root.append(top, this.head, this.table, this.help);
