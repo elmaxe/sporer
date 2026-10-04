@@ -9,7 +9,13 @@ Issue #88: the low-orbit water sea (`planet/PlanetGlobe.ts`, a `LodSurface` with
 3. **Which directions** they travel in, relative to the wind.
 4. **A rendering technique** that draws them on a sphere with no seam, stays stable at every distance (no shimmer), and costs little per pixel.
 
-It feeds `gen/waves.ts` (pure: the spectrum, the wave sets, the phases) and `world/seaWaves.ts` (the shader patch on the sea's material).
+A follow-up on the same issue asked for more realism: no waves from far out, shallow water and surf, patchy wind (slicks, storms), whitecaps and sharper crests, the glint in the system view, and crests lit from behind. That adds:
+
+5. **How much of the sea whitecaps cover** at a given wind.
+6. **How hard storms blow** over the sea.
+7. **The shape of real crests**: sharper than a sine.
+
+It feeds `gen/waves.ts` (pure: the spectrum, the wave sets, the phases, whitecap cover, storm winds) and `world/seaWaves.ts` (the shader patch on the sea's material, and the system view's glint).
 
 Precision: the right trends and roughly the right numbers (within ~25%): longer, faster waves at stronger wind and weaker gravity; the whole sea's slope as measured. Sizes are stylised against the UFO (see Game mapping).
 
@@ -32,6 +38,16 @@ All accessed 2026-10-04.
   - The height field as a sum of waves "Aᵢ cos(kᵢ · x₀ − ωᵢ t + φᵢ)".
   - Directional spreading in the Phillips spectrum: "The cosine factor |k̂ · ŵ|² … eliminates waves that move perpendicular to the wind direction".
   - Its dispersion is quantised to a repeat time ("Repeat Time = 100 seconds"), so a tiled FFT loops. The game doesn't need that: see Game mapping.
+
+- **Monahan & O'Muircheartaigh 1980**, "Optimal Power-Law Description of Oceanic Whitecap Coverage Dependence on Wind Speed", J. Phys. Oceanogr. 10, 2094–2099 (the journal page refused the download, HTTP 403). Read through Albert et al. 2016, "Parameterization of oceanic whitecap fraction based on satellite observations", Atmos. Chem. Phys. 16, 13725, https://acp.copernicus.org/articles/16/13725/2016/acp-16-13725-2016.pdf (PDF read with `pdftotext`):
+  - "W (U10) = 3.84 × 10⁻⁶ U10^3.41 (3)", derived from "the data sets of Monahan (1971) and Toba and Chaen (1973). Most of the wind speed values from these two data sets are up to 12 m s⁻¹ with only 10 % of the data points for winds up to 17 m s⁻¹".
+  - The same paper's other fits, Callaghan et al. 2008, "W = 3.18 × 10⁻³ (U10 − 3.70)³; 3.70 < U10 ≤ 11.25 m s⁻¹", and its satellite fit "W10 = 4.6 × 10⁻³ × U10^2.26", are "expressed in percent".
+- **Storm winds**:
+  - Met Office Beaufort scale (page above): force 6 "12 m/s", force 7 "15 m/s", force 8 gale "19 m/s", force 10 storm "27 m/s", force 12 hurricane "64+ knots" / "33+ m/s".
+  - US National Weather Service, https://www.weather.gov/key/tstmhazards: a severe thunderstorm produces "winds of 58 mph or greater"; "over water, wind gusts of 30 mph (26 knots) or greater can be dangerous to small boats".
+- **Gerstner waves**:
+  - Finch, "Effective Water Simulation from Physical Models", *GPU Gems* ch. 1 (NVIDIA, 2004), https://developer.nvidia.com/gpugems/gpugems/part-i-natural-effects/chapter-1-effective-water-simulation-physical-models: the normal's up component is 1 − Σ Qᵢ wᵢ Aᵢ S(); "Qi of 0 gives the usual rolling sine wave, and Qi = 1/(wi Ai) gives a sharp crest"; the sum must stay ≤ 1 to avoid loops.
+  - Wikipedia, "Trochoidal wave", https://en.wikipedia.org/wiki/Trochoidal_wave (citing Gerstner 1802): particles move on circular orbits of radius e^(kb)/k, so at the surface as big as the wave's amplitude; dispersion c² = g/k; the surface has "sharper crests and flat troughs".
 
 ## Measurements
 
@@ -61,6 +77,7 @@ for (const U of [3, 5, 7, 10, 14]) {
 - **Wave heights**: PM's H⅓ is within 12% of the Met Office's probable heights at forces 3–5 (0.56 against 0.6 m, 1.10 against 1.0 m, 2.24 against 2.0 m).
 - **The peak**: dS/dω = 0 at ω = (4β/5)^¼ ω₀ = 0.8772 ω₀, PM's 0.877. The constants agree with each other.
 - **Slope**: the PM spectrum's slope spectrum k² S(ω) = α/ω · exp(…) carries about α = 0.0081 of slope variance per e-fold of frequency above the peak. Integrated from below the peak down to the capillary limit, it gives 95% of Cox & Munk's measured slope at 5 m/s and 78% at 7 m/s. So the measured glitter is mostly short gravity waves, down to centimetres.
+- **Whitecaps**: at 10 m/s Monahan & O'Muircheartaigh give 3.84×10⁻⁶ × 10^3.41 = 0.0099. Callaghan et al. give 3.18×10⁻³ × 6.3³ = 0.80 and the satellite fit 4.6×10⁻³ × 10^2.26 = 0.84, both in percent. So the 1980 fit is a fraction (~1%, matching the others' 0.8%), not a percent (0.01%) as some summaries say. At the game's 7 m/s it's 0.3%; at a gale (19 m/s) 8.8%; at hurricane force (33 m/s) the extrapolated 58%.
 - **Cox & Munk's own check**: at 14 m/s the line gives σ² = 0.0747, atan √σ² = 15.3°, against their stated 15.9° (16° in the abstract). Their sentence is probably read off the data rather than the fit.
 
 ## Game mapping
@@ -74,10 +91,21 @@ for (const U of [3, 5, 7, 10, 14]) {
 - **Phases**: computed on the CPU in double precision, wrapped to [0, 2π), and handed to the shader per wave, so the float shader never sees a large system time (no repeat time needed, unlike Tessendorf's tiled FFT).
 - **Distance**: a wave fades out as it gets between 12 and 4 pixels long (`fadeFrom`, `fadeTo`, from the pixel's footprint `fwidth` on the sphere), longest first, so nothing shimmers. A faded wave's slope variance goes into the roughness. Three's GGX takes α = roughness², and a Beckmann-like distribution's α is the RMS slope √σ², so roughness = (σ²_total − σ²_drawn)^¼. The glint keeps its size as the waves fade with height: sparkles on the swell up close, one soft glint from high up.
 - **Wavelets (deliberate deviation)**: true to life, the slope of everything shorter than 0.5 m would also be roughness, the whole sea at Cox & Munk's σ² (0.039 at 7 m/s, roughness 0.44). That spreads the sun's glitter so wide that, against the game's bright sea colour and modest sun, it all but disappears (checked by eye in the lab). So by default (`waveParams.wavelets` off) the roughness counts only the drawn waves plus a calm sea's 0.003. From afar that is σ² ≈ 0.019 at 7 m/s (roughness 0.37): a broad glint, but visible.
+- **Far out**: on top of the pixel fade, every wave fades out between 50 and 110 units from the camera (`farFrom`, `farTo`), so from high in low orbit the sea shows only its glint. That is a look choice (at the stylised scale the swell would still be resolvable from there). Their slope goes into the roughness like any faded wave's.
+- **Wind over the sea**: per pixel, the breeze (`wind`) or a storm's wind where that is stronger. `weatherLook`'s storms under way give the storm's centre and angular radius. A thunderstorm cell blows the NWS's severe criterion (58 mph = 25.9 m/s) and a cyclone hurricane force (33 m/s), both × the storm's strength. The wind is full out to 0.4 of the storm's radius and fades to nothing at its edge (a shape choice). Dust, ash and global storms raise none. The waves keep their lengths and their slopes scale by √(σ²_CM(U) / σ²_CM(U_breeze)), so the sea under a storm is rougher in the same proportion as Cox & Munk's.
+- **Slicks**: Cox & Munk's slicks cut the slope 2–3×, so in slicks the slope variance is × 1/2.5 (`slickSlope`). Where they are and how much of the sea they cover (30%, patches ~40 units) are a look choice, from a slow two-octave noise. Storm winds clear them.
+- **Whitecaps**: the cover W is Monahan & O'Muircheartaigh's at the local wind, capped at 1 (`whitecapCover`; the shader mirrors it). Foam goes on the steepest crests: the slope-weighted crest term Σ sᵢ sin θᵢ, whose variance is the drawn slope variance, is taken as Gaussian, and foam goes where its CDF (Page's tanh approximation) is in the top W. That is the short waves' crests, so the patches are small and many. Putting it on the height (the long swell's crests) made blobs as big as the swell. Where the waves fade out, the cover is spread evenly as a tint of W, so a storm's sea goes white from afar too. The foam is diffuse, rough and a bright, slightly blue white (a look choice).
+- **Crests**: Gerstner's normal, n·(1 − Q Σ sᵢ sin θᵢ) − ∇h, with Q = 1 (`crests`): a true trochoidal wave, whose particles' orbits are as big as its amplitude (GPU Gems' Qᵢ wᵢ Aᵢ = kᵢaᵢ = sᵢ). At 7 m/s the sum stays under 1, so there are no loops; under storms it can pass 1 and is clamped at 0.2.
+- **Shallow water** (stylised): the sea's chunks carry the water's depth (sea level minus the terrain under it, units) in their colour attribute. The seabed shows through as exp(−depth / 1.5) (`shallowDepth`), a pale sand (`seabed`) tinted 75% by the sea's own hue. The terrain's relief is exaggerated (`RELIEF_SCALE`) and in different units from the waves', so no real attenuation length maps onto it; 1.5 units was chosen by eye for a visible band along the coasts.
+- **Surf** (stylised): foam in water shallower than 0.25 units (`surfDepth`), in bands that run shoreward at the swell's peak frequency, broken up by noise. From afar the bands even out to a steady line.
+- **Backlit crests** (stylised): where the camera looks towards a low sun (glowing most within ~±30° of its azimuth, fading out as it climbs from 15° to 37°), the upper half of the drawn waves glows in the sea's colour shifted towards green, × the sun's light. Its strength (`glow` 1.5) was set by eye.
+- **System view**: the terrain mesh's flat sea (vertices at sea level) gets the roughness low orbit's sea has from afar ((0.003 + drawn σ²)^¼ at the breeze) and a sphere's smooth normal, so the glint carries across the zoom. Before, the whole terrain was roughness 0.9 and the sea showed no glint at all.
 - Ice seas (and Titan's methane lakes, an `ice` type world) are unchanged: matte, no waves. Lava seas have their own shader.
 
 ## Open questions
 
 - At 7 m/s the PM tail integrated to λ_c gives 78% of Cox & Munk's slope, and at 14 m/s 48%. PM's short-wave tail doesn't grow with the wind, while the measured short-wave slope does. Spectra built for that weren't looked at (Elfouhaily et al. 1997 is one, named from memory, unchecked); the game only uses PM for the drawn waves' shares.
-- The wind is the same on every world and everywhere on it. Storms (`gen/weather.ts`) could raise it locally, and thin air could weaken it. Neither is modelled.
+- The breeze is the same on every world. Thin air could weaken it; that isn't modelled.
+- Monahan & O'Muircheartaigh's fit is extrapolated past 17 m/s, so the storm seas' cover (up to 58% at hurricane force) is a stretch of the data.
+- Volcanoes raised later (the volcano bomb) don't change the water's depth: it's sampled from the terrain as generated, so a new volcanic island has no shallows or surf.
 - Methane seas (Titan's lakes) are drawn as ice. How rough real methane seas are wasn't looked up.

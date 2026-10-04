@@ -17,9 +17,7 @@ import type { Landing } from '../cargo/plantFate';
 import { LodSurface, addCraterDebug, addLodDebug } from './LodSurface';
 import type { RenderClock } from './PlanetFrame';
 import { RingRocks } from './RingRocks';
-import { SeaWaveLook, addWaveDebug } from '../world/seaWaves';
-import { STANDARD_GRAVITY } from '../gen/waves';
-import { WIND_MIN_PRESSURE } from '../gen/geysers';
+import { createSeaWaves, addWaveDebug, type SeaWaveLook } from '../world/seaWaves';
 
 // Mountains' exaggeration up close lives in frame.ts (the system view's clouds need it too); re-exported here.
 export { RELIEF_SCALE };
@@ -122,13 +120,10 @@ export class PlanetGlobe implements Entity {
     if (seaFloor && this.lava) {
       this.object.add(createLavaSea(R, this.lava.createSeaMaterial(this.sun, this.sunLight, this.ambientLight)));
     } else if (seaFloor) {
-      // Ice sheets are still; water has waves wherever there's air to blow over it.
-      if (config.type !== 'ice') {
-        const climate = config.climate;
-        this.waves = new SeaWaveLook(seed, (climate?.gravity ?? 1) * STANDARD_GRAVITY, (climate?.pressure ?? 1) >= WIND_MIN_PRESSURE);
-        addWaveDebug(debug);
-      }
-      this.water = createWater(config.type, style.sea!, R, this.waves);
+      // Ice sheets are still; water has waves (calm where there's no air to blow over it).
+      this.waves = createSeaWaves(config, this.sun, this.sunLight);
+      if (this.waves) addWaveDebug(debug);
+      this.water = createWater(config.type, style.sea!, R, this.waves, this.sample);
       this.object.add(this.water.object);
     }
     if (config.rings) {
@@ -243,8 +238,8 @@ export class PlanetGlobe implements Entity {
     this.gas?.animate(this.frame.renderTime);
     this.weather?.animate(this.frame.renderTime);
     this.rings?.animate(this.frame.renderTime);
-    this.waves?.animate(this.frame.renderTime);
     const camera = this.object.worldToLocal(this.camera.getWorldPosition(this.cameraPosition));
+    this.waves?.animate(this.frame.renderTime, camera, this.weather?.shown ?? null);
     this.surface.update(camera, frameDt);
     this.water?.update(camera, frameDt);
   }
@@ -272,12 +267,20 @@ export class PlanetGlobe implements Entity {
  * Opaque: the sky is drawn first, so see-through water would show stars
  * through the planet.
  */
-function createWater(type: PlanetConfig['type'], color: string, radius: number, waves: SeaWaveLook | null): LodSurface {
-  // With waves, the roughness is the slope of the wavelets too small to draw (world/seaWaves.ts).
+function createWater(type: PlanetConfig['type'], color: string, radius: number, waves: SeaWaveLook | null, terrain: SurfaceSampler): LodSurface {
+  // With waves, the roughness is the slope of the waves too small to draw (world/seaWaves.ts).
   const material = new THREE.MeshStandardMaterial({ color, roughness: type === 'ice' ? 0.55 : 0.25 });
   waves?.apply(material);
+  // The waves' shader reads how deep the water is (units) from the colour's red.
+  const floor = new THREE.Color();
+  const sample: SurfaceSampler = waves
+    ? (dir, out, spacing) => {
+        out.setRGB(Math.max(0, radius - terrain(dir, floor, spacing)), 0, 0);
+        return radius;
+      }
+    : () => radius;
   // Drawn first, so the sea floor under it is rejected by the depth test rather than shaded.
-  return new LodSurface(radius, radius, () => radius, material, { smooth: 'coast', renderOrder: SEA_RENDER_ORDER, name: 'Sea' });
+  return new LodSurface(radius, radius, sample, material, { smooth: 'coast', renderOrder: SEA_RENDER_ORDER, name: 'Sea' });
 }
 
 /** The lava sea: a fixed smooth sphere at sea level with the animated lava (see world/lavaMaterial.ts). */

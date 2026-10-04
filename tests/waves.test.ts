@@ -9,7 +9,9 @@ import {
   seaWaves,
   significantHeight,
   slopeVariance,
+  stormWind,
   waveOmega,
+  whitecapCover,
   wavePhase,
   wavelength,
 } from '../src/gen/waves';
@@ -88,5 +90,21 @@ describe('sea waves', () => {
       const step = (((p - wavePhase(w!, t + 0.01)) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
       expect(step).toBeCloseTo(w!.omega * 0.01, 5);
     }
+  });
+
+  it('covers about 1% of the sea in whitecaps at 10 m/s, more with the wind, all of it at most', () => {
+    // Monahan & O'Muircheartaigh's fit as a fraction; the two other fits in Albert et al. (2016) give 0.8% at 10 m/s.
+    expect(whitecapCover(10)).toBeGreaterThan(0.008);
+    expect(whitecapCover(10)).toBeLessThan(0.012);
+    expect(whitecapCover(7)).toBeLessThan(whitecapCover(15));
+    expect(whitecapCover(0)).toBe(0);
+    expect(whitecapCover(60)).toBe(1);
+  });
+
+  it('blows a severe thunderstorm’s and a hurricane’s wind under storms, none under the others', () => {
+    expect(stormWind('cell', 1)).toBeCloseTo(25.9, 1);
+    expect(stormWind('cyclone', 1)).toBe(33);
+    expect(stormWind('cyclone', 0.5)).toBe(16.5);
+    expect(stormWind('dust', 1)).toBe(0);
   });
 });

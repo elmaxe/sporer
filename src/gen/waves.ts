@@ -56,8 +56,13 @@ export interface SeaWaves {
  * measured at 12.5 m; taken as the 10 m wind here (a few per cent apart).
  */
 export function coxMunkSlope(wind: number): number {
-  return 0.003 + 5.12e-3 * Math.max(0, wind);
+  return COX_MUNK[0] + COX_MUNK[1] * Math.max(0, wind);
 }
+
+/** Cox & Munk's σ² = a + b U, as [a, b] (the shader mirrors coxMunkSlope with these). */
+export const COX_MUNK = [0.003, 5.12e-3] as const;
+/** Monahan & O'Muircheartaigh's W = c U^e, as [c, e] (the shader mirrors whitecapCover with these). */
+export const WHITECAP = [3.84e-6, 3.41] as const;
 
 /** The Pierson–Moskowitz spectrum's peak angular frequency, ω_p = 0.877 g / U₁₉.₅, at a 10 m wind `wind` (m/s). */
 export function peakOmega(wind: number, gravity = STANDARD_GRAVITY): number {
@@ -157,3 +162,30 @@ export function wavePhase(wave: WaveComponent, time: number): number {
   const p = (wave.phase - wave.omega * time) % (Math.PI * 2);
   return p < 0 ? p + Math.PI * 2 : p;
 }
+
+/**
+ * Share of the sea covered by whitecaps at a 10 m wind `wind` (m/s):
+ * Monahan & O'Muircheartaigh (1980), W = 3.84·10⁻⁶ U^3.41 (a fraction: ~1%
+ * at 10 m/s). Fitted on winds mostly under 12 m/s (a tenth up to 17); past
+ * that it's extrapolated, and capped at all of it.
+ */
+export function whitecapCover(wind: number): number {
+  return Math.min(1, WHITECAP[0] * Math.max(0, wind) ** WHITECAP[1]);
+}
+
+/**
+ * The wind under a storm at its full strength, m/s at 10 m: a thunderstorm's
+ * gusts at the US National Weather Service's severe criterion (58 mph), a
+ * cyclone at hurricane force (Beaufort 12, the Met Office's 33 m/s). Other
+ * storms (dust, ash, global haze) aren't counted over the sea.
+ */
+export const STORM_WIND: Readonly<Record<string, number>> = {
+  cell: 58 * 0.44704,
+  cyclone: 33,
+};
+
+/** The wind a storm of `kind` raises at strength `strength` (0–1), m/s; 0 for kinds that don't. */
+export function stormWind(kind: string, strength: number): number {
+  return (STORM_WIND[kind] ?? 0) * Math.max(0, Math.min(1, strength));
+}
+

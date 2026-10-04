@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { applySeaGlint } from './seaWaves';
 import type { Entity } from '../core/Entity';
 import { RAPIER, type Physics } from '../physics/Physics';
 import { keplerPosition, orbitPosition, type KeplerOrbit, type Orbit } from '../gen/orbit';
@@ -178,6 +179,8 @@ export class Planet implements Entity, CelestialBody {
     );
     // Lava seas glow on the terrain's own flat sea.
     this.lava?.paintTerrain(this.surface.material, radius);
+    // Water seas are as glossy as low orbit's from afar, so the sun's glint carries across the zoom.
+    applySeaGlint(this.surface.material, config, radius);
     this.gas = createGasLook(config);
     this.gas?.apply(this.surface.material);
     // Clouds turn with the ground; the same layer as low orbit's, in planet radii.
