@@ -121,7 +121,7 @@ export class PlanetGlobe implements Entity {
     addLodDebug(debug);
     addCraterDebug(debug);
     if (seaFloor && this.lava) {
-      this.object.add(createLavaSea(R, this.lava.createSeaMaterial(this.sun, this.sunLight, this.ambientLight)));
+      this.object.add(createLavaSea(R, this.lava.createSeaMaterial(this.sun, this.sunLight, this.ambientLight, R)));
     } else if (seaFloor) {
       // Ice sheets are still; water has waves (calm where there's no air to blow over it).
       this.waves = createSeaWaves(config, this.sun, this.sunLight);

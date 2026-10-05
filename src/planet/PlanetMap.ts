@@ -124,7 +124,7 @@ const fragmentShader = /* glsl */ `
     vec3 col;
     #ifdef LAVA
     if (ground.a < 0.5) {
-      col = toneMapping(lavaSea(dir, lavaFlow(dir)));
+      col = toneMapping(lavaSea(dir, lavaFlow(dir), dir));
     } else
     #endif
     {
@@ -256,7 +256,7 @@ export class PlanetMap implements Entity {
       fragmentShader,
       defines: this.lava ? { LAVA: '' } : globe.gas ? { GAS: '' } : {},
       uniforms: {
-        ...(globe.lava ? globe.lava.seaUniforms(globe.sun, globe.sunLight, globe.ambientLight) : { uSun: { value: globe.sun } }),
+        ...(globe.lava ? globe.lava.seaUniforms(globe.sun, globe.sunLight, globe.ambientLight, globe.radius) : { uSun: { value: globe.sun } }),
         ...(globe.gas ? { ...globe.gas.uniforms, uGasFp: { value: (2 * Math.PI) / this.width } } : {}),
         uMap: { value: this.texture },
         uExtent: { value: new THREE.Vector2(this.width / this.scale, this.height / this.scale) },
