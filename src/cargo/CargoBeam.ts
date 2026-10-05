@@ -23,6 +23,7 @@ import { ParticlePool, type Puff } from './CargoFx';
 import { animalFate, describeAnimalFate, type Fate } from './animalFate';
 import { animalKey, cargoOf, cargoSize, speciesKey, type Cargo, type CargoSize, type Inventory } from './inventory';
 import { describeFate, plantFate, type FateWorld, type Landing } from './plantFate';
+import { pointerCamera } from '../world/thirdPerson';
 
 /** What the beam needs from the globe (see PlanetGlobe). */
 export interface CargoGround {
@@ -389,7 +390,7 @@ export class CargoBeam implements Entity {
 
   /** A press with the beam or a stack armed: catch what's under it, or start setting cargo down there. */
   private startBeam(ndcX: number, ndcY: number): void {
-    this.raycaster.setFromCamera(this.ndc.set(ndcX, ndcY), this.camera);
+    this.raycaster.setFromCamera(this.ndc.set(ndcX, ndcY), pointerCamera(this.camera));
     const { ray } = this.raycaster;
     if (this.armed === 'abduct') {
       // Nothing under the pointer but sky: no beam.
@@ -525,7 +526,7 @@ export class CargoBeam implements Entity {
   private sweep(): void {
     const { pointer } = this.input;
     if (pointer.inside) {
-      this.raycaster.setFromCamera(this.ndc.set(pointer.ndcX, pointer.ndcY), this.camera);
+      this.raycaster.setFromCamera(this.ndc.set(pointer.ndcX, pointer.ndcY), pointerCamera(this.camera));
       // Pointed past the beam's reach (or at the sky), it stays where it last reached.
       if (this.aimPoint(this.raycaster.ray) && this.point.distanceTo(this.hold) <= beamParams.range) this.beamFoot.copy(this.point);
     }
@@ -814,7 +815,7 @@ export class CargoBeam implements Entity {
       this.farReticle.hide();
       return;
     }
-    this.raycaster.setFromCamera(this.ndc.set(pointer.ndcX, pointer.ndcY), this.camera);
+    this.raycaster.setFromCamera(this.ndc.set(pointer.ndcX, pointer.ndcY), pointerCamera(this.camera));
     let size: number;
     if (this.armed === 'abduct') {
       if (!this.aimPoint(this.raycaster.ray)) {
