@@ -2846,9 +2846,9 @@ await section('cargo', async () => {
       await until(`planet.cargo.inFlight.length === 0`, 20000);
       release = { released: (await evaluate(`${animalChanges}.releasedCount`)) - before, hint: await evaluate(`document.getElementById('item-hint').textContent`) };
     }
-    // The laser: Tab to the Weapons, a real 3 arms it; held on an animal, then on a tree, it kills them.
+    // The laser: Tab to the Weapons, a real 1 arms it; held on an animal, then on a tree, it kills them.
     if (await evaluate(`document.getElementById('item-bar').dataset.tab !== 'weapons'`)) await key('Tab', 'Tab');
-    await key('Digit3', '3');
+    await key('Digit1', '1');
     const laserArmed = await evaluate(`({ selected: planet.selected, cursor: document.body.classList.contains('aiming'), hint: document.getElementById('item-hint').textContent })`);
     const fire = async (target, what) => {
       if (!target) return null;
@@ -3027,14 +3027,21 @@ await section('volcano', async () => {
   })()`);
   await drawFrames(3);
   const lodFar = { settled: await until(`planet.volcanoes.settled`, 30000), ...(await evaluate(`planet.volcanoes.lodStats()[0]`)) };
+  // Its loops: the far one from out there, the near one next to it (see audio/VolcanoSounds).
+  const volcanoLevels = `Object.fromEntries(audio.ambientLevels.filter((a) => a.cue.startsWith('volcano')).map((a) => [a.cue, +a.level.toFixed(3)]))`;
+  const soundFar = await evaluate(volcanoLevels);
   await evaluate(`planet.orbit.setDistance(planet.volcanoes.shapes[0].baseRadius * 0.4)`);
   await drawFrames(3);
   const lodNear = { settled: await until(`planet.volcanoes.settled`, 30000), ...(await evaluate(`planet.volcanoes.lodStats()[0]`)) };
+  const soundNear = await evaluate(volcanoLevels);
   await evaluate(`(() => { planet.orbit.setFocus(null); planet.orbit.setDistance(__zoom); })()`);
   const lod = { far: lodFar, near: lodNear };
+  const sound = { far: soundFar, near: soundNear };
   const heard = (await evaluate(`__cues`)).filter((c) => c.startsWith('volcano'));
   await evaluate(`levels.leavePlanet()`);
   await until(`levels.mode === 'system' && !levels.transitioning`, 60000);
+  // Silent once left.
+  sound.left = await evaluate(volcanoLevels);
   // The system view's globe shows it too.
   const systemView = await evaluate(`__volcanic.volcanoSites.length`);
   await evaluate(`(() => { ship.parkAt(__volcanic); levels.toPlanet(__volcanic); })()`);
@@ -3049,9 +3056,9 @@ await section('volcano', async () => {
   await evaluate(`levels.toSystem()`);
   await until(`levels.mode === 'system' && !levels.transitioning`, 60000);
   const rebuilt = await evaluate(`[...world.planets, ...world.moons].find((b) => b.name === __volcanic.name)?.volcanoSites.length`);
-  volcano = { inSpace, gas, armed, fired, landed, risen, after, lod, heard, systemView, revisit, rebuilt };
+  volcano = { inSpace, gas, armed, fired, landed, risen, after, lod, sound, heard, systemView, revisit, rebuilt };
   volcano.ok =
-    inSpace.slots === 2 &&
+    inSpace.slots === 3 &&
     /down to a planet or moon/.test(inSpace.hint) &&
     (!giant || (gas.selected === null && !gas.status.available && /No ground/.test(gas.status.reason) && gas.volcanoes === null)) &&
     armed.selected === 'volcanoBomb' &&
@@ -3074,6 +3081,10 @@ await section('volcano', async () => {
     lod.near.chunks > 4 &&
     lod.near.maxDepth >= 2 &&
     heard.join(',') === 'volcanoFire,volcanoRise' &&
+    sound.far.volcanoFar > sound.far.volcanoNear &&
+    sound.near.volcanoNear > 0.5 &&
+    sound.near.volcanoNear > sound.near.volcanoFar &&
+    Object.values(sound.left).every((level) => level === 0) &&
     systemView === 1 &&
     revisit.count === 1 &&
     revisit.growth === 1 &&
@@ -3095,15 +3106,15 @@ await section('buster', async () => {
       await drawFrames(2);
     }
   };
-  // In space: the bar shows, but the buster only works in low orbit.
-  await press('Digit1', '1');
+  // In space: the bar shows, but the buster (3) only works in low orbit.
+  await press('Digit3', '3');
   const inSpace = await evaluate(`({ bar: !document.getElementById('item-bar').hidden, slots: document.querySelectorAll('.item-slot[data-item]').length,
     hint: document.getElementById('item-hint').textContent })`);
   // Down to a moon of the home system (or its first planet).
   await evaluate(`(() => { const b = world.moons[0] ?? world.planets[0]; window.__busted = b; ship.parkAt(b); levels.toPlanet(b); })()`);
   await until(`levels.mode === 'planet' && !levels.transitioning`, 60000);
   await drawFrames(5);
-  await press('Digit1', '1');
+  await press('Digit3', '3');
   const armed = await evaluate(`({ selected: planet.selected, aiming: document.body.classList.contains('aiming'), hint: document.getElementById('item-hint').textContent })`);
   // A real click on the ground a little way off the ship (the ground under the ship, nudged towards the screen's centre).
   const target = await evaluate(`(() => {
@@ -3164,7 +3175,7 @@ await section('buster', async () => {
   buster = { inSpace, armed, fired, stayed, maxFlash, blasted, sounds: heardOrder, after, system, revisit, rebuilt, bustedName };
   buster.ok =
     inSpace.bar &&
-    inSpace.slots === 2 &&
+    inSpace.slots === 3 &&
     /down to a planet or moon/.test(inSpace.hint) &&
     armed.selected === 'planetBuster' &&
     armed.aiming &&
