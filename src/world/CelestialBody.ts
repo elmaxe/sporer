@@ -11,6 +11,8 @@ export interface Sight {
   readonly radius: number;
   /** Picked as a sphere this big instead, when set (e.g. a comet's coma round its small nucleus). */
   readonly pickRadius?: number;
+  /** The target ring goes round a sphere this big instead, when set (a black hole's disc round its small shadow). */
+  readonly markRadius?: number;
   /** Interpolated position of the rendered object. */
   readonly renderPosition: THREE.Vector3;
 }

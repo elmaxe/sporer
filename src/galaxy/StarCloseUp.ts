@@ -4,20 +4,20 @@ import { orbitPosition } from '../gen/orbit';
 import { hashSeed } from '../gen/rng';
 import { starActivity } from '../gen/starActivity';
 import type { SystemData } from '../gen/system';
-import { StarLook } from '../world/StarLook';
+import { createStarView, type StarView } from '../world/StarLook';
 
 /**
  * The system's star(s) drawn in the galaxy, during the seamless zoom between
  * the two: at the star's place, turned by the system's galactic tilt and
  * scaled to `scale` galaxy units per system unit, with the same surface and
- * corona as in the system (`StarLook`, same seeds and clock). So
+ * corona as in the system (`StarLook`, or a `BlackHoleLook`; same seeds and clock). So
  * the galaxy camera, at `scale` times the system camera's distance, sees
  * exactly what the system camera sees. Lives in the galaxy's rotating root.
  */
 export class StarCloseUp {
   /** The system's frame in galaxy coordinates: its origin is the barycentre. */
   readonly object = new THREE.Group();
-  private readonly looks: StarLook[];
+  private readonly looks: StarView[];
 
   constructor(
     private readonly parent: THREE.Object3D,
@@ -34,7 +34,8 @@ export class StarCloseUp {
     this.object.scale.setScalar(scale);
     this.looks = system.stars.map((star, i) => {
       // Seeded like the system's Star, so the surface matches.
-      const look = new StarLook(star, starActivity(star), hashSeed(system.seed, 'star', i));
+      // A black hole bends nothing here (the galaxy is no baked sky): its shadow and disc only.
+      const look = createStarView(star, starActivity(star), hashSeed(system.seed, 'star', i), null);
       this.object.add(look.object);
       return look;
     });

@@ -18,6 +18,7 @@ import {
   rerollLook,
   sanitizeTuning,
   withKind,
+  derived,
   type GenerateStarOptions,
   type StarLabState,
   type StarLabView,
@@ -142,7 +143,8 @@ export class StarLab {
       const { kind: _k, spectralClass: _c, ...rest } = patch;
       patch = rest;
     }
-    this.replaceSelected({ ...star, ...patch });
+    // A black hole's size, light and colour follow from its mass and disc.
+    this.replaceSelected(derived({ ...star, ...patch }));
     return this.whenReady();
   }
 

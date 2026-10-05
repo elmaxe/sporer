@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { markSky } from './skyCapture';
 import type { Entity } from '../core/Entity';
 import { hashSeed, Rng } from '../gen/rng';
 
@@ -40,6 +41,7 @@ export class Starfield implements Entity {
     );
     this.points.frustumCulled = false;
     this.points.renderOrder = -1;
+    markSky(this.points);
     scene.add(this.points);
   }
 

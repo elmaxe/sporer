@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { markSky } from './skyCapture';
 import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
 import { skyStars } from '../gen/galactic';
@@ -95,6 +96,7 @@ export class SkyStars implements Entity {
     this.points.frustumCulled = false;
     // With the band's own stars, after the band and nebulas, before everything in the system.
     this.points.renderOrder = -2;
+    markSky(this.points);
     this.points.onBeforeRender = (renderer) => {
       material.uniforms.pixelRatio!.value = renderer.getPixelRatio();
       material.uniforms.brightness!.value = skyStarParams.brightness;

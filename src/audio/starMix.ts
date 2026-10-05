@@ -25,6 +25,8 @@ export const starPitch: Record<StarKind, number> = {
   whiteDwarf: 1.2,
   redGiant: 0.8,
   blueGiant: 1.05,
+  // The deepest: a rumble rather than a star's roar.
+  blackHole: 0.6,
 };
 
 export interface StarMix {
