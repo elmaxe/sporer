@@ -18,6 +18,7 @@ import { PlanetGlobe, RELIEF_SCALE } from '../planet/PlanetGlobe';
 import { PlanetMap } from '../planet/PlanetMap';
 import { PlanetPicker } from '../planet/PlanetPicker';
 import { PlanetShip } from '../planet/PlanetShip';
+import { ShipWake } from '../planet/ShipWake';
 import { maxViewDistance, travelScale } from '../planet/frame';
 import { OrbitCamera } from '../player/OrbitCamera';
 import { zoomCurveParams } from '../player/zoomCurve';
@@ -26,6 +27,8 @@ import { plantSetup } from '../surface/plantSetup';
 import { animalSetup } from '../surface/animalSetup';
 import { SurfaceAnimals } from '../surface/SurfaceAnimals';
 import { SurfaceEntities } from '../surface/SurfaceEntities';
+import { GroundRocks } from '../surface/GroundRocks';
+import { rockSetup } from '../surface/rockSetup';
 import { cometParams } from '../world/Comet';
 import { Planet } from '../world/Planet';
 import { Starfield } from '../world/Starfield';
@@ -245,9 +248,13 @@ export class LabLevel extends Level {
   readonly weather: Weather | null = null;
   /** Plants on habitable bodies (globe view; the lab's menu-free switch is plantParams.enabled). */
   readonly plants: SurfaceEntities | null = null;
+  /** Loose rocks on the ground near the camera (globe view, solid bodies). */
+  readonly rocks: GroundRocks | null = null;
   /** Animals roaming where plants grow (globe view; terraform a world into a habitable tier and they come). */
   readonly animals: SurfaceAnimals | null = null;
   readonly ship: PlanetShip | null = null;
+  /** Water seas (globe view): the ship's downwash on the water below it. */
+  readonly wake: ShipWake | null = null;
   readonly map: PlanetMap | null = null;
   readonly bodies: LabBodies | null = null;
   readonly orbit: OrbitCamera;
@@ -308,6 +315,8 @@ export class LabLevel extends Level {
       const ship = (this.ship = this.add(
         new PlanetShip(this.scene, input, camera, debug, globe.top + ALTITUDE, shipStart, travelScale(R)),
       ));
+      // After the ship: its downwash on the water below it.
+      if (globe.waves) this.wake = this.add(new ShipWake(this.scene, globe, ship.object, camera, globe.sun));
       if (view.camera === 'fly') {
         target = ship.object;
         up = ship.up;
@@ -349,6 +358,8 @@ export class LabLevel extends Level {
       );
     const plants = globe ? plantSetup(config) : null;
     if (globe && plants) this.plants = this.add(new SurfaceEntities(this.scene, plants.plan, plants.ground, camera, new SurfaceChanges(), debug));
+    const rocks = globe ? rockSetup(config) : null;
+    if (globe && rocks) this.rocks = this.add(new GroundRocks(this.scene, rocks.plan, rocks.ground, camera, debug));
     const animals = globe ? animalSetup(config, plants) : null;
     if (globe && animals) this.animals = this.add(new SurfaceAnimals(this.scene, animals.plan, animals.ground, camera, clock, debug));
     if (carry) {

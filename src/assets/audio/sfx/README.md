@@ -26,9 +26,12 @@ rebuild; no code changes needed. Volumes and fades are in `cueParams` (`src/audi
 | `radarPing/` | The radar (switched on in the Inventory) sending its waves towards the nearest animal of the species picked on the planet map's Species tab: once per ping, more often and higher the closer they are (played from 0.56× speed far off to 1× right above the animals, so record it at the pitch you want to hear on top of them) | one-shot |
 | `laserBeam/` | The laser (a weapon) firing: starts on the press, fades out when it's let go. The file there is a synthesised placeholder: replace it with your own | loop |
 | `laserHit/` | The laser killing an animal or a plant (once for each). The file there is a synthesised placeholder: replace it with your own | one-shot |
+| `ventBurst/` | A geyser, plume or fumarole near the camera bursting into eruption (low orbit), louder the nearer it is | one-shot |
 | `starNear/` | A star close up: grows as the camera nears its surface, taking over from `starFar` | ambient |
 | `starFar/` | A star from across its system: fades with distance, giving way to `starNear` close up | ambient |
 | `shipHum/` | The UFO's own hum, always on | ambient |
+| `ventRumble/` | Fumaroles (airless rock's smoking, burning vents) and Io-style plumes in low orbit: rumble, roar and crackle, louder the nearer the camera is to vents erupting | ambient |
+| `geyserHiss/` | Cryo, steam and sulphur geysers in low orbit: a surging hiss, louder the nearer the camera is to vents erupting | ambient |
 
 One-shots can be pitched as they play: the game can ask for a playback rate (`play(cue, { rate })`; 1 as
 recorded, 2 an octave higher and twice as quick, kept within 0.25–4). Only `radarPing` uses it so far.
@@ -37,6 +40,11 @@ Ambient cues play on the **Ambience** channel (its slider), the rest on Effects.
 the game sets their loudness as it goes: the two star loops are mixed from the camera's distance to the star
 (`starMix` in `src/audio/starMix.ts`, the "Star sound" debug folder) and pitched by the star's kind
 (`starPitch`: giants deeper, dwarfs higher), so one pair of files serves every star.
+
+The vents' three cues (`ventRumble`, `geyserHiss`, `ventBurst`) are synthesised from noise by
+`scripts/ventSounds.sh` (ffmpeg); drop recordings in their folders instead to replace them. The loops are mixed
+from the camera's distance to each vent erupting (`ventMix` in `src/audio/ventMix.ts`, the "Vent sound" debug
+folder) and pitched by the kind of vent.
 
 Loops: the clip loops if the trip outlasts it (its last 0.5 s is crossfaded into its start so it wraps
 seamlessly), and fades out over `fadeOut` seconds on arrival, so a clip longer than most trips works too.

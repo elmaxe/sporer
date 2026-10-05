@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BREAKER_INDEX,
   STANDARD_GRAVITY,
   WAVES_PER_SET,
   WAVE_SETS,
@@ -7,6 +8,10 @@ import {
   drawnVariance,
   peakOmega,
   seaWaves,
+  shoalWavenumber,
+  shoalingCoefficient,
+  shorePhase,
+  shoreSwells,
   significantHeight,
   slopeVariance,
   stormWind,
@@ -106,5 +111,80 @@ describe('sea waves', () => {
     expect(stormWind('cyclone', 1)).toBe(33);
     expect(stormWind('cyclone', 0.5)).toBe(16.5);
     expect(stormWind('dust', 1)).toBe(0);
+  });
+});
+
+describe('shore waves', () => {
+  /** k from ω² = g k tanh(k h) by Newton's method, the exact answer the approximation is checked against. */
+  const exactK = (omega: number, h: number, g = STANDARD_GRAVITY) => {
+    let k = (omega * omega) / g / Math.sqrt(Math.tanh((omega * omega * h) / g));
+    for (let i = 0; i < 50; i++) {
+      const t = Math.tanh(k * h);
+      const f = g * k * t - omega * omega;
+      const df = g * t + g * k * h * (1 - t * t);
+      k -= f / df;
+    }
+    return k;
+  };
+
+  it("follow the dispersion relation within Fenton & McKee's 1.5% (1.7% measured)", () => {
+    const omega = 2 * Math.PI / 8;
+    for (const h of [0.1, 0.5, 1, 2, 5, 10, 20, 50, 100, 400]) {
+      const k = shoalWavenumber(omega, h);
+      expect(Math.abs(k / exactK(omega, h) - 1)).toBeLessThan(0.017);
+    }
+    // Deep water: the deep-water wavenumber; shallow: ω / √(g h).
+    expect(shoalWavenumber(omega, 1e4)).toBeCloseTo((omega * omega) / STANDARD_GRAVITY, 8);
+    expect(shoalWavenumber(omega, 0.01) / (omega / Math.sqrt(STANDARD_GRAVITY * 0.01))).toBeCloseTo(1, 2);
+  });
+
+  it("dip, then grow, as Fenton's shoaling coefficient does (Green's law in the shallows)", () => {
+    const omega = 2 * Math.PI / 8;
+    const L0 = wavelength(omega);
+    // Deep: 1; the minimum ~0.913 near d/λ0 = 0.16; then up.
+    expect(shoalingCoefficient(omega, L0)).toBeCloseTo(1, 2);
+    let min = Infinity;
+    let at = 0;
+    for (let d = 0.05; d < 0.5; d += 0.001) {
+      const ks = shoalingCoefficient(omega, d * L0);
+      if (ks < min) [min, at] = [ks, d];
+    }
+    expect(min).toBeGreaterThan(0.9);
+    expect(min).toBeLessThan(0.93);
+    expect(at).toBeGreaterThan(0.13);
+    expect(at).toBeLessThan(0.19);
+    // Green's law: H ∝ h^−¼ in the shallowest water.
+    const a = shoalingCoefficient(omega, 0.002 * L0);
+    const b = shoalingCoefficient(omega, 0.001 * L0);
+    expect(b / a).toBeCloseTo(2 ** 0.25, 1);
+  });
+
+  it('gain phase running out from the shore, as fast as their wavenumber over the slope', () => {
+    const omega = 1.2;
+    expect(shorePhase(omega, 0, 0.05)).toBe(0);
+    let last = 0;
+    for (const d of [0.5, 1, 2, 5, 10, 20]) {
+      const p = shorePhase(omega, d, 0.05);
+      expect(p).toBeGreaterThan(last);
+      last = p;
+    }
+    // d(phase)/d(depth) = k / slope.
+    const h = 3;
+    const dp = (shorePhase(omega, h + 0.01, 0.05) - shorePhase(omega, h - 0.01, 0.05)) / 0.02;
+    expect(dp / (shoalWavenumber(omega, h) / 0.05)).toBeCloseTo(1, 2);
+    // Shallow-water limit: 2ω√(d/g) / slope.
+    const shallow = shorePhase(0.05, 0.5, 1);
+    expect(shallow / (2 * 0.05 * Math.sqrt(0.5 / STANDARD_GRAVITY))).toBeCloseTo(1, 2);
+  });
+
+  it('come in two swells sharing a significant height, none when calm', () => {
+    expect(shoreSwells(seaWaves(1, 0, STANDARD_GRAVITY, 0.5))).toEqual([]);
+    const waves = seaWaves(1, 10, STANDARD_GRAVITY, 0.5);
+    const swells = shoreSwells(waves);
+    expect(swells).toHaveLength(2);
+    expect(swells[0]!.omega).toBeCloseTo(waves.peakOmega, 10);
+    const energy = swells.reduce((e, s) => e + s.height * s.height, 0);
+    expect(Math.sqrt(energy)).toBeCloseTo(significantHeight(10), 8);
+    expect(BREAKER_INDEX).toBe(0.78);
   });
 });

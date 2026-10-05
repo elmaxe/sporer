@@ -28,7 +28,7 @@ export const geyserParams = {
 const MAX_POINT_SIZE = 96;
 
 const vertexShader = /* glsl */ `
-  attribute vec4 aTime;    // launch time, lifetime, style (0 cryo, 1 puff, 2 droplet, 3 sulphur), brightness
+  attribute vec4 aTime;    // launch time, lifetime, style (0 cryo, 1 puff, 2 droplet, 3 sulphur, 4 smoke, 5 ember, 6 flame), brightness
   attribute vec4 aOrigin;  // unit direction of the vent, ground radius there
   attribute vec3 aTangent; // unit tangent it's thrown along
   attribute vec3 aLaunch;  // vertical speed, sideways speed, size at launch
@@ -45,6 +45,8 @@ const vertexShader = /* glsl */ `
   uniform vec3 uAmbient;
   varying vec3 vColor;
   varying float vAlpha;
+  // 1 for what glows by its own light (embers, flames): drawn added to what's behind rather than over it.
+  varying float vGlow;
 
   void main() {
     float age = uTime - aTime.x;
@@ -83,12 +85,24 @@ const vertexShader = /* glsl */ `
     float day = smoothstep(-0.12, 0.25, dot(dir, uSun));
     vec3 toParticle = normalize(p - cameraPosition);
     float forward = pow(max(dot(toParticle, uSun), 0.0), 6.0) * (style == 3 ? 0.4 : 1.0);
-    vec3 tint = style == 0 ? vec3(0.8, 0.9, 1.0) : style == 3 ? vec3(1.0, 0.88, 0.55) : vec3(1.0);
-    vColor = tint * (uAmbient + uSunLight * uSunlight * day * (1.0 + uForward * forward));
+    vec3 tint = style == 0 ? vec3(0.8, 0.9, 1.0) : style == 3 ? vec3(1.0, 0.88, 0.55) : style == 4 ? vec3(0.13, 0.12, 0.115) : vec3(1.0);
+    vColor = tint * (uAmbient + uSunLight * uSunlight * day * (1.0 + uForward * forward * (style == 4 ? 0.3 : 1.0)));
+    vGlow = 0.0;
+    // Smoke is lit from below by the fire it rises from, as it leaves the vent.
+    if (style == 4) vColor += vec3(0.55, 0.16, 0.035) * (1.0 - smoothstep(0.0, 0.3, a));
+    if (style == 5) {
+      // Embers: incandescent, cooling from a yellow-white to a dull red as they fly (blackbody-ish, stylised).
+      vColor = mix(vec3(1.9, 0.85, 0.22), vec3(0.7, 0.12, 0.03), smoothstep(0.0, 0.85, a));
+      vGlow = 1.0;
+    } else if (style == 6) {
+      // Flames: a hot yellow core going orange and red as they lick up and die.
+      vColor = mix(vec3(1.7, 0.75, 0.16), vec3(0.9, 0.16, 0.03), smoothstep(0.1, 1.0, a));
+      vGlow = 1.0;
+    }
 
-    // Out of the vent, then thinning out: grains near the end of their fall, steam as it disperses.
-    float opacity = style == 0 ? 0.4 : style == 1 ? 0.5 : style == 2 ? 0.6 : 0.45;
-    float fade = style == 1 ? 1.0 - smoothstep(0.35, 1.0, a) : 1.0 - smoothstep(0.7, 1.0, a);
+    // Out of the vent, then thinning out: grains near the end of their fall, steam and smoke as they disperse.
+    float opacity = style == 0 ? 0.4 : style == 1 ? 0.5 : style == 2 ? 0.6 : style == 4 ? 0.55 : style == 5 ? 0.9 : style == 6 ? 0.55 : 0.45;
+    float fade = style == 1 || style == 4 ? 1.0 - smoothstep(0.35, 1.0, a) : style == 6 ? 1.0 - smoothstep(0.3, 1.0, a) : 1.0 - smoothstep(0.7, 1.0, a);
     vAlpha = uOpacity * opacity * aTime.w * smoothstep(0.0, 0.05, a) * fade;
 
     vec4 mv = modelViewMatrix * vec4(p, 1.0);
@@ -101,6 +115,7 @@ const vertexShader = /* glsl */ `
 const fragmentShader = /* glsl */ `
   varying vec3 vColor;
   varying float vAlpha;
+  varying float vGlow;
 
   void main() {
     vec2 c = gl_PointCoord * 2.0 - 1.0;
@@ -108,16 +123,19 @@ const fragmentShader = /* glsl */ `
     if (d > 1.0) discard;
     // A soft round puff.
     float a = vAlpha * exp(-2.5 * d) * (1.0 - smoothstep(0.6, 1.0, d));
-    gl_FragColor = vec4(vColor, a);
+    gl_FragColor = vec4(vColor, 1.0);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
+    // Premultiplied: a puff covers what's behind it by its alpha, a glow only adds to it.
+    gl_FragColor = vec4(gl_FragColor.rgb * a, a * (1.0 - vGlow));
   }
 `;
 
 /**
  * A body's geysers in low orbit (gen/geysers.ts): cryogeysers' tall jets of
  * ice grains, steam geysers' columns and drifting clouds, Io-style sulphur
- * umbrellas. One pooled `Points` animated in the vertex shader (like
+ * umbrellas, airless rock's smoking fumaroles with their flames and embers
+ * (which glow by their own light, added to what's behind). One pooled `Points` animated in the vertex shader (like
  * LavaEruptions): each eruption writes its particles into the next free run
  * of the pool when its cycle opens, and only those ranges are uploaded. Lit
  * by the sun in the shader. Depends only on the clock.
@@ -187,6 +205,11 @@ export class Geysers implements Entity {
         },
         transparent: true,
         depthWrite: false,
+        blending: THREE.CustomBlending,
+        blendSrc: THREE.OneFactor,
+        blendDst: THREE.OneMinusSrcAlphaFactor,
+        blendSrcAlpha: THREE.OneFactor,
+        blendDstAlpha: THREE.OneMinusSrcAlphaFactor,
       }),
     );
     this.points.name = 'Geysers';

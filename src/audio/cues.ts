@@ -27,9 +27,12 @@ export type SoundCue =
   | 'radarPing'
   | 'laserBeam'
   | 'laserHit'
+  | 'ventBurst'
   | 'starNear'
   | 'starFar'
-  | 'shipHum';
+  | 'shipHum'
+  | 'ventRumble'
+  | 'geyserHiss';
 
 export const SOUND_CUES: readonly SoundCue[] = [
   'select',
@@ -51,9 +54,12 @@ export const SOUND_CUES: readonly SoundCue[] = [
   'radarPing',
   'laserBeam',
   'laserHit',
+  'ventBurst',
   'starNear',
   'starFar',
   'shipHum',
+  'ventRumble',
+  'geyserHiss',
 ];
 
 /** Cues that loop until stopped (`SoundEffects.start`); the rest play once (`SoundEffects.play`). */
@@ -64,9 +70,9 @@ export type LoopCue = 'systemTravel' | 'interstellarTravel' | 'busterFlight' | '
  * it goes (`SoundEffects.ambient`): they sound whenever audio is running,
  * even if asked for before it was unlocked.
  */
-export type AmbientCue = 'starNear' | 'starFar' | 'shipHum';
+export type AmbientCue = 'starNear' | 'starFar' | 'shipHum' | 'ventRumble' | 'geyserHiss';
 
-export const AMBIENT_CUES: readonly AmbientCue[] = ['starNear', 'starFar', 'shipHum'];
+export const AMBIENT_CUES: readonly AmbientCue[] = ['starNear', 'starFar', 'shipHum', 'ventRumble', 'geyserHiss'];
 
 export interface CueSpec {
   /** Linear gain on its channel at full level (1 = the file as it is). */
@@ -154,12 +160,18 @@ export const cueParams: Record<SoundCue, CueSpec> = {
   laserBeam: { ...travel(), volume: 0.6, fadeIn: 0.05, fadeOut: 0.15, loopCrossfade: 0.3 },
   // The laser killing an animal or a plant.
   laserHit: oneShot(),
+  // A vent near the camera bursting into eruption (geysers, plumes, fumaroles; see VentSounds).
+  ventBurst: { ...oneShot(), volume: 0.7 },
   // A star close up, as the camera nears its surface (see StarSounds).
   starNear: ambient(0.8),
   // A star from across its system, giving way to starNear close up.
   starFar: ambient(0.8),
   // The UFO's own hum, always on.
   shipHum: ambient(0.35),
+  // Fumaroles and Io-style plumes near the camera: rumble, the roar of flame and crackling (see VentSounds).
+  ventRumble: ambient(0.9),
+  // Cryo, steam and sulphur jets near the camera: a surging hiss (see VentSounds).
+  geyserHiss: ambient(0.7),
 };
 
 /** File types picked up as variants. */

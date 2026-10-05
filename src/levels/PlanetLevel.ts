@@ -16,6 +16,8 @@ import { atmosphereLook } from '../gen/atmosphere';
 import { GIANT_ESCAPE_VELOCITY, METEOR_MIN_PRESSURE, describeShower, meteorShowers } from '../gen/meteors';
 import { Geysers } from '../planet/Geysers';
 import { Weather } from '../planet/Weather';
+import { ShipWake } from '../planet/ShipWake';
+import { VentSounds } from '../planet/VentSounds';
 import { LavaEruptions } from '../planet/LavaEruptions';
 import { LocalMoons } from '../planet/LocalMoons';
 import { PlanetFrame } from '../planet/PlanetFrame';
@@ -59,6 +61,8 @@ import { bodyGravity } from '../cargo/beam';
 import type { Inventory } from '../cargo/inventory';
 import { weatherKind } from '../gen/weather';
 import { Plantings } from '../surface/Plantings';
+import { GroundRocks } from '../surface/GroundRocks';
+import { rockSetup } from '../surface/rockSetup';
 import { DEBRIS_REACH, debrisLookFor } from '../gen/debris';
 import { DEBRIS_NEAR, DebrisField } from '../world/DebrisField';
 
@@ -121,10 +125,14 @@ export class PlanetLevel extends Level implements ItemUser {
   eruptions: LavaEruptions | null = null;
   /** Bodies with geothermal activity only (see gen/geysers.ts). */
   geysers: Geysers | null = null;
+  /** The geysers' sound, as loud as the vents erupting near the camera are. */
+  ventSounds: VentSounds | null = null;
   /** Bodies with weather only: rain, lightning bolts and their light (the clouds are the globe's). */
   weather: Weather | null = null;
   /** Bodies whose orbit crosses a comet's dust stream: meteors (or impact flashes) while it does (not once busted). */
   meteors: Meteors | null = null;
+  /** Water seas only (not once busted): the ship's downwash on the water below it. */
+  wake: ShipWake | null = null;
   /** Comets only: their jets, coma and tails, as active as the comet is close to the star. */
   comet: CometActivity | null = null;
   /** A comet's orbit, which bends its dust tail back. */
@@ -133,6 +141,8 @@ export class PlanetLevel extends Level implements ItemUser {
   private readonly now = new THREE.Vector3();
   /** Habitable bodies (T1 and up) only: plants standing on the ground (see gen/plants.ts). */
   plants: SurfaceEntities | null = null;
+  /** Solid bodies (not once busted): the loose rocks on the ground, loaded as the camera comes near it (gen/rocks.ts). */
+  rocks: GroundRocks | null = null;
   /** The animals roaming it (gen/animals.ts), where plants grow. */
   animals: SurfaceAnimals | null = null;
   /** The radar, tracking a species of those animals picked on the map's Species tab (not once busted). */
@@ -293,6 +303,10 @@ export class PlanetLevel extends Level implements ItemUser {
         'Planet camera',
       ),
     );
+    // After the camera: heard from where it is this frame.
+    this.ventSounds = this.geysers ? this.add(new VentSounds(this.geysers, camera, this.frame, sfx, debug)) : null;
+    // After the ship: the downwash under it on the water, where it's drawn this frame.
+    this.wake = globe.waves && !busted ? this.add(new ShipWake(this.scene, globe, this.ship.object, camera, globe.sun)) : null;
     // After the camera: the bolts face this frame's view.
     this.weather =
       globe.weather && !busted
@@ -309,6 +323,8 @@ export class PlanetLevel extends Level implements ItemUser {
     if (volcanoes) for (const site of changes.volcanoes) volcanoes.add(site, null);
     const plantsSetup = busted ? null : plantSetup(config);
     this.plants = plantsSetup ? this.add(new SurfaceEntities(this.scene, plantsSetup.plan, plantsSetup.ground, camera, changes, debug)) : null;
+    const rocks = busted ? null : rockSetup(config);
+    this.rocks = rocks ? this.add(new GroundRocks(this.scene, rocks.plan, rocks.ground, camera, debug)) : null;
     this.buryPlants();
     const animalsSetup = busted ? null : animalSetup(config, plantsSetup);
     this.animals = animalsSetup ? this.add(new SurfaceAnimals(this.scene, animalsSetup.plan, animalsSetup.ground, camera, this.frame, debug, changes)) : null;
@@ -525,7 +541,9 @@ export class PlanetLevel extends Level implements ItemUser {
   /** The plants where volcanoes stand are buried under them. */
   private buryPlants(): void {
     const volcanoes = this.volcanoes;
-    if (this.plants && volcanoes && volcanoes.count > 0) this.plants.setBuried((dir) => volcanoes.covers(dir));
+    if (!volcanoes || volcanoes.count === 0) return;
+    this.plants?.setBuried((dir) => volcanoes.covers(dir));
+    this.rocks?.setBuried((dir) => volcanoes.covers(dir));
   }
 
   /** The buster is away: hold the ship where it is and pull the camera back to watch. */
@@ -543,9 +561,9 @@ export class PlanetLevel extends Level implements ItemUser {
     this.globe.bust(this.radius * DEBRIS_REACH);
     this.cargo?.clear(false);
     this.laser.clear();
-    for (const entity of [this.eruptions, this.geysers, this.weather, this.comet, this.plants, this.animals, this.radar, this.cargo, this.plantings, this.volcanoes, this.meteors])
+    for (const entity of [this.eruptions, this.geysers, this.ventSounds, this.weather, this.comet, this.plants, this.rocks, this.wake, this.animals, this.radar, this.cargo, this.plantings, this.volcanoes, this.meteors])
       if (entity) this.remove(entity);
-    this.eruptions = this.geysers = this.weather = this.comet = this.plants = this.animals = this.radar = this.cargo = this.plantings = this.meteors = null;
+    this.eruptions = this.geysers = this.ventSounds = this.weather = this.comet = this.plants = this.rocks = this.wake = this.animals = this.radar = this.cargo = this.plantings = this.meteors = null;
     this.volcanoes = null;
     if (this.plantTooltip) {
       this.plantTooltip.deactivate();
@@ -686,12 +704,14 @@ export class PlanetLevel extends Level implements ItemUser {
   }
 
   override enter(): void {
+    this.ventSounds?.mute(false);
     this.hud.activate();
     if (!this.busted) this.map.activate();
     this.plantTooltip?.activate();
   }
 
   override exit(): void {
+    this.ventSounds?.mute(true);
     this.buster.arm(false);
     this.volcanoBomb.arm(false);
     this.laser.arm(false);

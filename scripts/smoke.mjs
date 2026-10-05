@@ -35,7 +35,9 @@
 // the planet section visits a named asteroid and a contact binary (the full planet loop), with belt rocks in the sky.
 // Living lava: in low orbit over the lava world, the eruptions have vents, events and blobs in the air.
 // Geysers: every body in the planet loop has the geyser kind its climate says (or none), with vents, eruptions and
-// particles in the air while one erupts; the loop also visits a body with each kind (steam, cryo planet and moon, sulphur).
+// particles in the air while one erupts; the loop also visits a body with each kind (steam, cryo planet and moon, sulphur,
+// fumarole), and every body with geysers has their sound. Every solid body has rocks on its ground once the camera is down
+// near it, and over water, low, the ship's downwash stirs the sea.
 // Plants: bodies of tier 1 and up have plants around the ship (none on tier 0 or gas giants), hovering one shows it in the
 // tooltip, the menu's Plants button turns them off and on, and a removed plant stays in the change list.
 // Weather: every body in the planet loop has the weather its climate says (or none), as clouds in the system view and
@@ -294,6 +296,21 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null, during = n
       particles: planet.geysers.liveParticles, capacity: planet.geysers.capacity }`,
   );
   r.expectedGeysers = await evaluate(`geyserKind(__body.config.type, __body.config.climate)`);
+  // Heard: a vent loop wherever there are geysers.
+  r.ventSounds = await evaluate(`!!planet.ventSounds === !!planet.geysers && (!planet.ventSounds || planet.ventSounds.level >= 0)`);
+  // Loose rocks on every solid body's ground, loaded now the camera is down near it (none on giants).
+  r.rocks = await evaluate(`planet.rocks && new Promise((resolve) => {
+    const wall = performance.now();
+    const check = () => (planet.rocks.settled || performance.now() - wall > 8000 ? resolve(planet.rocks.stats()) : requestAnimationFrame(check));
+    check();
+  })`);
+  r.expectedRocks = await evaluate(`__body.config.type !== 'gas' && !(__body.config.bands && __body.config.bands.length)`);
+  // Over water, low, the ship's downwash stirs the sea under it.
+  r.wake = await evaluate(`planet.wake && (() => {
+    const w = planet.wake, g = planet.globe, dir = planet.ship.object.position.clone().normalize();
+    const over = g.landingAt(dir) === 'sea', height = planet.ship.object.position.length() - g.radius;
+    return { over, height, strength: w.strength };
+  })()`);
   // The body's weather (if its climate gives it any): the same look in the system view and here, storms coming and
   // going and lightning where it should be, over a stretch of the level's clock.
   r.expectedWeather = await evaluate(`({ kind: weatherKind(__body.config.type, __body.config.climate), volcanic: volcanicLightning(__body.config.type, __body.config.climate) })`);
@@ -448,6 +465,9 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null, during = n
     (r.type !== 'lava' || (r.lava && r.lava.vents > 0 && r.lava.events > 0 && r.lava.blobs > 0)) &&
     (r.expectedGeysers ?? null) === (r.geysers?.kind ?? null) &&
     (!r.geysers || (r.geysers.vents > 0 && r.geysers.events > 0 && (r.geysers.erupting === 0 || r.geysers.particles > 0))) &&
+    r.ventSounds &&
+    (r.expectedRocks ? r.rocks && r.rocks.cells > 0 : r.rocks === null) &&
+    (!r.wake || !r.wake.over || r.wake.height > 4 || r.wake.strength > 0.9) &&
     (r.expectedPlants
       ? r.plants.tierOk &&
         r.plants.cells > 0 &&
@@ -1631,7 +1651,7 @@ await section('types', async () => {
             found['geysers-sulphur'] = { star: ref.id, expr: 'world.moons.find((m) => m.name === ' + JSON.stringify(m.name) + ')' };
         }
       });
-      if (Object.keys(found).length === want.length + 9) break;
+      if (Object.keys(found).length === want.length + 10) break;
     }
     return found;
   })()`);
@@ -1644,7 +1664,7 @@ await section('types', async () => {
     const r = loaded ? await runPlanetLoop(expr, `planet-${type}`) : { ok: false, loaded };
     planetTypes.push({ case: type, star, ...r, seconds: +((Date.now() - t0) / 1000).toFixed(1) });
   }
-  return planetTypes.every((r) => r.ok) && planetTypes.length === 16; // 7 types, ringed, moon, 4 geyser kinds and 3 weather kinds
+  return planetTypes.every((r) => r.ok) && planetTypes.length === 17; // 7 types, ringed, moon, 5 geyser kinds and 3 weather kinds
 });
 const screenshot = join(outDir, 'screenshot.png');
 if (started && !stalled) writeFileSync(screenshot, await page.screenshot());

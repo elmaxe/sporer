@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { AMBIENT_CUES, cueParams, groupCueFiles, SOUND_CUES, VariantPicker } from '../src/audio/cues';
 import { starMix, starsMix, starSoundParams, type StarMix } from '../src/audio/starMix';
 import { Rng } from '../src/gen/rng';
+import { VENT_CUE, eruptionLoudness, ventLevel, ventPitch, ventSoundParams, ventsLevel } from '../src/audio/ventMix';
 import { crossfadeLoop } from '../src/audio/loop';
 import { channelGain, DEFAULT_AUDIO_SETTINGS, parseAudioSettings, sliderToGain } from '../src/audio/settings';
 
@@ -190,5 +191,40 @@ describe('starMix', () => {
     expect(out.far).toBeCloseTo(Math.min(1, one.far * Math.SQRT2), 12);
     starsMix([], [], out);
     expect(out).toEqual({ near: 0, far: 0 });
+  });
+});
+
+describe('ventMix', () => {
+  it('is full at a vent and half a reach away, falling off as the inverse square beyond', () => {
+    const peak = 20;
+    const reach = Math.max(ventSoundParams.minReach, ventSoundParams.reach * peak);
+    expect(ventLevel(0, peak, 1)).toBe(1);
+    expect(ventLevel(reach, peak, 1)).toBeCloseTo(0.5, 10);
+    expect(ventLevel(10 * reach, peak, 1) / ventLevel(20 * reach, peak, 1)).toBeCloseTo(4, 1);
+    expect(ventLevel(reach, peak, 0.5)).toBeCloseTo(0.25, 10);
+    // Small plumes are heard from at least minReach.
+    expect(ventLevel(ventSoundParams.minReach, 0.1, 1)).toBeCloseTo(0.5, 10);
+  });
+
+  it('adds vents up without going past full', () => {
+    expect(ventsLevel(0)).toBe(0);
+    expect(ventsLevel(0.01)).toBeCloseTo(0.01, 3);
+    expect(ventsLevel(50)).toBeLessThanOrEqual(1);
+    expect(ventsLevel(2)).toBeGreaterThan(ventsLevel(1));
+  });
+
+  it('swells as an eruption starts and dies away as it ends', () => {
+    expect(eruptionLoudness(-1, 10)).toBe(0);
+    expect(eruptionLoudness(0, 10)).toBe(0);
+    expect(eruptionLoudness(1.5, 10)).toBeGreaterThan(0.9);
+    expect(eruptionLoudness(9.99, 10)).toBeLessThan(0.01);
+    expect(eruptionLoudness(10, 10)).toBe(0);
+  });
+
+  it('gives every kind of vent a loop and a pitch', () => {
+    for (const kind of ['cryo', 'steam', 'sulphur', 'fumarole'] as const) {
+      expect((AMBIENT_CUES as readonly string[]).includes(VENT_CUE[kind])).toBe(true);
+      expect(ventPitch[kind]).toBeGreaterThan(0.25);
+    }
   });
 });

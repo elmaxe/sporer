@@ -97,6 +97,8 @@ interface LodNode {
   readonly bounds: ChunkBounds;
   /** Wholly below LodSurfaceOptions.hiddenBelow, so never drawn. */
   submerged: boolean;
+  /** Its water is shallower than LodSurfaceOptions.shallow somewhere: it splits like the terrain. */
+  shallow: boolean;
   children: LodNode[] | null;
   /** The children are drawn instead of this node. */
   split: boolean;
@@ -159,6 +161,14 @@ export interface LodSurfaceOptions {
    * for a coarse chunk to catch comes up when its finer chunks are built.
    */
   hiddenBelow?: number;
+  /**
+   * The sea: chunks whose water (the depth its sampler writes in the colour's
+   * red) is shallower than this anywhere split like the terrain, by
+   * lodParams.cellAngle, rather than by their sag: the shallows' look and
+   * the shore swells follow the seabed's depth, so their triangles must be as
+   * fine as the ground's or the swells' crests kink at every edge.
+   */
+  shallow?: number;
   name?: string;
 }
 
@@ -201,6 +211,7 @@ export class LodSurface {
   private readonly smooth: 'outlineError' | 'coastError' | null;
   private readonly renderOrder: number;
   private readonly hiddenBelow: number;
+  private readonly shallow: number;
 
   constructor(
     /** The lowest and highest the surface goes (for the horizon). */
@@ -208,11 +219,12 @@ export class LodSurface {
     private readonly top: number,
     private readonly sample: SurfaceSampler,
     private readonly material: THREE.Material,
-    { smooth = null, renderOrder = 0, hiddenBelow = -Infinity, name = 'Surface' }: LodSurfaceOptions = {},
+    { smooth = null, renderOrder = 0, hiddenBelow = -Infinity, shallow = -Infinity, name = 'Surface' }: LodSurfaceOptions = {},
   ) {
     this.smooth = smooth && `${smooth}Error`;
     this.renderOrder = renderOrder;
     this.hiddenBelow = hiddenBelow;
+    this.shallow = shallow;
     this.object.name = name;
     for (let face = 0; face < 6; face++) {
       const root = this.createNode(null, face, 0, 0, 0);
@@ -284,7 +296,7 @@ export class LodSurface {
     const b = node.bounds;
     const distance = Math.hypot(this.camera.x - b.x, this.camera.y - b.y, this.camera.z - b.z);
     const cells = cellAngle(b.reach, node.depth, distance, b.radius);
-    const looks = this.smooth
+    const looks = this.smooth && !node.shallow
       ? wantsSplit(chordError(cells, node.depth), lodParams[this.smooth], node.split)
       : wantsSplit(cells, lodParams.cellAngle, node.split);
     const wants = !hidden && node.depth < lodParams.maxDepth && looks;
@@ -390,6 +402,7 @@ export class LodSurface {
       angle: Math.acos(minDot),
       bounds: { x: 0, y: 0, z: 0, radius: 0, reach: 0, top: 0 },
       submerged: false,
+      shallow: false,
       children: null,
       split: false,
       mesh: null,
@@ -481,6 +494,8 @@ export class LodSurface {
     chunkBounds([node.base, node.target], node.bounds);
     // Blending and the seams only ever move a vertex between these, so it stays under too.
     node.submerged = node.bounds.top < this.hiddenBelow;
+    node.shallow = false;
+    for (let v = 0; v < colors.length && !node.shallow; v += 3) node.shallow = colors[v]! < this.shallow;
     const geometry = new THREE.BufferGeometry();
     geometry.setIndex(new THREE.BufferAttribute(chunkIndices(diagonals), 1));
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));

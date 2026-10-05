@@ -17,11 +17,13 @@ import type { Landing } from '../cargo/plantFate';
 import { LodSurface, addCraterDebug, addLodDebug } from './LodSurface';
 import type { RenderClock } from './PlanetFrame';
 import { RingRocks } from './RingRocks';
-import { createSeaWaves, addWaveDebug, type SeaWaveLook } from '../world/seaWaves';
+import { CLEAR_SEA_RENDER_ORDER, createSeaWaves, addWaveDebug, seaClear, seaDepthFrame, waveParams, type SeaWaveLook } from '../world/seaWaves';
 
 // Mountains' exaggeration up close lives in frame.ts (the system view's clouds need it too); re-exported here.
 export { RELIEF_SCALE };
 
+/** The shortest step (units) the seabed's slope is measured over under the sea. */
+const MIN_SLOPE_STEP = 0.25;
 /** Cube sphere segments of the lava sea, whose shader works out its flow per vertex (so it can't change detail; water is a LodSurface). */
 const LAVA_SEA_SEGMENTS = 37;
 /** Cube sphere segments of the atmosphere shell. */
@@ -112,7 +114,8 @@ export class PlanetGlobe implements Entity {
     this.surface = new LodSurface(gas ? R : floorRadius(R, style, RELIEF_SCALE, seaFloor, config.shape != null), this.top, this.sample, material, {
       smooth: gas ? 'outline' : null,
       // The opaque sea hides the sea floor's chunks that lie wholly under it.
-      hiddenBelow: seaFloor ? R : -Infinity,
+      // Clear water shows its shallows' floor (world/seaWaves.ts), down to where it's opaque.
+      hiddenBelow: seaFloor ? R - (seaClear(config) ? waveParams.clearDepth : 0) : -Infinity,
     });
     this.object.add(this.surface.object);
     addLodDebug(debug);
@@ -271,16 +274,34 @@ function createWater(type: PlanetConfig['type'], color: string, radius: number, 
   // With waves, the roughness is the slope of the waves too small to draw (world/seaWaves.ts).
   const material = new THREE.MeshStandardMaterial({ color, roughness: type === 'ice' ? 0.55 : 0.25 });
   waves?.apply(material);
-  // The waves' shader reads how deep the water is (units) from the colour's red.
+  // The waves' shader reads how deep the water is (units) from the colour's red, and how fast it deepens (the
+  // seabed's slope, depth units per unit east and north, see seaDepthFrame) from its green and blue, so the shore
+  // swells' crests turn smoothly along the coast.
   const floor = new THREE.Color();
+  const east = new THREE.Vector3();
+  const north = new THREE.Vector3();
+  const step = new THREE.Vector3();
   const sample: SurfaceSampler = waves
     ? (dir, out, spacing) => {
-        out.setRGB(Math.max(0, radius - terrain(dir, floor, spacing)), 0, 0);
+        const depth = radius - terrain(dir, floor, spacing);
+        const h = Math.max(spacing ?? 0, MIN_SLOPE_STEP);
+        seaDepthFrame(dir, east, north);
+        step.set(dir.x, dir.y, dir.z).addScaledVector(east, h / radius).normalize();
+        const de = radius - terrain(step, floor, spacing);
+        step.set(dir.x, dir.y, dir.z).addScaledVector(north, h / radius).normalize();
+        const dn = radius - terrain(step, floor, spacing);
+        out.setRGB(Math.max(0, depth), (de - depth) / h, (dn - depth) / h);
         return radius;
       }
     : () => radius;
-  // Drawn first, so the sea floor under it is rejected by the depth test rather than shaded.
-  return new LodSurface(radius, radius, sample, material, { smooth: 'coast', renderOrder: SEA_RENDER_ORDER, name: 'Sea' });
+  // Drawn first, so the sea floor under it is rejected by the depth test rather than shaded; a clear sea is drawn
+  // after the ground, being see-through. Its shallows split finely, for the shore swells.
+  return new LodSurface(radius, radius, sample, material, {
+    smooth: 'coast',
+    renderOrder: waves ? CLEAR_SEA_RENDER_ORDER : SEA_RENDER_ORDER,
+    shallow: waves?.shallowDepth ?? -Infinity,
+    name: 'Sea',
+  });
 }
 
 /** The lava sea: a fixed smooth sphere at sea level with the animated lava (see world/lavaMaterial.ts). */
