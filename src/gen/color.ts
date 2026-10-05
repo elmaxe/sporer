@@ -34,6 +34,18 @@ export function rgbToHex(r: number, g: number, b: number): string {
   return `#${[r, g, b].map((c) => Math.round(clamp01(c) * 255).toString(16).padStart(2, '0')).join('')}`;
 }
 
+/** RGB channels in [0, 1] to HSL (hue in degrees; 0 for greys). */
+export function rgbToHsl(r: number, g: number, b: number): [h: number, s: number, l: number] {
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  const d = max - min;
+  if (d === 0) return [0, 0, l];
+  const s = d / (1 - Math.abs(2 * l - 1));
+  const h = max === r ? ((g - b) / d + 6) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [h * 60, s, l];
+}
+
 function clamp01(v: number): number {
   return Math.min(1, Math.max(0, v));
 }

@@ -5,6 +5,7 @@ import { orbitPosition } from '../gen/orbit';
 import { createAtmosphere } from '../world/atmosphereShell';
 import { COARSE_VENT_RADIUS, terrainSegments, type Planet } from '../world/Planet';
 import { surfaceNoise } from '../gen/craters';
+import { createIceLook, type IceLook } from '../world/iceLook';
 import { createLavaLook, type LavaLook } from '../world/lavaMaterial';
 import { createTerrainGeometry } from '../world/planetGeometry';
 import type { PlanetFrame } from './PlanetFrame';
@@ -22,6 +23,8 @@ export class LocalMoons implements Entity {
   private readonly meshes: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>[];
   /** The lava moons' animated seas, by moon (null for the rest). */
   private readonly lava: (LavaLook | null)[];
+  /** The icy moons' looks, to dispose. */
+  private readonly ice: IceLook[] = [];
   private readonly spin = new THREE.Quaternion();
 
   constructor(
@@ -40,6 +43,9 @@ export class LocalMoons implements Entity {
         new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 }),
       );
       lava?.paintTerrain(mesh.material, radius * frame.scale);
+      const ice = createIceLook(moon.config);
+      ice?.applyGround(mesh.material, radius * frame.scale, radius * frame.scale * style.relief, true);
+      if (ice) this.ice.push(ice);
       mesh.name = moon.name;
       const { atmosphere, climate } = moon.config;
       const look = atmosphere && climate ? atmosphereLook(climate, radius) : null;
@@ -65,6 +71,7 @@ export class LocalMoons implements Entity {
   }
 
   dispose(): void {
+    for (const ice of this.ice) ice.dispose();
     for (const mesh of this.meshes) {
       this.scene.remove(mesh);
       mesh.traverse((o) => {
