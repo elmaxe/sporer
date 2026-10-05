@@ -111,6 +111,50 @@ html.touch #freeze-note {
   bottom: calc(max(8px, env(safe-area-inset-bottom)) + 26px);
 }
 
+/* The third-person view's note (menu → Third-person view, or C): under the frozen view's, its button switching what the drag steers. */
+#third-person-note {
+  position: fixed;
+  top: calc(max(8px, env(safe-area-inset-top)) + 52px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 2px 4px 2px 8px;
+  border-radius: 4px;
+  background: rgba(0, 40, 56, 0.6);
+  color: #4ad8ff;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 50;
+}
+
+#third-person-note button {
+  pointer-events: auto;
+  padding: 1px 6px;
+  border: 1px solid rgba(74, 216, 255, 0.5);
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.3);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+#third-person-note[hidden] {
+  display: none;
+}
+
+html.touch #third-person-note {
+  top: auto;
+  bottom: calc(max(8px, env(safe-area-inset-bottom)) + 52px);
+  max-width: calc(100vw - 32px);
+  flex-wrap: wrap;
+  justify-content: center;
+  white-space: normal;
+}
+
 /* Above the maps, which show tooltips for their bodies too. */
 #tooltip {
   position: fixed;

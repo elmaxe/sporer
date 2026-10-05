@@ -43,7 +43,7 @@ import type { Tooltip } from '../ui/Tooltip';
 import { cometParams } from '../world/Comet';
 import { galacticLightParams } from '../world/galacticLight';
 import type { Planet } from '../world/Planet';
-import { Level } from './Level';
+import { Level, type Overview } from './Level';
 import type { SystemLevel } from './SystemLevel';
 import { renderScene } from '../world/wireframe';
 import type { SoundEffects } from '../audio/sfx';
@@ -677,6 +677,14 @@ export class PlanetLevel extends Level implements ItemUser {
       bodies: world.planets.length + world.moons.length + world.nuclei.length + world.asteroids.length - this.hidden.length,
       localMoons: this.moons.moons.length,
     };
+  }
+
+  /** The whole globe, from outside it. */
+  override overview(out: Overview): Overview {
+    out.centre.set(0, 0, 0);
+    out.radius = this.radius;
+    out.minDistance = this.radius * 1.05;
+    return out;
   }
 
   override render(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera): void {

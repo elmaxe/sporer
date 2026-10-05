@@ -4,6 +4,7 @@ import type { Input } from '../core/Input';
 import { MarkerRing } from '../player/MarkerRing';
 import type { GroundHeight } from './ground';
 import type { PlanetShip } from './PlanetShip';
+import { pointerCamera } from '../world/thirdPerson';
 
 /** Target ring size, in planet-level units. */
 const MARKER_SIZE = 3;
@@ -43,7 +44,7 @@ export class PlanetPicker implements Entity {
   update(frameDt: number): void {
     const click = this.input.consumeClick();
     if (click) {
-      this.raycaster.setFromCamera(this.ndc.set(click.ndcX, click.ndcY), this.camera);
+      this.raycaster.setFromCamera(this.ndc.set(click.ndcX, click.ndcY), pointerCamera(this.camera));
       if (this.hit(this.raycaster.ray, this.point) !== null && !this.intercept?.(this.point)) this.ship.moveTo(this.point);
     }
 

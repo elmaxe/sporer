@@ -27,6 +27,7 @@ import {
 } from './buster';
 import { pathControl, pathPoint } from './path';
 import type { ItemStatus } from './items';
+import { pointerCamera } from '../world/thirdPerson';
 
 /** The aiming ring's size on the ground, planet units. */
 const RETICLE_SIZE = 6;
@@ -312,7 +313,7 @@ export class PlanetBuster implements Entity {
       this.reticle.hide();
       return;
     }
-    this.raycaster.setFromCamera(this.ndc.set(pointer.ndcX, pointer.ndcY), this.camera);
+    this.raycaster.setFromCamera(this.ndc.set(pointer.ndcX, pointer.ndcY), pointerCamera(this.camera));
     if (this.target.groundHit(this.raycaster.ray, this.point) === null) {
       this.reticle.hide();
       return;

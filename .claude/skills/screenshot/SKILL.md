@@ -53,7 +53,7 @@ Steps run in order. With no steps, you get `shot:view`.
 | `fps` | frames per second over 120 frames (headless SwiftShader: expect ~5–25) |
 | `goto:<url or ?params>` | load another page, e.g. `goto:?star=2`, and wait for the game |
 
-The page has the dev globals: `game`, `levels` (the `SceneManager`), `galaxy`, `ship`, `world` (the `StarSystem`), `system` (its data), `planet` (the planet level or null), `audio`, `menu` (the Esc menu: `menu.open()`, `menu.hide()`; open, the game is paused), `debugDump` (`data()`: the dump's data without pictures; `restore(state)`; `open()`: the dump dialog), `generateSystem`. See `threejs-game-conventions` for what the classes offer.
+The page has the dev globals: `game`, `levels` (the `SceneManager`), `galaxy`, `ship`, `world` (the `StarSystem`), `system` (its data), `planet` (the planet level or null), `audio`, `menu` (the Esc menu: `menu.open()`, `menu.hide()`; open, the game is paused), `debugDump` (`data()`: the dump's data without pictures; `restore(state)`; `open()`: the dump dialog), `thirdPerson` (the debug third-person view: `thirdPerson.on = true`, then `thirdPerson.aim` is the current level's overview `{ yaw, pitch, zoom }` to set by hand), `generateSystem`. See `threejs-game-conventions` for what the classes offer.
 
 ## 3. Look, and report
 

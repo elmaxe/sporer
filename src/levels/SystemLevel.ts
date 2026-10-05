@@ -26,7 +26,7 @@ import { Planet } from '../world/Planet';
 import { SkyStars } from '../world/SkyStars';
 import { StarSystem } from '../world/StarSystem';
 import { arrivalParams, hoverViewElevation } from './arrival';
-import { Level } from './Level';
+import { Level, type Overview } from './Level';
 import { renderScene, wireframeParams } from '../world/wireframe';
 
 /** Where the camera settles after flying in from the galaxy (or starting out in a system). */
@@ -262,6 +262,19 @@ export class SystemLevel extends Level {
     renderer.toneMappingExposure = this.starless ? galacticLightParams.exposure : 1;
     renderScene(renderer, this.scene, camera);
     renderer.toneMappingExposure = 1;
+  }
+
+  /** The whole system round its star (or rogue planet): out to the farthest planet's neighbourhood, belt or dust. */
+  override overview(out: Overview): Overview {
+    const data = this.data;
+    let reach = data.starZone * 4;
+    for (const p of data.planets) reach = Math.max(reach, p.orbit.radius + p.extent);
+    for (const b of data.belts) reach = Math.max(reach, b.outer);
+    if (data.dust) reach = Math.max(reach, data.dust.outer);
+    out.centre.copy(this.world.anchor.renderPosition);
+    out.radius = reach;
+    out.minDistance = 0;
+    return out;
   }
 
   private touching(body: Planet): boolean {

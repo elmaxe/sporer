@@ -31,6 +31,13 @@ export class Game {
    * the menu).
    */
   paused = false;
+  /**
+   * The camera each level is drawn with instead of `camera`, which the
+   * levels still steer and choose what to draw for (the debug third-person
+   * view, ui/ThirdPersonControl.ts). Asked right before each level draws,
+   * after it has moved `camera`; null draws with `camera`.
+   */
+  viewCamera: ((level: Level, camera: THREE.PerspectiveCamera) => THREE.PerspectiveCamera) | null = null;
 
   private _level: Level | null = null;
   /** The outgoing level while crossfading to the active one, and the active one's weight. */
@@ -155,12 +162,12 @@ export class Game {
     if (from) {
       // Each level moves the shared camera in its update, so update each right before drawing it.
       from.update(frameDt, alpha);
-      from.render(this.renderer, this.camera);
+      from.render(this.renderer, this.viewCamera?.(from, this.camera) ?? this.camera);
       this.crossfade.capture(this.renderer);
     }
     if (level) {
       level.update(frameDt, alpha);
-      level.render(this.renderer, this.camera);
+      level.render(this.renderer, this.viewCamera?.(level, this.camera) ?? this.camera);
     }
     if (from) {
       const solo = this.crossfadeSolo;

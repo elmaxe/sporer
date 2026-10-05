@@ -17,7 +17,7 @@ import { GalaxySpin } from '../galaxy/GalaxySpin';
 import { StarCloseUp } from '../galaxy/StarCloseUp';
 import { OrbitCamera, type OrbitParams } from '../player/OrbitCamera';
 import type { Tooltip } from '../ui/Tooltip';
-import { Level } from './Level';
+import { Level, type Overview } from './Level';
 import { ease } from './seamlessZoom';
 
 /** Galaxy-scale camera: from a few stars around the ship out to the whole disc. */
@@ -70,6 +70,8 @@ export class GalaxyLevel extends Level {
   private dive = 0;
   private readonly members: THREE.Vector3[] = [];
   private readonly tilt = new THREE.Quaternion();
+  /** The galaxy's radius, galaxy units. */
+  private readonly radius: number;
 
   constructor(
     galaxy: GalaxyData,
@@ -84,6 +86,7 @@ export class GalaxyLevel extends Level {
     onZoomIn: () => void,
   ) {
     super();
+    this.radius = galaxy.radius;
     // Only the UFO is lit; stars and glows are unlit.
     this.light = new THREE.HemisphereLight('#cfe3ff', '#302040', 2);
     this.scene.add(this.light);
@@ -176,6 +179,14 @@ export class GalaxyLevel extends Level {
   }
 
   /** The nebulas first, at low resolution; the scene lays them over the glow behind them. */
+  /** The whole galaxy round its centre. */
+  override overview(out: Overview): Overview {
+    this.root.getWorldPosition(out.centre);
+    out.radius = this.radius;
+    out.minDistance = 0;
+    return out;
+  }
+
   override render(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera): void {
     this.nebulas.renderVolumes(renderer, camera);
     super.render(renderer, camera);

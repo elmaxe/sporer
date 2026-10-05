@@ -6,6 +6,15 @@ import { renderScene } from '../world/wireframe';
 /** 'space': boost and map (the ship only flies where you tap); 'surface': stick, boost and map; 'none': just gestures. */
 export type TouchShipControls = 'none' | 'surface' | 'space';
 
+/** What a third-person overview camera takes in (see world/thirdPerson.ts), in the level's units. */
+export interface Overview {
+  readonly centre: THREE.Vector3;
+  /** How far round the centre the overview reaches at its first zoom. */
+  radius: number;
+  /** How close to the centre it may come (outside a globe). */
+  minDistance: number;
+}
+
 /**
  * One scale of the game (galaxy, system, later planet): its own scene,
  * entities and optional physics world, at units that suit that scale.
@@ -62,6 +71,18 @@ export class Level {
   /** Draws the level; the default renders its scene (as a wireframe with the menu's switch, see renderScene). */
   render(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera): void {
     renderScene(renderer, this.scene, camera);
+  }
+
+  /**
+   * What the debug third-person view (ui/ThirdPersonControl.ts) overlooks:
+   * the whole planet, system or galaxy. Writes into `out`. The default takes
+   * in a sphere round the scene's origin as big as the camera's range.
+   */
+  overview(out: Overview): Overview {
+    out.centre.set(0, 0, 0);
+    out.radius = 1000;
+    out.minDistance = 0;
+    return out;
   }
 
   /** Called when the level becomes active (e.g. to write its HUD text). */
