@@ -13,6 +13,13 @@ export const lavaParams = {
   glow: 1,
   /** Brightness of the glow around erupting vents. */
   vents: 1,
+  /** The ship's downwash on the lava below it: the crust swept aside from a molten disc, piled up round it, ripples running out. */
+  downwash: true,
+  /** It starts this high above the lava (units) and is at its strongest this low (the ship's lowest is 3). */
+  downwashFrom: 16,
+  downwashTo: 4,
+  /** How far out the crust is swept, in the ship's radii. */
+  downwashReach: 2.4,
 };
 
 export function addLavaDebug(debug: Debug): void {
@@ -20,6 +27,10 @@ export function addLavaDebug(debug: Debug): void {
   f?.add(lavaParams, 'pace', 0, 10);
   f?.add(lavaParams, 'glow', 0, 3);
   f?.add(lavaParams, 'vents', 0, 3);
+  f?.add(lavaParams, 'downwash');
+  f?.add(lavaParams, 'downwashFrom', 4, 60, 1);
+  f?.add(lavaParams, 'downwashTo', 0, 20, 0.5);
+  f?.add(lavaParams, 'downwashReach', 0.5, 5, 0.1);
 }
 
 /**
@@ -30,6 +41,11 @@ export const SEA_RENDER_ORDER = -1;
 
 /** How many vents glow at once (the brightest). */
 const VENT_SLOTS = 4;
+/** The ship's radius, units (the UFO is ~4 wide). */
+const SHIP_RADIUS = 2;
+/** The downwash's ripples on the lava: wavelength (units) and speed (units/s); slow and short-lived, the lava being thick (stylised). */
+const RIPPLE_LENGTH = 1.6;
+const RIPPLE_SPEED = 1.2;
 
 /**
  * GLSL shared by the lava sea (per pixel) and the system view's lava bodies
@@ -93,12 +109,43 @@ export const LAVA_SEA_GLSL = /* glsl */ `
   uniform vec3 uAmbient;
   uniform vec3 uCrust;
   uniform float uCrustScale;
+  // The ship's downwash: the point under it (unit, body frame) and its strength, then the swept disc's radius and the
+  // ripples' wavenumber (both on the unit sphere), the ripples' phase now and a clock (s, wrapped).
+  uniform vec4 uLavaShip;
+  uniform vec4 uLavaShipWave;
 
   vec3 lavaSea(vec3 p, float flow) {
     float t = uLavaTime;
+    // The ship's downwash sweeps the crust aside: plates pushed out from under it, bunched up in a ring round a
+    // disc of bare molten lava, which churns outward; slow ripples run on beyond and crack the crust open as they go.
+    float ship = uLavaShip.w;
+    vec3 shipOff = vec3(0.0), radial = vec3(0.0), sq = vec3(0.0), pc = p;
+    float shipR = 0.0, shipQ = 1e3, torn = 0.0, bare = 0.0, rim = 0.0, ripEnv = 0.0, ripple = 0.0, ripSlope = 0.0;
+    if (ship > 0.0) {
+      shipOff = p - uLavaShip.xyz;
+      shipOff -= p * dot(p, shipOff);
+      shipR = length(shipOff);
+      shipQ = shipR / uLavaShipWave.x;
+      radial = shipOff / max(shipR, 1e-7);
+      // The disc's edge, torn by noise (in the disc's own size, so it looks alike on every globe).
+      sq = p / uLavaShipWave.x;
+      torn = snoise(sq * 0.9 + vec3(0.0, uLavaShipWave.w * 0.15, 0.0));
+      // The hole opens wider as the ship comes down.
+      float openQ = shipQ / (0.35 + 0.65 * ship);
+      bare = smoothstep(0.0, 0.2, ship) * (1.0 - smoothstep(0.7, 1.0, openQ + 0.12 * torn));
+      // Where the crust is drawn from: pulled in towards the ship, so the plates out to ~1.9 radii are squeezed into the ring.
+      pc = p - radial * (ship * uLavaShipWave.x * 0.85 * (1.0 - smoothstep(0.9, 1.9, openQ)));
+      rim = smoothstep(0.0, 0.3, ship) * exp(-pow((openQ - 1.08 - 0.1 * torn) / 0.28, 2.0));
+      // Ripples beyond the rim, dying away within a radius or so.
+      ripEnv = ship * smoothstep(1.0, 1.4, shipQ) * exp(-1.8 * max(shipQ - 1.4, 0.0));
+      float ph = uLavaShipWave.y * (shipR + 0.15 * uLavaShipWave.x * torn) - uLavaShipWave.z;
+      ripple = ripEnv * cos(ph);
+      ripSlope = ripEnv * sin(ph);
+    }
+
     // Crust plates: the cells between a drifting noise's zero crossings, bent by
     // the currents. Their seams crack open wider where the flow runs hot.
-    vec3 q = p * uCrustScale + uLavaOffset * 1.7 + vec3(flow - 0.5) * 0.9;
+    vec3 q = pc * uCrustScale + uLavaOffset * 1.7 + vec3(flow - 0.5) * 0.9;
     float a = snoise(q + vec3(t * 0.025, 0.0, -t * 0.018));
     float seam = 1.0 - smoothstep(0.0, 0.03 + 0.14 * flow * flow, abs(a));
     // Finer cracks and ridges inside each plate, running parallel to its edges
@@ -107,10 +154,35 @@ export const LAVA_SEA_GLSL = /* glsl */ `
     float fine = 1.0 - smoothstep(0.0, 0.03, b);
     float vent = 0.6 * lavaVents(p);
     float heat = flow + vent + seam * 0.5 + fine * 0.25 * flow;
-    // Crust where it's cool: dark rock, lit like the terrain (Lambert), faintly red from below.
-    vec3 light = uAmbient + uSunLight * max(dot(p, uSun), 0.0);
-    vec3 rock = uCrust * light * (0.75 + 0.6 * smoothstep(0.0, 0.3, b));
-    return mix(rock + lavaRamp(heat) * 0.12, lavaRamp(heat), lavaMolten(heat));
+    // The ring of piled crust: buckled into ridges whose cracks glow; the ripples' crests stretch the crust open.
+    float buckle = 0.0;
+    if (rim > 0.001) {
+      float r = snoise(sq * 3.2 - radial * 1.5);
+      buckle = rim * (1.0 - smoothstep(0.0, 0.12, abs(r)));
+      heat += 0.45 * buckle - 0.15 * rim;
+    }
+    heat += 0.3 * max(ripple, 0.0);
+    // Crust where it's cool: dark rock, lit like the terrain (Lambert), faintly red from below; the rim's ridges and
+    // the ripples tip its normal.
+    vec3 n = normalize(p - radial * (0.35 * ripSlope + 0.25 * buckle));
+    vec3 light = uAmbient + uSunLight * max(dot(n, uSun), 0.0);
+    vec3 rock = uCrust * light * (0.75 + 0.6 * smoothstep(0.0, 0.3, b)) * (1.0 - 0.3 * rim);
+    vec3 col = mix(rock + lavaRamp(heat) * 0.12, lavaRamp(heat), lavaMolten(heat));
+    if (bare > 0.0) {
+      // Bare molten lava, churning outward from under the ship: two layers of noise spreading out from it (scaled up
+      // about the point under it, so nothing pinches there), crossfaded so it flows without smearing.
+      float churn = 0.0;
+      vec3 rel = shipOff / uLavaShipWave.x;
+      for (int l = 0; l < 2; l++) {
+        float cyc = fract(uLavaShipWave.w * 0.3 + 0.5 * float(l));
+        vec3 cq = rel * (2.4 / (1.0 + 1.2 * cyc)) + float(l) * 7.3;
+        churn += (1.0 - abs(2.0 * cyc - 1.0)) * snoise(cq);
+      }
+      // Hottest under the ship, a skin already dulling it towards the edge.
+      float hot = 0.92 + 0.4 * churn - 0.25 * smoothstep(0.3, 1.0, shipQ);
+      col = mix(col, lavaRamp(hot), bare);
+    }
+    return col;
   }
 `;
 
@@ -151,6 +223,15 @@ export class LavaLook {
     uLavaTint: THREE.IUniform<THREE.Color>;
     uLavaGlow: THREE.IUniform<number>;
   };
+  /** The ship's downwash on the lava sea (LAVA_SEA_GLSL), set each frame by `setShip`. */
+  private readonly shipUniforms = {
+    uLavaShip: { value: new THREE.Vector4(0, 1, 0, 0) },
+    uLavaShipWave: { value: new THREE.Vector4(1, 1, 0, 0) },
+  };
+  private shipStrength = 0;
+  /** The disc's radius and the ripples' wavenumber on the unit sphere (from the sea's radius, at `setShip`). */
+  private shipDisc = 1;
+  private shipK = 1;
   private readonly schedule: EruptionSchedule;
   private readonly crust: THREE.Color;
 
@@ -197,6 +278,36 @@ export class LavaLook {
       for (; k > 0 && slots[k - 1]!.w < glow; k--) slots[k]!.copy(slots[k - 1]!);
       slots[k]!.set(e.origin[0], e.origin[1], e.origin[2], glow);
     }
+    // The downwash: ripples running out at RIPPLE_SPEED, and the churn's clock (both in the clock's own seconds, not the lava's pace).
+    const ship = this.downwash;
+    this.shipUniforms.uLavaShip.value.w = ship;
+    if (ship > 0) {
+      const k = (Math.PI * 2) / RIPPLE_LENGTH;
+      this.shipUniforms.uLavaShipWave.value.set(this.shipDisc, this.shipK, (k * RIPPLE_SPEED * time) % (Math.PI * 2), time % 1000);
+    }
+  }
+
+  /**
+   * The ship over the lava sea: `dir` the unit direction under it (body
+   * frame), `height` above the lava (units) and `radius` the sea's (units), or
+   * null when it isn't over lava. Its downwash grows as it comes down
+   * (lavaParams.downwashFrom to downwashTo).
+   */
+  setShip(dir: THREE.Vector3 | null, height: number, radius: number): void {
+    const p = lavaParams;
+    if (!dir) {
+      this.shipStrength = 0;
+      return;
+    }
+    this.shipStrength = 1 - THREE.MathUtils.smoothstep(height, p.downwashTo, p.downwashFrom);
+    this.shipUniforms.uLavaShip.value.set(dir.x, dir.y, dir.z, this.downwash);
+    this.shipDisc = (SHIP_RADIUS * p.downwashReach) / radius;
+    this.shipK = ((Math.PI * 2) / RIPPLE_LENGTH) * radius;
+  }
+
+  /** How strong the ship's downwash on the lava is now (0 to 1). */
+  get downwash(): number {
+    return lavaParams.downwash ? this.shipStrength : 0;
   }
 
   /**
@@ -216,6 +327,7 @@ export class LavaLook {
   seaUniforms(sun: THREE.Vector3, sunLight: THREE.Color, ambient: THREE.Color): Record<string, THREE.IUniform> {
     return {
       ...this.uniforms,
+      ...this.shipUniforms,
       uSun: { value: sun },
       uSunLight: { value: sunLight },
       uAmbient: { value: ambient },

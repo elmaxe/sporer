@@ -305,10 +305,10 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null, during = n
     check();
   })`);
   r.expectedRocks = await evaluate(`__body.config.type !== 'gas' && !(__body.config.bands && __body.config.bands.length)`);
-  // Over water, low, the ship's downwash stirs the sea under it.
+  // Over water or lava, low, the ship's downwash stirs the sea under it.
   r.wake = await evaluate(`planet.wake && (() => {
     const w = planet.wake, g = planet.globe, dir = planet.ship.object.position.clone().normalize();
-    const over = g.landingAt(dir) === 'sea', height = planet.ship.object.position.length() - g.radius;
+    const landing = g.landingAt(dir), over = landing === 'sea' || landing === 'lava', height = planet.ship.object.position.length() - g.radius;
     return { over, height, strength: w.strength };
   })()`);
   // The body's weather (if its climate gives it any): the same look in the system view and here, storms coming and

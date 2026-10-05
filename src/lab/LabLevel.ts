@@ -253,7 +253,7 @@ export class LabLevel extends Level {
   /** Animals roaming where plants grow (globe view; terraform a world into a habitable tier and they come). */
   readonly animals: SurfaceAnimals | null = null;
   readonly ship: PlanetShip | null = null;
-  /** Water seas (globe view): the ship's downwash on the water below it. */
+  /** Water and lava seas (globe view): the ship's downwash on the sea below it. */
   readonly wake: ShipWake | null = null;
   readonly map: PlanetMap | null = null;
   readonly bodies: LabBodies | null = null;
@@ -315,8 +315,8 @@ export class LabLevel extends Level {
       const ship = (this.ship = this.add(
         new PlanetShip(this.scene, input, camera, debug, globe.top + ALTITUDE, shipStart, travelScale(R)),
       ));
-      // After the ship: its downwash on the water below it.
-      if (globe.waves) this.wake = this.add(new ShipWake(this.scene, globe, ship.object, camera, globe.sun));
+      // After the ship: its downwash on the water or lava below it.
+      if (ShipWake.wanted(globe)) this.wake = this.add(new ShipWake(this.scene, globe, ship.object, camera, globe.sun));
       if (view.camera === 'fly') {
         target = ship.object;
         up = ship.up;
