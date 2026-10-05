@@ -3,6 +3,7 @@ import type { Input } from '../core/Input';
 import { bodyLife, formatChance } from '../gen/life';
 import { hashSeed } from '../gen/rng';
 import { starActivity } from '../gen/starActivity';
+import { discOf, discPeakTemperature, isBlackHole, schwarzschildRadius } from '../gen/blackHoles';
 import { describeStar, describeStars, nominalStar, starLightColor } from '../gen/stars';
 import { describeSized, systemExtent } from '../gen/system';
 import { labFromSystem, labLink } from '../lab/labPlanet';
@@ -121,6 +122,11 @@ export class StarLabInfo implements Entity {
     state.stars.forEach((star, i) => {
       const label = state.stars.length > 1 ? `Star ${'AB'[i]}` : 'Star';
       rows.push([label, `${describeStar(star)} · class ${star.spectralClass} · radius ${fmt(star.radius)} (${fmt(star.radius / G_RADIUS)}× G) · luminosity ${fmt(star.luminosity)} · mass ${fmt(star.mass)}`]);
+      if (isBlackHole(star)) {
+        const disc = discOf(star);
+        rows.push(['', `shadow ${fmt(star.radius)} units, r_s ${fmt(schwarzschildRadius(star))} · disc to ${fmt(disc.outer)} r_s, ${Math.round(discPeakTemperature(star.mass, disc.feeding))} K at its hottest, fed at ${Math.round(disc.feeding * 100)}% of Eddington · light ${starLightColor(star)}`]);
+        return;
+      }
       const a = starActivity(star);
       const storms = stormsAt(a, hashSeed(state.seed, 'star', i), time);
       rows.push(['', `turns in ${fmt(a.rotationPeriod)} s · spots ${Math.round(a.spots * 100)}% · now ${storms.prominence} prominence${storms.prominence === 1 ? '' : 's'}, ${storms.flare} flare${storms.flare === 1 ? '' : 's'} · light ${starLightColor(star)}`]);

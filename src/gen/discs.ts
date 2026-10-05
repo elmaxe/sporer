@@ -268,9 +268,9 @@ export const DEBRIS_SHARE: Record<StarData['spectralClass'], number> = {
   M: 0.02,
 };
 
-/** The chance of a debris disc round a system's main star (none round giants or white dwarfs). */
+/** The chance of a debris disc round a system's main star (none round giants, white dwarfs or black holes, which have their accretion disc). */
 export function debrisChance(star: StarData | undefined): number {
-  if (!star || star.kind === 'whiteDwarf' || star.kind === 'redGiant' || star.kind === 'blueGiant') return 0;
+  if (!star || star.kind === 'whiteDwarf' || star.kind === 'redGiant' || star.kind === 'blueGiant' || star.kind === 'blackHole') return 0;
   return DEBRIS_SHARE[star.spectralClass];
 }
 

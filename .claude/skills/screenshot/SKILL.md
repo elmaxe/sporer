@@ -71,7 +71,7 @@ npm run shot -- --out $OUT --clean --sheet shot:system galaxy shot:galaxy
 # A star type: find its id, then start there
 npm run shot -- "js:galaxy.stars.find((s) => s.stars[0].kind === 'redGiant').id"   # → results[0].value
 npm run shot -- --out $OUT --clean --star 5 shot:red-giant
-# kinds: mainSequence, redDwarf, whiteDwarf, redGiant, blueGiant; binaries: s.stars.length === 2 (star 2 at seed 1337)
+# kinds: mainSequence, redDwarf, whiteDwarf, redGiant, blueGiant, blackHole (818 at seed 1337); binaries: s.stars.length === 2 (star 2 at seed 1337)
 
 # Mid-transition: freeze on a state, not a time (headless frame rates vary; a frame advances the clock by at most 0.25 s)
 npm run shot -- --out $OUT --clean "js:levels.toGalaxy()" "freeze:levels.crossfade > 0.4" shot:handover resume settle shot:after
@@ -195,9 +195,9 @@ For how stars look (surface, spots, corona, prominences and flares, binaries) an
 
 | Call | Does |
 |---|---|
-| `starLab.generate(seed, { kind, spectralClass, binary, young })` | a new star (or pair) and system (kind: mainSequence, redDwarf, whiteDwarf, redGiant, blueGiant) |
+| `starLab.generate(seed, { kind, spectralClass, binary, young })` | a new star (or pair) and system (kind: mainSequence, redDwarf, whiteDwarf, redGiant, blueGiant, blackHole) |
 | `starLab.load(galaxySeed, star)` | a game system's star(s) and seed (`star`: an id, or `'sol'`) |
-| `starLab.setStar({ kind, spectralClass, color, radius, luminosity, mass })` | edit the selected star (a new kind or class starts from that kind's typical star); `select(i)` picks the companion |
+| `starLab.setStar({ kind, spectralClass, color, radius, luminosity, mass })` | edit the selected star (a new kind or class starts from that kind's typical star; a black hole's size and light follow from `mass` and `disc: { outer, feeding, turn }`); `select(i)` picks the companion |
 | `starLab.setActivity({ spots: 1, flare: { chance: 1 } })`, `resetActivity()`, `rerollLook()` | how it lives (gen/starActivity.ts), back to its kind's, or another look round its kind's |
 | `starLab.setBinary(true)`, `setYoung(true)`, `rerollSystem(seed?)` | a companion, a protoplanetary disc, another system round the same star |
 | `starLab.setTuning({ planets: 9, spacing: 0.6, moons: 2, comets: 4, mainBelt: true, debris: false })` | the system tuner (`null` puts one back to as drawn) |

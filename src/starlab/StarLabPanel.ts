@@ -4,7 +4,9 @@ import type { StarActivity, StormSpec } from '../gen/starActivity';
 import { MAIN_SEQUENCE_CLASSES, STAR_KINDS, describeStar, type SpectralClass, type StarData, type StarKind } from '../gen/stars';
 import type { SystemTuning } from '../gen/system';
 import type { FpsCounter } from '../ui/FpsCounter';
-import { STAR_RANGES, TUNING_RANGES, decodeStarLab, sanitizeStar, tunable, type GenerateStarOptions } from './labStars';
+import { blackHoleParams } from '../world/BlackHoleLook';
+import { discOf, discPeakTemperature, schwarzschildRadius } from '../gen/blackHoles';
+import { HOLE_RANGES, STAR_RANGES, TUNING_RANGES, decodeStarLab, sanitizeStar, tunable, type GenerateStarOptions } from './labStars';
 import type { StarLab } from './StarLab';
 
 const VIEWS = { 'Star close up': 'star', 'Whole system': 'system' };
@@ -14,6 +16,7 @@ const KIND_LABELS: Record<StarKind, string> = {
   whiteDwarf: 'white dwarf',
   redGiant: 'red giant',
   blueGiant: 'blue giant',
+  blackHole: 'black hole',
 };
 const ANY = 'any';
 const DRAWN = 'as drawn';
@@ -147,7 +150,7 @@ export class StarLabPanel {
     }
     const pair = { binary: state.stars.length > 1, young: state.young };
     if (!state.real) this.root.add(pair, 'binary').name('a binary pair').onChange((v: boolean) => void lab.setBinary(v));
-    if (!state.real) this.root.add(pair, 'young').name('young (disc, forming planets)').onChange((v: boolean) => void lab.setYoung(v));
+    if (!state.real && s.kind !== 'blackHole') this.root.add(pair, 'young').name('young (disc, forming planets)').onChange((v: boolean) => void lab.setYoung(v));
 
     const e = this.folder('What it is');
     const kinds: Record<string, StarKind> = {};
@@ -155,6 +158,25 @@ export class StarLabPanel {
     e.add({ kind: s.kind }, 'kind', kinds).onChange((kind: StarKind) => void lab.setStar({ kind }));
     if (s.kind === 'mainSequence') {
       e.add({ cls: s.spectralClass }, 'cls', [...MAIN_SEQUENCE_CLASSES]).name('class').onChange((spectralClass: SpectralClass) => void lab.setStar({ spectralClass }));
+    }
+    if (s.kind === 'blackHole') {
+      // Everything else follows from the mass and the disc (gen/blackHoles.ts blackHoleStar).
+      const disc = { ...discOf(s) };
+      const hole = { mass: s.mass, turn: disc.turn > 0 ? 'with the planets' : 'against them' };
+      const rebuild = () => void lab.setStar({ mass: hole.mass, disc: { ...disc, turn: hole.turn === 'with the planets' ? 1 : -1 } });
+      e.add(hole, 'mass', ...HOLE_RANGES.mass, 0.1).name('mass (suns)').onFinishChange(rebuild);
+      e.add(disc, 'outer', ...HOLE_RANGES.outer, 0.1).name('disc reaches (r_s)').onFinishChange(rebuild);
+      e.add(disc, 'feeding', ...HOLE_RANGES.feeding, 0.01).name('fed (share of Eddington)').onFinishChange(rebuild);
+      e.add(hole, 'turn', ['with the planets', 'against them']).name('disc turns').onChange(rebuild);
+      const facts = {
+        shadow: `${s.radius.toFixed(1)} units (r_s ${schwarzschildRadius(s).toFixed(2)})`,
+        disc: `${Math.round(discPeakTemperature(s.mass, disc.feeding))} K at its hottest`,
+        light: `${s.luminosity.toFixed(2)} × the Sun's`,
+      };
+      for (const k of ['shadow', 'disc', 'light'] as const) e.add(facts, k).disable();
+      this.buildBlackHoleLook();
+      this.buildTuner();
+      return;
     }
     e.addColor(s, 'color').name('colour').onChange(changed);
     e.add(s, 'radius', ...STAR_RANGES.radius, 0.5).name('radius (units; Sun ≈ 30)').onChange(changed);
@@ -175,6 +197,16 @@ export class StarLabPanel {
     this.storm(live, 'Flares (bursts)', a.flare, true);
 
     this.buildTuner();
+  }
+
+  /** How black holes are drawn: the game's own look tunables (shared by every hole). */
+  private buildBlackHoleLook(): void {
+    const f = this.folder('How it looks');
+    f.add(blackHoleParams, 'beaming', 0, 1, 0.01).name('Doppler beaming (1: as physics)');
+    f.add(blackHoleParams, 'exposure', 0, 8, 0.05).name('disc brightness');
+    f.add(blackHoleParams, 'opacity', 0, 3, 0.01).name('disc opacity');
+    f.add(blackHoleParams, 'innerPeriod', 0.5, 30, 0.1).name('inner edge turns in (s)');
+    f.add(blackHoleParams, 'maxSteps', 20, 300, 1).name('ray steps per pixel');
   }
 
   /** A storm kind's controls (per-slot chance, timing, size, speed, particles). */

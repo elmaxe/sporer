@@ -1,6 +1,9 @@
 import * as THREE from 'three';
 import type { StarActivity } from '../gen/starActivity';
+import { isBlackHole } from '../gen/blackHoles';
 import type { StarData } from '../gen/stars';
+import { BlackHoleLook, blackHoleShape } from './BlackHoleLook';
+import type { SkyCapture } from './skyCapture';
 import {
   animateStarMaterials,
   createCoronaGeometry,
@@ -61,4 +64,16 @@ export class StarLook {
     this.glow.geometry.dispose();
     this.glow.material.dispose();
   }
+}
+
+/** What a system's star looks like, whatever its kind: a star's surface and corona or a black hole. */
+export type StarView = StarLook | BlackHoleLook;
+
+/**
+ * The look for `data`: a `StarLook`, or for a black hole a `BlackHoleLook`
+ * bending `sky` (null: drawn over whatever is behind, as in the galaxy's
+ * close-up). Seeded alike wherever it is drawn, so every view matches.
+ */
+export function createStarView(data: StarData, activity: StarActivity, seed: number, sky: SkyCapture | null): StarView {
+  return isBlackHole(data) ? new BlackHoleLook(blackHoleShape(data, seed), sky) : new StarLook(data, activity, seed);
 }
