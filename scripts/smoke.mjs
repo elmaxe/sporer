@@ -1109,7 +1109,22 @@ await section('rogues', async () => {
     centred: world.planets[0].renderPosition.length() < 1e-6,
     trails: levels.systemLevel.trails.planetTrails?.length ?? null,
   })`);
-  r.disc = await evaluate(discBrightness('world.planets[0]'));
+  // The disc as drawn, and lit by the galaxy alone: a lava world's own glow held off, so the check below sees the
+  // galactic light even where lava would hide its loss. Measured at ?quality=low (the rogue picked in seed 1337, a lava
+  // world): drawn 5.2–6.0 as it turns (lava 4.6 of it since #127 dimmed lava seas from afar; 16 before), galaxy alone
+  // 1.2, with neither 0.1.
+  r.disc = await evaluate(`(() => {
+    const drawn = ${discBrightness('world.planets[0]')};
+    const lava = world.planets[0].lava;
+    if (!lava) return { drawn, galaxyLit: drawn };
+    const glow = lava.uniforms.uLavaGlow.value;
+    lava.animate = () => {};
+    lava.uniforms.uLavaGlow.value = 0;
+    const galaxyLit = ${discBrightness('world.planets[0]')};
+    lava.uniforms.uLavaGlow.value = glow;
+    delete lava.animate;
+    return { drawn, galaxyLit };
+  })()`);
   r.fps = await evaluate(measureFps);
   const shot = await send('Page.captureScreenshot', { format: 'png' });
   r.screenshot = join(outDir, 'rogue-system.png');
@@ -1148,7 +1163,8 @@ await section('rogues', async () => {
     r.system.url.includes(`star=${r.pick.rogue}`) &&
     r.system.hovering &&
     r.system.centred &&
-    r.disc > 6 &&
+    r.disc.drawn > 3 &&
+    r.disc.galaxyLit > 0.5 &&
     r.loop.ok &&
     r.loop.sky.stars === 0 &&
     r.loop.during.brightness > 3 &&
