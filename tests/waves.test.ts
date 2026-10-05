@@ -2,11 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   BREAKER_INDEX,
   STANDARD_GRAVITY,
-  WAVES_PER_SET,
-  WAVE_SETS,
+  CASCADES,
+  WAVES_PER_CASCADE,
   coxMunkSlope,
-  drawnVariance,
   peakOmega,
+  seaVariance,
   seaWaves,
   shoalWavenumber,
   shoalingCoefficient,
@@ -14,6 +14,7 @@ import {
   shoreSwells,
   significantHeight,
   slopeVariance,
+  spreadPower,
   stormWind,
   waveOmega,
   whitecapCover,
@@ -56,28 +57,54 @@ describe('sea waves', () => {
     }
   });
 
-  it('makes deterministic sets of waves, longest first, steeper ones shorter, never steeper than the sea', () => {
+  it('makes deterministic cascades of waves on repeating tiles, longest first, never steeper than the sea', () => {
     const a = seaWaves(42, 7, STANDARD_GRAVITY, 0.5);
     expect(seaWaves(42, 7, STANDARD_GRAVITY, 0.5)).toEqual(a);
     expect(seaWaves(43, 7, STANDARD_GRAVITY, 0.5)).not.toEqual(a);
-    expect(a.sets).toHaveLength(WAVE_SETS);
-    for (const set of a.sets) {
-      expect(set).toHaveLength(WAVES_PER_SET);
-      for (let i = 1; i < set.length; i++) expect(set[i]!.length).toBeLessThan(set[i - 1]!.length);
-      expect(set[0]!.length).toBeGreaterThan(wavelength(a.peakOmega));
-      expect(set[set.length - 1]!.length).toBeGreaterThanOrEqual(0.5);
-      for (const w of set) {
-        expect(Math.abs(w.angle)).toBeLessThan(Math.PI / 2);
+    expect(a.cascades).toHaveLength(CASCADES);
+    for (const { size, waves } of a.cascades) {
+      expect(waves).toHaveLength(WAVES_PER_CASCADE);
+      for (let i = 1; i < waves.length; i++) expect(waves[i]!.length).toBeLessThanOrEqual(waves[i - 1]!.length);
+      for (const w of waves) {
+        // A whole number of waves across the tile both ways, so it repeats: its wavevector is the lattice's.
+        expect(Number.isInteger(w.nx) && Number.isInteger(w.nz)).toBe(true);
+        expect(w.nx !== 0 || w.nz !== 0).toBe(true);
+        expect(w.length).toBeCloseTo(size / Math.hypot(w.nx, w.nz), 9);
+        expect(w.angle).toBeCloseTo(Math.atan2(w.nz, w.nx), 9);
         expect(w.omega * w.omega).toBeCloseTo((STANDARD_GRAVITY * 2 * Math.PI) / w.length, 6);
       }
-      expect(drawnVariance(set)).toBeGreaterThan(0);
-      expect(drawnVariance(set)).toBeLessThan(a.meanSquareSlope);
     }
+    // Longest first across the cascades, from below the peak down to about the shortest asked for.
+    expect(a.cascades[0]!.waves[0]!.length).toBeGreaterThan(wavelength(a.peakOmega));
+    expect(a.cascades[CASCADES - 1]!.waves[WAVES_PER_CASCADE - 1]!.length).toBeGreaterThan(0.4);
+    for (let c = 1; c < CASCADES; c++) {
+      expect(a.cascades[c]!.size).toBeLessThan(a.cascades[c - 1]!.size);
+      // Tiles in no simple ratio, so their repeats never line up: not within 2% of p/q for q up to 8.
+      const r = a.cascades[c - 1]!.size / a.cascades[c]!.size;
+      for (let q = 1; q <= 8; q++) expect(Math.abs(r * q - Math.round(r * q)) / q).toBeGreaterThan(0.02 / q);
+    }
+    // The drawn waves carry the spectrum's slope from the lowest wave down to the shortest, under the whole sea's.
+    expect(seaVariance(a)).toBeCloseTo(slopeVariance(7, 0.75 * a.peakOmega, Math.sqrt((STANDARD_GRAVITY * 2 * Math.PI) / 0.5)), 6);
+    expect(seaVariance(a)).toBeLessThan(a.meanSquareSlope);
+  });
+
+  it('spreads the waves about the wind as Hasselmann et al. do: narrowest at the peak, wider either side', () => {
+    // WAFO: s = 6.97 (ω/ω_p)^4.06 below the peak, 9.77 (ω/ω_p)^−2.52 above.
+    expect(spreadPower(1)).toBeCloseTo(9.77, 6);
+    expect(spreadPower(0.999)).toBeCloseTo(6.97, 1);
+    expect(spreadPower(2)).toBeCloseTo(9.77 * 2 ** -2.52, 6);
+    expect(spreadPower(0.5)).toBeLessThan(spreadPower(0.9));
+    expect(spreadPower(4)).toBeLessThan(spreadPower(2));
+    // So the longest cascade runs with the wind and the shortest goes every way.
+    const a = seaWaves(5, 7, STANDARD_GRAVITY, 0.5);
+    const meanAngle = (c: number) => a.cascades[c]!.waves.reduce((sum, w) => sum + Math.abs(w.angle), 0) / WAVES_PER_CASCADE;
+    expect(meanAngle(0)).toBeLessThan(Math.PI / 4);
+    expect(meanAngle(CASCADES - 1)).toBeGreaterThan(Math.PI / 3);
   });
 
   it('is calm without wind, and longer and slower under weaker gravity', () => {
     const calm = seaWaves(1, 0, STANDARD_GRAVITY, 0.5);
-    expect(calm.sets).toHaveLength(0);
+    expect(calm.cascades).toHaveLength(0);
     expect(calm.meanSquareSlope).toBeCloseTo(0.003, 6);
     const earth = seaWaves(1, 7, STANDARD_GRAVITY, 0.5);
     const low = seaWaves(1, 7, STANDARD_GRAVITY * 0.14, 0.5);
@@ -86,7 +113,7 @@ describe('sea waves', () => {
   });
 
   it('wraps phases to [0, 2π) and keeps them continuous at huge times', () => {
-    const [w] = seaWaves(3, 7, STANDARD_GRAVITY, 0.5).sets[0]!;
+    const [w] = seaWaves(3, 7, STANDARD_GRAVITY, 0.5).cascades[0]!.waves;
     for (const t of [0, 1, 1e3, 1e7]) {
       const p = wavePhase(w!, t);
       expect(p).toBeGreaterThanOrEqual(0);

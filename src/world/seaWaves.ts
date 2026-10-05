@@ -5,18 +5,17 @@ import {
   COX_MUNK,
   peakOmega,
   STANDARD_GRAVITY,
-  WAVES_PER_SET,
-  WAVE_SETS,
+  CASCADES,
   WHITECAP,
   BREAKER_INDEX,
   coxMunkSlope,
   drawnVariance,
+  seaVariance,
   seaWaves,
   shorePhase,
   shoreSwells,
   stormWind,
   wavelength,
-  wavePhase,
   type SeaWaves,
   type ShoreSwell,
 } from '../gen/waves';
@@ -25,6 +24,7 @@ import type { PlanetConfig } from './Planet';
 import { VALUE_NOISE_GLSL } from './noiseGlsl';
 import { weatherParams } from './weatherLook';
 import { lodParams } from '../planet/LodSurface';
+import { WaveTiles } from './waveTiles';
 
 /** Tunables of the sea's waves (debug panel: Sea waves). They take effect on the next frame. */
 export const waveParams = {
@@ -46,7 +46,7 @@ export const waveParams = {
   shortest: 0.5,
   /** Count the wavelets shorter than that in the roughness (Cox & Munk's whole slope): true to life, but it spreads the sun's glint too thin to see. */
   wavelets: false,
-  /** A wave fades out between these many pixels long (and shorter), its slope going into the roughness. */
+  /** The shore swells and the downwash's ripples fade out between these many pixels long (and shorter). The wind's waves are mipmapped instead. */
   fadeFrom: 12,
   fadeTo: 4,
   /**
@@ -71,6 +71,8 @@ export const waveParams = {
   slickSize: 40,
   /** Gerstner's sharper crests and flatter troughs: 1 is a true trochoidal wave (the water's orbits as big as the wave), 0 plain sines. */
   crests: 1,
+  /** Wave groups: how much each cascade's waves swell and die away from place to place (0: the same everywhere; stylised). */
+  groups: 0.9,
   /** Whitecaps on the crests, as many as Monahan & O'Muircheartaigh's fit gives at the wind. */
   whitecaps: true,
   /**
@@ -82,11 +84,11 @@ export const waveParams = {
   clearDepth: 5,
   /** How deep (units) the water's colour goes from its shallows' to its deep's, and how dark the deep is (× the sea's colour). */
   deepDepth: 12,
-  deep: 0.75,
+  deep: 0.55,
   /** How much the waves tilt the sky's reflection (1: all of it; less keeps the sky's sheen smooth). */
-  skyWaves: 0.5,
+  skyWaves: 1,
   /** The sky's light reflected off the water, by Fresnel (stylised strength; none without air). */
-  sky: 0.35,
+  sky: 0.22,
   /** Wave crests lit through from inside, lighter than the troughs (stylised strength). */
   scatter: 0.2,
   /** Surf: how deep (units) the foam along the shore reaches. */
@@ -108,7 +110,7 @@ export const waveParams = {
   downwashTo: 4,
   /** How far out the downwash spreads, in the ship's radii. */
   downwashReach: 2.2,
-  /** Crests lit from behind by a low sun (stylised strength). */
+  /** Light through the crests, seen towards the sun (Atlas's sub-surface term; stylised strength). */
   glow: 1.5,
 };
 
@@ -121,23 +123,30 @@ export const CLEAR_SEA_RENDER_ORDER = 0.5;
 /** The wave fronts' bend: how far, and over how long a stretch, in the spectrum's peak wavelengths. */
 const WARP_SHARE = 0.6;
 const WARP_SIZE = 2;
+/** A cascade's wave groups span this many of its tiles (stylised). */
+const GROUP_TILES = 1.3;
 /** Depths the shore swells' phase is tabulated at. */
 const SHORE_STEPS = 32;
 /** The ship's radius, units (the UFO is ~4 wide). */
 const SHIP_RADIUS = 2;
 /** The downwash's ripples: wavelength (m, at metresPerUnit) and how far out (in its reach) they run before dying away. */
 const RIPPLE_LENGTH = 6;
-/** How many waves the shader holds. */
-const WAVES = WAVES_PER_SET * WAVE_SETS;
 /** Foam's colour (stylised: a bright, slightly blue white). */
 const FOAM = new THREE.Color(0.8, 0.85, 0.88);
 
 const SEA_WAVES_GLSL = /* glsl */ `
-  #define SEA_PER_SET ${WAVES_PER_SET}
   #define SEA_STORMS ${MAX_STORMS}
-  // Per wave: wavenumber vector in the projection plane (1/units), slope amplitude, wavelength (units).
-  uniform vec4 uSeaWave[${WAVES}];
-  uniform float uSeaPhase[${WAVES}];
+  // The wind's waves, baked into repeating tiles (world/waveTiles.ts): per cascade the slope, height and crest term,
+  // and their squares.
+  uniform sampler2D uSeaTileA0;
+  uniform sampler2D uSeaTileA1;
+  uniform sampler2D uSeaTileA2;
+  uniform sampler2D uSeaTileB0;
+  uniform sampler2D uSeaTileB1;
+  uniform sampler2D uSeaTileB2;
+  // Per cascade: 1/tile (1/units), its slope variance, its height variance (units²), 1/the size of its wave groups.
+  uniform vec4 uSeaCascade[${CASCADES}];
+  uniform float uSeaGroups;
   // The whole surface's mean square slope at the wind: what the roughness and the drawn waves share.
   uniform float uSeaSlope;
   uniform float uSeaWind;
@@ -147,7 +156,7 @@ const SEA_WAVES_GLSL = /* glsl */ `
   uniform int uSeaStormCount;
   // How far the wave fronts are bent (units) and over what size (1/units): a few sines alone would make a regular grid.
   uniform vec2 uSeaWarp;
-  // Wavelengths in pixels over which a wave fades out (to, from); distances (units) over which they all do.
+  // Wavelengths in pixels over which the shore's swells fade out (to, from); distances (units) over which all waves do.
   uniform vec2 uSeaFade;
   uniform vec2 uSeaFar;
   uniform vec2 uSeaHigh;
@@ -203,28 +212,32 @@ const SEA_WAVES_GLSL = /* glsl */ `
   // Standard normal CDF (Page's tanh approximation).
   float seaPhi(float x) { return 0.5 + 0.5 * tanh(0.7978846 * (x + 0.044715 * x * x * x)); }
 
-  struct SeaSet { vec2 grad; float drawn; float h; float hVar; float crest; };
+  struct SeaTile { vec2 grad; float h; float crest; float hidden; float drawn; float hVar; };
 
-  // One set of waves on a plane at coordinates uv, slopes scaled by amp: the height's gradient, the slope variance
-  // drawn, the height and its variance drawn, and Gerstner's crest term. Waves shorter than a few pixels (footprint fp)
-  // fade out, longest first so the loop stops at the first gone.
-  SeaSet seaWaveSet(int set, vec2 uv, float fp, float amp) {
-    SeaSet r = SeaSet(vec2(0.0), 0.0, 0.0, 0.0, 0.0);
-    for (int i = 0; i < SEA_PER_SET; i++) {
-      vec4 w = uSeaWave[set * SEA_PER_SET + i];
-      float fade = smoothstep(uSeaFade.x * fp, uSeaFade.y * fp, w.w);
-      if (fade <= 0.0) break;
-      float s = w.z * amp * fade;
-      float a = s * w.w * 0.15915494;
-      float t = dot(w.xy, uv) + uSeaPhase[set * SEA_PER_SET + i];
-      float c = cos(t);
-      float sn = sin(t);
-      r.grad += normalize(w.xy) * s * c;
-      r.drawn += 0.5 * s * s;
-      r.h += a * sn;
-      r.hVar += 0.5 * a * a;
-      r.crest += s * sn;
-    }
+  // One cascade's tile at plane coordinates uv (units): its slope, height and crest term, scaled by g (the wind and
+  // the wave groups here) and shown as much as near says. What its mipmaps averaged away (the second moment less the
+  // first squared, LEAN mapping) and what near fades out are hidden: roughness.
+  void seaTile(sampler2D A, sampler2D B, vec4 info, vec2 uv, float g, float near, inout SeaTile r) {
+    vec2 t = uv * info.x;
+    vec4 a = texture(A, t);
+    vec4 b = texture(B, t);
+    float lost = clamp(b.x + b.y - dot(a.xy, a.xy), 0.0, info.y);
+    float shown = near * g;
+    float share = 1.0 - lost / max(info.y, 1e-6);
+    r.grad += shown * a.xy;
+    r.h += shown * a.z;
+    r.crest += shown * a.w;
+    r.hidden += g * g * (lost + (1.0 - near * near) * (info.y - lost));
+    r.drawn += shown * shown * (info.y - lost);
+    r.hVar += shown * shown * info.z * share;
+  }
+
+  // Every cascade on one plane of the triplanar projection (offset per plane, so the planes don't repeat each other).
+  SeaTile seaTiles(vec2 uv, vec3 g, float near) {
+    SeaTile r = SeaTile(vec2(0.0), 0.0, 0.0, 0.0, 0.0, 0.0);
+    seaTile(uSeaTileA0, uSeaTileB0, uSeaCascade[0], uv, g.x, near, r);
+    seaTile(uSeaTileA1, uSeaTileB1, uSeaCascade[1], uv, g.y, near, r);
+    seaTile(uSeaTileA2, uSeaTileB2, uSeaCascade[2], uv, g.z, near, r);
     return r;
   }
 
@@ -271,19 +284,30 @@ const SEA_FRAGMENT = /* glsl */ `
     float keep = inversesqrt(dot(b, b));
     vec3 g = vec3(0.0);
     float drawn = 0.0, h = 0.0, hVar = 0.0, crest = 0.0;
-    if (near > 0.0 && uSeaWind > 0.0) {
+    // The slope of the waves not drawn here: hidden by the tiles' mipmaps or faded out, plus what no tile holds.
+    float hidden = 0.0;
+    if (uSeaWind > 0.0) {
       // Bent wave fronts: the planes' coordinates pushed about by a slow noise (seamless, being 3D).
       vec3 wq = vSeaPos * uSeaWarp.y;
       vec3 p = vSeaPos + uSeaWarp.x * (vec3(valueNoise(wq), valueNoise(wq + 17.3), valueNoise(wq + 41.7)) - 0.5);
-      SeaSet r;
-      if (b.x > 0.0) { r = seaWaveSet(0, p.zy, fp, amp * near); g += b.x * vec3(0.0, r.grad.y, r.grad.x); drawn += b.x * b.x * r.drawn; h += b.x * r.h; hVar += b.x * b.x * r.hVar; crest += b.x * r.crest; }
-      if (b.y > 0.0) { r = seaWaveSet(1, p.xz, fp, amp * near); g += b.y * vec3(r.grad.x, 0.0, r.grad.y); drawn += b.y * b.y * r.drawn; h += b.y * r.h; hVar += b.y * b.y * r.hVar; crest += b.y * r.crest; }
-      if (b.z > 0.0) { r = seaWaveSet(2, p.xy, fp, amp * near); g += b.z * vec3(r.grad.x, r.grad.y, 0.0); drawn += b.z * b.z * r.drawn; h += b.z * r.h; hVar += b.z * b.z * r.hVar; crest += b.z * r.crest; }
+      // Wave groups: each cascade's waves swell and die away over a few of its tiles (mean square about 1).
+      vec3 groups = vec3(
+        valueNoise(vSeaPos * uSeaCascade[0].w),
+        valueNoise(vSeaPos * uSeaCascade[1].w + 7.3),
+        valueNoise(vSeaPos * uSeaCascade[2].w + 13.9));
+      vec3 ga = amp * (1.0 + uSeaGroups * (groups - 0.5));
+      // Faded out altogether (far off, or seen from high up): all their slope is roughness, no tile to read.
+      if (near <= 0.0) hidden = dot(ga * ga, vec3(uSeaCascade[0].y, uSeaCascade[1].y, uSeaCascade[2].y)) / (keep * keep);
+      SeaTile r;
+      if (near > 0.0 && b.x > 0.0) { r = seaTiles(p.zy, ga, near); g += b.x * vec3(0.0, r.grad.y, r.grad.x); drawn += b.x * b.x * r.drawn; h += b.x * r.h; hVar += b.x * b.x * r.hVar; crest += b.x * r.crest; hidden += b.x * b.x * r.hidden; }
+      if (near > 0.0 && b.y > 0.0) { r = seaTiles(p.xz + vec2(0.37, 0.71) / uSeaCascade[2].x, ga, near); g += b.y * vec3(r.grad.x, 0.0, r.grad.y); drawn += b.y * b.y * r.drawn; h += b.y * r.h; hVar += b.y * b.y * r.hVar; crest += b.y * r.crest; hidden += b.y * b.y * r.hidden; }
+      if (near > 0.0 && b.z > 0.0) { r = seaTiles(p.xy + vec2(0.61, 0.13) / uSeaCascade[2].x, ga, near); g += b.z * vec3(r.grad.x, r.grad.y, 0.0); drawn += b.z * b.z * r.drawn; h += b.z * r.h; hVar += b.z * b.z * r.hVar; crest += b.z * r.crest; hidden += b.z * b.z * r.hidden; }
       g *= keep;
       drawn *= keep * keep;
       h *= keep;
       hVar *= keep * keep;
       crest *= keep;
+      hidden *= keep * keep;
     }
     // Shore swells: crests along the depth contours, running in to the waterline, slower, shorter and steeper as
     // the water shoals, capped at McCowan's breaker index (the surf zone) where they break.
@@ -350,34 +374,48 @@ const SEA_FRAGMENT = /* glsl */ `
       float ring = exp(-pow((q - 1.0 - 0.15 * bend) / 0.25, 2.0));
       shipSpray = uSeaShip.w * clamp(ring * smoothstep(0.3, 0.7, tear) * 1.6 + 0.25 * shipDisc * smoothstep(0.4, 0.8, tear), 0.0, 1.0);
     }
-    // The height's gradient along the surface tips the normal against it; Gerstner's term narrows the crests.
+    // The height's gradient along the surface tips the normal against it (the tiles hold the crests' shape).
     g -= n * dot(n, g);
-    normal = normalize(vSeaNormalMatrix * (n * max(1.0 - uSeaCrests * crest, 0.2) - g));
-    // What isn't drawn is roughness: GGX's alpha (roughness²) is about the RMS slope.
-    roughnessFactor = sqrt(sqrt(max(f * uSeaSlope - drawn, ${COX_MUNK[0]})));
+    normal = normalize(vSeaNormalMatrix * (n - g));
+    // What isn't drawn is roughness: GGX's alpha (roughness²) is about the RMS slope. uSeaSlope less the tiles' is the
+    // slope no tile holds (a calm sea's, or the wavelets').
+    float tiles = uSeaCascade[0].y + uSeaCascade[1].y + uSeaCascade[2].y;
+    roughnessFactor = sqrt(sqrt(max(f * (uSeaSlope - tiles) + hidden, ${COX_MUNK[0]})));
     // The downwash's disc is ruffled by the wind it blows.
     roughnessFactor = mix(roughnessFactor, 0.55, shipDisc);
 
-    // The water's own colour: brighter and greener over its shallows, darker over the deep.
+    // The water's own colour, the light scattered back up from inside it: brighter and greener over its shallows,
+    // darker over the deep.
     float depth = max(vSeaDepth, 0.0);
     vec3 seaHue = diffuseColor.rgb;
     vec3 shallowHue = seaHue * vec3(0.75, 1.3, 1.15) + vec3(0.02, 0.05, 0.04);
-    diffuseColor.rgb = mix(shallowHue, seaHue * uSeaDeep.x, smoothstep(0.0, uSeaClear.z, depth));
+    vec3 body = mix(shallowHue, seaHue * uSeaDeep.x, smoothstep(0.0, uSeaClear.z, depth));
     // Crests lit through from inside, lighter than the troughs.
     float lift = hVar > 0.0 ? clamp(h * inversesqrt(hVar) * 0.5, -1.0, 1.0) : 0.0;
-    diffuseColor.rgb *= 1.0 + uSeaScatter * lift;
+    // Fresnel on the wave's normal (Schlick, water's 0.02 head on): what the surface reflects never gets inside.
+    vec3 viewDir = normalize(vViewPosition);
+    float fresnel = 0.02 + 0.98 * pow(1.0 - clamp(dot(normal, viewDir), 0.0, 1.0), 5.0);
+    diffuseColor.rgb = body * (1.0 + uSeaScatter * lift) * (1.0 - fresnel);
     // Clear water: the seabed shows through, fading by e every clarity units deeper, opaque by clearDepth.
     seaAlpha = 1.0 - exp(-depth / uSeaClear.x);
     seaAlpha = mix(seaAlpha, 1.0, smoothstep(0.5 * uSeaClear.y, uSeaClear.y, depth));
 
-    // Whitecaps: the steepest crests (the slope-weighted crest term, which the short waves lead), as much of the sea
-    // as Monahan & O'Muircheartaigh's fit says; where the waves are too small to draw, their share spread evenly.
+    // Whitecaps: the most squeezed crests (the tiles' 1 − J, which the short waves lead), as much of the sea as
+    // Monahan & O'Muircheartaigh's fit says; where the waves are too small to draw, their share spread evenly.
     float cover = uSeaWhitecaps * min(1.0, ${WHITECAP[0]} * pow(wind, ${WHITECAP[1]}));
     float caps = cover;
-    float all = f * (uSeaSlope - ${COX_MUNK[0]});
+    float all = f * tiles;
     if (drawn > 0.0 && all > 0.0) {
-      float c = seaPhi(crest * inversesqrt(drawn));
-      caps = mix(cover, smoothstep(1.0 - 1.6 * cover, 1.0 - 0.4 * cover, c), clamp(drawn / all, 0.0, 1.0));
+      // The crest term's spread is about Q² × the slope's (gen/waves.ts: 1 − J ≈ Q Σ s sin θ).
+      float c = seaPhi(crest * inversesqrt(drawn * max(uSeaCrests * uSeaCrests, 1e-4)));
+      float crestFoam = smoothstep(1.0 - 1.6 * cover, 1.0 - 0.4 * cover, c);
+      if (crestFoam > 0.0) {
+        // Torn into streaks and bubbles by a finer noise, each octave evening out as it gets too fine for the pixels.
+        float torn = mix(0.5, valueNoise(vSeaPos * 5.0), 1.0 - smoothstep(0.08, 0.2, fp)) * 0.6
+          + mix(0.5, valueNoise(vSeaPos * 13.0), 1.0 - smoothstep(0.03, 0.08, fp)) * 0.4;
+        crestFoam *= smoothstep(0.25, 0.6, torn + 0.3 * (c - 0.5));
+      }
+      caps = mix(cover, crestFoam, clamp(drawn / all, 0.0, 1.0));
     }
     // Surf: foam on the breaking swells' crests and the wash at the waterline (or, without them, bands running in at
     // the swell's pace).
@@ -391,42 +429,55 @@ const SEA_FRAGMENT = /* glsl */ `
     diffuseColor.rgb = mix(diffuseColor.rgb, uSeaFoam, foam);
     roughnessFactor = mix(roughnessFactor, 1.0, foam);
 
-    // Crests lit through from behind by a low sun, seen against it.
-    vec3 view = normalize(vSeaPos - uSeaCamera);
-    vec3 vt = view - n * dot(n, view);
-    vec3 lt = uSeaSun - n * dot(n, uSeaSun);
-    float facing = max(dot(vt, lt) * inversesqrt(max(dot(vt, vt) * dot(lt, lt), 1e-8)), 0.0);
+    // Light through the waves (Atlas's sub-surface term): seen towards the sun, the backs of the crests glow in the
+    // water's shallow colour, the more the higher they stand and the more they face away from it.
+    vec3 toCamera = normalize(uSeaCamera - vSeaPos);
+    vec3 waveNormal = normalize(n - g);
     float up = dot(n, uSeaSun);
-    float glow = uSeaGlow * pow(facing, 4.0) * smoothstep(-0.02, 0.08, up) * (1.0 - smoothstep(0.25, 0.6, up)) * max(lift, 0.0) * (1.0 - foam);
-    totalEmissiveRadiance += glow * uSeaSunLight * diffuseColor.rgb * vec3(0.6, 1.3, 1.1);
-    // The sky reflected by Fresnel (Schlick, water's 0.02 head on): the sea brightens towards the horizon and every
-    // wave facing away catches it. Lit where the sky over it is (day side, dusk), none without air.
+    float through = uSeaGlow * max(lift, 0.0) * pow(clamp(dot(uSeaSun, -toCamera), 0.0, 1.0), 4.0)
+      * pow(0.5 - 0.5 * dot(uSeaSun, waveNormal), 3.0) * smoothstep(-0.02, 0.08, up) * (1.0 - foam);
+    vec3 glow = through * uSeaSunLight * shallowHue * vec3(0.7, 1.2, 1.05);
+    totalEmissiveRadiance += glow;
+    // The sky reflected by that Fresnel: the sea brightens towards the horizon and every wave facing away catches it.
+    // The sky is paler and brighter near its horizon than overhead. Lit where the sky over it is (day side, dusk),
+    // none without air.
     vec3 skyNormal = normalize(mix(normalize(vSeaNormalMatrix * n), normal, uSeaDeep.y));
-    float cosView = clamp(dot(skyNormal, normalize(vViewPosition)), 0.0, 1.0);
-    float fresnel = 0.02 + 0.98 * pow(1.0 - cosView, 5.0);
+    float skyFresnel = 0.02 + 0.98 * pow(1.0 - clamp(dot(skyNormal, viewDir), 0.0, 1.0), 5.0);
+    float elevation = dot(reflect(-viewDir, skyNormal), normalize(vSeaNormalMatrix * n));
+    float horizon = 1.0 - smoothstep(0.0, 0.6, elevation);
+    vec3 skyHue = mix(uSeaSky, vec3(dot(uSeaSky, vec3(0.3, 0.59, 0.11))), 0.6 * horizon) * (1.0 + 0.4 * horizon);
     float skyLit = smoothstep(-0.12, 0.3, up);
-    vec3 skyLight = uSeaSky * uSeaSunLight * skyLit * fresnel * (1.0 - foam);
+    vec3 skyLight = skyHue * uSeaSunLight * skyLit * skyFresnel * (1.0 - foam);
     totalEmissiveRadiance += skyLight;
     // See-through where shallow: foam, the glint and the sky's reflection stay (they're light off the surface).
-    float shine = dot(skyLight + glow * uSeaSunLight * diffuseColor.rgb, vec3(0.3, 0.59, 0.11));
+    float shine = dot(skyLight + glow, vec3(0.3, 0.59, 0.11));
     seaAlpha = max(max(seaAlpha, foam), clamp(shine * 1.5, 0.0, 1.0));
   }
 `;
 
 /**
- * Wind waves on a water sea (issue #88): gen/waves.ts's waves laid over the
- * sea's normals per pixel, on three planes blended by the normal (triplanar,
- * so there's no seam or pole on the sphere), animated by the system clock.
- * Waves too small for the pixels, or too far from the camera, fade out and
- * their slope goes into the roughness instead, so the sun's glint keeps its
- * size from low down to high up. The wind rises under storms (rougher water,
+ * Wind waves on a water sea (issue #88): gen/waves.ts's waves, baked into
+ * repeating tiles (world/waveTiles.ts), laid over the sea's normals per
+ * pixel on three planes blended by the normal (triplanar, so there's no seam
+ * or pole on the sphere), animated by the system clock. Waves too small for
+ * the pixels average away in the tiles' mipmaps, and waves too far from the
+ * camera fade out; either way their slope goes into the roughness instead,
+ * so the sun's glint keeps its size from low down to high up. The water is
+ * lit as the games known for theirs light it: its own colour where Fresnel
+ * lets light in, the sky where it reflects, and light through the crests. The wind rises under storms (rougher water,
  * whitecaps) and dies in slicks; shallow water shows its seabed and surf runs
  * up the shores. See docs/research/sea-waves.md.
  */
 export class SeaWaveLook {
   private readonly uniforms = {
-    uSeaWave: { value: Array.from({ length: WAVES }, () => new THREE.Vector4()) },
-    uSeaPhase: { value: new Array<number>(WAVES).fill(0) },
+    uSeaTileA0: { value: null as THREE.Texture | null },
+    uSeaTileA1: { value: null as THREE.Texture | null },
+    uSeaTileA2: { value: null as THREE.Texture | null },
+    uSeaTileB0: { value: null as THREE.Texture | null },
+    uSeaTileB1: { value: null as THREE.Texture | null },
+    uSeaTileB2: { value: null as THREE.Texture | null },
+    uSeaCascade: { value: Array.from({ length: CASCADES }, () => new THREE.Vector4(1, 0, 0, 1)) },
+    uSeaGroups: { value: 0 },
     uSeaSlope: { value: coxMunkSlope(0) },
     uSeaWind: { value: 0 },
     uSeaStorms: { value: Array.from({ length: MAX_STORMS }, () => new THREE.Vector4()) },
@@ -465,6 +516,9 @@ export class SeaWaveLook {
   private shipStrength = 0;
   /** The tunables the waves were made with. */
   private made = '';
+  /** The wind's waves baked into tiles, and the time they're drawn at. */
+  private readonly tiles: WaveTiles;
+  private time = 0;
   private readonly centre: [number, number, number] = [0, 0, 0];
 
   constructor(
@@ -481,6 +535,11 @@ export class SeaWaveLook {
   ) {
     this.uniforms.uSeaSun.value = sun;
     this.uniforms.uSeaSunLight.value = sunLight;
+    this.tiles = new WaveTiles();
+    const u = this.uniforms;
+    [u.uSeaTileA0.value, u.uSeaTileB0.value] = this.tiles.textures(0);
+    [u.uSeaTileA1.value, u.uSeaTileB1.value] = this.tiles.textures(1);
+    [u.uSeaTileA2.value, u.uSeaTileB2.value] = this.tiles.textures(2);
   }
 
   /**
@@ -499,10 +558,11 @@ export class SeaWaveLook {
     const p = waveParams;
     const u = this.uniforms;
     const wind = p.enabled && this.air ? p.wind : 0;
-    const key = `${wind}/${p.metresPerUnit}/${p.shortest}/${p.wavelets}/${p.shoreSlope}`;
+    const key = `${wind}/${p.metresPerUnit}/${p.shortest}/${p.wavelets}/${p.shoreSlope}/${p.crests}`;
     if (key !== this.made) this.make(wind, key);
     const waves = this.waves!;
-    waves.sets.forEach((set, s) => set.forEach((w, i) => (u.uSeaPhase.value[s * WAVES_PER_SET + i] = wavePhase(w, time))));
+    this.time = time;
+    u.uSeaGroups.value = p.groups;
     u.uSeaFade.value.set(p.fadeTo, Math.max(p.fadeFrom, p.fadeTo + 0.5));
     u.uSeaFar.value.set(p.farFrom, Math.max(p.farTo, p.farFrom + 1));
     u.uSeaHigh.value.set(p.highFrom, Math.max(p.highTo, p.highFrom + 1));
@@ -594,14 +654,24 @@ export class SeaWaveLook {
     // Bent over twice the longest swell's length, by up to a third of it either way.
     const swell = waves.peakOmega > 0 ? wavelength(waves.peakOmega, this.gravity) / p.metresPerUnit : 1;
     u.uSeaWarp.value.set(swell * WARP_SHARE, 1 / (swell * WARP_SIZE));
-    for (const v of u.uSeaWave.value) v.set(0, 0, 0, 0);
-    waves.sets.forEach((set, s) =>
-      set.forEach((w, i) => {
-        const length = w.length / p.metresPerUnit;
-        const k = (Math.PI * 2) / length;
-        u.uSeaWave.value[s * WAVES_PER_SET + i]!.set(Math.cos(w.angle) * k, Math.sin(w.angle) * k, w.slope, length);
-      }),
-    );
+    this.tiles.setWaves(waves, p.metresPerUnit, p.crests);
+    u.uSeaCascade.value.forEach((v, c) => {
+      const cascade = waves.cascades[c];
+      if (!cascade) return v.set(1, 0, 0, 1);
+      const size = cascade.size / p.metresPerUnit;
+      // Its height variance, Σ a² / 2 (units²); its wave groups span a little over its tile.
+      const heights = cascade.waves.reduce((sum, w) => sum + (w.slope * w.length) ** 2 / (8 * Math.PI * Math.PI), 0) / p.metresPerUnit ** 2;
+      v.set(1 / size, drawnVariance(cascade.waves), heights, 1 / (size * GROUP_TILES));
+    });
+  }
+
+  /** Redraws the wave tiles for this frame (call before drawing the sea). */
+  render(renderer: THREE.WebGLRenderer): void {
+    if (this.uniforms.uSeaWind.value > 0) this.tiles.render(renderer, this.time);
+  }
+
+  dispose(): void {
+    this.tiles.dispose();
   }
 
   /**
@@ -658,8 +728,7 @@ export function seaDepthFrame(dir: { x: number; y: number; z: number }, east: TH
 /** The whole sea's mean square slope at the waves' wind: Cox & Munk's, or (without the wavelets) a calm sea's plus the drawn waves'. */
 function seaSlope(waves: SeaWaves, wavelets: boolean): number {
   if (wavelets) return waves.meanSquareSlope;
-  const drawn = waves.sets.reduce((sum, set) => sum + drawnVariance(set), 0) / Math.max(1, waves.sets.length);
-  return coxMunkSlope(0) + drawn;
+  return coxMunkSlope(0) + seaVariance(waves);
 }
 
 /** Whether a body's sea is water with waves (not ice, not lava, not a gas giant's), and if so its gravity (m/s²) and whether air blows on it. */
@@ -735,6 +804,7 @@ export function addWaveDebug(debug: Debug): void {
   f?.add(waveParams, 'slickSlope', 0.1, 1, 0.01);
   f?.add(waveParams, 'slickSize', 5, 200, 1);
   f?.add(waveParams, 'crests', 0, 1, 0.05);
+  f?.add(waveParams, 'groups', 0, 1.5, 0.05);
   f?.add(waveParams, 'whitecaps');
   f?.add(waveParams, 'clarity', 0.05, 5, 0.05);
   f?.add(waveParams, 'clearDepth', 0.5, 20, 0.5);
