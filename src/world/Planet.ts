@@ -17,6 +17,7 @@ import type { SizeClass } from '../gen/planets';
 import { createGasGeometry, createRings, createTerrainGeometry, terrainSampler } from './planetGeometry';
 import { createWeatherLook, type WeatherLook } from './weatherLook';
 import { PLANET_SCALE, RELIEF_SCALE, globeRadius } from '../planet/frame';
+import { createGroundLook } from './groundLook';
 import { surfaceNoise } from '../gen/craters';
 import { VolcanoShape, eruptionStrength, volcanoGrowth, type VolcanoSite } from '../combat/volcano';
 import { VolcanoMesh } from './volcanoMesh';
@@ -187,6 +188,8 @@ export class Planet implements Entity, CelestialBody {
     // Ice worlds' snow, glacier ice, frozen seas and lineae, as low orbit draws them, averaged.
     this.ice = gas ? null : createIceLook(config);
     this.ice?.applyGround(this.surface.material, radius, radius * style.relief, true, PLANET_SCALE);
+    // Green worlds' grass, soil, sand, rock and snow, as low orbit draws them, averaged.
+    if (!gas) createGroundLook(config)?.apply(this.surface.material, radius, radius * style.relief, PLANET_SCALE, false);
     this.gas = createGasLook(config);
     this.gas?.apply(this.surface.material);
     // Clouds turn with the ground; the same layer as low orbit's, in planet radii.

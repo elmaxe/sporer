@@ -279,6 +279,16 @@ export class LabPanel {
     f.addColor(style, 'low').name('lowland colour').onChange(changed);
     f.addColor(style, 'high').name('highland colour').onChange(changed);
     f.add(style, 'relief', 0, 0.2, 0.001).name('relief (× radius)').onChange(changed);
+    // Lowlands flattened into plains under the mountains (gen/planets.ts landElevation): 1 is green worlds'.
+    const plains = {
+      get amount() {
+        return style.plains ?? 0;
+      },
+      set amount(v: number) {
+        style.plains = v;
+      },
+    };
+    if (this.p.type !== 'gas') f.add(plains, 'amount', 0, 1, 0.01).name('plains').onChange(changed);
     // Impact craters (gen/craters.ts): 1 is airless rock's.
     const craters = {
       get cover() {

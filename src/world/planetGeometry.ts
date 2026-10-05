@@ -5,6 +5,8 @@ import { gasTone, generateGasLayout } from '../gen/gasGiants';
 import { paletteAt } from './gasLook';
 import { SHAPE_FLOOR, shapeRadius, type ShapeData } from '../gen/shape';
 import type { PlanetStyle, RingData } from '../gen/system';
+import { landElevation } from '../gen/planets';
+import { SAND } from '../gen/terranGround';
 import { ringAt, ringProfile } from '../gen/rings';
 import { createCubeSphere } from './cubeSphere';
 import type { Vec3Like } from './cubeSphereMath';
@@ -61,8 +63,7 @@ export type TerrainPainter = (n: number, out: THREE.Color, x: number, y: number,
  * `seed`: a real body's (gen/realSurface.ts) ground takes its colour map's
  * colour at the point's direction (x, y, z) instead of the height ramp.
  */
-/** The sea floor's sand along the shore (stylised), and how deep (a share of the deepest floor) it gives way to the sea's colour. */
-const SEABED_SAND = '#d8c49a';
+/** How deep (a share of the deepest floor) the sea floor's sand along the shore (gen/terranGround.ts SAND) gives way to the sea's colour. */
 const SAND_DEPTH = 0.3;
 
 export function terrainPainter(style: PlanetStyle, seaFloor = false, seed?: number): TerrainPainter {
@@ -70,7 +71,7 @@ export function terrainPainter(style: PlanetStyle, seaFloor = false, seed?: numb
   const low = new THREE.Color(style.low);
   const high = new THREE.Color(style.high);
   // A pale sand, a little of the low ground's colour in it.
-  const sand = new THREE.Color(SEABED_SAND).lerp(low, 0.2);
+  const sand = new THREE.Color(SAND).lerp(low, 0.2);
   // Without a sea, terrain spans the full noise range [-1, 1].
   const base = sea === null ? -1 : style.seaLevel;
   const real = seed === undefined ? undefined : realSurface(seed);
@@ -117,7 +118,7 @@ export function terrainSampler(
   }
   return (dir, color, spacing) => {
     const height = paint(noise(dir.x, dir.y, dir.z, seed, spacing), color, dir.x, dir.y, dir.z);
-    return radius * (1 + relief * (height < 0 ? SEA_FLOOR_DEPTH : 1) * height);
+    return radius * (1 + relief * (height < 0 ? SEA_FLOOR_DEPTH * height : landElevation(style, height)));
   };
 }
 

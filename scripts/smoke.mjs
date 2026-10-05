@@ -286,6 +286,11 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null, during = n
   r.altitude = { low: await evaluate(altitude) };
   // Zoomed in, the UFO keeps its clearance over the ground beneath it (about 3 units, a bit more when it climbs ahead of a slope).
   r.clearance = await evaluate(`planet.ship.clearance`);
+  // Over plants it flies higher (the trees and bushes on the stretch ahead, as the ship clears them): their reach over the ground.
+  r.standing = await evaluate(`(() => {
+    const s = planet.ship, t = s.terrain;
+    return t?.obstacles ? +Math.max(0, t.obstacles.clearAlong(s.u, s.ahead, 0) - t.height(s.u)).toFixed(2) : 0;
+  })()`);
   r.lava = await evaluate(
     `planet.eruptions && { vents: planet.eruptions.activity.vents.length, events: planet.eruptions.events.length, blobs: planet.eruptions.liveBlobs }`,
   );
@@ -456,7 +461,7 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null, during = n
     Math.abs(r.skyStarTime - r.skyClock) < 0.25 &&
     r.altitudeOk &&
     r.clearance >= 1 &&
-    r.clearance < 15 &&
+    (r.clearance < 15 || r.clearance < r.standing + 5) &&
     r.altitude.high > r.altitude.low + 20 &&
     r.map.visible &&
     r.map.baked &&

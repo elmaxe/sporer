@@ -7,6 +7,7 @@ import { LAVA_SEA_GLSL } from '../world/lavaMaterial';
 import { GAS_GLSL } from '../world/gasLook';
 import { isGas, type PlanetConfig } from '../world/Planet';
 import { SHAPE_FLOOR, shapeRadius } from '../gen/shape';
+import { landElevation } from '../gen/planets';
 import { gasPainter, terrainPainter, type GasPainter, type TerrainPainter } from '../world/planetGeometry';
 import {
   EQUAL_EARTH_HEIGHT,
@@ -488,7 +489,7 @@ export class PlanetMap implements Entity {
           }
         } else {
           const n = this.noise(dx, dy, dz, seed, spacing);
-          const h = (heights[p] = this.terrain!(n, color, dx, dy, dz));
+          const h = (heights[p] = landElevation(this.config.style, this.terrain!(n, color, dx, dy, dz)));
           if (this.lava && n < this.config.style.seaLevel) alpha = 0;
           // Lit from the upper left: darker where the ground falls away towards the lower right.
           if (h > 0 && i > 0 && j > 0 && heights[p - 1]! >= 0 && heights[p - width]! >= 0) {

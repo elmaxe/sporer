@@ -2,7 +2,7 @@ import type { ClimateData } from './climate';
 import { LAVA_GRAVITY, MIN_ARC_GRAVITY, randomDirection, tangent } from './lavaActivity';
 import { detailedTerrain } from './noise';
 import { surfaceNoise } from './craters';
-import { GLOBE_SIZE_FACTOR, type MoonType, type PlanetStyle, type PlanetType } from './planets';
+import { GLOBE_SIZE_FACTOR, landElevation, type MoonType, type PlanetStyle, type PlanetType } from './planets';
 import { Rng, hashSeed } from './rng';
 import type { Vec3Tuple } from './starActivity';
 
@@ -272,7 +272,7 @@ export function groundRadius(
   const n = noise(dir[0], dir[1], dir[2], seed);
   const base = style.sea === null ? -1 : style.seaLevel;
   if (style.sea !== null && n < base) return radius;
-  return radius * (1 + style.relief * reliefScale * ((n - base) / (1 - base)));
+  return radius * (1 + style.relief * reliefScale * landElevation(style, (n - base) / (1 - base)));
 }
 
 /** True if `dir` is dry land (a little clear of the shore) on a body with a sea. */
