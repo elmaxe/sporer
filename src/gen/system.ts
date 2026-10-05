@@ -1,3 +1,4 @@
+import { starReach } from './blackHoles';
 import { flatTilt, type Quat } from './galactic';
 import { BELT_MARGIN, generateBelts, reserveMainBelt, wantsMainBelt, type BeltData } from './belts';
 import { generateComets, type CometData } from './comets';
@@ -173,7 +174,8 @@ export function tuneSystem(ref: StarRef, tuning: SystemTuning): SystemData {
   const stars = placeStars(rng.fork('stars'), ref.stars);
   const totalMass = ref.stars.reduce((m, s) => m + s.mass, 0);
   const totalLuminosity = ref.stars.reduce((l, s) => l + s.luminosity, 0);
-  const starZone = Math.max(...stars.map((s) => s.orbit.radius + s.radius));
+  // A black hole's zone is as far as it bends light (its disc and lensing), so planets orbit clear of it.
+  const starZone = Math.max(...stars.map((s) => s.orbit.radius + starReach(s)));
   const habitableRadius = clamp(140 * Math.sqrt(totalLuminosity), 60, 600);
 
   const drawnPlanets = rng.weighted<number>([
@@ -342,7 +344,8 @@ export function generateYoungSystem(ref: StarRef): SystemData {
   const stars = placeStars(rng.fork('stars'), ref.stars);
   const totalMass = ref.stars.reduce((m, s) => m + s.mass, 0);
   const totalLuminosity = ref.stars.reduce((l, s) => l + s.luminosity, 0);
-  const starZone = Math.max(...stars.map((s) => s.orbit.radius + s.radius));
+  // A black hole's zone is as far as it bends light (its disc and lensing), so planets orbit clear of it.
+  const starZone = Math.max(...stars.map((s) => s.orbit.radius + starReach(s)));
   const habitableRadius = clamp(140 * Math.sqrt(totalLuminosity), 60, 600);
   const { disc, planets: forming } = generateProtoplanetaryDisc(rng.fork('disc'), discContext(stars, starZone, habitableRadius));
   const planets: PlanetData[] = [];
@@ -542,7 +545,8 @@ function placeStars(rng: Rng, stars: StarData[]): SystemStar[] {
 
   // Binary: both orbit the barycentre, the lighter star further out.
   const [a, b] = stars as [StarData, StarData];
-  const separation = (a.radius + b.radius) * rng.range(1.6, 2.4);
+  // Reach, not radius: a black hole's disc and lensing keep its companion further out (stars: their radius).
+  const separation = (starReach(a) + starReach(b)) * rng.range(1.6, 2.4);
   const total = a.mass + b.mass;
   const period = rng.range(40, 80);
   const phase = rng.range(0, Math.PI * 2);

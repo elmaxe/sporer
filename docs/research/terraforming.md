@@ -2,7 +2,7 @@
 
 ## Question
 
-Phase 1 of `docs/design/terraforming.md` (roadmap step 38) makes the climate model of step 12 (`gen/climate.ts`, see `climate.md`) ready to be changed by the player, and adds how it changes over time (`gen/terraform.ts`). It needs, each from a source:
+Phase 1 of `docs/design/terraforming.md` (roadmap step 40) makes the climate model of step 12 (`gen/climate.ts`, see `climate.md`) ready to be changed by the player, and adds how it changes over time (`gen/terraform.ts`). It needs, each from a source:
 
 1. **CO₂ at a few bar.** The Venus-only fit τ = 0.0175 P² gave Mars with 1 bar of CO₂ no warming (+0.6 K) and with 3 bar +6 K. What do published Mars models get?
 2. **The Venus cloud deck.** The albedo jumped from the surface's to 0.77 at exactly 10 bar (10 bar was 6 °C, 9 bar 109 °C). Over what pressure should the deck come and go?
@@ -96,13 +96,13 @@ No 5% step in pressure moves the temperature by more than 3% anywhere from 1 to 
 `generateSystem` for the first 1500 stars, the 8 rogues and Sol (seed 1337), before and after, every field compared (scratch `snapshot.ts` and `compare.mjs`):
 
 - **Every body that isn't CO₂ is unchanged**: the only differences are float rounding (≤ 6×10⁻¹⁴ K, from N₂–O₂ air now being the sum of two gases). Pinned by a fingerprint of 5809 bodies in the first 800 systems (`tests/climate.test.ts`).
-- **317 CO₂ bodies change temperature** (nothing else generated changes: no type, weather or look):
+- **316 CO₂ bodies change temperature** (nothing else generated changes: no type, weather or look):
 
 | CO₂ pressure | Bodies | ΔT median (range) |
 |---|---|---|
 | < 10 mbar (Mars-like remnants) | 121 | +0.3 K (0 to +2.7) |
 | 10–100 mbar | 95 | +3.2 K (+0.8 to +13.5) |
-| 0.1–1 bar (CO₂ deserts) | 50 | +27 K (+10 to +58) |
+| 0.1–1 bar (CO₂ deserts) | 49 | +27 K (+10 to +58) |
 | 10–14 bar (thin Venuses, no longer fully clouded) | 7 | +243 K (+63 to +285) |
 | over 14 bar | 40 | +73 K (−10 to +232) |
 

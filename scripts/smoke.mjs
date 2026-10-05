@@ -2,10 +2,11 @@
 // Usage: npm run smoke [-- [options] [http://localhost:5173/]]   (dev server must be running)
 //   --only <sections>  run just these, comma-separated, in the usual order: core (flying, picking, system map,
 //                      living stars, comets, sky), galaxy (the galaxy loop), nebulas (every kind on the map
-//                      and from inside), rogues (fly to a rogue planet and down to it), dust (a young star's disc,
+//                      and from inside), rogues (fly to a rogue planet and down to it), blackholes (find a black
+//                      hole on the map, fly into its system: its shadow, bent sky and disc, and down to a planet there), dust (a young star's disc,
 //                      a debris disc, comet dust trails, meteor showers and impact flashes in low orbit), audio, planet (the home planet
 //                      loop, held zoom, seamless zooms), types (every planet type and geyser kind), lab, plants
-//                      (the plant lab), animals (the animal lab), stars (the star lab), touch, cargo (the abduction beam and the hold), volcano (the volcano bomb), buster
+//                      (the plant lab), animals (the animal lab), stars (the star lab, a black hole too), touch, cargo (the abduction beam and the hold), volcano (the volcano bomb), buster
 //                      (the planet buster, last: it blows up a moon of the home system)
 //   --quick            everything but types
 //   --timeout <s>      give up after this long (default 900), reporting the section it was in
@@ -104,7 +105,7 @@ import { launch, sleep, StallError } from './lib/browser.mjs';
 
 const args = process.argv.slice(2);
 const option = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
-const SECTIONS = ['core', 'galaxy', 'nebulas', 'rogues', 'dust', 'audio', 'planet', 'types', 'lab', 'plants', 'animals', 'stars', 'touch', 'cargo', 'volcano', 'buster'];
+const SECTIONS = ['core', 'galaxy', 'nebulas', 'rogues', 'blackholes', 'dust', 'audio', 'planet', 'types', 'lab', 'plants', 'animals', 'stars', 'touch', 'cargo', 'volcano', 'buster'];
 const only = option('--only')?.split(',');
 if (only?.some((name) => !SECTIONS.includes(name))) {
   console.error(`--only takes some of: ${SECTIONS.join(', ')}`);
@@ -157,7 +158,7 @@ if (started) await drawFrames(20);
 const startId = started ? await evaluate(`system.id`) : null;
 
 const state = `({ speed: +ship.speed.toFixed(1), pos: ship.object.position.toArray().map((n) => +n.toFixed(1)) })`;
-let before, after, autopilot, pick, systemMap, sky, living, comet, belt, galaxyLoop, fps, audio, planetLoop, heldZoom, cometLoop, asteroidLoops, seamless, nebulas, rogues, dust;
+let before, after, autopilot, pick, systemMap, sky, living, comet, belt, galaxyLoop, fps, audio, planetLoop, heldZoom, cometLoop, asteroidLoops, seamless, nebulas, rogues, blackHoles, dust;
 const planetTypes = [];
 let lab = null;
 let buster = null;
@@ -286,6 +287,11 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null, during = n
   r.altitude = { low: await evaluate(altitude) };
   // Zoomed in, the UFO keeps its clearance over the ground beneath it (about 3 units, a bit more when it climbs ahead of a slope).
   r.clearance = await evaluate(`planet.ship.clearance`);
+  // Over plants it flies higher (the trees and bushes on the stretch ahead, as the ship clears them): their reach over the ground.
+  r.standing = await evaluate(`(() => {
+    const s = planet.ship, t = s.terrain;
+    return t?.obstacles ? +Math.max(0, t.obstacles.clearAlong(s.u, s.ahead, 0) - t.height(s.u)).toFixed(2) : 0;
+  })()`);
   r.lava = await evaluate(
     `planet.eruptions && { vents: planet.eruptions.activity.vents.length, events: planet.eruptions.events.length, blobs: planet.eruptions.liveBlobs }`,
   );
@@ -456,7 +462,7 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null, during = n
     Math.abs(r.skyStarTime - r.skyClock) < 0.25 &&
     r.altitudeOk &&
     r.clearance >= 1 &&
-    r.clearance < 15 &&
+    (r.clearance < 15 || r.clearance < r.standing + 5) &&
     r.altitude.high > r.altitude.low + 20 &&
     r.map.visible &&
     r.map.baked &&
@@ -744,7 +750,7 @@ await section('core', async () => {
   return hovered && noManual && picked && skyOk && alive;
 });
 
-if (started && (runs('galaxy') || runs('nebulas') || runs('rogues') || runs('dust') || runs('audio') || runs('planet'))) {
+if (started && (runs('galaxy') || runs('nebulas') || runs('rogues') || runs('blackholes') || runs('dust') || runs('audio') || runs('planet'))) {
   // Seamless zooms: while a level transition runs, sample every drawn frame (after drawing, before it's shown):
   // the crossfade weight and the canvas brightness (mean over a sparse grid). Each transition is one segment,
   // from the level it left to the one it reached. Setting __seamless.freezeWhen to a mode stops the game once
@@ -1153,6 +1159,155 @@ await section('rogues', async () => {
     r.loop.sky.stars === 0 &&
     r.loop.during.brightness > 3 &&
     r.loop.during.sunLight > 0 &&
+    (r.segments === null || (r.segments.length >= 3 && r.segments.every((x) => x.crossfadeFrames > 0 && x.minBrightness > 0.5))) &&
+    r.back;
+  return r.ok;
+});
+
+/**
+ * A black hole on screen: the mean brightness (0–255) of its shadow's middle and of the ring round it out to
+ * its disc, read from the canvas just drawn.
+ */
+const holeBrightness = `(() => {
+  game.redraw();
+  const hole = world.stars[0];
+  const cam = game.camera;
+  const c = hole.renderPosition.clone().project(cam);
+  const up = cam.up.clone().applyQuaternion(cam.quaternion);
+  const px = (radius) => {
+    const e = hole.renderPosition.clone().add(up.clone().multiplyScalar(radius)).project(cam);
+    return 0.5 * Math.hypot((e.x - c.x) * gl.drawingBufferWidth, (e.y - c.y) * gl.drawingBufferHeight);
+  };
+  const gl = game.renderer.getContext();
+  const cx = (c.x + 1) / 2 * gl.drawingBufferWidth, cy = (c.y + 1) / 2 * gl.drawingBufferHeight;
+  const shadow = px(hole.radius), disc = px(hole.pickRadius);
+  const p = new Uint8Array(4);
+  const mean = (from, to, dy = 0) => {
+    let sum = 0, n = 0;
+    for (let k = 0; k < 160; k++) {
+      const a = k * 2.39996, r = from + (to - from) * ((k + 0.5) / 160);
+      const x = Math.round(cx + Math.cos(a) * r), y = Math.round(cy + dy + Math.sin(a) * r);
+      if (x < 0 || y < 0 || x >= gl.drawingBufferWidth || y >= gl.drawingBufferHeight) continue;
+      gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, p);
+      sum += p[0] + p[1] + p[2]; n++;
+    }
+    return n ? +(sum / (3 * n)).toFixed(2) : null;
+  };
+  // Edge on, the disc's near side crosses the shadow's middle: its upper half is still black.
+  return { centre: mean(0, shadow * 0.3), upper: mean(0, shadow * 0.15, shadow * 0.55), disc: mean(shadow * 1.6, disc), shadowPx: +shadow.toFixed(1) };
+})()`;
+
+await section('blackholes', async () => {
+  const r = (blackHoles = {});
+  const home = await evaluate(`system.id`);
+  const segmentsBefore = await evaluate(`window.__seamless ? __seamless.segments.length : 0`);
+  await until(`!levels.transitioning`, 20000);
+  await evaluate(`levels.toGalaxy()`);
+  await until(`levels.mode === 'galaxy' && !levels.transitioning`, 40000);
+  r.map = await evaluate(`(() => {
+    const holes = galaxy.stars.filter((s) => s.stars[0].kind === 'blackHole');
+    const rings = levels.galaxyLevel.map.holeCount;
+    return { holes: holes.length, rings, expected: Math.round(galaxy.stars.length / 1000), inRemnant: holes.some((s) => s.nebula?.kind === 'remnant'), home: holes.some((s) => s.id === ${home}) };
+  })()`);
+  // Hover and click one, from its nearest star, as for a rogue planet.
+  r.pick = await evaluate(`new Promise((resolve) => {
+    const level = levels.galaxyLevel;
+    const holes = galaxy.stars.filter((s) => s.stars[0].kind === 'blackHole');
+    const target = holes.find((x) => !x.nebula) ?? holes[0];
+    const d = (s) => Math.hypot(s.position.x - target.position.x, s.position.y - target.position.y, s.position.z - target.position.z);
+    const from = galaxy.stars.filter((s) => s !== target).sort((a, b) => d(a) - d(b))[0];
+    level.ship.jumpTo(from);
+    const V = game.camera.position.constructor;
+    const at = (s) => new V(s.position.x, s.position.y, s.position.z).applyMatrix4(level.root.matrixWorld);
+    level.orbit.setDistance(d(from) * 1.2);
+    level.orbit.lookFrom(at(from).sub(at(target)).normalize().applyAxisAngle(new V(0, 1, 0), 0.4));
+    const canvas = game.renderer.domElement;
+    const rect = canvas.getBoundingClientRect();
+    const frames = (k) => new Promise((r) => { let i = 0; (function f() { if (++i > k) r(); else requestAnimationFrame(f); })(); });
+    setTimeout(async () => {
+      const p = at(target).project(game.camera);
+      const here = { clientX: rect.left + ((p.x + 1) / 2) * rect.width, clientY: rect.top + ((1 - p.y) / 2) * rect.height, bubbles: true };
+      canvas.dispatchEvent(new PointerEvent('pointermove', here));
+      await frames(3);
+      const tip = document.getElementById('tooltip');
+      const tooltip = tip.hidden ? null : { name: document.getElementById('tooltip-name').textContent, text: tip.textContent };
+      canvas.dispatchEvent(new PointerEvent('pointerdown', { ...here, button: 0 }));
+      canvas.dispatchEvent(new PointerEvent('pointerup', { ...here, button: 0 }));
+      await frames(2);
+      resolve({ hole: target.id, name: target.name, onScreen: Math.abs(p.x) < 1 && Math.abs(p.y) < 1, tooltip, destination: level.ship.destination?.id ?? null });
+    }, 1500);
+  })`);
+  r.arrived = (await until(`!levels.galaxyLevel.ship.travelling`, 40000)) && (await evaluate(`levels.galaxyLevel.ship.current.id`)) === r.pick.hole;
+  if (await evaluate(`!!window.__seamless`)) await evaluate(`__seamless.freezeWhen = 'system'`);
+  await evaluate(`levels.toSystem()`);
+  r.handoverShot = await freezeShot('blackhole-handover');
+  r.entered = await until(`levels.mode === 'system' && !levels.transitioning && system.id === ${r.pick.hole}`, 40000);
+  r.flewIn = await until(`!ship.enRoute`, 40000);
+  r.system = await evaluate(`({
+    kind: world.stars[0].data.kind,
+    hud: document.getElementById('hud-location').textContent,
+    url: location.search,
+    hovering: ship.targetBody === world.stars[0],
+    skyBaked: !!world.sky?.ready,
+    planets: world.planets.length,
+    innermost: world.planets[0]?.config.orbit.radius ?? null,
+    reach: system.starZone,
+  })`);
+  // Seen from where the camera arrives, then from the disc's plane (the far side bent over the top).
+  r.arrival = await evaluate(holeBrightness);
+  const shot = await send('Page.captureScreenshot', { format: 'png' });
+  r.screenshot = join(outDir, 'blackhole-system.png');
+  writeFileSync(r.screenshot, Buffer.from(shot.result.data, 'base64'));
+  await evaluate(`(() => {
+    const o = levels.systemLevel.orbit, hole = world.stars[0];
+    o.setFocus(hole.renderPosition);
+    o.setDistance(hole.pickRadius * 1.65);
+    o.lookFrom(hole.renderPosition.clone().set(1, 0.08, 0.25));
+  })()`);
+  await sleep(800);
+  r.edgeOn = await evaluate(holeBrightness);
+  const edge = await send('Page.captureScreenshot', { format: 'png' });
+  r.edgeScreenshot = join(outDir, 'blackhole-edge-on.png');
+  writeFileSync(r.edgeScreenshot, Buffer.from(edge.result.data, 'base64'));
+  await evaluate(`levels.systemLevel.orbit.setFocus(null)`);
+  r.fps = await evaluate(measureFps);
+  // Down to its first planet and back: the hole is in the sky there.
+  r.loop = r.system.planets > 0 ? await runPlanetLoop('world.planets[0]', 'blackhole-low-orbit') : { ok: true, none: true };
+  r.segments = await evaluate(`window.__seamless ? __seamless.segments.slice(${segmentsBefore}).map((seg) => ({
+    zoom: seg.from + ' → ' + seg.to,
+    crossfadeFrames: seg.frames.filter((x) => x.weight !== null && x.weight > 0 && x.weight < 1).length,
+    minBrightness: +Math.min(...seg.frames.map((x) => x.brightness)).toFixed(2),
+  })) : null`);
+  await evaluate(`levels.toGalaxy()`);
+  await until(`levels.mode === 'galaxy' && !levels.transitioning`, 40000);
+  await evaluate(`levels.galaxyLevel.ship.jumpTo(galaxy.stars[${home}]), levels.toSystem()`);
+  r.back = await until(`levels.mode === 'system' && !levels.transitioning && system.id === ${home}`, 40000);
+
+  r.ok =
+    r.map.holes === r.map.expected &&
+    r.map.holes > 0 &&
+    r.map.rings === r.map.holes &&
+    r.map.inRemnant &&
+    !r.map.home &&
+    r.pick.onScreen &&
+    r.pick.tooltip?.name === r.pick.name &&
+    r.pick.tooltip.text.includes('Black hole') &&
+    r.pick.destination === r.pick.hole &&
+    r.arrived &&
+    r.entered &&
+    r.flewIn &&
+    r.system.kind === 'blackHole' &&
+    r.system.hud.includes('Black hole') &&
+    r.system.url.includes(`star=${r.pick.hole}`) &&
+    r.system.hovering &&
+    r.system.skyBaked &&
+    (r.system.innermost === null || r.system.innermost > r.system.reach) &&
+    // The shadow is black, the disc round it lit (from where the camera arrives and edge on).
+    r.arrival.centre < 12 &&
+    r.arrival.disc > 25 &&
+    r.edgeOn.upper < 12 &&
+    r.edgeOn.disc > 12 &&
+    r.loop.ok &&
     (r.segments === null || (r.segments.length >= 3 && r.segments.every((x) => x.crossfadeFrames > 0 && x.minBrightness > 0.5))) &&
     r.back;
   return r.ok;
@@ -2214,6 +2369,28 @@ async function starLabChecks(page) {
       })()`),
     );
   }
+  // A black hole: its shadow black in the middle, its disc lit round it.
+  r.hole = await evaluate(`(async () => {
+    await starLab.generate(21, { kind: 'blackHole', binary: false });
+    await starLab.setView({ view: 'star' });
+    await starLab.look(0, 60);
+    await new Promise((ok) => setTimeout(ok, 600));
+    game.redraw();
+    const gl = game.renderer.getContext(), w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
+    const px = new Uint8Array(w * h * 4);
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    // The shadow's middle: a few pixels round the centre (the hole is small in this view).
+    let dark = 0, m = 0;
+    for (let y = Math.floor(h / 2) - 4; y <= h / 2 + 4; y++) for (let x = Math.floor(w / 2) - 4; x <= w / 2 + 4; x++) {
+      const i = 4 * (y * w + x); dark += px[i] + px[i + 1] + px[i + 2]; m++;
+    }
+    const middle = +(dark / (3 * m)).toFixed(1);
+    let lit = 0, n = 0;
+    for (let i = 0; i < px.length; i += 4 * 97) { lit += px[i] + px[i + 1] + px[i + 2] > 300 ? 1 : 0; n++; }
+    return { kind: starLab.level.world.stars[0].data.kind, middle, lit: +(lit / n).toFixed(3), info: document.getElementById('lab-info').textContent.includes('Black hole') };
+  })()`);
+  r.holeScreenshot = join(outDir, 'star-lab-black-hole.png');
+  writeFileSync(r.holeScreenshot, await page.screenshot());
   r.screenshot = join(outDir, 'star-lab.png');
   writeFileSync(r.screenshot, await page.screenshot());
   r.system = await evaluate(`(async () => {
@@ -2271,6 +2448,10 @@ async function starLabChecks(page) {
     r.kinds.length === 5 &&
     r.kinds.every((k, i) => k.kind === ['mainSequence', 'redDwarf', 'whiteDwarf', 'redGiant', 'blueGiant'][i] && k.brightness > 60) &&
     r.kinds.some((k) => k.particles > 0) &&
+    r.hole.kind === 'blackHole' &&
+    r.hole.middle < 15 &&
+    r.hole.lit > 0.005 &&
+    r.hole.info &&
     r.system.planets > 0 &&
     r.system.planets === r.system.expected &&
     r.system.links === r.system.expected &&
@@ -3212,7 +3393,7 @@ const ok = started && !stalled && Object.keys(sections).length > 0 && Object.val
 console.error(`[smoke] ${ok ? 'ok' : 'FAILED'} in ${Math.round((Date.now() - T0) / 1000)} s${errors.length ? `, ${errors.length} console errors` : ''}`);
 console.log(
   JSON.stringify(
-    { ok, started, stalled, sections, before, after, autopilot, pick, systemMap, sky, living, comet, belt, galaxyLoop, nebulas, rogues, dust, seamless, audio, planetLoop, heldZoom, cometLoop, asteroidLoops, planetTypes, touch, touchLab, cargo, volcano, buster, lab, plantLab, animalLab, gameAnimals, starLab, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
+    { ok, started, stalled, sections, before, after, autopilot, pick, systemMap, sky, living, comet, belt, galaxyLoop, nebulas, rogues, blackHoles, dust, seamless, audio, planetLoop, heldZoom, cometLoop, asteroidLoops, planetTypes, touch, touchLab, cargo, volcano, buster, lab, plantLab, animalLab, gameAnimals, starLab, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
     null,
     2,
   ),

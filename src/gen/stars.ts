@@ -1,9 +1,11 @@
-import { hslToHex, jitterHsl, type Hsl } from './color';
+import { generateBlackHole, nominalBlackHole, type AccretionDisc } from './blackHoles';
+import { hexToRgb, hslToHex, jitterHsl, rgbToHsl, type Hsl } from './color';
 import type { Rng } from './rng';
 import type { StarActivity } from './starActivity';
 
 export type SpectralClass = 'O' | 'B' | 'A' | 'F' | 'G' | 'K' | 'M';
-export type StarKind = 'mainSequence' | 'redDwarf' | 'whiteDwarf' | 'redGiant' | 'blueGiant';
+/** `blackHole`: a stellar black hole with its accretion disc (gen/blackHoles.ts), chosen apart from the rest. */
+export type StarKind = 'mainSequence' | 'redDwarf' | 'whiteDwarf' | 'redGiant' | 'blueGiant' | 'blackHole';
 
 export interface StarData {
   kind: StarKind;
@@ -11,7 +13,11 @@ export interface StarData {
   color: string;
   /** In system-scene units (a G-class star is ~30). */
   radius: number;
-  /** Relative to a G-class star = 1. Drives light intensity and the habitable zone. */
+  /**
+   * Relative to a G-class star = 1. Drives light intensity and the habitable zone.
+   * A black hole's is its disc's; its `radius` is its shadow's, `color` and
+   * `spectralClass` its disc's (gen/blackHoles.ts blackHoleStar).
+   */
   luminosity: number;
   /** Relative to a G-class star = 1. Drives orbital periods. */
   mass: number;
@@ -21,6 +27,8 @@ export interface StarData {
    * generated star.
    */
   activity?: StarActivity;
+  /** A black hole's accretion disc (gen/blackHoles.ts). Absent for every other kind. */
+  disc?: AccretionDisc;
 }
 
 interface StarSpec {
@@ -42,7 +50,7 @@ const MAIN_SEQUENCE: readonly (readonly [StarSpec, number])[] = [
   [{ spectralClass: 'K', radius: [22, 27], luminosity: 0.5, mass: 0.75, color: [30, 1, 0.64] }, 35],
 ];
 
-const OTHER_KINDS: Record<Exclude<StarKind, 'mainSequence'>, StarSpec> = {
+const OTHER_KINDS: Record<Exclude<StarKind, 'mainSequence' | 'blackHole'>, StarSpec> = {
   redDwarf: { spectralClass: 'M', radius: [13, 19], luminosity: 0.12, mass: 0.35, color: [14, 1, 0.6] },
   whiteDwarf: { spectralClass: 'A', radius: [6, 9], luminosity: 0.05, mass: 0.7, color: [210, 0.7, 0.95] },
   redGiant: { spectralClass: 'M', radius: [75, 110], luminosity: 8, mass: 1.5, color: [8, 1, 0.58] },
@@ -50,15 +58,17 @@ const OTHER_KINDS: Record<Exclude<StarKind, 'mainSequence'>, StarSpec> = {
 };
 
 /** Every kind, and every main-sequence class, in the order tools list them. */
-export const STAR_KINDS: readonly StarKind[] = ['mainSequence', 'redDwarf', 'whiteDwarf', 'redGiant', 'blueGiant'];
+export const STAR_KINDS: readonly StarKind[] = ['mainSequence', 'redDwarf', 'whiteDwarf', 'redGiant', 'blueGiant', 'blackHole'];
 export const MAIN_SEQUENCE_CLASSES: readonly SpectralClass[] = MAIN_SEQUENCE.map(([s]) => s.spectralClass);
 
 /** The base colour (no jitter) of a kind or, on the main sequence, a class, as [hue°, saturation, lightness]. */
 export function starBaseColor(kind: StarKind, spectralClass: SpectralClass): Hsl {
+  if (kind === 'blackHole') return rgbToHsl(...hexToRgb(nominalBlackHole().color));
   if (kind !== 'mainSequence') return OTHER_KINDS[kind].color;
   return (MAIN_SEQUENCE.find(([s]) => s.spectralClass === spectralClass) ?? MAIN_SEQUENCE[4]!)[0].color;
 }
 
+/** Black holes are left out: a few systems become one afterwards (gen/blackHoles.ts chooseBlackHoles). */
 const KIND_WEIGHTS: readonly (readonly [StarKind, number])[] = [
   ['mainSequence', 60],
   ['redDwarf', 22],
@@ -72,6 +82,7 @@ const KIND_WEIGHTS: readonly (readonly [StarKind, number])[] = [
  * star's class instead of drawing it (tools: the star lab; it skips that draw).
  */
 export function generateStar(rng: Rng, kind: StarKind = rng.weighted(KIND_WEIGHTS), spectralClass?: SpectralClass): StarData {
+  if (kind === 'blackHole') return generateBlackHole(rng);
   const chosen = kind === 'mainSequence' && spectralClass ? MAIN_SEQUENCE.find(([s]) => s.spectralClass === spectralClass)?.[0] : undefined;
   const spec = chosen ?? (kind === 'mainSequence' ? rng.weighted(MAIN_SEQUENCE) : OTHER_KINDS[kind]);
   const size = rng.next();
@@ -92,6 +103,7 @@ export function generateStar(rng: Rng, kind: StarKind = rng.weighted(KIND_WEIGHT
  * lab that want "a G star" rather than a generated one.
  */
 export function nominalStar(kind: StarKind, spectralClass: SpectralClass = 'G'): StarData {
+  if (kind === 'blackHole') return nominalBlackHole();
   const spec =
     kind === 'mainSequence'
       ? (MAIN_SEQUENCE.find(([s]) => s.spectralClass === spectralClass)?.[0] ?? MAIN_SEQUENCE[4]![0])
@@ -153,6 +165,8 @@ export function describeStar(star: StarData): string {
       return 'Red giant';
     case 'blueGiant':
       return 'Blue giant';
+    case 'blackHole':
+      return 'Black hole';
   }
 }
 

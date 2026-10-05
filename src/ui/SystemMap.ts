@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Entity } from '../core/Entity';
 import type { Input } from '../core/Input';
+import { isBlackHole } from '../gen/blackHoles';
 import { DEBRIS_REACH, debrisPalette, debrisPosition, generateDebris } from '../gen/debris';
 import { surfaceNoise } from '../gen/craters';
 import type { SystemData } from '../gen/system';
@@ -72,6 +73,8 @@ interface StarColors {
   glow: readonly [string, string];
   rim: string;
   inner: string;
+  /** A black hole: a black shadow with its disc's glow round it and across it. */
+  hole: boolean;
 }
 
 /**
@@ -164,6 +167,7 @@ export class SystemMap implements Entity {
       glow: [withAlpha(s.color, 0.55), withAlpha(s.color, 0)],
       rim: s.color,
       inner: mixWhite(s.color, 0.55),
+      hole: isBlackHole(s),
     }));
     this.folded = loadFolded();
     const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -508,6 +512,10 @@ export class SystemMap implements Entity {
   }
 
   private drawStar(ctx: CanvasRenderingContext2D, s: MapDisc, colors: StarColors): void {
+    if (colors.hole) {
+      this.drawBlackHole(ctx, s, colors);
+      return;
+    }
     // A glow round the rim, then the disc, white-hot inside.
     const glow = ctx.createRadialGradient(s.x, s.y, s.r * 0.95, s.x, s.y, s.r + 22);
     glow.addColorStop(0, colors.glow[0]);
@@ -523,6 +531,30 @@ export class SystemMap implements Entity {
     ctx.fillStyle = disc;
     ctx.beginPath();
     ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  /** A black hole: its disc's glow, the shadow with a thin bright photon ring, the disc's near side across it. */
+  private drawBlackHole(ctx: CanvasRenderingContext2D, s: MapDisc, colors: StarColors): void {
+    const glow = ctx.createRadialGradient(s.x, s.y, s.r * 0.5, s.x, s.y, s.r + 22);
+    glow.addColorStop(0, colors.glow[0]);
+    glow.addColorStop(1, colors.glow[1]);
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.r + 22, 0, Math.PI * 2);
+    ctx.fill();
+    const shadow = s.r * 0.55;
+    ctx.fillStyle = '#000000';
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, shadow, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = colors.inner;
+    ctx.lineWidth = Math.max(1.5, s.r * 0.06);
+    ctx.stroke();
+    // The disc seen almost edge on, in front of the shadow.
+    ctx.fillStyle = colors.inner;
+    ctx.beginPath();
+    ctx.ellipse(s.x, s.y, s.r * 1.05, Math.max(1.5, s.r * 0.09), 0, 0, Math.PI * 2);
     ctx.fill();
   }
 

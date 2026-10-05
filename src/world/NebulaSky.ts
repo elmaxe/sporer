@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { markSky } from './skyCapture';
 import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
 import type { StarRef } from '../gen/galaxy';
@@ -124,6 +125,7 @@ export class NebulaSky implements Entity {
     this.sphere.frustumCulled = false;
     // After the galaxy band (-3), before the sky stars (-2) and everything in the system (all opaque-queue sky).
     this.sphere.renderOrder = -2.5;
+    markSky(this.sphere);
     scene.add(this.sphere);
     addNebulaDebug(debug, 'System nebulas', () => (this.baked = false));
   }
