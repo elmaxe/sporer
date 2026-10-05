@@ -408,10 +408,13 @@ const SEA_FRAGMENT = /* glsl */ `
     if (drawn > 0.0 && all > 0.0) {
       // The crest term's spread is about Q² × the slope's (gen/waves.ts: 1 − J ≈ Q Σ s sin θ).
       float c = seaPhi(crest * inversesqrt(drawn * max(uSeaCrests * uSeaCrests, 1e-4)));
-      // Torn into streaks and bubbles by a finer noise, each octave evening out as it gets too fine for the pixels.
-      float torn = mix(0.5, valueNoise(vSeaPos * 5.0), 1.0 - smoothstep(0.08, 0.2, fp)) * 0.6
-        + mix(0.5, valueNoise(vSeaPos * 13.0), 1.0 - smoothstep(0.03, 0.08, fp)) * 0.4;
-      float crestFoam = smoothstep(1.0 - 1.6 * cover, 1.0 - 0.4 * cover, c) * smoothstep(0.25, 0.6, torn + 0.3 * (c - 0.5));
+      float crestFoam = smoothstep(1.0 - 1.6 * cover, 1.0 - 0.4 * cover, c);
+      if (crestFoam > 0.0) {
+        // Torn into streaks and bubbles by a finer noise, each octave evening out as it gets too fine for the pixels.
+        float torn = mix(0.5, valueNoise(vSeaPos * 5.0), 1.0 - smoothstep(0.08, 0.2, fp)) * 0.6
+          + mix(0.5, valueNoise(vSeaPos * 13.0), 1.0 - smoothstep(0.03, 0.08, fp)) * 0.4;
+        crestFoam *= smoothstep(0.25, 0.6, torn + 0.3 * (c - 0.5));
+      }
       caps = mix(cover, crestFoam, clamp(drawn / all, 0.0, 1.0));
     }
     // Surf: foam on the breaking swells' crests and the wash at the waterline (or, without them, bands running in at

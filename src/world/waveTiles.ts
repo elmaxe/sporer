@@ -160,9 +160,10 @@ export class WaveTiles {
     const waves = this.waves;
     if (!waves || waves.cascades.length === 0) return;
     if (!this.ready) {
-      // Sharper at a low angle, where the sea is mostly seen.
-      const anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
-      const texels = renderer.getPixelRatio() < 1 ? LOW_TILE_TEXELS : TILE_TEXELS;
+      // Sharper at a low angle, where the sea is mostly seen (not at reduced resolution, where it would cost the most).
+      const low = renderer.getPixelRatio() < 1;
+      const anisotropy = low ? 1 : Math.min(8, renderer.capabilities.getMaxAnisotropy());
+      const texels = low ? LOW_TILE_TEXELS : TILE_TEXELS;
       for (const t of this.targets) {
         for (const x of t.textures) x.anisotropy = anisotropy;
         t.setSize(texels, texels);
