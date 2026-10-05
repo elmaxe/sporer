@@ -230,9 +230,11 @@ export class PlanetGlobe implements Entity {
     for (const child of this.object.children) child.visible = false;
   }
 
-  /** Draws the ground's depth for the atmosphere: call before drawing the scene with `camera`. */
+  /** Draws what the scene reads from textures, the ground's depth for the atmosphere and the sea's wave tiles: call before drawing the scene with `camera`. */
   renderDepth(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera): void {
-    if (!this.busted) this.ground?.render(renderer, this.scene, camera);
+    if (this.busted) return;
+    this.ground?.render(renderer, this.scene, camera);
+    this.waves?.render(renderer);
   }
 
   update(frameDt: number): void {
@@ -251,6 +253,7 @@ export class PlanetGlobe implements Entity {
     this.gas?.dispose();
     this.surface.dispose();
     this.water?.dispose();
+    this.waves?.dispose();
     this.ground?.dispose();
     this.rings?.dispose();
     this.scene.remove(this.object);
