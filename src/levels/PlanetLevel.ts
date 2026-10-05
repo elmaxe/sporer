@@ -131,7 +131,7 @@ export class PlanetLevel extends Level implements ItemUser {
   weather: Weather | null = null;
   /** Bodies whose orbit crosses a comet's dust stream: meteors (or impact flashes) while it does (not once busted). */
   meteors: Meteors | null = null;
-  /** Water seas only (not once busted): the ship's downwash on the water below it. */
+  /** Water and lava seas (not once busted): the ship's downwash on the sea below it. */
   wake: ShipWake | null = null;
   /** Comets only: their jets, coma and tails, as active as the comet is close to the star. */
   comet: CometActivity | null = null;
@@ -305,8 +305,8 @@ export class PlanetLevel extends Level implements ItemUser {
     );
     // After the camera: heard from where it is this frame.
     this.ventSounds = this.geysers ? this.add(new VentSounds(this.geysers, camera, this.frame, sfx, debug)) : null;
-    // After the ship: the downwash under it on the water, where it's drawn this frame.
-    this.wake = globe.waves && !busted ? this.add(new ShipWake(this.scene, globe, this.ship.object, camera, globe.sun)) : null;
+    // After the ship: the downwash under it on the water or lava, where it's drawn this frame.
+    this.wake = ShipWake.wanted(globe) && !busted ? this.add(new ShipWake(this.scene, globe, this.ship.object, camera, globe.sun)) : null;
     // After the camera: the bolts face this frame's view.
     this.weather =
       globe.weather && !busted
