@@ -1,3 +1,4 @@
+import { chooseBlackHoles } from './blackHoles';
 import { hslToHex } from './color';
 import { chooseYoungStars } from './discs';
 import { generateName } from './names';
@@ -101,6 +102,8 @@ export function generateGalaxy(seed: number, count = DEFAULT_STAR_COUNT): Galaxy
   placeSol(stars, nebulas);
   // After Sol, so it's never young; its own stream, so nothing above changes.
   chooseYoungStars(seed, stars);
+  // Last, from its own stream: a few systems become black holes (never Sol, a young star or the home system).
+  chooseBlackHoles(seed, stars, nebulas);
   return { seed, radius: GALAXY_RADIUS, arms, twist, armOffset, stars, nebulas, rogues };
 }
 

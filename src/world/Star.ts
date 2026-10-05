@@ -1,12 +1,14 @@
 import * as THREE from 'three';
 import type { Entity } from '../core/Entity';
+import { discOf, isBlackHole, schwarzschildRadius } from '../gen/blackHoles';
 import { orbitPosition } from '../gen/orbit';
 import { starActivity, type StarActivity } from '../gen/starActivity';
 import { describeStar, starLightColor } from '../gen/stars';
 import type { SystemStar } from '../gen/system';
 import { RAPIER, type Physics } from '../physics/Physics';
 import type { CelestialBody } from './CelestialBody';
-import { StarLook } from './StarLook';
+import type { SkyCapture } from './skyCapture';
+import { StarLook, createStarView, type StarView } from './StarLook';
 import { StarStorms } from './StarStorms';
 
 /** Light intensity for a star's light, from its luminosity. */
@@ -30,11 +32,14 @@ export class Star implements Entity, CelestialBody {
   readonly velocity = new THREE.Vector3();
   readonly description: string;
   readonly radius: number;
+  /** A black hole: hovered and clicked anywhere on its disc, and marked round it. */
+  readonly pickRadius?: number;
+  readonly markRadius?: number;
   readonly standoff: number;
   readonly activity: StarActivity;
   readonly storms: StarStorms;
-  /** The surface and corona; the storms turn with its surface. */
-  private readonly look: StarLook;
+  /** The surface and corona, the storms turning with its surface; or a black hole and its disc (no storms). */
+  readonly look: StarView;
   private readonly light: THREE.PointLight;
   private readonly body: RAPIER.RigidBody;
   private readonly orbiting: boolean;
@@ -47,20 +52,29 @@ export class Star implements Entity, CelestialBody {
     readonly data: SystemStar,
     /** Seeds the surface pattern and storm events. */
     readonly seed: number,
+    /** The sky a black hole bends (see SkyCapture); unused by stars. */
+    sky: SkyCapture | null = null,
   ) {
     this.orbiting = data.orbit.radius > 0;
     this.description = describeStar(data);
     this.radius = data.radius;
+    if (isBlackHole(data)) {
+      const disc = discOf(data).outer * schwarzschildRadius(data);
+      this.pickRadius = disc;
+      // The target ring (at 1.45 times this) just round the disc's bright part.
+      this.markRadius = disc * 0.75;
+    }
     this.standoff = data.radius + STANDOFF_MARGIN;
     this.activity = starActivity(data);
-    this.look = new StarLook(data, this.activity, seed);
+    this.look = createStarView(data, this.activity, seed, sky);
     this.storms = new StarStorms(this.activity, seed, data.radius, data.color);
 
     // decay 0 keeps intensity constant with distance, so outer planets stay lit.
     this.light = new THREE.PointLight(starLightColor(data), starLightIntensity(data), 0, 0);
 
     this.object.name = `Star (${data.kind})`;
-    this.look.spin.add(this.storms.points);
+    // A black hole's activity has no storms; its (empty) pool sits at the centre.
+    (this.look instanceof StarLook ? this.look.spin : this.look.object).add(this.storms.points);
     this.object.add(this.look.object, this.light);
     orbitPosition(data.orbit, 0, this.position);
     this.prev.copy(this.position);

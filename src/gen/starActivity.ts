@@ -111,6 +111,19 @@ export function kindActivity(star: Pick<StarData, 'kind' | 'spectralClass'>): St
       };
     case 'mainSequence':
       return mainSequence(star.spectralClass);
+    case 'blackHole':
+      // No surface and no storms: its disc lives in world/BlackHoleLook.ts.
+      return {
+        pace: 1,
+        granulation: 0,
+        contrast: 0,
+        spots: 0,
+        rotationPeriod: 60,
+        pulse: 0,
+        pulsePeriod: 10,
+        prominence: { interval: 10, chance: 0, life: [1, 1], size: NONE, speed: NONE, particles: 0 },
+        flare: { interval: 10, chance: 0, life: [1, 1], size: NONE, speed: NONE, particles: 0 },
+      };
   }
 }
 

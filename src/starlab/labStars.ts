@@ -1,3 +1,4 @@
+import { BLACK_HOLE_MASS, DISC_OUTER, FEEDING, blackHoleStar, discOf, isBlackHole, type AccretionDisc } from '../gen/blackHoles';
 import { jitterHsl } from '../gen/color';
 import { BINARY_CHANCE, generateGalaxy, solRef, systemRef, type StarRef } from '../gen/galaxy';
 import { generateName } from '../gen/names';
@@ -84,6 +85,13 @@ export const STAR_RANGES = {
   mass: [0.08, 30],
 } as const satisfies Record<string, readonly [number, number]>;
 
+/** The lab's ranges for a black hole's numbers (wider than the galaxy draws). */
+export const HOLE_RANGES = {
+  mass: [3, 40],
+  outer: [4, 30],
+  feeding: [0.01, 1],
+} as const satisfies Record<string, readonly [number, number]>;
+
 /** The tuner's ranges. */
 export const TUNING_RANGES = {
   planets: [0, 12],
@@ -95,7 +103,20 @@ export const TUNING_RANGES = {
 /** A copy that can be edited in place (the panel binds to it). */
 export function cloneStar(star: StarData): StarData {
   const activity = star.activity ?? kindActivity(star);
-  return { ...star, activity: cloneActivity(activity) };
+  const copy: StarData = { ...star, activity: cloneActivity(activity) };
+  if (star.disc) copy.disc = { ...star.disc };
+  return copy;
+}
+
+/**
+ * A black hole's size, light, class and colour worked out again from its
+ * mass and disc (after an edit), its activity kept; other stars as they are.
+ */
+export function derived(star: StarData): StarData {
+  if (!isBlackHole(star)) return star;
+  const out = blackHoleStar(star.mass, discOf(star));
+  if (star.activity) out.activity = star.activity;
+  return out;
 }
 
 export function cloneActivity(a: StarActivity): StarActivity {
@@ -134,6 +155,15 @@ export function withKind(star: StarData, kind: StarKind, spectralClass: Spectral
  */
 export function rerollLook(star: StarData, roll: number): StarData {
   const rng = new Rng(hashSeed(roll, 'star look', star.kind, star.spectralClass));
+  if (isBlackHole(star)) {
+    // Another disc round the same hole, as the galaxy draws them.
+    const disc: AccretionDisc = {
+      outer: rng.range(DISC_OUTER[0], DISC_OUTER[1]),
+      feeding: FEEDING[0] * (FEEDING[1] / FEEDING[0]) ** rng.next(),
+      turn: rng.sign() as 1 | -1,
+    };
+    return cloneStar(blackHoleStar(star.mass, disc));
+  }
   const base = kindActivity(star);
   const scale = (v: number, lo: number, hi: number) => v * Math.exp(rng.range(Math.log(lo), Math.log(hi)));
   const storm = (s: StormSpec): StormSpec => ({
@@ -258,6 +288,16 @@ export function decodeStarLab(text: string): StarLabState | null {
 /** `raw`'s valid fields over its kind's typical star (numbers kept in the lab's ranges). */
 export function sanitizeStar(raw: Partial<StarData>): StarData {
   const kind = STAR_KINDS.includes(raw.kind as StarKind) ? (raw.kind as StarKind) : 'mainSequence';
+  if (kind === 'blackHole') {
+    const base = cloneStar(blackHoleStar(BLACK_HOLE_MASS[0] * 2, discOf({} as StarData)));
+    const d = (raw.disc ?? {}) as Partial<AccretionDisc>;
+    const disc: AccretionDisc = {
+      outer: num(d.outer, discOf(base).outer, ...HOLE_RANGES.outer),
+      feeding: num(d.feeding, discOf(base).feeding, ...HOLE_RANGES.feeding),
+      turn: d.turn === -1 ? -1 : 1,
+    };
+    return { ...cloneStar(blackHoleStar(num(raw.mass, base.mass, ...HOLE_RANGES.mass), disc)), activity: base.activity! };
+  }
   const cls = ['O', 'B', 'A', 'F', 'G', 'K', 'M'].includes(raw.spectralClass as string) ? (raw.spectralClass as SpectralClass) : 'G';
   const base = withKind(nominalStar(kind, cls), kind, cls);
   return {

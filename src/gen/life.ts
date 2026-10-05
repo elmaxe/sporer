@@ -147,6 +147,13 @@ export const EMERGENCE_TIME = 0.5;
  * dwarf's close-in zone, at least 3 Gyr (Agol 2011).
  */
 export const EVOLVED_HZ_TIME: Record<'redGiant' | 'whiteDwarf', number> = { redGiant: 1, whiteDwarf: 3 };
+/**
+ * A black hole's: stylised, as long as a white dwarf's. Its planets formed
+ * again after the supernova, like a pulsar's, and its disc is drawn as a
+ * steady thermal glow rather than the X-rays a real one gives off
+ * (docs/research/black-holes.md).
+ */
+export const BLACK_HOLE_HZ_TIME = EVOLVED_HZ_TIME.whiteDwarf;
 
 /** A star as far as life cares. */
 export type LifeStar = Pick<StarData, 'kind' | 'mass' | 'luminosity'>;
@@ -327,6 +334,7 @@ export function timeFactor(stars: readonly LifeStar[]): number {
 
 function availableTime(star: LifeStar): number {
   if (star.kind === 'redGiant' || star.kind === 'whiteDwarf') return EVOLVED_HZ_TIME[star.kind];
+  if (star.kind === 'blackHole') return BLACK_HOLE_HZ_TIME;
   return lifetime(star.mass);
 }
 
