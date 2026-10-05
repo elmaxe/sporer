@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { afterEach, describe, expect, it } from 'vitest';
-import { setThirdPerson, thirdPersonMarker } from '../src/world/thirdPerson';
+import { pointerCamera, setThirdPerson, thirdPersonMarker } from '../src/world/thirdPerson';
 import { beginFrozenCulling, endFrozenCulling, frozenOutline, frozenStats, resetFrozenStats, setViewFrozen } from '../src/world/viewFreeze';
 
 /** A camera at the origin looking down -Z, a box in front of it and one behind, the one behind holding a child in front. */
@@ -123,6 +123,19 @@ describe('third-person view', () => {
     const marker = thirdPersonMarker(view)!;
     marker.updateMatrixWorld();
     expect(new THREE.Vector3().setFromMatrixPosition(marker.matrixWorld).toArray()).toEqual([3, 4, 5]);
+  });
+
+  it('casts the pointer\'s rays from the overview while it draws the picture', () => {
+    const { camera } = setup();
+    const view = overview();
+    expect(pointerCamera(camera)).toBe(camera);
+    setThirdPerson(view, camera);
+    expect(pointerCamera(camera)).toBe(view);
+    // Another camera (the planet level's sky camera) is left alone.
+    const other = new THREE.PerspectiveCamera();
+    expect(pointerCamera(other)).toBe(other);
+    setThirdPerson(null);
+    expect(pointerCamera(camera)).toBe(camera);
   });
 
   it('culls by the frozen frustum when the view is frozen too', () => {

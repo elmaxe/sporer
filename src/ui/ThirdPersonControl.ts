@@ -20,8 +20,11 @@ const FAR_SHARE = 40;
  * camera goes on choosing and culling what's drawn and shows as a marker.
  * Dragging and the wheel (or a pinch) turn and zoom the overview; V, or the
  * note's button, hands them back to the game's camera and back again, so
- * both can be moved while watching. Each level keeps its own overview,
- * starting on the side the game's camera is. While on, a note at the top
+ * both can be moved while watching. Either way a click picks what's under
+ * the pointer in the overview (a planet to fly to, a spot on the globe), and
+ * with the game's camera steering, held tools (the laser, the beam) work
+ * too. Each level keeps its own overview, starting on the side the game's
+ * camera is. While on, a note at the top
  * (#third-person-note) says so and how many objects the game camera's
  * frustum left out. Not saved. A global entity, before the levels, so it
  * takes the drags before their cameras do.
@@ -88,8 +91,8 @@ export class ThirdPersonControl implements Entity {
     if (this.steerOverview && level) {
       const drag = input.consumeDrag();
       const wheel = input.consumeWheel();
-      // Clicks and presses would pick or fire along the game camera's rays, which don't match the picture.
-      input.consumeClick();
+      // Clicks go on to the game, picking along the overview's rays (world/thirdPerson.ts pointerCamera); held
+      // tools' presses don't, since a tool taking the press would stop the drag turning the overview.
       input.consumePress();
       const aim = this.aims.get(level);
       if (aim) steerAim(aim, drag.x, drag.y, wheel);

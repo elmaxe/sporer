@@ -18,6 +18,7 @@ import { createGlowTexture } from '../world/glowTexture';
 import { CLOUD_RENDER_ORDER } from '../world/weatherLook';
 import type { ItemStatus } from './items';
 import { burnAt, laserParams, laserWidth, type Burn } from './laserRules';
+import { pointerCamera } from '../world/thirdPerson';
 
 /** What the laser needs from the globe (see PlanetGlobe). */
 export interface LaserGround {
@@ -254,7 +255,7 @@ export class Laser implements Entity {
    * `ground` the ground behind it. False if it hits neither.
    */
   private aimAt(ndcX: number, ndcY: number): boolean {
-    this.raycaster.setFromCamera(this.ndc.set(ndcX, ndcY), this.camera);
+    this.raycaster.setFromCamera(this.ndc.set(ndcX, ndcY), pointerCamera(this.camera));
     const { ray } = this.raycaster;
     const groundAt = this.globe.groundHit(ray, this.ground);
     const limit = groundAt === null ? Infinity : groundAt + GROUND_SLACK;

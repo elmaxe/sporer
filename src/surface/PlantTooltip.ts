@@ -6,6 +6,7 @@ import type { Tooltip } from '../ui/Tooltip';
 import type { Plantings } from './Plantings';
 import type { SurfaceAnimals } from './SurfaceAnimals';
 import type { SurfaceEntities } from './SurfaceEntities';
+import { pointerCamera } from '../world/thirdPerson';
 
 /** How far past the ground's hit a plant can still be picked: its crown is wider than a point. */
 const GROUND_SLACK = 1;
@@ -50,7 +51,7 @@ export class PlantTooltip implements Entity {
     const { pointer } = this.input;
     const hovering = pointer.inside && !this.input.isDragging && !this.input.blocked;
     if (hovering) {
-      this.raycaster.setFromCamera(this.ndc.set(pointer.ndcX, pointer.ndcY), this.camera);
+      this.raycaster.setFromCamera(this.ndc.set(pointer.ndcX, pointer.ndcY), pointerCamera(this.camera));
       const { ray } = this.raycaster;
       const ground = this.groundHit(ray, this.point);
       // A plant stands on the ground, so it is hit just before the ray reaches it.

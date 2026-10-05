@@ -4,6 +4,7 @@ import type { Entity } from '../core/Entity';
 import type { Input } from '../core/Input';
 import type { CelestialBody, Region, Sight } from '../world/CelestialBody';
 import type { Ship } from './Ship';
+import { pointerCamera } from '../world/thirdPerson';
 
 /**
  * Minimum pick radius as a fraction of the body's distance from the camera
@@ -69,7 +70,7 @@ export class Picker implements Entity {
 
   /** The nearest body or sight whose (padded) sphere the ray through `ndc` hits. Leaves the ray set. */
   private pick(ndcX: number, ndcY: number): Sight | null {
-    this.raycaster.setFromCamera(this.ndc.set(ndcX, ndcY), this.camera);
+    this.raycaster.setFromCamera(this.ndc.set(ndcX, ndcY), pointerCamera(this.camera));
     this.best = null;
     this.bestDepth = Infinity;
     for (const body of this.bodies) this.test(body);

@@ -26,6 +26,16 @@ export function cullingCamera(camera: THREE.Camera): THREE.Camera {
   return thirdPerson.view !== null && camera === thirdPerson.view && thirdPerson.eye ? thirdPerson.eye : camera;
 }
 
+/**
+ * The camera to cast pointer rays from when the game uses `camera`: the
+ * overview while it draws the picture (so a click picks what's under the
+ * pointer on screen), else `camera`. The overview is posed as it was for the
+ * last frame drawn, as `camera` itself is when pickers read it.
+ */
+export function pointerCamera(camera: THREE.Camera): THREE.Camera {
+  return thirdPerson.view !== null && camera === thirdPerson.eye ? thirdPerson.view : camera;
+}
+
 /** The marker's colour (the frozen view's outline is yellow). */
 const MARKER_COLOR = 0x4ad8ff;
 /** After everything else in the scene (finite, so the marker's own parts keep their order). */
