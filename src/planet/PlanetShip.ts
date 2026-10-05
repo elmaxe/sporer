@@ -4,7 +4,7 @@ import type { Entity } from '../core/Entity';
 import type { Input } from '../core/Input';
 import type { ArriveParams } from '../player/autopilot';
 import { buildUfoMesh } from '../player/Ship';
-import { climbStep, flightRadius, groundAhead, groundParams, type GroundHeight } from './ground';
+import { aheadDirection, climbStep, flightRadius, groundAhead, groundParams, type GroundHeight, type Obstacles } from './ground';
 import { sphereStep, surfaceArriveImpulse } from './surfaceMotion';
 
 /** Tunables, exposed in the debug panel. Planet-level units (an Earth-sized globe's radius is 100). */
@@ -26,10 +26,11 @@ export const planetAutopilotParams: ArriveParams = {
   damping: planetShipParams.damping,
 };
 
-/** What the ship can follow: the ground's radius in any direction, and the highest it gets. */
+/** What the ship can follow: the ground's radius in any direction, and the highest it gets; and what stands on it, to fly over. */
 export interface Terrain {
   readonly height: GroundHeight;
   readonly top: number;
+  readonly obstacles?: Obstacles;
 }
 
 /** The autopilot counts as arrived within this arc length and speed. */
@@ -47,6 +48,9 @@ const ARRIVE_SPEED = 1;
  * every altitude);
  * WASD pushes it in the tangent plane relative to the camera. It stays level
  * with the ground (up = the radial direction) and turns to face its course.
+ * Whatever stands on the ground (`Terrain.obstacles`: trees, bushes) it flies
+ * over, at any zoom: the hull clears everything under it and along the same
+ * stretch ahead, so it rises before a tree and sinks back past it.
  */
 export class PlanetShip implements Entity {
   /** Interpolated render transform; read this for cameras and UI. */
@@ -87,6 +91,7 @@ export class PlanetShip implements Entity {
   private readonly right = new THREE.Vector3();
   private readonly want = new THREE.Vector3();
   private readonly basis = new THREE.Matrix4();
+  private readonly ahead = new THREE.Vector3();
   private readonly arrive: ArriveParams = { ...planetAutopilotParams };
 
   constructor(
@@ -130,6 +135,8 @@ export class PlanetShip implements Entity {
     g?.add(groundParams, 'climbTime', 0.05, 2);
     g?.add(groundParams, 'sinkTime', 0.05, 3);
     g?.add(groundParams, 'minClearance', 0, 5);
+    g?.add(groundParams, 'collide').name('fly over plants');
+    g?.add(groundParams, 'obstacleMargin', 0, 3);
   }
 
   /** Current speed in units per second. */
@@ -254,6 +261,8 @@ export class PlanetShip implements Entity {
     u.applyQuaternion(this.step).normalize();
     vel.applyQuaternion(this.step).addScaledVector(u, -vel.dot(u));
     this.heading.applyQuaternion(this.step).addScaledVector(u, -this.heading.dot(u)).normalize();
+    // Nor into what stands where it is now, if the climb ahead of it fell short (it set off too close to see it coming).
+    if (terrain?.obstacles && groundParams.collide) this._radius = terrain.obstacles.clearAlong(u, u, this._radius);
 
     // Turn to face the direction of travel, about the local up.
     if (vel.lengthSq() > 1) {
@@ -285,13 +294,22 @@ export class PlanetShip implements Entity {
     });
   }
 
-  /** The radius to fly at from here: the zoom's, lowered towards the highest ground beneath and ahead of the ship. */
+  /**
+   * The radius to fly at from here: the zoom's, lowered towards the highest
+   * ground beneath and ahead of the ship, and raised over whatever stands on
+   * the ground there.
+   */
   private goal(): number {
     const { terrain } = this;
-    if (!terrain || this.follow <= 0) return this.zoomRadius;
-    const ground = groundAhead(terrain.height, this.u, this.vel, this.heading, this._radius);
-    // Not below the ground right under the hull.
-    return Math.max(flightRadius(this.zoomRadius, terrain.top, ground, this.follow), terrain.height(this.u) + groundParams.minClearance);
+    if (!terrain) return this.zoomRadius;
+    let goal = this.zoomRadius;
+    if (this.follow > 0) {
+      const ground = groundAhead(terrain.height, this.u, this.vel, this.heading, this._radius);
+      // Not below the ground right under the hull.
+      goal = Math.max(flightRadius(this.zoomRadius, terrain.top, ground, this.follow), terrain.height(this.u) + groundParams.minClearance);
+    }
+    if (!terrain.obstacles || !groundParams.collide) return goal;
+    return terrain.obstacles.clearAlong(this.u, aheadDirection(this.u, this.vel, this.heading, this._radius, 1, this.ahead), goal);
   }
 
   /** Level with the ground (+Y = radial) and facing the heading (the UFO's front is -Z). */

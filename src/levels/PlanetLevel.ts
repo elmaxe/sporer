@@ -276,6 +276,13 @@ export class PlanetLevel extends Level implements ItemUser {
         get top() {
           return globe.top;
         },
+        // It flies over the plants, the planet's own and those set down (made after it, so looked up when asked).
+        obstacles: {
+          clearAlong: (from, to, atLeast) => {
+            const above = this.plants ? this.plants.clearAlong(from, to, atLeast) : atLeast;
+            return this.plantings ? this.plantings.clearAlong(from, to, above) : above;
+          },
+        },
       }),
     );
     this.setFlight(PLANET_VIEW_DISTANCE);
