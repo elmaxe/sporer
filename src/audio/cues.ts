@@ -30,6 +30,8 @@ export type SoundCue =
   | 'ventBurst'
   | 'starNear'
   | 'starFar'
+  | 'volcanoNear'
+  | 'volcanoFar'
   | 'shipHum'
   | 'ventRumble'
   | 'geyserHiss';
@@ -57,6 +59,8 @@ export const SOUND_CUES: readonly SoundCue[] = [
   'ventBurst',
   'starNear',
   'starFar',
+  'volcanoNear',
+  'volcanoFar',
   'shipHum',
   'ventRumble',
   'geyserHiss',
@@ -70,9 +74,17 @@ export type LoopCue = 'systemTravel' | 'interstellarTravel' | 'busterFlight' | '
  * it goes (`SoundEffects.ambient`): they sound whenever audio is running,
  * even if asked for before it was unlocked.
  */
-export type AmbientCue = 'starNear' | 'starFar' | 'shipHum' | 'ventRumble' | 'geyserHiss';
+export type AmbientCue = 'starNear' | 'starFar' | 'volcanoNear' | 'volcanoFar' | 'shipHum' | 'ventRumble' | 'geyserHiss';
 
-export const AMBIENT_CUES: readonly AmbientCue[] = ['starNear', 'starFar', 'shipHum', 'ventRumble', 'geyserHiss'];
+export const AMBIENT_CUES: readonly AmbientCue[] = [
+  'starNear',
+  'starFar',
+  'volcanoNear',
+  'volcanoFar',
+  'shipHum',
+  'ventRumble',
+  'geyserHiss',
+];
 
 export interface CueSpec {
   /** Linear gain on its channel at full level (1 = the file as it is). */
@@ -166,6 +178,10 @@ export const cueParams: Record<SoundCue, CueSpec> = {
   starNear: ambient(0.8),
   // A star from across its system, giving way to starNear close up.
   starFar: ambient(0.8),
+  // A volcano close up, as the camera nears its vent (see VolcanoSounds).
+  volcanoNear: ambient(0.8),
+  // The volcanoes from across the globe, giving way to volcanoNear close up.
+  volcanoFar: ambient(0.8),
   // The UFO's own hum, always on.
   shipHum: ambient(0.35),
   // Fumaroles and Io-style plumes near the camera: rumble, the roar of flame and crackling (see VentSounds).

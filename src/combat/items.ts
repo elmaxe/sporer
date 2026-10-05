@@ -36,6 +36,8 @@ export interface ItemDef {
    * are selected (armed) and put away.
    */
   switch?: boolean;
+  /** A switch that's on when the game starts. */
+  startsOn?: boolean;
 }
 
 export const ITEM_TABS: readonly { id: ItemTab; name: string }[] = [
@@ -45,10 +47,10 @@ export const ITEM_TABS: readonly { id: ItemTab; name: string }[] = [
 
 export const ITEMS: readonly ItemDef[] = [
   {
-    id: 'planetBuster',
+    id: 'laser',
     tab: 'weapons',
-    name: 'Planet Buster',
-    description: 'Blows a whole planet or moon apart, for good. Fire it from low orbit.',
+    name: 'Laser',
+    description: 'A beam from the ship that kills the animals and plants it touches. Hold it on them.',
   },
   {
     id: 'volcanoBomb',
@@ -57,10 +59,10 @@ export const ITEMS: readonly ItemDef[] = [
     description: 'Raises an erupting volcano where it lands. Fire it from low orbit over solid ground.',
   },
   {
-    id: 'laser',
+    id: 'planetBuster',
     tab: 'weapons',
-    name: 'Laser',
-    description: 'A beam from the ship that kills the animals and plants it touches. Hold it on them.',
+    name: 'Planet Buster',
+    description: 'Blows a whole planet or moon apart, for good. Fire it from low orbit.',
   },
   {
     id: 'abduct',
@@ -74,6 +76,7 @@ export const ITEMS: readonly ItemDef[] = [
     name: 'Radar',
     description: "Tracks the animal picked on the planet map's Species tab: its waves point to the nearest one. On or off.",
     switch: true,
+    startsOn: true,
   },
 ];
 
@@ -82,9 +85,9 @@ export function itemDef(id: ToolId): ItemDef {
   return ITEMS.find((i) => i.id === id)!;
 }
 
-/** Which switch items (`ItemDef.switch`) are on, for the whole game (kept by the SceneManager). All start off. */
+/** Which switch items (`ItemDef.switch`) are on, for the whole game (kept by the SceneManager). They start as `ItemDef.startsOn` says. */
 export class ItemSwitches {
-  private readonly on = new Set<ToolId>();
+  private readonly on = new Set<ToolId>(ITEMS.filter((i) => i.switch && i.startsOn).map((i) => i.id));
 
   isOn(id: ToolId): boolean {
     return this.on.has(id);

@@ -164,9 +164,19 @@ const ASH_FRAGMENT = /* glsl */ `
   }
 `;
 
+/** What can be heard of a volcano (see audio/VolcanoSounds). */
+export interface VolcanoVent {
+  /** Its vent, at the crater floor (the body frame: the scene's space). */
+  readonly vent: THREE.Object3D;
+  readonly shape: VolcanoShape;
+  /** How hard it's erupting now (0–1, 0 before it's risen). */
+  readonly activity: number;
+}
+
 /** One volcano's meshes and particles, in the body frame. */
-class VolcanoView {
+class VolcanoView implements VolcanoVent {
   readonly vent = new THREE.Group();
+  activity = 0;
   private readonly blobs: THREE.Points<THREE.BufferGeometry, THREE.ShaderMaterial>;
   private readonly ash: THREE.Points<THREE.BufferGeometry, THREE.ShaderMaterial>;
   private readonly glow: THREE.Sprite;
@@ -318,7 +328,8 @@ class VolcanoView {
 
     const blobs = this.blobs.material.uniforms;
     blobs.uTime!.value = time;
-    blobs.uStrength!.value = strength * Math.min(1, shape.growth * 3);
+    this.activity = strength * Math.min(1, shape.growth * 3);
+    blobs.uStrength!.value = this.activity;
     blobs.uSize!.value = volcanoLookParams.blobSize;
     const ash = this.ash.material.uniforms;
     ash.uTime!.value = time;
@@ -412,6 +423,11 @@ export class Volcanoes implements Entity {
   /** The volcanoes' shapes (for tests and the level). */
   get shapes(): VolcanoShape[] {
     return this.views.map((v) => v.shape);
+  }
+
+  /** The volcanoes as they sound (see audio/VolcanoSounds). */
+  get vents(): readonly VolcanoVent[] {
+    return this.views;
   }
 
   /** Each cone's chunks drawn now (see VolcanoSurface), for automation. */
