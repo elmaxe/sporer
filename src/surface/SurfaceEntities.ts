@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
 import { MAX_PLANT_SCALE, PLANT_CELL_SIZE, generateCell, parsePlantId, plantGridSize, type GroundRadius, type PlantData, type PlantPlan, type PlantSpecies } from '../gen/plants';
-import { HULL_DEPTH, HULL_RADIUS, groundParams, obstacleClearance, type Obstacles } from '../planet/ground';
+import { HULL_DEPTH, HULL_RADIUS, obstacleClearance, type ObstacleVisit, type Obstacles } from '../planet/ground';
 import { faceGridPoint } from '../world/cubeSphereMath';
 import { GROUND_DETAIL_LAYER } from '../world/groundDepth';
 import type { SurfaceChanges } from './changes';
@@ -17,8 +17,8 @@ const KEEP_EXTRA = 1.15;
 const SCAN_DISTANCE = 4;
 /** Instances a batch starts with; it doubles when full. */
 const FIRST_CAPACITY = 64;
-/** Per obstacle: unit direction (3), crown radius, radius of its top from the planet's centre. */
-const OBSTACLE_STRIDE = 5;
+/** Per obstacle: unit direction (3), crown radius, radius of its top from the planet's centre, species index. */
+const OBSTACLE_STRIDE = 6;
 /** The cells near the ship are kept for obstacle queries until it has moved this much further (units). */
 const NEAR_SLACK = 24;
 
@@ -110,7 +110,7 @@ export interface SurfaceStats {
  * (recorded in the planet's change list, which outlives the level) and
  * `promote(id)` (a plant as an object of its own, for a beam to lift or a
  * weapon to hit). Static in the planet's body frame, like the globe. As
- * `Obstacles`, the ship flies over its plants instead of through them.
+ * `Obstacles`, it says which plants the ship's hull goes through (to shake them).
  */
 export class SurfaceEntities implements Entity, Obstacles {
   readonly object = new THREE.Group();
@@ -376,6 +376,7 @@ export class SurfaceEntities implements Entity, Obstacles {
       obstacles[at + 2] = p.z;
       obstacles[at + 3] = s.crownRadius * p.scale;
       obstacles[at + 4] = top;
+      obstacles[at + 5] = p.species;
       cell.top = Math.max(cell.top, top);
     });
     // A cell that had no plants standing may have some now.
@@ -552,33 +553,32 @@ export class SurfaceEntities implements Entity, Obstacles {
   }
 
   /**
-   * The ship's obstacles (`Obstacles`): the lowest radius at which its hull
-   * clears every standing plant loaded on the arc from unit direction `from`
-   * to `to`, or `atLeast` if that's higher. Each plant is an upright cylinder
-   * as wide as its crown and as tall as the plant. Cheap enough for every
-   * fixed step: only the cells near the arc are looked at (the cells round the
-   * ship are listed once and kept until it moves on), and a cell whose highest
-   * plant can't reach `atLeast` is skipped whole. Plants switched off aren't loaded, so nothing is in the way.
+   * The ship's obstacles (`Obstacles`): calls `visit` with every standing
+   * plant loaded that the hull, its centre at `radius`, goes
+   * through on the arc from unit direction `from` to `to`. Each plant is an
+   * upright cylinder as wide as its crown and as tall as the plant. Cheap
+   * enough for every frame: only the cells near the arc are looked at (the
+   * cells round the ship are listed once and kept until it moves on), and a
+   * cell whose highest plant can't reach the hull is skipped whole. Plants
+   * switched off aren't loaded, so nothing is touched.
    */
-  clearAlong(from: THREE.Vector3, to: THREE.Vector3, atLeast: number): number {
-    if (this.cells.size === 0) return atLeast;
+  touchAlong(from: THREE.Vector3, to: THREE.Vector3, radius: number, visit: ObstacleVisit): void {
+    if (this.cells.size === 0) return;
     const R = this.plan.radius;
     const middle = this.queryMiddle.addVectors(from, to).normalize().multiplyScalar(R);
     // A plant whose base is further than this from the arc's middle can't be under the hull anywhere along it.
     const need = (from.distanceTo(to) / 2) * R + HULL_RADIUS + this.widestCrown;
     if (this.nearReach < 0 || middle.distanceTo(this.nearCentre) + need > this.nearReach) this.listNear(middle, need + NEAR_SLACK);
-    // The hull's centre needs at most its depth and the margin over a plant's top.
-    const lift = HULL_DEPTH + groundParams.obstacleMargin;
-    let best = atLeast;
     for (const cell of this.nearCells) {
-      if (cell.top + lift <= best || cell.centre.distanceTo(middle) > cell.bound + need) continue;
+      // The hull's underside reaches at most its depth below its centre.
+      if (cell.top + HULL_DEPTH <= radius || cell.centre.distanceTo(middle) > cell.bound + need) continue;
       const o = cell.obstacles;
       for (let k = 0; k < o.length; k += OBSTACLE_STRIDE) {
-        if (o[k + 4]! + lift <= best) continue;
-        best = Math.max(best, obstacleClearance(o[k]!, o[k + 1]!, o[k + 2]!, o[k + 3]!, o[k + 4]!, from, to));
+        if (o[k + 4]! + HULL_DEPTH <= radius) continue;
+        if (radius < obstacleClearance(o[k]!, o[k + 1]!, o[k + 2]!, o[k + 3]!, o[k + 4]!, from, to))
+          visit(o[k]!, o[k + 1]!, o[k + 2]!, o[k + 3]!, o[k + 4]!, this.plan.species[o[k + 5]!]!);
       }
     }
-    return best;
   }
 
   /** Lists the loaded cells that reach within `reach` of `centre`. */
