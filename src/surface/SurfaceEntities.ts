@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
 import { MAX_PLANT_SCALE, PLANT_CELL_SIZE, generateCell, parsePlantId, plantGridSize, type GroundRadius, type PlantData, type PlantPlan, type PlantSpecies } from '../gen/plants';
+import { HULL_DEPTH, HULL_RADIUS, groundParams, obstacleClearance, type Obstacles } from '../planet/ground';
 import { faceGridPoint } from '../world/cubeSphereMath';
 import { GROUND_DETAIL_LAYER } from '../world/groundDepth';
 import type { SurfaceChanges } from './changes';
@@ -16,6 +17,10 @@ const KEEP_EXTRA = 1.15;
 const SCAN_DISTANCE = 4;
 /** Instances a batch starts with; it doubles when full. */
 const FIRST_CAPACITY = 64;
+/** Per obstacle: unit direction (3), crown radius, radius of its top from the planet's centre. */
+const OBSTACLE_STRIDE = 5;
+/** The cells near the ship are kept for obstacle queries until it has moved this much further (units). */
+const NEAR_SLACK = 24;
 
 /** The plant a ray hit. The same object every time: read it before the next `pick`. */
 export interface PlantHit {
@@ -57,6 +62,9 @@ interface Cell {
   readonly bound: number;
   readonly plants: PlantData[];
   groups: (SpeciesGroup | null)[];
+  /** Its standing plants as obstacles for the ship (OBSTACLE_STRIDE floats each), and the highest top among them. */
+  obstacles: Float32Array;
+  top: number;
   /** Per species, per level of detail: in that level's batch now. */
   readonly levels: boolean[][];
 }
@@ -101,9 +109,10 @@ export interface SurfaceStats {
  * The API later steps need: `pick(ray)` (nearest plant along a ray), `remove(id)`
  * (recorded in the planet's change list, which outlives the level) and
  * `promote(id)` (a plant as an object of its own, for a beam to lift or a
- * weapon to hit). Static in the planet's body frame, like the globe.
+ * weapon to hit). Static in the planet's body frame, like the globe. As
+ * `Obstacles`, the ship flies over its plants instead of through them.
  */
-export class SurfaceEntities implements Entity {
+export class SurfaceEntities implements Entity, Obstacles {
   readonly object = new THREE.Group();
   private readonly cells = new Map<string, Cell>();
   /** Every cell's centre, unit direction: face by face, row by row. */
@@ -139,6 +148,11 @@ export class SurfaceEntities implements Entity {
   /** Under something raised on the ground since (a volcano): left out of the batches and picking. */
   private buried: ((dir: THREE.Vector3) => boolean) | null = null;
   private readonly plantDir = new THREE.Vector3();
+  /** The loaded cells within `nearReach` of `nearCentre`, for obstacle queries; stale when cells come or go. */
+  private readonly nearCells: Cell[] = [];
+  private readonly nearCentre = new THREE.Vector3();
+  private nearReach = -1;
+  private readonly queryMiddle = new THREE.Vector3();
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -278,6 +292,7 @@ export class SurfaceEntities implements Entity {
       const distance = camera.distanceTo(cell.centre);
       if (distance > keep || !this.facesCamera(cell, cx, cy, cz, cosHorizon)) {
         this.cells.delete(key);
+        this.nearReach = -1;
         this.dirty = true;
       } else this.setLevels(cell, distance);
     }
@@ -300,6 +315,7 @@ export class SurfaceEntities implements Entity {
       }
       const cell = this.createCell(key, face, i, j, index);
       this.cells.set(key, cell);
+      this.nearReach = -1;
       this.setLevels(cell, this.distances[index]!);
       this.dirty = true;
       if (performance.now() - start > plantParams.budgetMs) budgetSpent = true;
@@ -328,6 +344,8 @@ export class SurfaceEntities implements Entity {
       bound: this.cellBound,
       plants,
       groups: [],
+      obstacles: EMPTY,
+      top: -Infinity,
       levels: this.plan.species.map(() => new Array<boolean>(PLANT_LOD_COUNT).fill(false)),
     };
     this.fillGroups(cell);
@@ -347,6 +365,21 @@ export class SurfaceEntities implements Entity {
       const n = counts[s.index]!;
       return n > 0 ? { matrices: new Float32Array(n * 16), positions: new Float32Array(n * 3), sizes: new Float32Array(n), count: 0 } : null;
     });
+    const obstacles = (cell.obstacles = live.length > 0 ? new Float32Array(live.length * OBSTACLE_STRIDE) : EMPTY);
+    cell.top = -Infinity;
+    live.forEach((p, k) => {
+      const s = this.plan.species[p.species]!;
+      const top = p.radius + s.height * p.scale;
+      const at = k * OBSTACLE_STRIDE;
+      obstacles[at] = p.x;
+      obstacles[at + 1] = p.y;
+      obstacles[at + 2] = p.z;
+      obstacles[at + 3] = s.crownRadius * p.scale;
+      obstacles[at + 4] = top;
+      cell.top = Math.max(cell.top, top);
+    });
+    // A cell that had no plants standing may have some now.
+    this.nearReach = -1;
     for (const p of live) {
       const g = cell.groups[p.species]!;
       writeMatrix(g.matrices, g.count * 16, p);
@@ -434,6 +467,8 @@ export class SurfaceEntities implements Entity {
 
   private clear(): void {
     this.cells.clear();
+    this.nearReach = -1;
+    this.nearCells.length = 0;
     this.rescan = true;
     this.pending = 0;
     this.dirty = false;
@@ -514,6 +549,44 @@ export class SurfaceEntities implements Entity {
         visit(hit);
       }
     }
+  }
+
+  /**
+   * The ship's obstacles (`Obstacles`): the lowest radius at which its hull
+   * clears every standing plant loaded on the arc from unit direction `from`
+   * to `to`, or `atLeast` if that's higher. Each plant is an upright cylinder
+   * as wide as its crown and as tall as the plant. Cheap enough for every
+   * fixed step: only the cells near the arc are looked at (the cells round the
+   * ship are listed once and kept until it moves on), and a cell whose highest
+   * plant can't reach `atLeast` is skipped whole. Plants switched off aren't loaded, so nothing is in the way.
+   */
+  clearAlong(from: THREE.Vector3, to: THREE.Vector3, atLeast: number): number {
+    if (this.cells.size === 0) return atLeast;
+    const R = this.plan.radius;
+    const middle = this.queryMiddle.addVectors(from, to).normalize().multiplyScalar(R);
+    // A plant whose base is further than this from the arc's middle can't be under the hull anywhere along it.
+    const need = (from.distanceTo(to) / 2) * R + HULL_RADIUS + this.widestCrown;
+    if (this.nearReach < 0 || middle.distanceTo(this.nearCentre) + need > this.nearReach) this.listNear(middle, need + NEAR_SLACK);
+    // The hull's centre needs at most its depth and the margin over a plant's top.
+    const lift = HULL_DEPTH + groundParams.obstacleMargin;
+    let best = atLeast;
+    for (const cell of this.nearCells) {
+      if (cell.top + lift <= best || cell.centre.distanceTo(middle) > cell.bound + need) continue;
+      const o = cell.obstacles;
+      for (let k = 0; k < o.length; k += OBSTACLE_STRIDE) {
+        if (o[k + 4]! + lift <= best) continue;
+        best = Math.max(best, obstacleClearance(o[k]!, o[k + 1]!, o[k + 2]!, o[k + 3]!, o[k + 4]!, from, to));
+      }
+    }
+    return best;
+  }
+
+  /** Lists the loaded cells that reach within `reach` of `centre`. */
+  private listNear(centre: THREE.Vector3, reach: number): void {
+    this.nearCentre.copy(centre);
+    this.nearReach = reach;
+    this.nearCells.length = 0;
+    for (const cell of this.cells.values()) if (cell.obstacles.length > 0 && cell.centre.distanceTo(centre) <= cell.bound + reach) this.nearCells.push(cell);
   }
 
   /** A generated plant by id, from the loaded cells or made afresh (null if there's none). */
@@ -637,6 +710,8 @@ export class SurfaceEntities implements Entity {
 export function underDisc(distance: number, crown: number, radius: number): boolean {
   return distance <= radius + crown * 0.5;
 }
+
+const EMPTY = new Float32Array(0);
 
 /** How far out a species is drawn at all, in its heights. */
 function farthest(s: PlantSpecies): number {
