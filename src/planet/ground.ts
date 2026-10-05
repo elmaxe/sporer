@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { PlantSpecies } from '../gen/plants';
 
 /*
  * The ground under the UFO in low orbit (step 24): pure maths, unit-tested in
@@ -48,12 +49,15 @@ export const HULL_DEPTH = 0.56;
  */
 export interface Obstacles {
   /**
-   * Calls `visit` with the unit direction of everything standing on the
-   * ground that the hull, its centre `radius` from the planet's centre, passes
-   * through anywhere on the short arc from unit direction `from` to `to`.
+   * Calls `visit` with everything standing on the ground that the hull, its
+   * centre `radius` from the planet's centre, passes through anywhere on the
+   * short arc from unit direction `from` to `to`.
    */
-  touchAlong(from: THREE.Vector3, to: THREE.Vector3, radius: number, visit: (x: number, y: number, z: number) => void): void;
+  touchAlong(from: THREE.Vector3, to: THREE.Vector3, radius: number, visit: ObstacleVisit): void;
 }
+
+/** A plant the hull touched: its unit direction, crown radius, the radius of its top from the planet's centre, and its species. */
+export type ObstacleVisit = (x: number, y: number, z: number, crown: number, top: number, species: PlantSpecies) => void;
 
 const scratch = new THREE.Vector3();
 const point = new THREE.Vector3();

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Entity } from '../core/Entity';
 import type { PlantSpecies } from '../gen/plants';
-import { obstacleClearance, type Obstacles } from '../planet/ground';
+import { obstacleClearance, type ObstacleVisit, type Obstacles } from '../planet/ground';
 import { GROUND_DETAIL_LAYER } from '../world/groundDepth';
 import type { PlantedPlant, SurfaceChanges } from './changes';
 import { PLANT_LODS, createPlantGeometry, createPlantMaterial, setLodTint, type PlantFadeUniforms } from './plantLook';
@@ -137,12 +137,13 @@ export class Plantings implements Entity, Obstacles {
   }
 
   /** As `SurfaceEntities.touchAlong`: visits every standing planted plant the ship's hull, its centre at `radius`, goes through on the arc `from` → `to`. */
-  touchAlong(from: THREE.Vector3, to: THREE.Vector3, radius: number, visit: (x: number, y: number, z: number) => void): void {
+  touchAlong(from: THREE.Vector3, to: THREE.Vector3, radius: number, visit: ObstacleVisit): void {
     if (!plantParams.enabled) return;
     for (const p of this.changes.plantedPlants) {
       if (this.promoted.has(p.id)) continue;
       const top = p.radius + p.species.height * p.scale;
-      if (radius < obstacleClearance(p.x, p.y, p.z, p.species.crownRadius * p.scale, top, from, to)) visit(p.x, p.y, p.z);
+      const crown = p.species.crownRadius * p.scale;
+      if (radius < obstacleClearance(p.x, p.y, p.z, crown, top, from, to)) visit(p.x, p.y, p.z, crown, top, p.species);
     }
   }
 

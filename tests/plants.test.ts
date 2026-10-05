@@ -27,7 +27,8 @@ import { plantSetup } from '../src/surface/plantSetup';
 import { SurfaceEntities } from '../src/surface/SurfaceEntities';
 import { Plantings } from '../src/surface/Plantings';
 import { HULL_DEPTH, HULL_RADIUS } from '../src/planet/ground';
-import { PlantBrush } from '../src/surface/PlantBrush';
+import { PlantBrush, leafParams } from '../src/surface/PlantBrush';
+import type { Puff } from '../src/cargo/CargoFx';
 import { PlantShaker, SHAKE_SLOTS, plantShakeParams, plantShakeUniforms } from '../src/surface/plantShake';
 import { parseGraphicsSettings } from '../src/ui/GraphicsSettings';
 
@@ -461,13 +462,23 @@ describe('SurfaceEntities', () => {
       plantings.dispose();
     });
 
-    it('shakes the trees the ship flies through, along its course, and lets them settle', () => {
+    it('shakes the trees the ship flies through, along its course, knocks leaves off them, and lets them settle', () => {
       const { surface } = make();
       const tree = tallest(surface);
       const over = dirOf(tree);
       const side = new THREE.Vector3(0, 0, 1).cross(over).normalize();
       const ship = { object: new THREE.Object3D(), speed: 30 };
-      const brush = new PlantBrush(ship, () => [surface, null], debug);
+      // The leaves thrown, as the pool would get them.
+      const thrown: { position: THREE.Vector3; velocity: THREE.Vector3; color: THREE.Color }[] = [];
+      const leaves = {
+        live: 0,
+        emit: (p: Puff) => thrown.push({ position: p.position.clone(), velocity: p.velocity.clone(), color: (p.color as THREE.Color).clone() }),
+        setView: () => {},
+        update: () => {},
+        dispose: () => {},
+      };
+      const sun = over.clone();
+      const brush = new PlantBrush(ship, new THREE.PerspectiveCamera(), sun, () => [surface, null], leaves, debug);
       const radius = topOf(tree) - 0.5;
       const place = (along: number) => ship.object.position.copy(over).addScaledVector(side, along / RADIUS).normalize().multiplyScalar(radius);
       // From 10 units before the tree to 10 past, at 30 units a second.
@@ -488,6 +499,24 @@ describe('SurfaceEntities', () => {
       // Every plant shaken is inside the zone the shader checks first.
       const zone = u.uShakeZone.value;
       for (const a of u.uShakeAt.value.slice(0, count)) expect(a.x * zone.x + a.y * zone.y + a.z * zone.z).toBeGreaterThanOrEqual(zone.w);
+      // Leaves knocked out of the crowns, a burst per plant shaken, thrown along with the ship, in the plants' colours.
+      expect(thrown.length).toBeGreaterThanOrEqual(count * Math.min(leafParams.maxCount, Math.round(leafParams.count + leafParams.perSpeed * 30)));
+      const s = p3.species[tree.species]!;
+      const fromTree = thrown.filter((l) => l.position.clone().normalize().distanceTo(over) * RADIUS < s.crownRadius * tree.scale + 1);
+      expect(fromTree.length).toBeGreaterThan(0);
+      for (const l of fromTree) expect(l.position.length()).toBeLessThanOrEqual(topOf(tree) + 0.01);
+      const along = thrown.reduce((sum, l) => sum + l.velocity.dot(side), 0) / thrown.length;
+      expect(along).toBeGreaterThan(30 * leafParams.carry * 0.5);
+      const colours = new Set(p3.species.flatMap((x) => [x.leafColor, x.trunkColor]).map((c) => new THREE.Color(c).getHexString()));
+      // Under a noon sun, a leaf's colour is its species' a little lighter or darker.
+      for (const l of thrown) {
+        const near = [...colours].some((c) => {
+          const base = new THREE.Color(`#${c}`);
+          const k = l.color.r / Math.max(base.r, 1e-3);
+          return Math.abs(l.color.g - base.g * k) < 0.02 && Math.abs(l.color.b - base.b * k) < 0.02 && k > 0.75 && k < 1.25;
+        });
+        expect(near).toBe(true);
+      }
       // Flown on, high above it all: the shakes die away and go.
       ship.object.position.multiplyScalar(2);
       for (let t = 0; t < 10; t += 1 / 30) brush.update(1 / 30);

@@ -112,9 +112,10 @@ export class PlantShaker {
    * Shakes the plant standing at unit direction (`x`, `y`, `z`), pushed along
    * `push` (tangent there; any length) with `strength` (its top swings this
    * many of its heights). Not again while a shake of it this recent goes on.
-   * With every slot taken, the one that has died down most makes way.
+   * With every slot taken, the one that has died down most makes way. True if
+   * it started a shake.
    */
-  shake(x: number, y: number, z: number, push: THREE.Vector3, strength: number): void {
+  shake(x: number, y: number, z: number, push: THREE.Vector3, strength: number): boolean {
     const at = this.u.uShakeAt.value;
     const pushes = this.u.uShakePush.value;
     let slot = -1;
@@ -125,7 +126,7 @@ export class PlantShaker {
       const dx = a.x - x;
       const dy = a.y - y;
       const dz = a.z - z;
-      if (dx * dx + dy * dy + dz * dz < 1e-12 && age < plantShakeParams.retrigger) return;
+      if (dx * dx + dy * dy + dz * dz < 1e-12 && age < plantShakeParams.retrigger) return false;
       const left = pushes[i]!.w * Math.exp(-age / plantShakeParams.decay);
       if (left < weakest) {
         weakest = left;
@@ -138,6 +139,7 @@ export class PlantShaker {
     if (length > 1e-9) pushes[slot]!.set(push.x / length, push.y / length, push.z / length, strength);
     else pushes[slot]!.set(0, 0, 0, 0);
     this.fitZone();
+    return true;
   }
 
   /** Moves the clock on by `dt` seconds and lets the shakes that have died away go. */

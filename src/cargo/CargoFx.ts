@@ -52,7 +52,7 @@ export interface Puff {
 }
 
 /**
- * A pool of soft round particles (the glow texture), simulated on the CPU:
+ * A pool of soft round particles (the glow texture, or one given), simulated on the CPU:
  * the cargo beam only throws a few hundred at a time (flames, smoke, splashes,
  * shards, sparkles), so the arrays are rewritten each frame. `additive` pools
  * glow (flames, sparks); the others are drawn over what's behind (smoke, spray).
@@ -61,7 +61,7 @@ export class ParticlePool {
   private readonly points: THREE.Points;
   private readonly geometry = new THREE.BufferGeometry();
   private readonly material: THREE.ShaderMaterial;
-  private readonly texture = createGlowTexture();
+  private readonly texture: THREE.Texture;
   private readonly positions = new Float32Array(POOL_SIZE * 3);
   private readonly colors = new Float32Array(POOL_SIZE * 3);
   private readonly alphas = new Float32Array(POOL_SIZE);
@@ -77,7 +77,10 @@ export class ParticlePool {
     private readonly scene: THREE.Scene,
     additive: boolean,
     renderOrder: number,
+    /** The particles' shape (its alpha); the pool owns it. */
+    texture: THREE.Texture = createGlowTexture(),
   ) {
+    this.texture = texture;
     this.geometry.setAttribute('position', new THREE.BufferAttribute(this.positions, 3).setUsage(THREE.DynamicDrawUsage));
     this.geometry.setAttribute('color', new THREE.BufferAttribute(this.colors, 3).setUsage(THREE.DynamicDrawUsage));
     this.geometry.setAttribute('alpha', new THREE.BufferAttribute(this.alphas, 1).setUsage(THREE.DynamicDrawUsage));
@@ -95,6 +98,11 @@ export class ParticlePool {
     this.points.renderOrder = renderOrder;
     this.points.visible = false;
     scene.add(this.points);
+  }
+
+  /** Particles alive now. */
+  get live(): number {
+    return this.count;
   }
 
   /** Point sizes are in world units: `viewHeight` is the drawing buffer's height in pixels and `fov` the camera's (degrees). */
