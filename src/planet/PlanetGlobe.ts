@@ -13,6 +13,7 @@ import { createGasLook, type GasLook } from '../world/gasLook';
 import { addIceDebug, createIceLook, type IceLook } from '../world/iceLook';
 import type { Debug } from '../core/Debug';
 import { PLANET_SCALE, RELIEF_SCALE, globeRadius } from './frame';
+import { addGroundDebug, createGroundLook } from '../world/groundLook';
 import { groundHit } from './ground';
 import type { Landing } from '../cargo/plantFate';
 import { LodSurface, addCraterDebug, addLodDebug } from './LodSurface';
@@ -117,6 +118,10 @@ export class PlanetGlobe implements Entity {
     const ice = (this.ice = gas ? null : createIceLook(config));
     if (ice) addIceDebug(debug);
     ice?.applyGround(material, R, R * style.relief * RELIEF_SCALE, false);
+    // Green worlds' grass, soil, sand, rock and snow.
+    const ground = gas ? null : createGroundLook(config);
+    if (ground) addGroundDebug(debug);
+    ground?.apply(material, R, R * style.relief * RELIEF_SCALE);
     this.surface = new LodSurface(gas ? R : floorRadius(R, style, RELIEF_SCALE, seaFloor, config.shape != null), this.top, this.sample, material, {
       smooth: gas ? 'outline' : null,
       // The opaque sea hides the sea floor's chunks that lie wholly under it.

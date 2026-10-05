@@ -33,7 +33,16 @@ export function terrainNoise(x: number, y: number, z: number, seed: number): num
 export const DETAIL_AMPLITUDE = 0.15;
 
 /** Each detail octave's frequency is this many times the last one's. */
-const DETAIL_LACUNARITY = 2.3;
+export const DETAIL_LACUNARITY = 2.3;
+
+/** The first detail octave's frequency (radians⁻¹ of the unit sphere, before each axis's own factor). */
+export const DETAIL_FREQUENCY = 11;
+
+/**
+ * The seed's phases in `terrainDetail`'s three sines, as multiples of the
+ * seed (world/groundLook.ts mirrors its octaves on the GPU).
+ */
+export const DETAIL_PHASES: readonly [number, number, number] = [3.1, 1.9, 0.3];
 
 /**
  * `detailedTerrain`'s octaves: three at the original scale (Earth radius 100,
@@ -57,14 +66,15 @@ export function detailedTerrain(x: number, y: number, z: number, seed: number): 
 export function terrainDetail(x: number, y: number, z: number, seed: number): number {
   let sum = 0;
   let amp = 1;
-  let freq = 11;
+  let freq = DETAIL_FREQUENCY;
   let total = 0;
+  const [a, b, c] = DETAIL_PHASES;
   for (let octave = 0; octave < DETAIL_OCTAVES; octave++) {
     sum +=
       amp *
-      Math.sin(x * freq * 1.7 + seed * 3.1) *
-      Math.sin(y * freq * 2.1 + seed * 1.9 + z * freq * 0.6) *
-      Math.sin(z * freq * 1.9 + seed * 0.3 + x * freq);
+      Math.sin(x * freq * 1.7 + seed * a) *
+      Math.sin(y * freq * 2.1 + seed * b + z * freq * 0.6) *
+      Math.sin(z * freq * 1.9 + seed * c + x * freq);
     total += amp;
     amp *= 0.5;
     freq *= DETAIL_LACUNARITY;

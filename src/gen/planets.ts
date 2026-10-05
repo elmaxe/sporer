@@ -17,6 +17,35 @@ export interface PlanetStyle {
   relief: number;
   /** Impact craters' density, 0 (none, or unset) to 1 (heavily cratered, as airless rock is); see gen/craters.ts. */
   craters?: number;
+  /**
+   * How much the land is flattened into lowland plains under its mountains, 0
+   * (none, or unset: height rises evenly with the noise) to 1; see
+   * `landElevation`.
+   */
+  plains?: number;
+}
+
+/**
+ * At full `plains`, the share of the evenly rising height a lowland keeps:
+ * the slope of `landElevation` at the shore. Low ground is gentle, and the
+ * mountains rise steeply above it (docs/research/terran-ground.md).
+ */
+export const PLAINS_SLOPE = 0.5;
+
+/**
+ * Where the land stands, 0 (the shore) to 1 (the highest peaks), at
+ * `height`, the noise's share of the way from sea level (or the lowest point)
+ * to its top. Evenly, h, without `plains`; with them a cubic,
+ * a·h + (1 − a)·h³, whose slope at the shore is a: Earth's land is mostly low
+ * (its mean height is 9% of its highest), so lowlands are flattened into
+ * plains and the uplands rise into mountains (stylised: the land's mean is a
+ * third of its peaks, not a tenth). Every view of the ground reads it.
+ */
+export function landElevation(style: PlanetStyle, height: number): number {
+  const p = style.plains ?? 0;
+  if (!(p > 0) || height <= 0) return height;
+  const a = 1 - p * (1 - PLAINS_SLOPE);
+  return height * (a + (1 - a) * height * height);
 }
 
 /**
@@ -260,7 +289,10 @@ export function planetStyle(rng: Rng, type: Exclude<PlanetType, 'gas'> | MoonTyp
         seaLevel: type === 'ocean' ? rng.range(0.25, 0.4) : rng.range(-0.15, 0.15),
         low: jitterHsl(rng, vegetation),
         high: jitterHsl(rng, [rng.range(30, 50), 0.2, 0.85]),
-        relief: rng.range(0.03, 0.05),
+        // Lower than the barren and desert worlds' and flattened into plains (landElevation): green worlds are mostly
+        // lowland under a few mountain ranges, as in Spore. The same draws as ever, so nothing else moves.
+        relief: rng.range(0.02, 0.035),
+        plains: 1,
       };
     }
     case 'ice': {
