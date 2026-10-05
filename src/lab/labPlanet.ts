@@ -1,7 +1,9 @@
 import {
   atmosphereTint,
   climateSetting,
+  climateSettingOf,
   climateState,
+  climateStateOf,
   earthRadii,
   evaluateClimate,
   generateClimate,
@@ -10,6 +12,7 @@ import {
   type ClimateData,
   type ClimateSetting,
   type ClimateState,
+  type StateSpec,
 } from '../gen/climate';
 import { hexToRgb, rgbToHex } from '../gen/color';
 import { NAMED_RADIUS_KM, asteroidBody, asteroidRadius, type AsteroidClass } from '../gen/belts';
@@ -632,6 +635,9 @@ export function decodeLab(text: string): LabState | null {
     if (typeof planet.radius !== 'number' || !Number.isFinite(planet.radius) || planet.radius <= 0) planet.radius = base.radius;
     planet.style = { ...base.style, ...p.style };
     if (planet.type !== 'gas' && !planet.climate) planet.climate = base.climate;
+    // Links from before the atmosphere was split into gases (and the terraforming levers) still open.
+    if (planet.climate) planet.climate = { ...planet.climate, state: upgradeState(planet.climate.state, planet.climate.setting.gravity) };
+    if (Array.isArray(planet.moons)) planet.moons = planet.moons.map((m) => (m.climate && !m.climate.gases ? { ...m, climate: upgradeClimate(m.climate) } : m));
     if (isSmallKind(planet.kind) && !planet.shape) planet.shape = base.shape;
     if (typeof planet.zone !== 'number' || !Number.isFinite(planet.zone)) planet.zone = base.zone;
     const state: LabState = { planet, view: { ...DEFAULT_VIEW, ...raw.view } };
@@ -640,6 +646,17 @@ export function decodeLab(text: string): LabState | null {
   } catch {
     return null;
   }
+}
+
+/** A climate state from a link, made whole: an older one (a pressure and a composition) is turned into gases. */
+function upgradeState(state: ClimateState | StateSpec, gravity: number): ClimateState {
+  const spec = state as StateSpec;
+  return climateStateOf(spec.gases ? { ...spec, pressure: undefined, composition: undefined } : spec, gravity);
+}
+
+/** A moon's whole climate from an older link, re-derived from its upgraded state. */
+function upgradeClimate(climate: ClimateData): ClimateData {
+  return evaluateClimate(climateSettingOf(climate), upgradeState(climate as StateSpec, climate.gravity));
 }
 
 /** Mixes two hex colours (t = 0 → a). */

@@ -1,3 +1,4 @@
+import { gasesOf } from '../src/gen/climate';
 import { describe, expect, it } from 'vitest';
 import { generateGalaxy } from '../src/gen/galaxy';
 import { nominalStar } from '../src/gen/stars';
@@ -256,7 +257,7 @@ describe('editing', () => {
   it('derives the climate from the edited state', () => {
     const p = generateLabPlanet(5, { type: 'barren', kind: 'earth' });
     const cold = labClimateData(p)!;
-    p.climate!.state = { ...p.climate!.state, composition: 'carbonDioxide', pressure: 90 };
+    p.climate!.state = { ...p.climate!.state, gases: gasesOf(90, 'carbonDioxide') };
     const venus = labClimateData(p)!;
     expect(venus.temperature).toBeGreaterThan(cold.temperature + 100);
     expect(venus.albedo).toBeCloseTo(0.77);

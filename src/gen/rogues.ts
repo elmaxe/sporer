@@ -2,6 +2,7 @@ import {
   SURFACE_ALBEDO,
   WATER,
   climateSetting,
+  climateStateOf,
   evaluateClimate,
   type ClimateBody,
   type ClimateData,
@@ -148,13 +149,13 @@ export function rogueClimate(rng: Rng, body: Omit<ClimateBody, 'insolation'>, he
   const [w0, w1] = WATER[body.type];
   const surfaceAlbedo = rng.range(a0, a1);
   const water = rng.range(w0, w1);
-  return evaluateClimate(setting, {
-    pressure: hydrogen,
-    composition: hydrogen > 0 ? 'hydrogen' : 'none',
-    greenhouse: 1,
-    water,
-    surfaceAlbedo,
-  });
+  return evaluateClimate(
+    setting,
+    climateStateOf(
+      { pressure: hydrogen, composition: hydrogen > 0 ? 'hydrogen' : 'none', greenhouse: 1, water, surfaceAlbedo },
+      setting.gravity,
+    ),
+  );
 }
 
 /** A hydrogen envelope's pressure for a rogue of this size, or 0 for none. Draws from `rng` either way. */

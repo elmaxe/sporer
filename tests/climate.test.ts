@@ -10,6 +10,7 @@ import {
   boilingPoint,
   climateSetting,
   climateState,
+  climateStateOf,
   describeAtmosphere,
   describeClimate,
   evaluateClimate,
@@ -20,6 +21,7 @@ import {
   type ClimateData,
   type ClimateSetting,
   type ClimateState,
+  type StateSpec,
 } from '../src/gen/climate';
 import { generateGalaxy } from '../src/gen/galaxy';
 import { gameRadius } from '../src/gen/planets';
@@ -34,8 +36,8 @@ function setting(insolation: number, extra: Partial<ClimateSetting> = {}): Clima
   return { insolation, gravity: 1, escapeVelocity: 11.186, heatFlow: 0, ...extra };
 }
 
-function state(extra: Partial<ClimateState>): ClimateState {
-  return { pressure: 0, composition: 'none', greenhouse: 1, water: 0, surfaceAlbedo: 0.3, ...extra };
+function state(extra: StateSpec): ClimateState {
+  return climateStateOf({ pressure: 0, composition: 'none', greenhouse: 1, water: 0, surfaceAlbedo: 0.3, ...extra });
 }
 
 const galaxy = generateGalaxy(1337);
@@ -73,8 +75,8 @@ describe('surface temperature', () => {
   });
 
   it('is warmer closer in, with more greenhouse and with thicker air, cooler when brighter', () => {
-    const base = state({ pressure: 1, composition: 'oxygenNitrogen' });
-    const t = (ins: number, s: Partial<ClimateState> = {}) => evaluateClimate(setting(ins), { ...base, ...s }).temperature;
+    const t = (ins: number, s: StateSpec = {}) =>
+      evaluateClimate(setting(ins), state({ pressure: 1, composition: 'oxygenNitrogen', ...s })).temperature;
     expect(t(2)).toBeGreaterThan(t(1));
     expect(t(1, { greenhouse: 2 })).toBeGreaterThan(t(1));
     expect(t(1, { pressure: 2 })).toBeGreaterThan(t(1));
@@ -216,7 +218,7 @@ describe('habitability', () => {
       setting(0.431, { escapeVelocity: 5.03, gravity: 0.38 }),
       state({ pressure: 0.00636, composition: 'carbonDioxide', water: 0.1, surfaceAlbedo: 0.25 }),
     );
-    const step1 = terraform(mars, { pressure: 1, composition: 'oxygenNitrogen' });
+    const step1 = terraform(mars, { pressure: 1, composition: 'oxygenNitrogen', greenhouse: 1 });
     expect(step1.temperature).toBeGreaterThan(mars.temperature);
     const step2 = terraform(step1, { greenhouse: 5 });
     expect(step2.temperature).toBeGreaterThan(step1.temperature);

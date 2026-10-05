@@ -1,5 +1,5 @@
 import type GUI from 'lil-gui';
-import type { Composition } from '../gen/climate';
+import { GASES, compositionOf, gasesOf, totalPressure, type Composition, type Gas } from '../gen/climate';
 import { MOON_RADIUS, gasStyle, type MoonType, type PlanetType } from '../gen/planets';
 import { cometActivity } from '../gen/comets';
 import { iceShare } from '../gen/rings';
@@ -411,13 +411,32 @@ export class LabPanel {
     const { state, setting } = climate;
     const changed = () => lab.changed();
     const f = this.folder('Climate');
-    f.add(state, 'composition', COMPOSITIONS).name('air').onChange(changed);
-    const log = {
-      get pressure() {
-        return Math.round(Math.log10(Math.max(state.pressure, 1e-7)) * 100) / 100;
+    // The air as a composition and a total pressure; both rewrite the gases (gasesOf), which the Gases folder edits directly.
+    let lastComposition: Composition = compositionOf(state.gases) === 'none' ? 'oxygenNitrogen' : compositionOf(state.gases);
+    const air = {
+      get composition(): Composition {
+        return compositionOf(state.gases);
+      },
+      set composition(c: Composition) {
+        if (c !== 'none') lastComposition = c;
+        Object.assign(state.gases, gasesOf(totalPressure(state.gases), c));
+      },
+      get pressure(): number {
+        return totalPressure(state.gases);
       },
       set pressure(v: number) {
-        state.pressure = v <= -7 ? 0 : 10 ** v;
+        const p = totalPressure(state.gases);
+        if (p > 0 && v > 0) for (const gas of GASES) state.gases[gas] *= v / p;
+        else Object.assign(state.gases, gasesOf(v, lastComposition));
+      },
+    };
+    f.add(air, 'composition', COMPOSITIONS).name('air').onChange(changed).listen();
+    const log = {
+      get pressure() {
+        return Math.round(Math.log10(Math.max(air.pressure, 1e-7)) * 100) / 100;
+      },
+      set pressure(v: number) {
+        air.pressure = v <= -7 ? 0 : 10 ** v;
       },
       get insolation() {
         return Math.round(Math.log10(Math.max(setting.insolation, 1e-3)) * 100) / 100;
@@ -433,10 +452,18 @@ export class LabPanel {
       },
     };
     f.add(log, 'pressure', -7, 3.5, 0.01).name('log₁₀ pressure (bar)').onChange(changed).listen();
-    f.add(state, 'pressure', 0, 3000).name('pressure (bar)').onChange(changed).listen();
-    f.add(state, 'greenhouse', 0, 10, 0.01).name('greenhouse (× ref)').onChange(changed);
-    f.add(state, 'water', 0, 1, 0.01).onChange(changed);
-    f.add(state, 'surfaceAlbedo', 0, 1, 0.01).name('surface albedo').onChange(changed);
+    f.add(air, 'pressure', 0, 3000).name('pressure (bar)').onChange(changed).listen();
+    f.add(state, 'greenhouse', 0, 10, 0.01).name('trace greenhouse (× Earth)').onChange(changed).listen();
+    f.add(state, 'water', 0, 1, 0.01).onChange(changed).listen();
+    f.add(state, 'surfaceAlbedo', 0, 1, 0.01).name('surface albedo').onChange(changed).listen();
+    const g = f.addFolder('Gases (bar)').close();
+    const gasMax: Record<Gas, number> = { n2: 10, o2: 2, co2: 100, h2: 500 };
+    const gasName: Record<Gas, string> = { n2: 'N₂', o2: 'O₂', co2: 'CO₂', h2: 'H₂' };
+    for (const gas of GASES) g.add(state.gases, gas, 0, gasMax[gas], 0.001).name(gasName[gas]).onChange(changed).listen();
+    const t = f.addFolder('Terraforming levers').close();
+    t.add(state, 'starlight', 0, 3, 0.01).name('starlight (mirrors, shades)').onChange(changed).listen();
+    t.add(state, 'aerosol', 0, 0.9, 0.01).name('aerosol haze reflectance').onChange(changed).listen();
+    t.add(state, 'magicHeat', -300, 300, 1).name('magic heat (W/m²)').onChange(changed).listen();
     const presets = {
       earth: () => void lab.terraform({ composition: 'oxygenNitrogen', pressure: 1, greenhouse: 1, water: Math.max(state.water, 0.6) }),
       venus: () => void lab.terraform({ composition: 'carbonDioxide', pressure: 92, greenhouse: 1 }),
