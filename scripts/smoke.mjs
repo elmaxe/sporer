@@ -2294,7 +2294,7 @@ await section('stars', async () => (starLab = await runStarLab()).ok);
 
 /**
  * Touch play on an emulated phone (390x844, real CDP touch events): no full-screen button, the first tap goes full
- * screen; hold a finger on the star (tooltip), lift (autopilot to it), drag (rotates, no tap), pinch (zoom), Boost (no stick in space), then
+ * screen; hold a finger on the star (tooltip), lift (autopilot to it), drag (rotates, no tap), pinch (zoom), Boost (no stick in space), the menu and its release notes (they fit and scroll with a swipe), then
  * pinch in at a planet to descend, tap the globe, and pinch out to the system and on to the galaxy, checking which
  * on-screen controls each level shows.
  */
@@ -2370,6 +2370,27 @@ async function runTouch() {
   r.menu = await evaluate(`({ opened: menu.isOpen && game.paused, lab: document.getElementById('menu-lab').href.includes('lab.html'), stars: /stars\\.html\\?seed=.+&star=\\d+/.test(document.getElementById('menu-stars').href) })`);
   r.menu.shot = join(outDir, 'touch-menu.png');
   writeFileSync(r.menu.shot, await page.screenshot());
+  // The release notes (a long list, put in place of the real one, which may not load here, once the menu's load of it is over)
+  // fit the screen and scroll with a swipe.
+  await evaluate(`(async () => {
+    await menu.notes.refresh();
+    const body = Array.from({ length: 8 }, (_, i) => '- A change, ' + i + ', described at some length so that it wraps over a line or two.').join('\\n');
+    menu.notes.releases = Array.from({ length: 12 }, (_, i) => ({ tag: 'v' + i, name: 'v' + i, date: '2026-01-01T00:00:00Z', url: 'https://github.com/', body }));
+    menu.notes.open();
+  })()`);
+  await frames();
+  r.menu.notes = await evaluate(`(() => {
+    const b = document.getElementById('notes-panel').getBoundingClientRect();
+    const list = document.getElementById('notes-list');
+    return { open: menu.notes.isOpen, fits: b.top >= 0 && b.bottom <= innerHeight, overflows: list.scrollHeight > list.clientHeight };
+  })()`);
+  // Above y = 600: headless Chrome full screen doesn't scroll for touches lower down (its screen is 800 × 600).
+  await swipe([[W / 2, 500]], [[W / 2, 200]]);
+  r.menu.notes.scrolled = await until(`document.getElementById('notes-list').scrollTop > 0`, 5000);
+  await touch('touchStart', [await center('notes-close')]);
+  await touch('touchEnd', []);
+  await frames();
+  r.menu.notes.closed = await evaluate(`!menu.notes.isOpen && menu.isOpen`);
   await touch('touchStart', [await center('menu-resume')]);
   await touch('touchEnd', []);
   await frames();
@@ -2471,6 +2492,11 @@ async function runTouch() {
     r.menu.opened &&
     r.menu.lab &&
     r.menu.stars &&
+    r.menu.notes.open &&
+    r.menu.notes.fits &&
+    r.menu.notes.overflows &&
+    r.menu.notes.scrolled &&
+    r.menu.notes.closed &&
     r.menu.closed &&
     r.systemMap.closed &&
     r.systemMap.button &&

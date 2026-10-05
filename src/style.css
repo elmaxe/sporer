@@ -927,6 +927,8 @@ html.touch #menu .menu-keys {
   inset: 0;
   z-index: 1020;
   display: grid;
+  /* A row the screen's height: an auto row would grow with the notes, unbounding the panel's max-height, and the list wouldn't scroll. */
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
   place-items: center;
   padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom))
     max(12px, env(safe-area-inset-left));
