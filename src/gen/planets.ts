@@ -1,4 +1,5 @@
 import { hslToHex, jitterHsl, type Hsl } from './color';
+import { ICE_CLASSES, iceHex } from './iceColor';
 import type { Rng } from './rng';
 
 export type PlanetType = 'lava' | 'barren' | 'desert' | 'terran' | 'ocean' | 'ice' | 'gas';
@@ -263,12 +264,15 @@ export function planetStyle(rng: Rng, type: Exclude<PlanetType, 'gas'> | MoonTyp
       };
     }
     case 'ice': {
+      // Real ice's colours (gen/iceColor.ts), turned to the world's own blue: a frozen sea of blue ice (albedo 0.5–0.62;
+      // stylised: bare sea ice is as pale as the firn, and Spore's frozen seas read blue), lowlands of firn (0.6–0.75),
+      // highlands of snow. The same draws as ever, so nothing else moves.
       const h = rng.range(185, 215);
       return {
-        sea: hslToHex(h, 0.45, rng.range(0.6, 0.7)),
+        sea: iceHex({ ...ICE_CLASSES.blueIce, albedo: rng.range(0.5, 0.62) }, h),
         seaLevel: rng.range(-0.4, 0.1),
-        low: hslToHex(h, 0.25, rng.range(0.78, 0.86)),
-        high: '#ffffff',
+        low: iceHex({ ...ICE_CLASSES.firn, albedo: rng.range(0.6, 0.75) }, h),
+        high: iceHex(ICE_CLASSES.snow, h),
         relief: rng.range(0.025, 0.045),
       };
     }

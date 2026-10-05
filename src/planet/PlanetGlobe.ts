@@ -10,6 +10,7 @@ import { createCubeSphere } from '../world/cubeSphere';
 import { GROUND_LAYER, GroundDepth } from '../world/groundDepth';
 import { createWeatherLook, type WeatherLook } from '../world/weatherLook';
 import { createGasLook, type GasLook } from '../world/gasLook';
+import { addIceDebug, createIceLook, type IceLook } from '../world/iceLook';
 import type { Debug } from '../core/Debug';
 import { PLANET_SCALE, RELIEF_SCALE, globeRadius } from './frame';
 import { groundHit } from './ground';
@@ -67,6 +68,8 @@ export class PlanetGlobe implements Entity {
   readonly weather: WeatherLook | null;
   /** Ringed bodies: the ring's rocks and ice up close. */
   readonly rings: RingRocks | null;
+  /** Icy bodies: snow, glacier ice, the frozen sea and lineae. */
+  private readonly ice: IceLook | null;
   /** Water seas: the wind's waves on them. */
   readonly waves: SeaWaveLook | null = null;
 
@@ -111,6 +114,9 @@ export class PlanetGlobe implements Entity {
     const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 });
     this.gas = createGasLook(config);
     this.gas?.apply(material);
+    const ice = (this.ice = gas ? null : createIceLook(config));
+    if (ice) addIceDebug(debug);
+    ice?.applyGround(material, R, R * style.relief * RELIEF_SCALE, false);
     this.surface = new LodSurface(gas ? R : floorRadius(R, style, RELIEF_SCALE, seaFloor, config.shape != null), this.top, this.sample, material, {
       smooth: gas ? 'outline' : null,
       // The opaque sea hides the sea floor's chunks that lie wholly under it.
@@ -126,7 +132,7 @@ export class PlanetGlobe implements Entity {
       // Ice sheets are still; water has waves (calm where there's no air to blow over it).
       this.waves = createSeaWaves(config, this.sun, this.sunLight);
       if (this.waves) addWaveDebug(debug);
-      this.water = createWater(config.type, style.sea!, R, this.waves, this.sample);
+      this.water = createWater(config.type, style.sea!, R, this.waves, this.sample, ice?.surface.frozenSea ? ice : null);
       this.object.add(this.water.object);
     }
     if (config.rings) {
@@ -251,6 +257,7 @@ export class PlanetGlobe implements Entity {
 
   dispose(): void {
     this.gas?.dispose();
+    this.ice?.dispose();
     this.surface.dispose();
     this.water?.dispose();
     this.waves?.dispose();
@@ -273,10 +280,19 @@ export class PlanetGlobe implements Entity {
  * Opaque: the sky is drawn first, so see-through water would show stars
  * through the planet.
  */
-function createWater(type: PlanetConfig['type'], color: string, radius: number, waves: SeaWaveLook | null, terrain: SurfaceSampler): LodSurface {
+function createWater(
+  type: PlanetConfig['type'],
+  color: string,
+  radius: number,
+  waves: SeaWaveLook | null,
+  terrain: SurfaceSampler,
+  ice: IceLook | null,
+): LodSurface {
   // With waves, the roughness is the slope of the waves too small to draw (world/seaWaves.ts).
   const material = new THREE.MeshStandardMaterial({ color, roughness: type === 'ice' ? 0.55 : 0.25 });
   waves?.apply(material);
+  // A frozen sea: floes, pressure ridges, leads and drifted snow (world/iceLook.ts).
+  ice?.applySea(material, radius);
   // The waves' shader reads how deep the water is (units) from the colour's red, and how fast it deepens (the
   // seabed's slope, depth units per unit east and north, see seaDepthFrame) from its green and blue, so the shore
   // swells' crests turn smoothly along the coast.

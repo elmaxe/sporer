@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { createIceLook, type IceLook } from './iceLook';
 import { applySeaGlint } from './seaWaves';
 import type { Entity } from '../core/Entity';
 import { RAPIER, type Physics } from '../physics/Physics';
@@ -134,6 +135,8 @@ export class Planet implements Entity, CelestialBody {
   private readonly lava: LavaLook | null;
   /** Gas and ice giants: the cloud tops. */
   readonly gas: GasLook | null;
+  /** Icy bodies: snow, glacier ice, frozen seas and lineae. */
+  private readonly ice: IceLook | null;
   /** Bodies with weather: the clouds, storms and lightning (see gen/weather.ts). */
   readonly weather: WeatherLook | null;
   private readonly body: RAPIER.RigidBody;
@@ -181,6 +184,9 @@ export class Planet implements Entity, CelestialBody {
     this.lava?.paintTerrain(this.surface.material, radius);
     // Water seas are as glossy as low orbit's from afar, so the sun's glint carries across the zoom.
     applySeaGlint(this.surface.material, config, radius);
+    // Ice worlds' snow, glacier ice, frozen seas and lineae, as low orbit draws them, averaged.
+    this.ice = gas ? null : createIceLook(config);
+    this.ice?.applyGround(this.surface.material, radius, radius * style.relief, true, PLANET_SCALE);
     this.gas = createGasLook(config);
     this.gas?.apply(this.surface.material);
     // Clouds turn with the ground; the same layer as low orbit's, in planet radii.
@@ -413,6 +419,7 @@ export class Planet implements Entity, CelestialBody {
     this.volcanoGlow?.dispose();
     this.debris?.dispose();
     this.gas?.dispose();
+    this.ice?.dispose();
     this.scene.remove(this.object);
     this.object.traverse((o) => {
       if (o instanceof THREE.Mesh) {
