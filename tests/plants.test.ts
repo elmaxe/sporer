@@ -25,6 +25,8 @@ import { createPlantGeometry } from '../src/surface/plantLook';
 import { plantParams } from '../src/surface/plantParams';
 import { plantSetup } from '../src/surface/plantSetup';
 import { SurfaceEntities } from '../src/surface/SurfaceEntities';
+import { Plantings } from '../src/surface/Plantings';
+import { HULL_DEPTH, HULL_RADIUS, groundParams } from '../src/planet/ground';
 import { parseGraphicsSettings } from '../src/ui/GraphicsSettings';
 
 const RADIUS = 400;
@@ -255,7 +257,7 @@ describe('graphics settings: plants', () => {
     expect(parseGraphicsSettings(null, true).plants).toBe(false);
     expect(parseGraphicsSettings('{"plants":true}', true).plants).toBe(true);
     expect(parseGraphicsSettings('{"plants":false}', false).plants).toBe(false);
-    expect(parseGraphicsSettings('{"weather":false}', true)).toEqual({ weather: false, plants: false, animals: false, wireframe: false });
+    expect(parseGraphicsSettings('{"weather":false}', true)).toEqual({ weather: false, plants: false, animals: false, rocks: true, wireframe: false });
     expect(parseGraphicsSettings('{"plants":"yes"}', false).plants).toBe(true);
   });
 });
@@ -366,5 +368,82 @@ describe('SurfaceEntities', () => {
     expect(surface.stats().plants).toBe(before - 1);
     expect(surface.promote(plants[1]!.id)).toBeNull();
     surface.dispose();
+  });
+
+  describe('as obstacles for the ship', () => {
+    const lift = HULL_DEPTH + groundParams.obstacleMargin;
+    const plantsOf = (surface: SurfaceEntities) =>
+      [...(surface as unknown as { cells: Map<string, { plants: PlantData[] }> }).cells.values()].flatMap((c) => c.plants);
+    const topOf = (p: PlantData) => p.radius + p3.species[p.species]!.height * p.scale;
+    const dirOf = (p: PlantData) => new THREE.Vector3(p.x, p.y, p.z);
+
+    it('keeps the hull over the tallest plant under it, and over a tree along the way', () => {
+      const { surface } = make();
+      const plants = plantsOf(surface);
+      const tree = plants.filter((p) => p3.species[p.species]!.kind === 'tree').sort((a, b) => topOf(b) - topOf(a))[0]!;
+      const over = dirOf(tree);
+      expect(surface.clearAlong(over, over, 0)).toBeGreaterThanOrEqual(topOf(tree) + lift - 1e-3);
+      // A stretch that passes over it from 15 units one side to 15 the other.
+      const side = new THREE.Vector3(0, 0, 1).cross(over).normalize().multiplyScalar(15 / RADIUS);
+      const from = over.clone().sub(side).normalize();
+      const to = over.clone().add(side).normalize();
+      expect(surface.clearAlong(from, to, 0)).toBeGreaterThanOrEqual(topOf(tree) + lift - 1e-3);
+      // Something higher asked for already stands.
+      expect(surface.clearAlong(over, over, 1e6)).toBe(1e6);
+      surface.dispose();
+    });
+
+    it('matches checking every plant one by one, wherever the ship is', () => {
+      const { surface } = make();
+      const plants = plantsOf(surface);
+      const at = new THREE.Vector3();
+      let under = 0;
+      for (let k = 0; k < 40; k++) {
+        // Spots round the camera, near the plants it loaded.
+        at.set(Math.sin(k * 2.4) * 0.15, Math.cos(k * 2.4) * 0.15, 1).normalize();
+        let expected = 0;
+        for (const p of plants) {
+          const s = p3.species[p.species]!;
+          const d = dirOf(p).sub(at).length() * topOf(p) - s.crownRadius * p.scale;
+          if (d < HULL_RADIUS) expected = Math.max(expected, topOf(p) + HULL_DEPTH * Math.sqrt(1 - Math.max(0, d / HULL_RADIUS) ** 2) + groundParams.obstacleMargin);
+        }
+        expect(surface.clearAlong(at, at, 0)).toBeCloseTo(expected, 3);
+        if (expected > 0) under++;
+      }
+      // Some of the spots are under plants, some aren't.
+      expect(under).toBeGreaterThan(5);
+      expect(under).toBeLessThan(40);
+      surface.dispose();
+    });
+
+    it('stops counting a plant once it is removed or lifted, and counts nothing with plants off', () => {
+      const { surface } = make();
+      const plants = plantsOf(surface);
+      const tree = plants.filter((p) => p3.species[p.species]!.kind === 'tree').sort((a, b) => topOf(b) - topOf(a))[0]!;
+      const over = dirOf(tree);
+      const before = surface.clearAlong(over, over, 0);
+      const live = surface.promote(tree.id)!;
+      expect(surface.clearAlong(over, over, 0)).toBeLessThan(before);
+      live.restore();
+      expect(surface.clearAlong(over, over, 0)).toBe(before);
+      surface.remove(tree.id);
+      expect(surface.clearAlong(over, over, 0)).toBeLessThan(before);
+      plantParams.enabled = false;
+      surface.update();
+      expect(surface.clearAlong(over, over, 0)).toBe(0);
+      plantParams.enabled = true;
+      surface.dispose();
+    });
+
+    it('counts the plants the player set down too', () => {
+      const changes = new SurfaceChanges();
+      const plantings = new Plantings(new THREE.Scene(), changes);
+      const tree = p3.species.find((s) => s.kind === 'tree')!;
+      const up = new THREE.Vector3(0, 1, 0);
+      expect(plantings.clearAlong(up, up, 0)).toBe(0);
+      plantings.plant({ speciesKey: 'x#0', species: tree, origin: 'Home', x: 0, y: 1, z: 0, radius: RADIUS, scale: 1, yaw: 0 });
+      expect(plantings.clearAlong(up, up, 0)).toBeCloseTo(RADIUS + tree.height + lift);
+      plantings.dispose();
+    });
   });
 });

@@ -2,7 +2,23 @@ import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { detailedTerrain } from '../src/gen/noise';
 import { RELIEF_SCALE, globeRadius } from '../src/planet/frame';
-import { climbStep, flightRadius, followWeight, groundAhead, groundHit, groundParams, type GroundHeight } from '../src/planet/ground';
+import type { Debug } from '../src/core/Debug';
+import type { Input } from '../src/core/Input';
+import { PlanetShip } from '../src/planet/PlanetShip';
+import {
+  HULL_DEPTH,
+  HULL_RADIUS,
+  aheadDirection,
+  climbStep,
+  flightRadius,
+  followWeight,
+  groundAhead,
+  groundHit,
+  groundParams,
+  obstacleClearance,
+  type GroundHeight,
+  type Obstacles,
+} from '../src/planet/ground';
 import { peakRadius, terrainSampler } from '../src/world/planetGeometry';
 import type { PlanetStyle } from '../src/gen/system';
 
@@ -140,5 +156,94 @@ describe('groundHit', () => {
     // The first surface along the ray is the target or something in front of it: never beyond it.
     expect(t!).toBeLessThanOrEqual(target.distanceTo(origin) + 0.1);
     expect(out.length()).toBeCloseTo(height(out.clone().normalize()), 2);
+  });
+});
+
+describe('obstacleClearance', () => {
+  const lift = HULL_DEPTH + groundParams.obstacleMargin;
+  // A tree at +Y on a ball of radius 100: 2 wide (radius), its top 10 above the ground.
+  const tree = [0, 1, 0, 2, 110] as const;
+  const clear = (from: THREE.Vector3, to: THREE.Vector3) => obstacleClearance(...tree, from.normalize(), to.normalize());
+
+  it('keeps the hull its depth and the margin over the top when right over it', () => {
+    expect(clear(v(0, 1, 0), v(0, 1, 0))).toBeCloseTo(110 + lift);
+  });
+
+  it('lets the hull come lower near its rim, and ignores it once past the rim', () => {
+    const at = (x: number) => clear(v(x / 110, 1, 0), v(x / 110, 1, 0));
+    // Within the crown, still the full depth; between the crown's edge and the rim, less and less.
+    expect(at(1.9)).toBeCloseTo(110 + lift, 1);
+    expect(at(2 + HULL_RADIUS * 0.5)).toBeLessThan(110 + lift);
+    expect(at(2 + HULL_RADIUS * 0.5)).toBeGreaterThan(110 + groundParams.obstacleMargin);
+    expect(at(2 + HULL_RADIUS + 0.05)).toBe(-Infinity);
+  });
+
+  it('counts a tree anywhere along the stretch, not just at its ends', () => {
+    // From 10 units one side of the tree to 10 units the other.
+    expect(clear(v(-0.1, 1, 0), v(0.1, 1, 0))).toBeCloseTo(110 + lift, 1);
+    // A stretch passing well beside it.
+    expect(clear(v(-0.1, 1, 0.1), v(0.1, 1, 0.1))).toBe(-Infinity);
+  });
+});
+
+describe('aheadDirection', () => {
+  it('reaches the footprint ahead along the heading when still, and further along the velocity when moving', () => {
+    const u = v(0, 1, 0);
+    const out = v(0, 0, 0);
+    aheadDirection(u, v(0, 0, 0), v(0, 0, 1), 100, 1, out);
+    expect(out.angleTo(u) * 100).toBeCloseTo(groundParams.footprint);
+    expect(out.z).toBeGreaterThan(0);
+    aheadDirection(u, v(-20, 0, 0), v(0, 0, 1), 100, 1, out);
+    expect(out.angleTo(u) * 100).toBeCloseTo(groundParams.footprint + 20 * groundParams.lookAhead);
+    expect(out.x).toBeLessThan(0);
+  });
+});
+
+describe('PlanetShip over obstacles', () => {
+  const debug = { folder: () => undefined } as unknown as Debug;
+  const input = { isDown: () => false, axis: () => 0 } as unknown as Input;
+  const camera = new THREE.PerspectiveCamera();
+  const flat: GroundHeight = () => R;
+  // A line of tall trees across its way, at +Z of the start.
+  const trees: [number, number, number, number, number][] = [];
+  for (let k = -3; k <= 3; k++) {
+    const d = v(k * 0.04, 1, 0.3).normalize();
+    trees.push([d.x, d.y, d.z, 3, R + 12]);
+  }
+  const obstacles: Obstacles = {
+    clearAlong: (from, to, atLeast) => trees.reduce((best, t) => Math.max(best, obstacleClearance(...t, from, to)), atLeast),
+  };
+
+  it('rises over trees in its way and never brings its hull into them, then sinks back', () => {
+    const ship = new PlanetShip(new THREE.Scene(), input, camera, debug, R + 3, v(0, 1, 0), 1, { height: flat, top: R, obstacles });
+    ship.setRadius(R + 3, 1);
+    ship.placeAt(v(0, 1, 0));
+    ship.moveTo(v(0, 1, 0.6));
+    const dt = 1 / 60;
+    let highest = 0;
+    for (let i = 0; i < 60 * 8; i++) {
+      ship.fixedUpdate(dt);
+      const u = ship.direction;
+      // What the hull needs right where it is.
+      const need = obstacles.clearAlong(u, u, -Infinity);
+      expect(ship.radius).toBeGreaterThanOrEqual(need - 0.05);
+      highest = Math.max(highest, ship.radius);
+    }
+    expect(highest).toBeGreaterThan(R + 12 + HULL_DEPTH);
+    // Well past the trees, back down at the zoom's altitude.
+    expect(ship.direction.angleTo(v(0, 1, 0.6).normalize())).toBeLessThan(0.01);
+    expect(ship.radius).toBeCloseTo(R + 3, 1);
+  });
+
+  it('flies through them with collisions off', () => {
+    groundParams.collide = false;
+    try {
+      const ship = new PlanetShip(new THREE.Scene(), input, camera, debug, R + 3, v(0, 1, 0), 1, { height: flat, top: R, obstacles });
+      ship.setRadius(R + 3, 1);
+      ship.placeAt(trees[3]!.length ? v(trees[3]![0], trees[3]![1], trees[3]![2]) : v(0, 1, 0));
+      expect(ship.radius).toBeCloseTo(R + 3);
+    } finally {
+      groundParams.collide = true;
+    }
   });
 });

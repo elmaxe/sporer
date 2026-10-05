@@ -26,6 +26,10 @@ export const groundParams = {
   sinkTime: 0.7,
   /** The hull never comes closer than this to the ground beneath it, whatever the smoothing says. */
   minClearance: 1.2,
+  /** Whether the ship flies over what stands on the ground (trees, bushes) instead of through it. */
+  collide: true,
+  /** The hull's lowest point keeps this far above the top of what stands on the ground. */
+  obstacleMargin: 0.4,
   /** Picking the ground with a ray: step as a share of the height above the ground, its limits, and bisection steps. */
   rayStepShare: 0.4,
   rayMinStep: 0.25,
@@ -33,6 +37,27 @@ export const groundParams = {
   rayRefine: 14,
   rayMaxSteps: 6000,
 };
+
+/**
+ * The UFO's hull as obstacles meet it: a disc this wide (radius) whose underside
+ * is half an ellipsoid this deep below its centre (player/Ship.ts buildUfoMesh:
+ * a sphere of radius 2 squashed to 0.28 of its height).
+ */
+export const HULL_RADIUS = 2;
+export const HULL_DEPTH = 0.56;
+
+/**
+ * Things standing on the ground that the ship flies over (plants), queried
+ * along the stretch it is about to cover.
+ */
+export interface Obstacles {
+  /**
+   * The lowest radius at which the hull, anywhere on the short arc from unit
+   * direction `from` to `to`, clears everything standing there, or `atLeast` if
+   * that is higher (so a source can skip whatever can't reach it).
+   */
+  clearAlong(from: THREE.Vector3, to: THREE.Vector3, atLeast: number): number;
+}
 
 const scratch = new THREE.Vector3();
 const point = new THREE.Vector3();
@@ -72,15 +97,61 @@ export function groundAhead(
   p = groundParams,
 ): number {
   let highest = height(u);
+  for (let k = 1; k <= p.samples; k++) highest = Math.max(highest, height(aheadDirection(u, vel, heading, radius, k / p.samples, scratch, p)));
+  return highest;
+}
+
+/**
+ * The unit direction `share` of the way along the stretch `groundAhead`
+ * looks over (`footprint` plus `lookAhead` seconds of `vel`, along `heading`
+ * when nearly still), written into `out`.
+ */
+export function aheadDirection(
+  u: THREE.Vector3,
+  vel: THREE.Vector3,
+  heading: THREE.Vector3,
+  radius: number,
+  share: number,
+  out: THREE.Vector3,
+  p = groundParams,
+): THREE.Vector3 {
   const speed = vel.length();
   const reach = p.footprint + speed * p.lookAhead;
   const toward = speed > 1 ? point.copy(vel).divideScalar(speed) : point.copy(heading);
-  for (let k = 1; k <= p.samples; k++) {
-    const angle = (reach * k) / p.samples / radius;
-    scratch.copy(u).multiplyScalar(Math.cos(angle)).addScaledVector(toward, Math.sin(angle));
-    highest = Math.max(highest, height(scratch));
-  }
-  return highest;
+  const angle = (reach * share) / radius;
+  return out.copy(u).multiplyScalar(Math.cos(angle)).addScaledVector(toward, Math.sin(angle));
+}
+
+/**
+ * The lowest radius at which the hull's centre clears an obstacle anywhere on
+ * the short arc from unit direction `from` to `to` (taken as the straight
+ * chord, a few hull widths at most): an upright cylinder `crown` wide (radius)
+ * round unit direction (`bx`, `by`, `bz`), up to radius `top` from the
+ * planet's centre. Over the cylinder the hull's lowest point keeps
+ * `obstacleMargin` above its top; nearer its rim the hull's underside is
+ * shallower, so it may come lower. -Infinity if the hull never passes over it.
+ */
+export function obstacleClearance(
+  bx: number,
+  by: number,
+  bz: number,
+  crown: number,
+  top: number,
+  from: THREE.Vector3,
+  to: THREE.Vector3,
+  p = groundParams,
+): number {
+  const ex = to.x - from.x;
+  const ey = to.y - from.y;
+  const ez = to.z - from.z;
+  const length2 = ex * ex + ey * ey + ez * ez;
+  let t = length2 > 0 ? ((bx - from.x) * ex + (by - from.y) * ey + (bz - from.z) * ez) / length2 : 0;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  // How far the hull's axis passes from the obstacle's, at the obstacle's top.
+  const offset = Math.hypot(bx - from.x - ex * t, by - from.y - ey * t, bz - from.z - ez * t) * top - crown;
+  if (offset >= HULL_RADIUS) return -Infinity;
+  const rim = offset <= 0 ? 0 : offset / HULL_RADIUS;
+  return top + HULL_DEPTH * Math.sqrt(1 - rim * rim) + p.obstacleMargin;
 }
 
 /**

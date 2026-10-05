@@ -419,6 +419,22 @@ describe('LOD surface', () => {
     for (const s of [fine, outline, coast]) s.dispose();
   });
 
+  it("splits a sea's shallows as finely as the terrain, and its deep water by its sag", () => {
+    // Shallow (depth 0.5 in the colour's red) north of the equator, deep south of it.
+    const sea = (dir: Vec3Like, color: THREE.Color) => {
+      color.setRGB(dir.y > 0 ? 0.5 : 10, 0, 0);
+      return R;
+    };
+    const plain = new LodSurface(R, R, sea, new THREE.MeshBasicMaterial(), { smooth: 'coast' });
+    const shallow = new LodSurface(R, R, sea, new THREE.MeshBasicMaterial(), { smooth: 'coast', shallow: 2 });
+    const fine = new LodSurface(R, R, sea, new THREE.MeshBasicMaterial());
+    const camera = new THREE.Vector3(0.3, 0.05, 1).setLength(R * 1.05);
+    for (const s of [plain, shallow, fine]) expect(settle(s, camera)).toBe(true);
+    expect(triangles(shallow)).toBeGreaterThan(triangles(plain) * 1.5);
+    expect(triangles(shallow)).toBeLessThan(triangles(fine));
+    for (const s of [plain, shallow, fine]) s.dispose();
+  });
+
   it('leaves out chunks lying wholly under hiddenBelow (the sea floor), and keeps the rest closed', () => {
     const sea = R;
     // A sea floor: everything below the sea except a band of land round the equator.

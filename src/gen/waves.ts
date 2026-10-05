@@ -1,11 +1,12 @@
 import { Rng } from './rng';
 
 /**
- * Wind waves on a planet's sea (issue #88), as pure data: a handful of
- * travelling sine waves drawn from the Pierson–Moskowitz spectrum of a fully
- * developed sea, and how much slope is left over in wavelets too small to
- * draw (the sea's roughness). The view (world/seaWaves.ts) lays them over
- * the low-orbit sea's normals. See docs/research/sea-waves.md.
+ * Wind waves on a planet's sea (issue #88), as pure data: cascades of
+ * travelling waves drawn from the Pierson–Moskowitz spectrum of a fully
+ * developed sea, each band on a square tile that repeats, and how much slope
+ * is left over in wavelets too small to draw (the sea's roughness). The view
+ * bakes the tiles on the GPU (world/waveTiles.ts) and lays them over the
+ * low-orbit sea's normals (world/seaWaves.ts). See docs/research/sea-waves.md.
  */
 
 /** Standard gravity, m/s² (CODATA). */
@@ -17,12 +18,21 @@ const PM_BETA = 0.74;
 /** U₁₉.₅ / U₁₀, from the same page's H⅓ = 0.21 U₁₉.₅² / g ≈ 0.22 U₁₀² / g: √(0.22 / 0.21). */
 const U195_PER_U10 = Math.sqrt(0.22 / 0.21);
 
-/** The waves the view draws, per projection (the shader lays the sea out on three planes, see world/seaWaves.ts). */
-export const WAVES_PER_SET = 12;
-/** Sets: one per axis of the triplanar projection. */
-export const WAVE_SETS = 3;
+/**
+ * The view draws the waves as tiles that repeat (world/seaWaves.ts): this many
+ * cascades, each a square of its own size holding one band of the spectrum,
+ * the sizes in irrational ratios so their repeats never line up (as FFT
+ * oceans do: Pensionerov's FFT-Ocean, Ryan's ocean rendering notes).
+ */
+export const CASCADES = 3;
+/** Waves per cascade (an FFT ocean holds every point of the lattice; a few dozen drawn from the spectrum look alike). */
+export const WAVES_PER_CASCADE = 48;
 /** The longest wave drawn, as a share of the spectrum's peak frequency (a little below the peak, where the energy starts). */
 const LOWEST_SHARE = 0.75;
+/** A cascade's tile is this many times its longest wave, so even that one has a few directions on the lattice to choose from. */
+const TILE_WAVES = 2.5;
+/** Cascade c's tile is also stretched by φ^(c/2), so no two tiles' sizes are in a simple ratio. */
+const GOLDEN = (1 + Math.sqrt(5)) / 2;
 
 export interface WaveComponent {
   /** Wavelength, metres. */
@@ -35,6 +45,17 @@ export interface WaveComponent {
   slope: number;
   /** Phase at time 0, radians. */
   phase: number;
+  /** Its wavevector on its cascade's tile, in whole waves across it (along the wind, and across it): the tile repeats. */
+  nx: number;
+  nz: number;
+}
+
+/** One band of the spectrum on a square tile that repeats. */
+export interface WaveCascade {
+  /** The tile's side, metres. */
+  size: number;
+  /** Its waves, longest first. */
+  waves: WaveComponent[];
 }
 
 export interface SeaWaves {
@@ -46,8 +67,8 @@ export interface SeaWaves {
   peakOmega: number;
   /** The whole sea surface's mean square slope (Cox & Munk), drawn waves and wavelets together. */
   meanSquareSlope: number;
-  /** WAVE_SETS sets of WAVES_PER_SET waves, longest first (empty when calm). */
-  sets: WaveComponent[][];
+  /** CASCADES cascades, longest first (empty when calm). */
+  cascades: WaveCascade[];
 }
 
 /**
@@ -106,54 +127,84 @@ export function slopeVariance(wind: number, from: number, to: number, gravity = 
 
 /**
  * A sea's waves from its own seed: `wind` (m/s at 10 m; 0 for a calm sea,
- * e.g. no air), `gravity` (m/s²), down to waves `shortest` metres long. Each
- * of the WAVE_SETS sets covers the spectrum from just below its peak to
- * `shortest` in equal steps of ln ω, each wave carrying its band's slope
- * variance, at angles to the wind spread as cos² (Tessendorf's |k̂·ŵ|²).
+ * e.g. no air), `gravity` (m/s²), down to waves `shortest` metres long. The
+ * spectrum from just below its peak to `shortest` is split into CASCADES
+ * bands of equal steps in ln ω, each on its own repeating tile. A band's
+ * waves cover it in equal steps of ln ω, each carrying its step's slope
+ * variance, at angles to the wind drawn from Hasselmann et al.'s (1980)
+ * cos^2s(θ/2) spreading, then moved to the nearest wavevector the tile
+ * repeats with.
  */
 export function seaWaves(seed: number, wind: number, gravity: number, shortest: number): SeaWaves {
   const meanSquareSlope = coxMunkSlope(wind);
-  if (wind <= 0) return { wind: 0, gravity, peakOmega: 0, meanSquareSlope, sets: [] };
+  if (wind <= 0) return { wind: 0, gravity, peakOmega: 0, meanSquareSlope, cascades: [] };
   const peak = peakOmega(wind, gravity);
   const low = LOWEST_SHARE * peak;
   const high = Math.max(waveOmega(shortest, gravity), low * 1.01);
-  const step = Math.log(high / low) / WAVES_PER_SET;
+  const band = Math.log(high / low) / CASCADES;
   const rng = new Rng(seed).fork('waves');
-  const sets: WaveComponent[][] = [];
-  for (let s = 0; s < WAVE_SETS; s++) {
-    const r = rng.fork(s);
-    const set: WaveComponent[] = [];
-    for (let i = 0; i < WAVES_PER_SET; i++) {
-      const from = low * Math.exp(i * step);
+  const cascades: WaveCascade[] = [];
+  for (let c = 0; c < CASCADES; c++) {
+    const r = rng.fork(c);
+    const bottom = low * Math.exp(c * band);
+    const size = TILE_WAVES * wavelength(bottom, gravity) * GOLDEN ** (c / 2);
+    const step = band / WAVES_PER_CASCADE;
+    const waves: WaveComponent[] = [];
+    for (let i = 0; i < WAVES_PER_CASCADE; i++) {
+      const from = bottom * Math.exp(i * step);
       const to = from * Math.exp(step);
-      // Jittered within the band, so the three sets don't share wavelengths (no beating where they blend).
-      const omega = from * Math.exp(r.range(0.25, 0.75) * step);
-      set.push({
-        length: wavelength(omega, gravity),
-        omega,
-        angle: cosSquaredAngle(r),
+      // Jittered within its step, so neighbouring cascades' waves don't share lengths.
+      const target = from * Math.exp(r.range(0.25, 0.75) * step);
+      const angle = spreadAngle(r, target / peak);
+      // The nearest wavevector the tile repeats with (never none).
+      const n = (size * target * target) / gravity / (Math.PI * 2);
+      let nx = Math.round(n * Math.cos(angle));
+      const nz = Math.round(n * Math.sin(angle));
+      if (nx === 0 && nz === 0) nx = 1;
+      const k = (Math.PI * 2 * Math.hypot(nx, nz)) / size;
+      waves.push({
+        length: (Math.PI * 2) / k,
+        omega: Math.sqrt(gravity * k),
+        angle: Math.atan2(nz, nx),
         slope: Math.sqrt(2 * slopeVariance(wind, from, to, gravity)),
         phase: r.range(0, Math.PI * 2),
+        nx,
+        nz,
       });
     }
-    sets.push(set);
+    waves.sort((x, y) => y.length - x.length);
+    cascades.push({ size, waves });
   }
-  return { wind, gravity, peakOmega: peak, meanSquareSlope, sets };
+  return { wind, gravity, peakOmega: peak, meanSquareSlope, cascades };
 }
 
-/** The slope variance of one set's drawn waves (a sine of slope amplitude s has variance s² / 2). */
-export function drawnVariance(set: readonly WaveComponent[]): number {
+/** The slope variance of some drawn waves (a sine of slope amplitude s has variance s² / 2). */
+export function drawnVariance(waves: readonly WaveComponent[]): number {
   let v = 0;
-  for (const w of set) v += (w.slope * w.slope) / 2;
+  for (const w of waves) v += (w.slope * w.slope) / 2;
   return v;
 }
 
-/** An angle in (−π/2, π/2) with density ∝ cos²: most waves run with the wind, none across it. */
-function cosSquaredAngle(rng: Rng): number {
+/** The slope variance of all a sea's drawn waves. */
+export function seaVariance(waves: SeaWaves): number {
+  return waves.cascades.reduce((sum, c) => sum + drawnVariance(c.waves), 0);
+}
+
+/**
+ * Hasselmann et al. (1980), JONSWAP's directional spreading: D(θ) ∝
+ * cos^2s(θ/2), narrowest at the peak, s = 6.97 (ω/ω_p)^4.06 below it and
+ * 9.77 (ω/ω_p)^−2.52 above (as WAFO gives them).
+ */
+export function spreadPower(ratio: number): number {
+  return ratio < 1 ? 6.97 * ratio ** 4.06 : 9.77 * ratio ** -2.52;
+}
+
+/** An angle to the wind in (−π, π] with density ∝ cos^2s(θ/2) at frequency `ratio` × the peak's (rejection sampling). */
+function spreadAngle(rng: Rng, ratio: number): number {
+  const s = spreadPower(ratio);
   for (;;) {
-    const a = rng.range(-Math.PI / 2, Math.PI / 2);
-    const c = Math.cos(a);
-    if (rng.next() < c * c) return a;
+    const a = rng.range(-Math.PI, Math.PI);
+    if (rng.next() < Math.abs(Math.cos(a / 2)) ** (2 * s)) return a;
   }
 }
 
@@ -189,3 +240,74 @@ export function stormWind(kind: string, strength: number): number {
   return (STORM_WIND[kind] ?? 0) * Math.max(0, Math.min(1, strength));
 }
 
+
+// --- Shore waves (shoaling) ---
+
+/**
+ * McCowan's (1894) breaker index: a wave breaks in water about this much
+ * deeper than it is high (H_b / h_b ≈ 0.78), so in the surf zone its height
+ * is capped at it. See docs/research/sea-waves.md.
+ */
+export const BREAKER_INDEX = 0.78;
+
+/**
+ * Wavenumber (1/m) of a wave of angular frequency `omega` in water `depth`
+ * metres deep, from the dispersion relation ω² = g k tanh(k h) by Fenton &
+ * McKee's (1990) explicit approximation, k h = k₀h · coth((k₀h)^¾)^⅔ (k₀ the
+ * deep-water ω²/g). The shader mirrors it.
+ */
+export function shoalWavenumber(omega: number, depth: number, gravity = STANDARD_GRAVITY): number {
+  const k0 = (omega * omega) / gravity;
+  const x = k0 * Math.max(depth, 1e-9);
+  return k0 * Math.pow(1 / Math.tanh(Math.pow(x, 0.75)), 2 / 3);
+}
+
+/**
+ * How much higher a wave is in water `depth` m deep than in deep water, by
+ * energy flux: K_s = √(c_g0 / c_g), c_g = (ω/k)·½(1 + 2kh / sinh 2kh), which
+ * with ω² = g k₀ is √(k / (k₀ (1 + 2kh / sinh 2kh))). Green's law (h^−¼) in
+ * the shallows. The shader mirrors it.
+ */
+export function shoalingCoefficient(omega: number, depth: number, gravity = STANDARD_GRAVITY): number {
+  const k0 = (omega * omega) / gravity;
+  const k = shoalWavenumber(omega, depth, gravity);
+  const kh2 = 2 * k * Math.max(depth, 1e-9);
+  const g = kh2 > 30 ? 0 : kh2 / Math.sinh(kh2);
+  return Math.sqrt(k / (k0 * (1 + g)));
+}
+
+/**
+ * The phase (radians) a wave of `omega` gains running out from the
+ * waterline to `depth` metres over a seabed sloping `slope` (m of depth per
+ * m out): θ(d) = ∫₀^d k(h) dh / slope. Its crests lie along the depth
+ * contours (a wave refracts until it does) and bunch up as the water shoals.
+ * Integrated in s = √h, where the shallow-water k ∝ h^−½ is smooth.
+ */
+export function shorePhase(omega: number, depth: number, slope: number, gravity = STANDARD_GRAVITY): number {
+  if (depth <= 0) return 0;
+  const steps = 64;
+  const top = Math.sqrt(depth);
+  let sum = 0;
+  for (let i = 0; i < steps; i++) {
+    const s = ((i + 0.5) / steps) * top;
+    sum += shoalWavenumber(omega, s * s, gravity) * 2 * s;
+  }
+  return (sum * top) / steps / slope;
+}
+
+/** The two swells that run up a shore: at the spectrum's peak and a shorter one, each with half the energy of a sea of significant height H⅓. */
+export const SHORE_SWELLS = [1, 1.3] as const;
+
+export interface ShoreSwell {
+  /** Angular frequency, rad/s. */
+  omega: number;
+  /** Height in deep water, m. */
+  height: number;
+}
+
+/** The swells running up a sea's shores at its wind (none when calm). */
+export function shoreSwells(waves: SeaWaves): ShoreSwell[] {
+  if (waves.peakOmega <= 0) return [];
+  const height = significantHeight(waves.wind, waves.gravity) / Math.SQRT2;
+  return SHORE_SWELLS.map((f) => ({ omega: waves.peakOmega * f, height }));
+}

@@ -69,7 +69,7 @@ export interface GameState {
   } | null;
   /** The galaxy map, when there. */
   galaxy: { spin: number; current: number; destination: number | null } | null;
-  graphics: { weather: boolean; plants: boolean; animals?: boolean; wireframe: boolean };
+  graphics: { weather: boolean; plants: boolean; animals?: boolean; rocks?: boolean; wireframe: boolean };
   /**
    * Bodies blown apart by the planet buster (missing in dumps from before it): this system's, each with its
    * blast's system time, and how many there are in the whole game. Also whether one was going off.
@@ -267,7 +267,7 @@ export function summaryLines(dump: Omit<DebugDump, 'images'>): string[] {
     const moving = s.transitioning ? ` · mid-transition${s.crossfade !== null ? ` (crossfade ${s.crossfade.toFixed(2)})` : ''}` : '';
     lines.push(`Where: ${where(s)} · seed ${s.seed ?? 'default'} · star ${s.star} · t=${time.toFixed(2)} s${moving}`);
     const g = s.graphics;
-    lines.push(`Camera: distance ${s.orbit.distance.toFixed(1)} · fov ${s.camera.fov} · weather ${g.weather ? 'on' : 'off'} · plants ${g.plants ? 'on' : 'off'}${g.animals === false ? ' · animals off' : ''}${g.wireframe ? ' · wireframe' : ''}`);
+    lines.push(`Camera: distance ${s.orbit.distance.toFixed(1)} · fov ${s.camera.fov} · weather ${g.weather ? 'on' : 'off'} · plants ${g.plants ? 'on' : 'off'}${g.animals === false ? ' · animals off' : ''}${g.rocks === false ? ' · rocks off' : ''}${g.wireframe ? ' · wireframe' : ''}`);
     const c = s.cargo;
     const animalsHere = (c?.surface?.removedAnimals?.length ?? 0) + (c?.surface?.released?.length ?? 0);
     if (c && (c.inventory.stacks.length > 0 || c.selected || c.inFlight.length > 0 || c.surface?.planted?.length || c.surface?.removed.length || animalsHere > 0)) {

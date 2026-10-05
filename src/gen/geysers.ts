@@ -21,6 +21,12 @@ import type { Vec3Tuple } from './starActivity';
  *   then, throwing droplets and a buoyant cloud of steam that drifts off.
  * - sulphur: airless, Io-hot bodies have Io's volcanic plumes, wide umbrellas
  *   of SO₂ and dust: many small Prometheus-type and the odd tall Pele-type.
+ * - fumarole: every other airless rocky body warm enough inside vents a
+ *   little: fissures smoking with gas and dust, flickering with flames and
+ *   throwing glowing embers. Real airless bodies still outgas (the Moon's
+ *   radon from Aristarchus and Kepler, the argon Apollo 17 saw puffing out
+ *   with moonquakes, Mercury's hollows), but far too faintly to see: this one
+ *   is deliberately stylised, so barren worlds aren't dead (see geysers.md).
  *
  * Each vent erupts on its own cycle, a fixed period per vent with one seeded
  * event per cycle (like the lava's slots, gen/lavaActivity.ts), so what is
@@ -34,7 +40,7 @@ import type { Vec3Tuple } from './starActivity';
  * docs/research/geysers.md.
  */
 
-export type GeyserKind = 'cryo' | 'steam' | 'sulphur';
+export type GeyserKind = 'cryo' | 'steam' | 'sulphur' | 'fumarole';
 
 /**
  * Least heat flow (W/m²) for cryogeysers: just under Enceladus's measured
@@ -48,6 +54,16 @@ export const STEAM_MIN_HEAT_FLOW = 0.046;
 export const SULPHUR_MIN_HEAT_FLOW = 1;
 /** Io-style umbrella plumes need near vacuum (Io's SO₂ air is ~1 nbar); a Venus-like lava world has none. */
 export const SULPHUR_MAX_PRESSURE = 0.001;
+/**
+ * Least heat flow for fumaroles on airless rock, W/m²: a tenth of the Moon's
+ * measured 16–21 mW/m² (Apollo 17 and 15), so most airless rocky bodies vent
+ * a little (about 60% of the barren ones; stylised, see geysers.md), up to
+ * FUMAROLE_FULL_HEAT_FLOW where they're at their busiest.
+ */
+export const FUMAROLE_MIN_HEAT_FLOW = 0.002;
+export const FUMAROLE_FULL_HEAT_FLOW = 0.2;
+/** Rocky bodies that can have fumaroles (airless). */
+const FUMAROLE_TYPES: readonly (PlanetType | MoonType)[] = ['barren', 'desert', 'lava'];
 /** Below this pressure (bar) there's no wind to carry a plume; Triton's 14 µbar still does. */
 export const WIND_MIN_PRESSURE = 1e-6;
 
@@ -78,6 +94,8 @@ export const GEYSER_SPECS: Record<GeyserKind, GeyserSpec> = {
   steam: { period: [20, 55], duty: [0.2, 0.35], rate: 30, spread: 0.08, size: 0.3, minSize: 1 * GLOBE_SIZE_FACTOR, growth: 4 },
   // Long-lived, like Io's plumes (months to years).
   sulphur: { period: [45, 90], duty: [0.6, 0.9], rate: 16, spread: 0.6, size: 0.3, minSize: 1.2 * GLOBE_SIZE_FACTOR, growth: 2.5 },
+  // Smoking most of the time, swelling and dying down every so often (stylised).
+  fumarole: { period: [14, 32], duty: [0.55, 0.9], rate: 16, spread: 0.35, size: 0.3, minSize: 0.7 * GLOBE_SIZE_FACTOR, growth: 3.5 },
 };
 
 /**
@@ -85,9 +103,9 @@ export const GEYSER_SPECS: Record<GeyserKind, GeyserSpec> = {
  * Like the lava's, every length and speed here grows with the globes (GLOBE_SIZE_FACTOR) and no time does,
  * so plumes look the same next to the planet whatever its size.
  */
-export const PEAK_1G: Record<'cryo' | 'steam', number> = { cryo: 6 * GLOBE_SIZE_FACTOR, steam: 5 * GLOBE_SIZE_FACTOR };
+export const PEAK_1G: Record<'cryo' | 'steam' | 'fumarole', number> = { cryo: 6 * GLOBE_SIZE_FACTOR, steam: 5 * GLOBE_SIZE_FACTOR, fumarole: 3 * GLOBE_SIZE_FACTOR };
 /** Plumes never climb higher than this fraction of the body's radius. Io's are real fractions (sulphur). */
-export const MAX_PEAK_FRACTION: Record<GeyserKind, number> = { cryo: 0.6, steam: 0.06, sulphur: 0.23 };
+export const MAX_PEAK_FRACTION: Record<GeyserKind, number> = { cryo: 0.6, steam: 0.06, sulphur: 0.23, fumarole: 0.05 };
 /** No plume is lower than this, units (a small moon's Prometheus-type plume would be a speck on the globe). */
 export const MIN_PEAK = 3 * GLOBE_SIZE_FACTOR;
 /** Io's plumes as fractions of its 1821.49 km radius: Prometheus-type 50–120 km, Pele-type 300–426 km. */
@@ -95,6 +113,13 @@ export const IO_PLUMES = { prometheus: [50 / 1821.49, 120 / 1821.49], pele: [300
 
 /** Steam: the rising cloud. Drag (1/s) that stops the jet, buoyancy (units/s², upwards) and lifetime range. */
 export const STEAM_PUFF = { drag: 1.2, buoyancy: 0.35 * GLOBE_SIZE_FACTOR, life: [5, 9] as const, share: 0.7 };
+/**
+ * Fumaroles: the smoke (stalls like steam, then hangs and spreads; it would
+ * fan out into the vacuum, but stylised to billow), the flames at the mouth
+ * (short-lived) and the embers' share (the rest), thrown on short arcs.
+ */
+export const FUMAROLE_SMOKE = { drag: 1.1, buoyancy: 0.12 * GLOBE_SIZE_FACTOR, life: [4, 8] as const, share: 0.5 };
+export const FUMAROLE_FLAME = { drag: 3, buoyancy: 0.6 * GLOBE_SIZE_FACTOR, life: [0.5, 1.2] as const, share: 0.25 };
 /** Drag (1/s) on cryo grains where there's air. */
 export const CRYO_AIR_DRAG = 0.3;
 /** Wind speed range, units/s, where there's air. */
@@ -154,7 +179,14 @@ export function geyserKind(type: PlanetType | MoonType, climate: ClimateData | n
     return heatFlow >= CRYO_MIN_HEAT_FLOW ? 'cryo' : null;
   if (waterState === 'none' && (type === 'lava' || type === 'barren') && heatFlow >= SULPHUR_MIN_HEAT_FLOW && pressure < SULPHUR_MAX_PRESSURE)
     return 'sulphur';
+  if (FUMAROLE_TYPES.includes(type) && pressure < SULPHUR_MAX_PRESSURE && heatFlow >= FUMAROLE_MIN_HEAT_FLOW) return 'fumarole';
   return null;
+}
+
+/** How busy a body's fumaroles are, 0–1: its heat flow on a log scale from FUMAROLE_MIN_HEAT_FLOW to FUMAROLE_FULL_HEAT_FLOW. */
+export function fumaroleHeat(heatFlow: number): number {
+  const t = Math.log(heatFlow / FUMAROLE_MIN_HEAT_FLOW) / Math.log(FUMAROLE_FULL_HEAT_FLOW / FUMAROLE_MIN_HEAT_FLOW);
+  return Math.min(1, Math.max(0, t));
 }
 
 /** How active a body's geysers are, 0–1, from its internal heat (climate.geothermal) over its kind's range. */
@@ -179,7 +211,7 @@ export function geyserActivity(body: GeyserBody, radius: number, reliefScale = 1
   if (!kind || !body.climate) return null;
   const climate = body.climate;
   const rng = new Rng(hashSeed(body.seed, 'geysers'));
-  const heat = geyserHeat(kind, climate.geothermal);
+  const heat = kind === 'fumarole' ? fumaroleHeat(climate.heatFlow) : geyserHeat(kind, climate.geothermal);
   const spec = GEYSER_SPECS[kind];
   const g = Math.max(MIN_ARC_GRAVITY, climate.gravity);
   const gravity = arcGravity(climate.gravity);
@@ -291,9 +323,18 @@ function placeVents(rng: Rng, kind: GeyserKind, body: GeyserBody, heat: number):
       const count = rng.int(2, 4);
       for (let v = 0; v < count; v++) out.push(offset(centre, heading, rng.range(-0.12, 0.12)));
     }
+  } else if (kind === 'fumarole') {
+    // Fissures here and there, each smoking from a row of vents a few units apart.
+    const fissures = 2 + Math.round(4 * heat);
+    for (let f = 0; f < fissures; f++) {
+      const centre = randomDirection(rng);
+      const heading = rng.range(0, Math.PI * 2);
+      const count = rng.int(3, 5);
+      for (let v = 0; v < count; v++) out.push(offset(centre, heading, rng.range(-0.035, 0.035)));
+    }
   } else {
-    // Io's plumes rise from volcanic centres all over the surface.
-    const count = 2 + Math.round(4 * heat);
+    // Io's plumes rise from volcanic centres all over the surface (Io has ~150 active at a time).
+    const count = 3 + Math.round(6 * heat);
     for (let v = 0; v < count; v++) out.push(randomDirection(rng));
   }
   return out;
@@ -407,8 +448,8 @@ export function plumePoint(
 // --- Eruptions ---
 
 /** Particle styles: how each one moves and looks (the shader's colour code). */
-export type ParticleStyle = 'cryo' | 'puff' | 'droplet' | 'sulphur';
-export const PARTICLE_CODE: Record<ParticleStyle, number> = { cryo: 0, puff: 1, droplet: 2, sulphur: 3 };
+export type ParticleStyle = 'cryo' | 'puff' | 'droplet' | 'sulphur' | 'smoke' | 'ember' | 'flame';
+export const PARTICLE_CODE: Record<ParticleStyle, number> = { cryo: 0, puff: 1, droplet: 2, sulphur: 3, smoke: 4, ember: 5, flame: 6 };
 
 export interface GeyserEvent {
   /** Which vent, and which of its cycles. */
@@ -427,6 +468,7 @@ export interface GeyserEvent {
 /** Longest a particle from `activity`'s vent can live, seconds. */
 export function maxParticleLife(activity: GeyserActivity, vent: GeyserVent): number {
   if (activity.kind === 'steam') return Math.max(STEAM_PUFF.life[1], landingTime(vent.speed, activity.drag, activity.gravity));
+  if (activity.kind === 'fumarole') return Math.max(FUMAROLE_SMOKE.life[1], landingTime(vent.speed, activity.drag, activity.gravity));
   return landingTime(vent.speed, activity.drag, activity.gravity);
 }
 
@@ -520,6 +562,45 @@ export function geyserParticle(rng: Rng, activity: GeyserActivity, event: Geyser
       brightness: rng.range(0.6, 1),
     };
   }
+  if (activity.kind === 'fumarole') {
+    const roll = rng.next();
+    if (roll < FUMAROLE_SMOKE.share + FUMAROLE_FLAME.share) {
+      // Smoke billowing up and hanging, or a lick of flame at the mouth.
+      const flame = roll >= FUMAROLE_SMOKE.share;
+      const m = flame ? FUMAROLE_FLAME : FUMAROLE_SMOKE;
+      const up = vent.peak * m.drag * strength * (flame ? rng.range(0.12, 0.3) : rng.range(0.5, 1));
+      return {
+        style: flame ? 'flame' : 'smoke',
+        start,
+        life: rng.range(m.life[0], m.life[1]),
+        up: up * Math.cos(tilt),
+        side: up * Math.sin(tilt),
+        tangent: dir,
+        drag: m.drag,
+        gravity: -m.buoyancy,
+        size: baseSize * (flame ? rng.range(0.6, 1) : rng.range(0.7, 1.2)),
+        growth: flame ? 1.8 : spec.growth,
+        brightness: rng.range(0.6, 1),
+      };
+    }
+    // Embers: thrown on short arcs, glowing and cooling as they fall.
+    const speed = vent.speed * strength * rng.range(0.25, 0.7);
+    const t = Math.min(1, tilt * 1.8);
+    const up = speed * Math.cos(t);
+    return {
+      style: 'ember',
+      start,
+      life: landingTime(up, activity.drag, activity.gravity),
+      up,
+      side: speed * Math.sin(t),
+      tangent: dir,
+      drag: activity.drag,
+      gravity: activity.gravity,
+      size: baseSize * rng.range(0.12, 0.2),
+      growth: 0.7,
+      brightness: rng.range(0.6, 1),
+    };
+  }
   const style: ParticleStyle = activity.kind === 'steam' ? 'droplet' : activity.kind;
   // Most grains are slower than the fastest: a filled fan rather than a shell.
   const speed = vent.speed * strength * rng.range(0.45, 1);
@@ -608,5 +689,5 @@ export function maxGeyserParticles(activity: GeyserActivity): number {
 
 /** HUD wording for a body's geysers. */
 export function describeGeysers(kind: GeyserKind): string {
-  return kind === 'cryo' ? 'cryogeysers' : kind === 'steam' ? 'steam geysers' : 'sulphur plumes';
+  return kind === 'cryo' ? 'cryogeysers' : kind === 'steam' ? 'steam geysers' : kind === 'fumarole' ? 'smoking vents' : 'sulphur plumes';
 }

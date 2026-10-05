@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { evaluateClimate, type ClimateData, type ClimateSetting, type ClimateState } from '../src/gen/climate';
 import { generateGalaxy } from '../src/gen/galaxy';
 import {
+  FUMAROLE_FULL_HEAT_FLOW,
+  FUMAROLE_MIN_HEAT_FLOW,
   GeyserSchedule,
+  fumaroleHeat,
   MAX_PEAK_FRACTION,
   PEAK_1G,
   TIGER_STRIPES,
@@ -75,15 +78,25 @@ describe('which bodies have geysers', () => {
     expect(geyserKind('lava', io)).toBe('sulphur');
     // A Venus: hot enough, but its thick air smothers Io-style plumes.
     expect(geyserKind('lava', venus)).toBeNull();
-    expect(geyserKind('barren', moon)).toBeNull();
+    // Airless rock warm enough inside smokes a little (stylised fumaroles).
+    expect(geyserKind('barren', moon)).toBe('fumarole');
+    expect(geyserKind('desert', moon)).toBe('fumarole');
+    const cold = climate({ insolation: 0.01, gravity: 0.01, escapeVelocity: 0.1, heatFlow: FUMAROLE_MIN_HEAT_FLOW / 2 }, { surfaceAlbedo: 0.1 });
+    expect(geyserKind('barren', cold)).toBeNull();
+    // Not where there's air, nor on ice (cryo's threshold rules there).
+    expect(geyserKind('barren', earth)).toBeNull();
+    expect(geyserKind('ice', moon)).toBeNull();
     expect(geyserKind('gas', earth)).toBeNull();
     expect(geyserKind('terran', null)).toBeNull();
   });
 
   it('shows every kind across the galaxy', () => {
-    for (const kind of ['cryo', 'steam', 'sulphur'] as const) expect(ofKind(kind).length).toBeGreaterThan(5);
+    for (const kind of ['cryo', 'steam', 'sulphur', 'fumarole'] as const) expect(ofKind(kind).length).toBeGreaterThan(5);
     // ...and many solid bodies have none.
-    expect(bodies.length - active.length).toBeGreaterThan(active.length);
+    expect(bodies.length - active.length).toBeGreaterThan(active.length * 0.5);
+    // Most airless barren bodies vent now.
+    const barren = bodies.filter((b) => b.body.type === 'barren' && b.body.climate!.pressure < 0.001);
+    expect(barren.filter((b) => b.activity).length).toBeGreaterThan(barren.length * 0.5);
   });
 
   it('follows the climate', () => {
@@ -92,6 +105,10 @@ describe('which bodies have geysers', () => {
       if (activity.kind === 'steam') expect(c.waterState).toBe('liquid');
       if (activity.kind === 'cryo') expect(c.waterState).toBe('ice');
       if (activity.kind === 'sulphur') expect(c.heatFlow).toBeGreaterThanOrEqual(1);
+      if (activity.kind === 'fumarole') {
+        expect(c.pressure).toBeLessThan(0.001);
+        expect(c.heatFlow).toBeGreaterThanOrEqual(FUMAROLE_MIN_HEAT_FLOW);
+      }
     }
   });
 });
@@ -271,6 +288,47 @@ describe('eruptions', () => {
       }
       expect(spawned.length).toBeGreaterThan(0);
       expect(held).toBeLessThanOrEqual(bound);
+    }
+  });
+});
+
+describe('fumaroles', () => {
+  it('get busier with the heat flow, on a log scale', () => {
+    expect(fumaroleHeat(FUMAROLE_MIN_HEAT_FLOW)).toBe(0);
+    expect(fumaroleHeat(FUMAROLE_FULL_HEAT_FLOW)).toBe(1);
+    expect(fumaroleHeat(Math.sqrt(FUMAROLE_MIN_HEAT_FLOW * FUMAROLE_FULL_HEAT_FLOW))).toBeCloseTo(0.5, 6);
+    expect(fumaroleHeat(10)).toBe(1);
+  });
+
+  it('smoke, flicker with flames and throw embers that fall back', () => {
+    const sample = ofKind('fumarole').slice(0, 5);
+    expect(sample.length).toBeGreaterThan(0);
+    const counts: Record<string, number> = {};
+    for (const { body, activity } of sample) {
+      for (let v = 0; v < activity.vents.length; v++) {
+        const event = geyserEvent(activity, body.seed, v, 3);
+        if (!event) continue;
+        const rng = new Rng(event.seed);
+        for (let i = 0; i < event.particles; i++) {
+          const p = geyserParticle(rng, activity, event, i);
+          counts[p.style] = (counts[p.style] ?? 0) + 1;
+          if (p.style === 'ember') expect(plumeHeight(p.up, p.drag, p.gravity, p.life)).toBeCloseTo(0, 3);
+          if (p.style === 'smoke' || p.style === 'flame') expect(p.gravity).toBeLessThan(0);
+          expect(p.start + p.life).toBeLessThanOrEqual(event.end + 1e-9);
+        }
+      }
+    }
+    const total = (counts.smoke ?? 0) + (counts.ember ?? 0) + (counts.flame ?? 0);
+    expect(total).toBeGreaterThan(100);
+    expect(counts.smoke! / total).toBeGreaterThan(0.4);
+    expect(counts.flame! / total).toBeGreaterThan(0.15);
+    expect(counts.ember! / total).toBeGreaterThan(0.15);
+  });
+
+  it('stand in rows along fissures, low on the body', () => {
+    for (const { radius, activity } of ofKind('fumarole').slice(0, 20)) {
+      expect(activity.vents.length).toBeGreaterThanOrEqual(6);
+      for (const v of activity.vents) expect(v.peak).toBeLessThanOrEqual(MAX_PEAK_FRACTION.fumarole * radius + 1e-9);
     }
   });
 });

@@ -105,3 +105,74 @@ Which bodies (the game's own code, `geyserKind` over 1500 systems of seed 1337; 
 - The steam threshold (half Earth's heat flow) and the stripes on every cryo moon (in reality most icy moons, e.g. Ganymede, Callisto, Titan, show none) are gameplay choices. The heat threshold does leave Ganymede analogues without them.
 - Triton's plumes are thought to be driven by sunlight on nitrogen ice (a solid-state greenhouse), not internal heat, so a Triton analogue in the game gets them only if its heat flow passes the cryo threshold.
 - Enceladus feeding Saturn's E ring (a faint ring of ice along a strongly active moon's orbit in the system view) is not done.
+
+# Fumaroles on airless rock, and the vents' sound
+
+## Question
+
+A follow-up asked for more smoke, fire and geysers on barren and airless worlds, with sound. Before this, under 3% of airless barren bodies vented: 38 of 1356 in the first 400 systems of galaxy 1337, all of them Io-hot. That needs:
+
+1. **Which airless rocky bodies vent at all in reality, and how much heat they have.**
+2. **How hot a vent's gas is**, and when rock glows.
+3. **What a venting jet sounds like.**
+
+It feeds `gen/geysers.ts` (the `fumarole` kind, its vents and particles), `planet/Geysers.ts` (smoke, flames and embers), `audio/ventMix.ts` and `planet/VentSounds.ts`, and the synthesised cues (`scripts/ventSounds.sh`).
+
+## Sources
+
+All accessed 2026-10-04.
+
+- **Moon's heat flow**, Nagihara et al., LPSC 2018 #1470 (https://www.hou.usra.edu/meetings/lpsc2018/pdf/1470.pdf): "Apollo 15 site (21 mW/m2) was greater than … Apollo 17 site (16 mW/m2)".
+- **Mercury's heat flow**, models only (Fleury et al. 2024, GRL, https://elib.dlr.de/208730/): present-day surface maps spanning "12–20 mW/m²".
+- **The Moon still vents**, Lawson et al. 2002 (https://www.osti.gov/servlets/purl/976310):
+  - "radon gas is presently emanating from the vicinity of craters Aristarchus and Kepler".
+  - Po-210 maps "vents which have been active over the last approximately 60 years".
+  - On Apollo 17, "argon-40 is released from the lunar interior every few months, apparently in concert with some of the shallow moonquakes".
+- **Mercury's hollows** (DPS one-pager): "The pits may be actively forming today"; volatiles "escape the rocks as gas, leading to collapse".
+- **Fumarole temperatures**, USGS Volcano Hazards Program: "range in temperature from boiling up to several hundred degrees (about 400 °C or 750 °F)".
+- **Draper point** (Draper 1847, via Wikipedia's raw page): "977 °F" (525 °C, 798 K), "above which almost all solid materials visibly glow".
+- **Jet noise**, McKee et al. 2017, a fumarole at Aso (https://www.osti.gov/pages/servlets/purl/1366922):
+  - The jet is "~2.5 m" across and "~260°C", moving at "79 to 132 m/s".
+  - Its sound is a "7-10 Hz spectral peak", "predominantly below 20 Hz".
+  - The Strouhal number "asymptotically approaches a constant of ~0.19, independent of jet temperature" (Tam et al. 1996), so f = St·U/D.
+
+## Measurements
+
+The Aso jet's peak, f = 0.19·U/D:
+- 0.19·79/2.5 = 6.0 Hz and 0.19·132/2.5 = 10 Hz, matching the measured 7–10 Hz.
+- A small vent hisses in the audible band: D = 0.1 m at 100 m/s gives ~190 Hz, and D = 2 cm at 200 m/s ~1.9 kHz.
+
+Heat flow over the airless bodies of the first 400 systems (galaxy 1337), and the share at or above each threshold among those with no geysers before:
+
+| type | count | q10 | median | q90 | ≥ 0.001 | ≥ 0.002 | ≥ 0.005 |
+|---|---|---|---|---|---|---|---|
+| barren | 1356 | 0.0002 | 0.005 | 0.17 | 0.71 | 0.61 | 0.48 |
+| desert | 53 | 0.008 | 0.025 | 0.10 | 1.00 | 0.98 | 0.96 |
+
+## Game mapping
+
+- **Kind** (`geyserKind`): *fumarole*, for an airless (under 1 mbar) barren, desert or lava body that isn't Io-hot, with heat flow ≥ 0.002 W/m² (`FUMAROLE_MIN_HEAT_FLOW`).
+  - That is a tenth of the Moon's measured 16–21 mW/m², so about 60% of airless barren bodies vent, the Moon included.
+  - Deliberately stylised: the real Moon's radon and argon are far too faint to see. Its venting today, and Mercury's hollows, are the precedent.
+- **Activity.** `fumaroleHeat` runs on a log scale from 0.002 to 0.2 W/m² (`FUMAROLE_FULL_HEAT_FLOW`), since the bodies span two orders of magnitude.
+- **Vents** sit in 2–6 fissures by heat, each 3–5 vents within ±0.035 rad along a heading.
+- **Plumes** reach 3 units × GLOBE_SIZE_FACTOR at 1 g (g^−½), capped at 5% of the radius. Each vent smokes every 14–32 s for 55–90% of it.
+- **Particles:**
+  - *Smoke* (half): stalls like steam (drag 1.1/s) and hangs, rising slowly and growing 3.5×. It would really fan out into the vacuum, so this is stylised to billow. Dark grey, lit by the sun, and lit orange from below by the fire for its first 30%.
+  - *Flames* (a quarter): short-lived (0.5–1.2 s) licks at the mouth, yellow-orange going red.
+  - *Embers* (the rest): thrown on short ballistic arcs, cooling from yellow-white to a dull red as they fall. Glowing rock is over the Draper point, 525 °C, so hotter than most fumaroles' gas; they stand for the hottest vents.
+  - Flames and embers glow by their own light: the shader blends premultiplied, adding them to what's behind instead of covering it.
+- **Io-style plumes** come from more volcanic centres: 3–9, up from 2–6 (Io has ~150 active at a time).
+- **Sound.** The loops carry no recordings: `scripts/ventSounds.sh` synthesises them from filtered noise.
+  - *geyserHiss* (cryo, steam): a surging 1.1–6.5 kHz hiss, where a small vent's jet noise falls, over a low roar.
+  - *ventRumble* (fumarole, sulphur): a 160 Hz rumble, the 350–1800 Hz roar of flame and crackling.
+  - *ventBurst*: a whoosh and a thump as an eruption starts.
+  - `VentSounds` sets the loop's level from the vents erupting near the camera. Each counts 1/(1 + (d/reach)²), with the reach 2 plume heights and at least 10 units, as the stars' loops fall off. Each is weighted by how far into its eruption it is (`eruptionLoudness`). They sum to 1 − e^−Σ.
+  - Pitch by kind: cryo 1.2, Io-style 0.75.
+  - A burst is heard when a vent loud enough alone (0.3) starts, at most every 1.5 s.
+  - Airless bodies would really be silent near a vent, as the descent is (`reentry` is silent there). Here, as for the stars in space, the game plays them anyway.
+
+## Open questions
+
+- A real Io-hot or Moon-like body's vents are invisible from orbit or don't exist. The fumaroles are a gameplay choice, and the threshold is set by how many bodies it should touch, not by any measurement.
+- The real acoustic spectra of geysers (Old Faithful's 10–40 Hz and 50–65 Hz) were seen only in search summaries. The loops are pitched where a small jet's noise would be, not measured against them.
