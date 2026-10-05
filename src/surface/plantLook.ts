@@ -3,6 +3,7 @@ import type { PlantKind, PlantSpecies } from '../gen/plants';
 import { growPlant, type PlantSkeleton } from '../gen/plantForm';
 import { groundDepthPass } from '../world/groundDepth';
 import { PLANT_LOD_COUNT, buildPlantMesh, type PlantMeshData } from './plantMesh';
+import { SHAKE_VERTEX, SHAKE_VERTEX_PARS, plantShakeUniforms } from './plantShake';
 
 /*
  * How plants look: each species' generated mesh (gen/plantForm.ts grows the
@@ -146,7 +147,9 @@ export function lodAt(ranges: readonly number[], distance: number, out: LodPosit
  * level the band the one before gave up, and past the last level's fade
  * nothing. The meshes are also drawn into the atmosphere's ground-depth texture
  * (GROUND_DETAIL_LAYER, see SurfaceEntities), so the haze stops at a tree
- * and doesn't wash it over with the haze of the ground behind it.
+ * and doesn't wash it over with the haze of the ground behind it. A plant the
+ * ship goes through shakes (plantShake.ts: shared uniforms, so nothing is
+ * rewritten per plant).
  */
 export function createPlantMaterial(lod: number, height: number, ranges: readonly number[]): { material: THREE.MeshStandardMaterial; uniforms: PlantFadeUniforms } {
   const uniforms: PlantFadeUniforms = {
@@ -161,13 +164,14 @@ export function createPlantMaterial(lod: number, height: number, ranges: readonl
   const material = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9 });
   material.customProgramCacheKey = () => 'plant-lod';
   material.onBeforeCompile = (shader) => {
-    Object.assign(shader.uniforms, uniforms);
+    Object.assign(shader.uniforms, uniforms, plantShakeUniforms);
     shader.uniforms.uDepthPass = groundDepthPass;
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying float vPlantDistance;\nuniform float uHeight;\nuniform float uRange;')
+      .replace('#include <common>', `#include <common>\nvarying float vPlantDistance;\nuniform float uHeight;\nuniform float uRange;${SHAKE_VERTEX_PARS}`)
       .replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
+        ${SHAKE_VERTEX}
         {
           // Distance to the camera in this plant's heights (an instance's up axis is scaled by the plant's size).
           vec3 plantCentre = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;

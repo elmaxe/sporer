@@ -60,6 +60,7 @@ import { CargoBeam } from '../cargo/CargoBeam';
 import { bodyGravity } from '../cargo/beam';
 import type { Inventory } from '../cargo/inventory';
 import { weatherKind } from '../gen/weather';
+import { PlantBrush } from '../surface/PlantBrush';
 import { Plantings } from '../surface/Plantings';
 import { GroundRocks } from '../surface/GroundRocks';
 import { rockSetup } from '../surface/rockSetup';
@@ -276,13 +277,6 @@ export class PlanetLevel extends Level implements ItemUser {
         get top() {
           return globe.top;
         },
-        // It flies over the plants, the planet's own and those set down (made after it, so looked up when asked).
-        obstacles: {
-          clearAlong: (from, to, atLeast) => {
-            const above = this.plants ? this.plants.clearAlong(from, to, atLeast) : atLeast;
-            return this.plantings ? this.plantings.clearAlong(from, to, above) : above;
-          },
-        },
       }),
     );
     this.setFlight(PLANET_VIEW_DISTANCE);
@@ -340,6 +334,8 @@ export class PlanetLevel extends Level implements ItemUser {
       ? this.add(new Radar(this.scene, animalsSetup.plan, animalsSetup.ground, this.ship, camera, this.frame, sfx, () => switches.isOn('radar'), debug, changes))
       : null;
     this.plantings = busted ? null : this.add(new Plantings(this.scene, changes));
+    // The plants the ship goes through shake: the planet's own and those set down (gone once it's busted).
+    this.add(new PlantBrush(this.ship, () => [this.plants, this.plantings], debug));
     this.plantTooltip = this.plantings
       ? this.add(new PlantTooltip(camera, input, this.plants, this.plantings, tooltip, this.animals, (ray, out) => globe.groundHit(ray, out)))
       : null;

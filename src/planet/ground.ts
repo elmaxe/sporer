@@ -26,10 +26,6 @@ export const groundParams = {
   sinkTime: 0.7,
   /** The hull never comes closer than this to the ground beneath it, whatever the smoothing says. */
   minClearance: 1.2,
-  /** Whether the ship flies over what stands on the ground (trees, bushes) instead of through it. */
-  collide: true,
-  /** The hull's lowest point keeps this far above the top of what stands on the ground. */
-  obstacleMargin: 0.4,
   /** Picking the ground with a ray: step as a share of the height above the ground, its limits, and bisection steps. */
   rayStepShare: 0.4,
   rayMinStep: 0.25,
@@ -47,16 +43,16 @@ export const HULL_RADIUS = 2;
 export const HULL_DEPTH = 0.56;
 
 /**
- * Things standing on the ground that the ship flies over (plants), queried
- * along the stretch it is about to cover.
+ * Things standing on the ground (plants) that the ship flies through, shaking
+ * them as it goes (surface/plantShake.ts), queried along the stretch it covered.
  */
 export interface Obstacles {
   /**
-   * The lowest radius at which the hull, anywhere on the short arc from unit
-   * direction `from` to `to`, clears everything standing there, or `atLeast` if
-   * that is higher (so a source can skip whatever can't reach it).
+   * Calls `visit` with the unit direction of everything standing on the
+   * ground that the hull, its centre `radius` from the planet's centre, passes
+   * through anywhere on the short arc from unit direction `from` to `to`.
    */
-  clearAlong(from: THREE.Vector3, to: THREE.Vector3, atLeast: number): number;
+  touchAlong(from: THREE.Vector3, to: THREE.Vector3, radius: number, visit: (x: number, y: number, z: number) => void): void;
 }
 
 const scratch = new THREE.Vector3();
@@ -127,9 +123,10 @@ export function aheadDirection(
  * the short arc from unit direction `from` to `to` (taken as the straight
  * chord, a few hull widths at most): an upright cylinder `crown` wide (radius)
  * round unit direction (`bx`, `by`, `bz`), up to radius `top` from the
- * planet's centre. Over the cylinder the hull's lowest point keeps
- * `obstacleMargin` above its top; nearer its rim the hull's underside is
- * shallower, so it may come lower. -Infinity if the hull never passes over it.
+ * planet's centre. Over the cylinder the hull's lowest point just touches its
+ * top; nearer its rim the hull's underside is shallower, so it may come lower.
+ * -Infinity if the hull never passes over it. A hull flying lower than this
+ * goes through it.
  */
 export function obstacleClearance(
   bx: number,
@@ -139,7 +136,6 @@ export function obstacleClearance(
   top: number,
   from: THREE.Vector3,
   to: THREE.Vector3,
-  p = groundParams,
 ): number {
   const ex = to.x - from.x;
   const ey = to.y - from.y;
@@ -151,7 +147,7 @@ export function obstacleClearance(
   const offset = Math.hypot(bx - from.x - ex * t, by - from.y - ey * t, bz - from.z - ez * t) * top - crown;
   if (offset >= HULL_RADIUS) return -Infinity;
   const rim = offset <= 0 ? 0 : offset / HULL_RADIUS;
-  return top + HULL_DEPTH * Math.sqrt(1 - rim * rim) + p.obstacleMargin;
+  return top + HULL_DEPTH * Math.sqrt(1 - rim * rim);
 }
 
 /**
