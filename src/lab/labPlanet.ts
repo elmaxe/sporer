@@ -635,17 +635,28 @@ export function decodeLab(text: string): LabState | null {
     if (typeof planet.radius !== 'number' || !Number.isFinite(planet.radius) || planet.radius <= 0) planet.radius = base.radius;
     planet.style = { ...base.style, ...p.style };
     if (planet.type !== 'gas' && !planet.climate) planet.climate = base.climate;
-    // Links from before the atmosphere was split into gases (and the terraforming levers) still open.
-    if (planet.climate) planet.climate = { ...planet.climate, state: upgradeState(planet.climate.state, planet.climate.setting.gravity) };
-    if (Array.isArray(planet.moons)) planet.moons = planet.moons.map((m) => (m.climate && !m.climate.gases ? { ...m, climate: upgradeClimate(m.climate) } : m));
     if (isSmallKind(planet.kind) && !planet.shape) planet.shape = base.shape;
     if (typeof planet.zone !== 'number' || !Number.isFinite(planet.zone)) planet.zone = base.zone;
-    const state: LabState = { planet, view: { ...DEFAULT_VIEW, ...raw.view } };
+    // Links from before the atmosphere was split into gases still open.
+    const state: LabState = { planet: withUpgradedClimate(planet), view: { ...DEFAULT_VIEW, ...raw.view } };
     if (raw.source && typeof raw.source.star === 'number') state.source = raw.source;
     return state;
   } catch {
     return null;
   }
+}
+
+/**
+ * A planet from a link or pasted JSON, its climate made whole: one from
+ * before the atmosphere was split into gases (a pressure and a composition)
+ * is turned into gases, and missing terraforming levers are untouched.
+ */
+export function withUpgradedClimate(planet: LabPlanet): LabPlanet {
+  const climate = planet.climate && { ...planet.climate, state: upgradeState(planet.climate.state, planet.climate.setting.gravity) };
+  const moons = Array.isArray(planet.moons)
+    ? planet.moons.map((m) => (m.climate && !m.climate.gases ? { ...m, climate: upgradeClimate(m.climate) } : m))
+    : planet.moons;
+  return { ...planet, climate, moons };
 }
 
 /** A climate state from a link, made whole: an older one (a pressure and a composition) is turned into gases. */

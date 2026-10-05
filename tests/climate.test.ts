@@ -11,6 +11,18 @@ import {
   climateSetting,
   climateState,
   climateStateOf,
+  changeState,
+  cloudCover,
+  cloudCovered,
+  compositionOf,
+  gasesOf,
+  hazeAlbedo,
+  opticalDepth,
+  titanGreenhouse,
+  totalPressure,
+  EARTH_OXYGEN_FRACTION,
+  GREENHOUSE,
+  NO_GASES,
   describeAtmosphere,
   describeClimate,
   evaluateClimate,
@@ -292,6 +304,163 @@ describe('generated climates', () => {
       if (planet.climate) expect(planet.atmosphere !== null).toBe(planet.climate.pressure >= 0.005);
       for (const m of planet.moons) expect(m.atmosphere !== null).toBe(m.climate.pressure >= 0.005);
     }
+  });
+});
+
+describe('the atmosphere as gases (terraforming.md)', () => {
+  const earthAir = state({ pressure: 1.014, composition: 'oxygenNitrogen', surfaceAlbedo: 0.294 });
+
+  it("splits Earth-like air at Earth's oxygen share, breathable at every pressure a living world is generated with", () => {
+    expect(earthAir.gases.o2 / 1.014).toBeCloseTo(EARTH_OXYGEN_FRACTION, 6);
+    expect(totalPressure(earthAir.gases)).toBeCloseTo(1.014, 12);
+    for (const p of [0.5, 0.7, 1, 2, 3.5, 5]) {
+      const g = gasesOf(p, 'oxygenNitrogen');
+      expect(totalPressure(g)).toBeCloseTo(p, 12);
+      expect(compositionOf(g)).toBe('oxygenNitrogen');
+    }
+  });
+
+  it('is breathable only with enough oxygen, not too much, and little CO₂', () => {
+    const air = (n2: number, o2: number, co2 = 0) => compositionOf({ n2, o2, co2, h2: 0 });
+    expect(air(0.78, 0.21)).toBe('oxygenNitrogen');
+    // La Rinconada's 0.113 bar is the floor; Everest's summit (0.07 bar of O₂) is below it.
+    expect(air(0.26, 0.07)).toBe('nitrogen');
+    expect(air(2, 0.6)).toBe('nitrogen'); // over half an atmosphere of O₂
+    expect(air(0.25, 0.15)).toBe('nitrogen'); // 37% O₂: a fire risk
+    expect(air(0.78, 0.21, 0.01)).toBe('nitrogen'); // 1% CO₂
+    expect(air(0.78, 0.21, 0.004)).toBe('oxygenNitrogen');
+    expect(compositionOf({ n2: 0.5, o2: 0.2, co2: 1, h2: 0 })).toBe('carbonDioxide');
+    expect(compositionOf({ ...NO_GASES })).toBe('none');
+  });
+
+  it('gives a pure atmosphere exactly the optical depth fitted on its reference body', () => {
+    const tau = GREENHOUSE.trace.tau0 * 1.014;
+    expect(opticalDepth(earthAir)).toBeCloseTo(tau, 12);
+    // Titan's N₂ (τ₀ P^4/3) carried as trace gas.
+    const titan = state({ pressure: 1.467, composition: 'nitrogen', greenhouse: 1.2 });
+    expect(opticalDepth(titan)).toBeCloseTo(1.2 * GREENHOUSE.nitrogen.tau0 * 1.467 ** (4 / 3), 12);
+    // Hydrogen: τ₀ (P/√g)^n.
+    const h2 = climateStateOf({ pressure: 300, composition: 'hydrogen', greenhouse: 1 }, 2);
+    expect(opticalDepth(h2, 2)).toBeCloseTo(GREENHOUSE.hydrogen.tau0 * (300 / Math.sqrt(2)) ** GREENHOUSE.hydrogen.n, 9);
+    // A CO₂ atmosphere carries no trace gas of its own.
+    expect(state({ pressure: 92, composition: 'carbonDioxide' }).greenhouse).toBe(0);
+  });
+
+  it('adds the gases up: N₂ given to a CO₂ world broadens its CO₂ and adds pressure', () => {
+    const mars = state({ pressure: 0.5, composition: 'carbonDioxide' });
+    const plus = { ...mars, gases: { ...mars.gases, n2: 1 } };
+    expect(opticalDepth(plus)).toBeGreaterThan(opticalDepth(mars));
+    expect(evaluateClimate(setting(0.43), plus).pressure).toBeCloseTo(1.5, 12);
+  });
+
+  it("keeps every generated body that isn't CO₂ exactly as before (the fingerprint of the first 800 systems)", () => {
+    // From the climates generated before the atmosphere was split into gases (docs/research/terraforming.md).
+    const lines: string[] = [];
+    for (const system of systems)
+      for (const p of system.planets)
+        for (const c of [p.climate, ...p.moons.map((m) => m.climate)]) {
+          if (!c || c.composition === 'carbonDioxide') continue;
+          lines.push(
+            [
+              c.composition,
+              c.pressure.toPrecision(9),
+              c.temperature.toFixed(6),
+              c.albedo.toFixed(9),
+              c.opticalDepth.toPrecision(9),
+              c.waterState,
+              c.habitability,
+              c.retentionClass,
+              c.leaking,
+            ].join('|'),
+          );
+        }
+    let h = 2166136261;
+    const text = lines.join('\n');
+    for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619) >>> 0;
+    expect(lines.length).toBe(5809);
+    expect(h.toString(16)).toBe('e7bb6306');
+  });
+});
+
+describe('CO₂ (terraforming.md)', () => {
+  const mars = (pressure: number) =>
+    evaluateClimate(setting(586.2 / S), state({ pressure, composition: 'carbonDioxide', surfaceAlbedo: 0.25 })).temperature;
+
+  it("warms Mars as Ramirez et al. 2014 found under today's Sun (their warming above 6.5 mbar)", () => {
+    // Ramirez Fig. 1, S/S₀ = 1: 218.1 K at 6.5 mbar; 227.4, 247.3, 264.1, 286.3 K at 0.1, 0.5, 1 and 2 bar.
+    const today = mars(0.0065);
+    for (const [p, t] of [
+      [0.1, 227.4],
+      [0.5, 247.3],
+      [1, 264.1],
+      [2, 286.3],
+    ] as const)
+      expect(Math.abs(mars(p) - today - (t - 218.1))).toBeLessThan(2);
+    // Zubrin & McKay 1993's fit (40 √P K) is the cooler of the two: within 15 K up to 3 bar.
+    for (const p of [0.5, 1, 3]) expect(Math.abs(mars(p) - today - 40 * Math.sqrt(p))).toBeLessThan(15);
+  });
+
+  it('thins the Venus cloud deck gradually: no jump as the pressure falls', () => {
+    const venus = (pressure: number) =>
+      evaluateClimate(setting(2601.3 / S), state({ pressure, composition: 'carbonDioxide', surfaceAlbedo: 0.1 }));
+    expect(venus(92).albedo).toBe(0.77);
+    expect(venus(30).albedo).toBe(0.77);
+    expect(venus(3).albedo).toBe(0.1);
+    expect(cloudCover({ composition: 'carbonDioxide', pressure: 3 * Math.sqrt(10) })).toBeCloseTo(0.5, 9);
+    // Every generated Venus (10 bar and up) is still mostly under its deck.
+    expect(cloudCovered({ composition: 'carbonDioxide', pressure: 10 })).toBe(true);
+    // No step of 5% in pressure moves the temperature by more than 3% (the old 10-bar cliff was 26%).
+    for (let p = 1; p < 60; p *= 1.05) {
+      const t = venus(p).temperature;
+      expect(Math.abs(venus(p * 1.05).temperature - t) / t).toBeLessThan(0.03);
+    }
+  });
+});
+
+describe('the terraforming levers', () => {
+  const base = state({ pressure: 1, composition: 'oxygenNitrogen', surfaceAlbedo: 0.3, water: 0.5 });
+
+  it('mirrors and shades change the light absorbed, not what the body can hold', () => {
+    const mars = setting(586.2 / S, { escapeVelocity: 5.03, gravity: 0.38 });
+    const now = evaluateClimate(mars, base);
+    const mirrored = evaluateClimate(mars, { ...base, starlight: 2 });
+    expect(mirrored.temperature).toBeGreaterThan(now.temperature + 20);
+    expect(mirrored.retention).toBe(now.retention);
+    expect(mirrored.retentionClass).toBe('marginal');
+    expect(evaluateClimate(mars, { ...base, starlight: 0.5 }).temperature).toBeLessThan(now.temperature);
+  });
+
+  it('an aerosol haze brightens the planet and cools it', () => {
+    expect(hazeAlbedo(0.3, 0)).toBe(0.3);
+    expect(hazeAlbedo(0, 0.2)).toBeCloseTo(0.2, 12);
+    expect(hazeAlbedo(1, 0.2)).toBeCloseTo(1, 12);
+    const hazy = evaluateClimate(setting(1), { ...base, aerosol: 0.1 });
+    const clear = evaluateClimate(setting(1), base);
+    expect(hazy.albedo).toBeGreaterThan(clear.albedo);
+    expect(hazy.temperature).toBeLessThan(clear.temperature);
+  });
+
+  it('magic heat enters the energy balance like heat from inside', () => {
+    const inside = evaluateClimate(setting(0.3, { heatFlow: 50 }), base);
+    const magic = evaluateClimate(setting(0.3), { ...base, magicHeat: 50 });
+    expect(magic.temperature).toBeCloseTo(inside.temperature, 9);
+    expect(evaluateClimate(setting(0.3), { ...base, magicHeat: -50 }).temperature).toBeLessThan(evaluateClimate(setting(0.3), base).temperature);
+  });
+
+  it('a temperature given (a world still settling) sets the water and the tier, not the equilibrium', () => {
+    const frozen = evaluateClimate(setting(1), base, 250);
+    expect(frozen.temperature).toBe(250);
+    expect(frozen.waterState).toBe('ice');
+    expect(frozen.equilibriumTemperature).toBe(evaluateClimate(setting(1), base).equilibriumTemperature);
+  });
+
+  it('changes a state by a total pressure and composition, keeping the greenhouse unless given', () => {
+    const mars = state({ pressure: 0.006, composition: 'carbonDioxide', water: 0.1 });
+    const air = changeState(mars, { pressure: 1, composition: 'oxygenNitrogen' });
+    expect(compositionOf(air.gases)).toBe('oxygenNitrogen');
+    expect(air.greenhouse).toBe(0);
+    expect(air.water).toBe(0.1);
+    expect(changeState(mars, { pressure: 1.5, composition: 'nitrogen', greenhouse: 1 }).greenhouse).toBeCloseTo(titanGreenhouse(1.5), 12);
   });
 });
 

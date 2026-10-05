@@ -17,6 +17,7 @@ import {
   mixHex,
   withGeneratedClimate,
   withMoons,
+  withUpgradedClimate,
   type LabKind,
   type LabPlanet,
 } from './labPlanet';
@@ -122,7 +123,7 @@ export class LabPanel {
         const text = prompt('Planet JSON (as copied with "Copy planet JSON")');
         if (!text) return;
         try {
-          void lab.replace({ ...lab.planet, ...(JSON.parse(text) as Partial<LabPlanet>) }, null);
+          void lab.replace(withUpgradedClimate({ ...lab.planet, ...(JSON.parse(text) as Partial<LabPlanet>) }), null);
         } catch (err) {
           alert(`Not valid JSON: ${String(err)}`);
         }

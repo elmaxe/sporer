@@ -175,11 +175,20 @@ function blackBody(irradiance: number, albedo: number, heatFlow = 0): number {
  * its lines are broadened by the total (see opticalDepth), so a pure one
  * gives exactly τ₀ Pⁿ. See docs/research/climate.md and terraforming.md.
  */
+/** CO₂'s low-pressure optical depth τ = a p^m (see GREENHOUSE). */
+const CO2_LOW = { tau0: 1.585, n: 0.78 } as const;
+
 export const GREENHOUSE = {
   // Earth: 1361 W/m², A 0.294, 288.15 K at 1.014 bar (NASA). The trace gases (`greenhouse` 1) in any air.
   trace: { tau0: tauFor(288.15, blackBody(1361, 0.294)) / 1.014, n: 1 },
-  // Venus: 2601.3 W/m², A 0.77, 737.15 K at 92 bar (NASA).
-  carbonDioxide: { tau0: tauFor(737.15, blackBody(2601.3, 0.77)) / 92 ** 2, n: 2 },
+  // CO₂: a·p^m for its saturating bands at low pressure, fitted (rms 0.5 K) to Ramirez et al. 2014's Mars under
+  // today's Sun from 0.05 to 2.5 bar (terraforming.md), plus τ₀ p P, pressure-broadened, which carries Venus:
+  // 2601.3 W/m², A 0.77, 737.15 K at 92 bar (NASA).
+  carbonDioxide: {
+    low: CO2_LOW,
+    tau0: (tauFor(737.15, blackBody(2601.3, 0.77)) - CO2_LOW.tau0 * 92 ** CO2_LOW.n) / 92 ** 2,
+    n: 2,
+  },
   // Titan: 15.2 W/m², A 0.265 (Li et al. 2011), 93.65 K at 1.467 bar (Fulchignoni et al. 2005). Its methane's
   // greenhouse is expressed as trace gas (titanGreenhouse) when its air is turned into gases.
   nitrogen: { tau0: tauFor(93.65, blackBody(15.2, 0.265)) / 1.467 ** (4 / 3), n: 4 / 3 },
@@ -190,10 +199,17 @@ export const GREENHOUSE = {
 
 /** Cloud and haze albedos that replace the surface's under a thick atmosphere. */
 const CLOUD_ALBEDO = {
-  /** Venus's sulphuric-acid cloud deck (Bond 0.77, NASA), above this pressure of CO₂. */
-  carbonDioxide: { albedo: 0.77, minPressure: 10 },
+  /**
+   * Venus's sulphuric-acid cloud deck (Bond 0.77, NASA). Its cover grows on
+   * a log scale from none at 3 bar of CO₂ (the Mars models of Ramirez et al.
+   * 2014 and Forget et al. 2013 run without it up to there) to whole at 30
+   * bar. The literature sets the deck by its SO₂ and water, not the
+   * pressure, so the decade is a gameplay choice: it replaces a cliff at
+   * 10 bar (9 bar was 100 K hotter). See terraforming.md.
+   */
+  carbonDioxide: { albedo: 0.77, minPressure: 3, fullPressure: 30 },
   /** Titan's orange haze (Bond 0.265, Li et al. 2011), above this pressure of N₂. */
-  nitrogen: { albedo: 0.265, minPressure: 0.5 },
+  nitrogen: { albedo: 0.265, minPressure: 0.5, fullPressure: 0.5 },
 } as const;
 
 /**
@@ -405,11 +421,13 @@ export function titanGreenhouse(pressure: number, greenhouse = 1): number {
  * The trace greenhouse (in Earth's units) of an atmosphere whose greenhouse
  * was given relative to its composition's reference body, the way generation
  * draws it: Earth's trace gases for N₂–O₂, Titan's for N₂; a CO₂ or hydrogen
- * atmosphere at 1 is its own greenhouse gas and nothing more.
+ * atmosphere at 1 is its own greenhouse gas and nothing more; no air has none.
  */
 export function traceGreenhouse(composition: Composition, pressure: number, greenhouse: number, gravity = 1): number {
   switch (composition) {
     case 'none':
+      // No air, no trace gases in it.
+      return 0;
     case 'oxygenNitrogen':
       return greenhouse;
     case 'nitrogen':
@@ -431,13 +449,15 @@ const UNTOUCHED = { starlight: 1, aerosol: 0, magicHeat: 0 } as const;
  * A full state from a partial one. Given `pressure` and `composition`
  * instead of `gases`, the air is made with gasesOf, and `greenhouse` is then
  * read relative to the composition's reference body (traceGreenhouse), as
- * generation draws it. The rest defaults to an untouched, airless, dry body.
+ * generation draws it. The rest defaults to an untouched, airless, dry body
+ * (with Earth's trace greenhouse gases if it has air).
  */
 export function climateStateOf(spec: StateSpec, gravity = 1): ClimateState {
   const legacy = !spec.gases && (spec.pressure !== undefined || spec.composition !== undefined);
   const composition = spec.composition ?? 'none';
   const gases = spec.gases ? { ...spec.gases } : gasesOf(spec.pressure ?? 0, composition);
-  const greenhouse = spec.greenhouse ?? 1;
+  // Unless given: Earth's trace gases in any air, none without.
+  const greenhouse = spec.greenhouse ?? (legacy || totalPressure(gases) > 0 ? 1 : 0);
   return {
     gases,
     greenhouse: legacy ? traceGreenhouse(composition, spec.pressure ?? 0, greenhouse, gravity) : greenhouse,
@@ -451,15 +471,29 @@ export function climateStateOf(spec: StateSpec, gravity = 1): ClimateState {
 
 // --- Evaluation: state + setting → derived ---
 
-/** A Venus-like cloud deck or Titan-like haze hides the surface. */
-export function cloudCovered(state: Pick<ClimateData, 'composition' | 'pressure'>): boolean {
-  if (state.composition !== 'carbonDioxide' && state.composition !== 'nitrogen') return false;
-  return state.pressure >= CLOUD_ALBEDO[state.composition].minPressure;
+/** How much of the planet a Venus-like cloud deck or Titan-like haze hides, 0–1. */
+export function cloudCover(state: Pick<ClimateData, 'composition' | 'pressure'>): number {
+  if (state.composition !== 'carbonDioxide' && state.composition !== 'nitrogen') return 0;
+  const { minPressure, fullPressure } = CLOUD_ALBEDO[state.composition];
+  if (state.pressure >= fullPressure) return 1;
+  if (state.pressure < minPressure) return 0;
+  return Math.log(state.pressure / minPressure) / Math.log(fullPressure / minPressure);
 }
 
-/** Bond albedo of the planet: the surface's, unless a thick atmosphere hides it under cloud or haze, with any aerosol haze on top. */
+/** The cloud deck or haze hides most of the surface (its looks and weather follow). */
+export function cloudCovered(state: Pick<ClimateData, 'composition' | 'pressure'>): boolean {
+  return cloudCover(state) >= 0.5;
+}
+
+/**
+ * Bond albedo of the planet: the surface's, where cloud or haze doesn't hide
+ * it, and the clouds' where it does, with any aerosol haze on top.
+ */
 export function planetAlbedo(state: Pick<ClimateData, 'composition' | 'pressure' | 'surfaceAlbedo'> & Partial<Pick<ClimateState, 'aerosol'>>): number {
-  const below = cloudCovered(state) ? CLOUD_ALBEDO[state.composition as keyof typeof CLOUD_ALBEDO].albedo : state.surfaceAlbedo;
+  const cover = cloudCover(state);
+  let below = state.surfaceAlbedo;
+  if (cover >= 1) below = CLOUD_ALBEDO[state.composition as keyof typeof CLOUD_ALBEDO].albedo;
+  else if (cover > 0) below += (CLOUD_ALBEDO[state.composition as keyof typeof CLOUD_ALBEDO].albedo - below) * cover;
   return hazeAlbedo(below, state.aerosol ?? 0);
 }
 
@@ -477,15 +511,19 @@ export function hazeAlbedo(below: number, reflectance: number): number {
 /**
  * The atmosphere's grey optical depth; `gravity` (in g) matters only for
  * hydrogen. The sum of the trace gases' (τ₀ · greenhouse · P), CO₂'s (its
- * column p_CO₂ broadened by the total pressure) and hydrogen's (the same, over
- * the gravity).
+ * saturating bands, a p_CO₂^m, and its column broadened by the total
+ * pressure, τ₀ p_CO₂ P) and hydrogen's (its column broadened by the total,
+ * over the gravity).
  */
 export function opticalDepth(state: Pick<ClimateState, 'gases' | 'greenhouse'>, gravity = 1): number {
   const { gases } = state;
   const p = totalPressure(gases);
   if (p <= 0) return 0;
   let tau = GREENHOUSE.trace.tau0 * state.greenhouse * p;
-  if (gases.co2 > 0) tau += GREENHOUSE.carbonDioxide.tau0 * gases.co2 * p ** (GREENHOUSE.carbonDioxide.n - 1);
+  if (gases.co2 > 0) {
+    const { low, tau0, n } = GREENHOUSE.carbonDioxide;
+    tau += low.tau0 * gases.co2 ** low.n + tau0 * gases.co2 * p ** (n - 1);
+  }
   if (gases.h2 > 0) {
     const { tau0, n, gravity: k } = GREENHOUSE.hydrogen;
     const scale = gravity ** k;
