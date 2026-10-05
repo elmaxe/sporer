@@ -117,6 +117,8 @@ export class BlackHoleLook {
   private readonly trace: THREE.Mesh<THREE.SphereGeometry, THREE.ShaderMaterial>;
   private readonly traceScene = new THREE.Scene();
   private readonly image = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: false });
+  /** The lens's depth where its image is opaque, after it (see the constructor). */
+  private readonly depth: THREE.Mesh<THREE.SphereGeometry, THREE.ShaderMaterial>;
   private readonly dot: THREE.Points<THREE.BufferGeometry, THREE.ShaderMaterial>;
   private readonly inverse = new THREE.Matrix4();
   private readonly rotation = new THREE.Matrix4();
@@ -189,6 +191,26 @@ export class BlackHoleLook {
     this.lens.renderOrder = 0.8;
     this.lens.onBeforeRender = (renderer, scene, camera) => this.traceRays(renderer, scene, camera);
     this.object.add(this.lens);
+
+    // Then its depth, where the image covers what's behind it (the shadow, the disc, the bent sky), so the air and
+    // clouds of a planet behind the hole, drawn after it, stay hidden. The sphere's far side: a planet in front of the
+    // hole, and the ship inside it, still draw over it.
+    this.depth = new THREE.Mesh(
+      geometry,
+      new THREE.ShaderMaterial({
+        uniforms: { uImage: show.uniforms.uImage!, uResolution: show.uniforms.uResolution! },
+        vertexShader: SHOW_VERTEX,
+        fragmentShader: DEPTH_FRAGMENT,
+        side: THREE.BackSide,
+        colorWrite: false,
+        depthWrite: true,
+        transparent: true,
+      }),
+    );
+    this.depth.name = 'Black hole depth';
+    this.depth.scale.copy(this.lens.scale);
+    this.depth.renderOrder = this.lens.renderOrder + 0.01;
+    this.object.add(this.depth);
 
     // A far-away hole: one point, as bright as its disc is small on screen.
     const dotGeometry = new THREE.BufferGeometry();
@@ -281,6 +303,7 @@ export class BlackHoleLook {
     this.object.removeFromParent();
     this.lens.geometry.dispose();
     this.lens.material.dispose();
+    this.depth.material.dispose();
     this.trace.material.dispose();
     this.image.dispose();
     this.dot.geometry.dispose();
@@ -301,6 +324,15 @@ const SHOW_FRAGMENT = /* glsl */ `
     // Linear, premultiplied light and coverage, traced at a lower resolution.
     gl_FragColor = texture2D(uImage, gl_FragCoord.xy / uResolution);
     #include <colorspace_fragment>
+  }`;
+
+const DEPTH_FRAGMENT = /* glsl */ `
+  uniform sampler2D uImage;
+  uniform vec2 uResolution;
+  void main() {
+    // Only where it hides most of what's behind it.
+    if (texture2D(uImage, gl_FragCoord.xy / uResolution).a < 0.5) discard;
+    gl_FragColor = vec4(0.0);
   }`;
 
 const LENS_VERTEX = /* glsl */ `

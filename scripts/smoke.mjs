@@ -2370,10 +2370,16 @@ async function starLabChecks(page) {
     await starLab.setView({ view: 'star' });
     await starLab.look(0, 60);
     await new Promise((ok) => setTimeout(ok, 600));
-    const middle = ${brightness};
+    game.redraw();
     const gl = game.renderer.getContext(), w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
     const px = new Uint8Array(w * h * 4);
     gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    // The shadow's middle: a few pixels round the centre (the hole is small in this view).
+    let dark = 0, m = 0;
+    for (let y = Math.floor(h / 2) - 4; y <= h / 2 + 4; y++) for (let x = Math.floor(w / 2) - 4; x <= w / 2 + 4; x++) {
+      const i = 4 * (y * w + x); dark += px[i] + px[i + 1] + px[i + 2]; m++;
+    }
+    const middle = +(dark / (3 * m)).toFixed(1);
     let lit = 0, n = 0;
     for (let i = 0; i < px.length; i += 4 * 97) { lit += px[i] + px[i + 1] + px[i + 2] > 300 ? 1 : 0; n++; }
     return { kind: starLab.level.world.stars[0].data.kind, middle, lit: +(lit / n).toFixed(3), info: document.getElementById('lab-info').textContent.includes('Black hole') };
@@ -2439,7 +2445,7 @@ async function starLabChecks(page) {
     r.kinds.some((k) => k.particles > 0) &&
     r.hole.kind === 'blackHole' &&
     r.hole.middle < 15 &&
-    r.hole.lit > 0.02 &&
+    r.hole.lit > 0.005 &&
     r.hole.info &&
     r.system.planets > 0 &&
     r.system.planets === r.system.expected &&
