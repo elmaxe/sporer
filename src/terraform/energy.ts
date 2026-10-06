@@ -29,6 +29,8 @@ export class ShipEnergy {
   refunded = 0;
   /** What's being spent a second right now (a ray held), for the bar's "about to spend" segment; set by whoever spends. */
   draining = 0;
+  /** What the works running on every body (greenhouse factories, carbon sinks) cost a second now; set by the game's clock. */
+  upkeep = 0;
 
   /** Whether `amount` can be paid now. */
   canAfford(amount: number): boolean {

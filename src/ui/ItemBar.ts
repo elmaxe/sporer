@@ -86,6 +86,14 @@ const ICONS: Record<ToolId, string> = {
     '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
     '<path d="M6.5 10h6v11h-6z" /><path d="M8 10V7.5h3V10M9.5 7.5V5.5h2.5" />' +
     '<path d="M15 4.5h.01M17.5 3h.01M17.5 6h.01M20 4.5h.01M20 1.8h.01M20 7.2h.01M22 3h.01M22 6h.01" stroke-width="2.2" /></svg>',
+  factory:
+    '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M2.5 21h19M3.5 21v-8l5 3v-3l5 3v-3l5 3V21" /><path d="M16 15.5V8h2.5v7" />' +
+    '<path d="M17 5.5c-.8-1.4.4-2.8 1.8-2.4.6-1.2 2.6-.8 2.7.6" /></svg>',
+  sink:
+    '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M2.5 21h19M4 21l4-7h8l4 7" /><path d="M9 14V9.5h6V14" />' +
+    '<path d="M6 4.5h3.5M14.5 4.5H18M8 7l2 2.2M16 7l-2 2.2" /><circle cx="12" cy="17.5" r="1" /></svg>',
 };
 
 /** What the bar needs to know about the game: where the player is, what can use items there, and what's in the hold. */
@@ -262,7 +270,8 @@ export class ItemBar implements Entity {
   private showEnergy(): void {
     const e = this.source.energy;
     const drain = e.draining > 0 ? ` −${formatEnergy(e.draining)}/s` : "";
-    const text = `${e.infinite ? "∞" : formatEnergy(e.level)} energy${drain}`;
+    const works = e.upkeep > 0 ? ` · works −${formatEnergy(e.upkeep)}/s` : "";
+    const text = `${e.infinite ? "∞" : formatEnergy(e.level)} energy${drain}${works}`;
     const fill = e.fill;
     const key = `${text}:${fill.toFixed(3)}:${this.tab}`;
     if (key === this.shownEnergy) return;

@@ -506,7 +506,7 @@ export class LabPanel {
    */
   private buildTerraform(): void {
     const lab = this.lab;
-    const f = this.folder('Terraform (rays, mirrors, shade)', true);
+    const f = this.folder('Terraform (rays, mirrors, shade, works)', true);
     const gasName: Record<Gas, string> = { n2: 'N₂', o2: 'O₂', co2: 'CO₂', h2: 'H₂' };
     f.add(lab, 'raySeconds', 1, 30, 1).name('hold each ray (s)');
     f.add(lab.rayChoice, 'gas', Object.fromEntries(GASES.map((g) => [gasName[g], g]))).name('air / vacuum gas').onChange(() => lab.showChartNow());
@@ -540,7 +540,18 @@ export class LabPanel {
     f.add(light, 'close').name('Close the sunshade a step');
     f.add(light, 'open').name('Open the sunshade a step');
     f.add(light, 'spray').name('Spray aerosol');
-    f.add(light, 'note').name('light tools').disable().listen();
+    // Greenhouse (terraform/greenhouse.ts): works set down on dry land near the view, running until beamed up.
+    const works = {
+      factory: () => void lab.works('factory'),
+      sink: () => void lab.works('sink'),
+      remove: () => void lab.removeWorks(),
+      run: () => void lab.runOn(60),
+    };
+    f.add(works, 'factory').name('Set down a greenhouse factory');
+    f.add(works, 'sink').name('Set down a carbon sink');
+    f.add(works, 'remove').name('Beam the last works up');
+    f.add(works, 'run').name('Run on a minute');
+    f.add(light, 'note').name('tools').disable().listen();
     const time = {
       get mode(): TerraformMode {
         return lab.terraformState?.mode ?? 'relaxed';

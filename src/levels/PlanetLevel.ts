@@ -71,9 +71,11 @@ import { DEBRIS_REACH, debrisLookFor } from '../gen/debris';
 import { DEBRIS_NEAR, DebrisField } from '../world/DebrisField';
 import type { ClimateData } from '../gen/climate';
 import { leakRate } from '../gen/terraform';
-import { isLightTool, isRayTool } from '../combat/items';
+import { isGreenhouseTool, isLightTool, isRayTool } from '../combat/items';
 import { MagicRay } from '../terraform/MagicRay';
 import { LightTools } from '../terraform/LightTools';
+import { GreenhouseTools } from '../terraform/GreenhouseTools';
+import { describeWorks, forecastWorks } from '../terraform/greenhouse';
 import { describeInstallations, forecastLight, lightBrightness } from '../terraform/light';
 import { ClimateChart, CHART_REFRESH } from '../terraform/ClimateChart';
 import { forecastClimate, type RayId } from '../terraform/rays';
@@ -200,12 +202,16 @@ export class PlanetLevel extends Level implements ItemUser {
   rays: MagicRay | null = null;
   /** The heat-and-light tools and the mirrors and sunshade over the body (as the rays). */
   light: LightTools | null = null;
+  /** The greenhouse works: factories and carbon sinks on the ground (as the rays). */
+  greenhouse: GreenhouseTools | null = null;
   /** How bright the star's light is drawn: mirrors and a sunshade change it (terraform/light.ts lightBrightness). */
   private readonly brightness = { value: 1 };
   /** The body as terraforming knows it (null for giants and small bodies without a climate). */
   readonly terraformBody: TerraformBody | null;
   /** The climate chart, while the Terraform tab is on show or a ray is selected. */
   private chart: ClimateChart | null = null;
+  /** Plants were hidden under greenhouse works (so they're shown again once the last is gone). */
+  private worksBuried = false;
   private sinceLive = LIVE_INTERVAL;
   private liveVersion = -1;
   private sinceChart = CHART_REFRESH;
@@ -414,6 +420,25 @@ export class PlanetLevel extends Level implements ItemUser {
             new LightTools(this.scene, camera, input, globe, this.ship, this, terraforming, terraformBody, sfx, () => this.rayBlock(), () => this.liveClimate ?? terraformBody.climate, debug),
           )
         : null;
+    // The works stand on the ground whatever is selected; their tools take presses as the rays do.
+    this.greenhouse =
+      terraformBody && terraforming && !busted
+        ? this.add(
+            new GreenhouseTools(
+              this.scene,
+              camera,
+              input,
+              globe,
+              terraforming,
+              terraformBody,
+              sfx,
+              () => this.rayBlock(),
+              () => this.liveClimate ?? terraformBody.climate,
+              () => this.buryPlants(),
+              debug,
+            ),
+          )
+        : null;
     // Before the picker: a press the beam takes isn't a click that flies the ship. What lands meets the climate as it is now.
     const level = this;
     const world = {
@@ -560,7 +585,7 @@ export class PlanetLevel extends Level implements ItemUser {
         ? 'volcanoBomb'
         : this.laser.armed
           ? 'laser'
-          : (this.rays?.armed ?? this.light?.armed ?? this.cargo?.selected ?? null);
+          : (this.rays?.armed ?? this.light?.armed ?? this.greenhouse?.armed ?? this.cargo?.selected ?? null);
   }
 
   status(item: ItemId): ItemStatus {
@@ -570,6 +595,7 @@ export class PlanetLevel extends Level implements ItemUser {
     if (item === 'laser') return this.laser.status();
     if (isRayTool(item)) return this.rays ? this.rays.status(item) : { available: false, hint: '', reason: this.rayBlock() ?? 'Nothing here to terraform' };
     if (isLightTool(item)) return this.light ? this.light.status(item) : { available: false, hint: '', reason: this.rayBlock() ?? 'Nothing here to terraform' };
+    if (isGreenhouseTool(item)) return this.greenhouse ? this.greenhouse.status(item) : { available: false, hint: '', reason: this.rayBlock() ?? 'Nothing here to terraform' };
     if (this.cargo) return this.cargo.status(item);
     return { available: false, hint: '', reason: item === 'abduct' ? 'Nothing left here to beam up' : 'Nothing here to set it down on' };
   }
@@ -581,14 +607,17 @@ export class PlanetLevel extends Level implements ItemUser {
     if (item !== 'laser') this.laser.arm(false);
     const ray = item !== null && isRayTool(item) ? item : null;
     const light = item !== null && isLightTool(item) ? item : null;
+    const works = item !== null && isGreenhouseTool(item) ? item : null;
     if (ray === null) this.rays?.arm(null);
     if (light === null) this.light?.arm(null);
+    if (works === null) this.greenhouse?.arm(null);
     if (item === 'planetBuster') this.buster.arm(true);
     if (item === 'volcanoBomb') this.volcanoBomb.arm(true);
     if (item === 'laser') this.laser.arm(true);
     if (ray) this.rays?.arm(ray);
     if (light) this.light?.arm(light);
-    this.cargo?.arm(item === 'planetBuster' || item === 'volcanoBomb' || item === 'laser' || ray || light ? null : item);
+    if (works) this.greenhouse?.arm(works);
+    this.cargo?.arm(item === 'planetBuster' || item === 'volcanoBomb' || item === 'laser' || ray || light || works ? null : item);
   }
 
   /** The radar's line above the item bar while it's on (a switch: always available). */
@@ -659,7 +688,8 @@ export class PlanetLevel extends Level implements ItemUser {
     const tab = document.getElementById('item-bar')?.dataset.tab;
     const ray = this.rays?.armed ?? null;
     const tool = this.light?.armed ?? null;
-    const want = this.active && !this.busted && !this.zoomLocked && (tab === 'terraform' || ray !== null || tool !== null);
+    const works = this.greenhouse?.armed ?? null;
+    const want = this.active && !this.busted && !this.zoomLocked && (tab === 'terraform' || ray !== null || tool !== null || works !== null);
     if (!want) {
       if (chart.visible) chart.hide();
       return;
@@ -676,11 +706,18 @@ export class PlanetLevel extends Level implements ItemUser {
         ? forecastClimate(snapshot.target, ray as RayId, t.choice, FORECAST_SECONDS)
         : tool
           ? forecastLight(snapshot.target, t.logs.actions(tb.key), t.time, t.mode, tool, t.choice, FORECAST_SECONDS)
-          : null,
+          : works
+            ? forecastWorks(snapshot.target, tb.climate, t.logs.actions(tb.key), t.time, t.mode, works)
+            : null,
       leak: leakRate(snapshot.climate, t.mode),
       milestones: t.milestones.log(tb.key),
       picker: ray === 'airRay' || ray === 'vacuumRay' ? 'gas' : ray === 'waterRay' ? 'water' : tool === 'mirror' ? 'mirror' : tool === 'sunshade' ? 'shade' : null,
-      projects: this.light ? describeInstallations(this.light.installations, snapshot.climate, t.mode) : '',
+      projects: [
+        this.light ? describeInstallations(this.light.installations, snapshot.climate, t.mode) : '',
+        this.greenhouse ? describeWorks(this.greenhouse.groundWorks, snapshot.climate, t.mode) : '',
+      ]
+        .filter(Boolean)
+        .join(' · '),
     });
   }
 
@@ -708,12 +745,15 @@ export class PlanetLevel extends Level implements ItemUser {
     this.plantings?.bury((dir) => dir.dot(shape.centre) > shape.cosAngle);
   }
 
-  /** The plants where volcanoes stand are buried under them. */
+  /** The plants where volcanoes and greenhouse works stand are buried under them (shown again once a works is beamed away). */
   private buryPlants(): void {
-    const volcanoes = this.volcanoes;
-    if (!volcanoes || volcanoes.count === 0) return;
-    this.plants?.setBuried((dir) => volcanoes.covers(dir));
-    this.rocks?.setBuried((dir) => volcanoes.covers(dir));
+    const volcanoes = this.volcanoes && this.volcanoes.count > 0 ? this.volcanoes : null;
+    const works = this.greenhouse && this.greenhouse.look.count > 0 ? this.greenhouse.look : null;
+    if (!volcanoes && !works && !this.worksBuried) return;
+    this.worksBuried = works !== null;
+    const test = volcanoes || works ? (dir: THREE.Vector3) => (volcanoes?.covers(dir) ?? false) || (works?.covers(dir) ?? false) : null;
+    this.plants?.setBuried(test);
+    this.rocks?.setBuried(test);
   }
 
   /** The buster is away: hold the ship where it is and pull the camera back to watch. */

@@ -31,6 +31,7 @@ rebuild; no code changes needed. Volumes and fades are in `cueParams` (`src/audi
 | `mirrorLance/` | The mirror lance: the orbital mirrors' light focused on the ground while it's held: starts on the press, fades out when it's let go | loop |
 | `sunshadeMove/` | The sunshade's slats turning a step closed or open | one-shot |
 | `aerosolSpray/` | The aerosol spray held over a world, laying a haze into its air: starts on the press, fades out when it's let go | loop |
+| `worksBeam/` | A greenhouse factory or a carbon sink beamed down onto a world's ground, or back up (the Terraform tab); it lands with `dropImpact` | one-shot |
 | `milestone/` | A terraforming milestone reached: first breath of air, first rain, the seas thawing, breathable air, a tier reached or lost (with its banner) | one-shot |
 | `ventBurst/` | A geyser, plume or fumarole near the camera bursting into eruption (low orbit), louder the nearer it is | one-shot |
 | `starNear/` | A star close up: grows as the camera nears its surface, taking over from `starFar` | ambient |

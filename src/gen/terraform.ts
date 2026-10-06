@@ -59,15 +59,29 @@ export interface TerraformAction {
   /**
    * A tool that stays (terraform/light.ts): an orbital mirror deployed
    * or recalled, or the sunshade set. Their `starlight` change is worked out
-   * when they're used; what stays up is read back from the log.
+   * when they're used; what stays up is read back from the log. Or ground
+   * works (terraform/greenhouse.ts): a greenhouse factory or a carbon sink
+   * beamed down at `site` (level 1) or back up (level 0); they run from when
+   * they've landed until they're beamed up, and the timeline plays what they
+   * do (`amount` is 0).
    */
   tool?: TerraformTool;
-  /** What the tool is at once the action is over: how many mirrors are up, or how much the shade blocks (0–1). */
+  /** What the tool is at once the action is over: how many mirrors are up, how much the shade blocks (0–1), or whether the works at `site` stands (1) or was taken away (0). */
   level?: number;
+  /** Energy a second the works costs while it runs (ground works only; counted by the game's clock, terraform/Terraforming.ts). */
+  upkeep?: number;
 }
 
-/** Tools that stay over a body, recorded in its log (terraform/light.ts `installationsAt`). */
-export type TerraformTool = 'mirror' | 'shade';
+/** Tools that stay over a body, recorded in its log (terraform/light.ts `installationsAt`, terraform/greenhouse.ts `worksAt`). */
+export type TerraformTool = 'mirror' | 'shade' | WorksKind;
+
+/** Works that stand on the ground and run: greenhouse factories and carbon sinks (terraform/greenhouse.ts). */
+export type WorksKind = 'factory' | 'sink';
+export const WORKS_KINDS: readonly WorksKind[] = ['factory', 'sink'];
+
+export function isWorks(tool: TerraformTool | undefined): tool is WorksKind {
+  return tool === 'factory' || tool === 'sink';
+}
 
 /** The game's terraforming mode from `time` on (switched in the menu at any time). */
 export interface ModeChange {
@@ -90,6 +104,16 @@ export interface TerraformTuning {
   leakTime: number;
   /** The leak time ×10 for every this much retention above the shoreline (shorter below it). */
   leakDecade: number;
+  /** A greenhouse factory makes its share (GREENHOUSE_WORKS.factoryCap) in this long, s. */
+  factoryBuild: number;
+  /**
+   * Trace greenhouse gas above (or below) the body's own relaxes back to it
+   * with this e-folding time, s: factory-made gas breaks down, and a world
+   * whose gas was drawn down makes it again.
+   */
+  greenhouseLifetime: number;
+  /** One carbon sink draws CO₂ and trace greenhouse gas down with this e-folding time, s (n sinks n× faster). */
+  sinkTime: number;
 }
 
 /**
@@ -107,6 +131,9 @@ export const TERRAFORM_TUNING: Record<TerraformMode, TerraformTuning> = {
     // A marginal Mars leaks over an hour, the Moon (retention −1.67) in about five minutes.
     leakTime: 3600,
     leakDecade: 1.55,
+    factoryBuild: 180,
+    greenhouseLifetime: 900,
+    sinkTime: 1200,
   },
   relaxed: {
     dryResponse: 20 / 3,
@@ -116,6 +143,9 @@ export const TERRAFORM_TUNING: Record<TerraformMode, TerraformTuning> = {
     leaks: false,
     leakTime: 3600,
     leakDecade: 1.55,
+    factoryBuild: 60,
+    greenhouseLifetime: 300,
+    sinkTime: 400,
   },
   sandbox: {
     dryResponse: 20 / 3,
@@ -125,8 +155,70 @@ export const TERRAFORM_TUNING: Record<TerraformMode, TerraformTuning> = {
     leaks: false,
     leakTime: 3600,
     leakDecade: 1.55,
+    factoryBuild: 60,
+    greenhouseLifetime: 300,
+    sinkTime: 400,
   },
 };
+
+/**
+ * What each greenhouse works does, the same in every mode (the modes change
+ * only how fast: TerraformTuning's factoryBuild, greenhouseLifetime and
+ * sinkTime). See docs/research/terraforming.md, Phase 4.
+ */
+export const GREENHOUSE_WORKS = {
+  /**
+   * Trace greenhouse gas (× Earth's) each running factory holds the air at,
+   * above the body's own: four, so three make Haikrai III's ×12 (19 °C under
+   * 1 bar of N₂–O₂; with mirrors at ×1.5, two do).
+   */
+  factoryCap: 4,
+} as const;
+
+/** One stretch of time a works ran on a body: from when it landed to when it was taken away (Infinity if it's still there). */
+export interface WorksRun {
+  kind: WorksKind;
+  site: [number, number, number];
+  /** When it was beamed down, and when it landed and began to run, s. */
+  placed: number;
+  from: number;
+  /** When it was beamed back up (null: it's still there), and when it was gone, s. */
+  removed: number | null;
+  removedBy: number | null;
+  /** Energy a second while it runs. */
+  upkeep: number;
+}
+
+/** Two sites closer than this (dot product of the unit vectors) are the same works. */
+const SAME_SITE = 1 - 1e-9;
+
+/** Every works that stood on a body, from its log (in order of start): when each landed, and when (if) it was taken away. */
+export function worksRuns(actions: readonly TerraformAction[]): WorksRun[] {
+  const runs: WorksRun[] = [];
+  for (const a of actions) {
+    if (!isWorks(a.tool) || !a.site) continue;
+    const kind = a.tool;
+    const [x, y, z] = a.site;
+    if ((a.level ?? 1) >= 1) {
+      runs.push({ kind, site: [x, y, z], placed: a.start, from: a.start + a.duration, removed: null, removedBy: null, upkeep: a.upkeep ?? 0 });
+      continue;
+    }
+    const run = runs.find((r) => r.kind === kind && r.removed === null && r.site[0] * x + r.site[1] * y + r.site[2] * z > SAME_SITE);
+    if (run) {
+      run.removed = a.start;
+      run.removedBy = a.start + a.duration;
+    }
+  }
+  return runs;
+}
+
+/** How many of `kind` are running at `time`: landed, and not yet being taken away. */
+export function runningAt(runs: readonly WorksRun[], kind: WorksKind, time: number): number {
+  let n = 0;
+  for (const r of runs) if (r.kind === kind && r.from <= time && (r.removed === null || time < r.removed)) n++;
+  return n;
+}
+
 
 /** The integration step, s of game time. */
 export const TERRAFORM_STEP = 1;
@@ -268,6 +360,8 @@ export class TerraformTimeline {
   private readonly actions: TerraformAction[] = [];
   private modes: ModeChange[] = [];
   private checkpoints: Point[] = [];
+  /** The works that stood on the body (from the log, remade when it changes). */
+  private works: WorksRun[] | null = null;
 
   constructor(base: ClimateData, actions: readonly TerraformAction[] = [], modes: readonly ModeChange[] = []) {
     this.setting = climateSettingOf(base);
@@ -333,6 +427,7 @@ export class TerraformTimeline {
   }
 
   private invalidate(time: number): void {
+    this.works = null;
     // A checkpoint at t was stepped to from t − 1: keep only those not after the change.
     this.checkpoints = this.checkpoints.filter((c) => c.time <= time);
   }
@@ -362,6 +457,11 @@ export class TerraformTimeline {
     return rest > 1e-9 ? this.step(point, rest) : point;
   }
 
+  private runWorks(s: ClimateState, time: number, dt: number, tuning: TerraformTuning): void {
+    this.works ??= worksRuns(this.actions);
+    runWorksOn(s, this.base.greenhouse, this.works, time, dt, tuning);
+  }
+
   /** One step of `dt` seconds from `from` (which isn't changed). */
   private step(from: Point, dt: number): Point {
     const t1 = from.time + dt;
@@ -378,12 +478,40 @@ export class TerraformTimeline {
 
     s.aerosol *= 0.5 ** (dt / tuning.aerosolHalfLife);
 
+    this.runWorks(s, from.time, dt, tuning);
+
     if (tuning.leaks) leak(s, this.setting, dt, tuning);
 
     const target = evaluateClimate(this.setting, s).temperature;
     const tau = responseTime(s, this.setting.gravity, tuning);
     const temperature = target + (from.temperature - target) * Math.exp(-dt / tau);
     return { time: t1, state: s, temperature };
+  }
+}
+
+/**
+ * What changes trace greenhouse gas over `dt` from `time` (changes `s`):
+ * - it relaxes back to the body's own abundance with the greenhouse
+ *   lifetime (a no-op until something moved it);
+ * - each running carbon sink draws CO₂ and trace gas down (weathering:
+ *   CO₂ locked into carbonate), n sinks n× as fast;
+ * - running factories make trace gas at their rate until the air holds
+ *   their cap above the body's own, then just make up for what breaks down.
+ */
+function runWorksOn(s: ClimateState, base: number, runs: readonly WorksRun[], time: number, dt: number, tuning: TerraformTuning): void {
+  s.greenhouse = base + (s.greenhouse - base) * Math.exp(-dt / tuning.greenhouseLifetime);
+  if (runs.length === 0) return;
+  const sinks = runningAt(runs, 'sink', time);
+  if (sinks > 0) {
+    const keep = Math.exp((-sinks * dt) / tuning.sinkTime);
+    s.gases.co2 *= keep;
+    s.greenhouse *= keep;
+  }
+  const factories = runningAt(runs, 'factory', time);
+  if (factories > 0) {
+    const cap = base + factories * GREENHOUSE_WORKS.factoryCap;
+    const made = (factories * GREENHOUSE_WORKS.factoryCap * dt) / tuning.factoryBuild;
+    if (s.greenhouse < cap) s.greenhouse = Math.min(cap, s.greenhouse + made);
   }
 }
 

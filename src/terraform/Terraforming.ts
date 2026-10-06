@@ -1,6 +1,6 @@
 import type { ClimateData } from '../gen/climate';
 import type { MoonType, PlanetType } from '../gen/planets';
-import { DEFAULT_TERRAFORM_MODE, TerraformLogs, type TerraformLogsData, type TerraformMode, type TerraformSnapshot } from '../gen/terraform';
+import { DEFAULT_TERRAFORM_MODE, TerraformLogs, worksRuns, type TerraformLogsData, type TerraformMode, type TerraformSnapshot, type WorksRun } from '../gen/terraform';
 import { ShipEnergy, type ShipEnergyData } from './energy';
 import { Milestones, milestoneFlags, type MilestoneEvent, type MilestonesData } from './milestones';
 import { DEFAULT_RAY_CHOICE, type RayChoice } from './rays';
@@ -43,6 +43,9 @@ export class Terraforming {
   /** Called for every milestone reached (the banner). */
   onMilestone: ((body: TerraformBody, event: MilestoneEvent) => void) | null = null;
   private _mode: TerraformMode;
+  /** Every body's works (greenhouse factories, carbon sinks), remade when the logs change. */
+  private works: WorksRun[] = [];
+  private worksVersion = -1;
 
   constructor(mode: TerraformMode = DEFAULT_TERRAFORM_MODE) {
     this._mode = mode;
@@ -59,8 +62,23 @@ export class Terraforming {
     this.logs.setMode(this.time, mode);
   }
 
+  /** Moves the clock on, paying for the works running on every body (wherever the ship is). */
   advance(dt: number): void {
+    const upkeep = this.upkeep();
+    this.energy.upkeep = upkeep;
     this.time += dt;
+    if (upkeep > 0) this.energy.spend(upkeep * dt);
+  }
+
+  /** Energy a second every works running now costs, on every body. */
+  upkeep(): number {
+    if (this.worksVersion !== this.logs.version) {
+      this.works = this.logs.keys().flatMap((key) => worksRuns(this.logs.actions(key)));
+      this.worksVersion = this.logs.version;
+    }
+    let sum = 0;
+    for (const r of this.works) if (r.from <= this.time && (r.removed === null || this.time < r.removed)) sum += r.upkeep;
+    return sum;
   }
 
   /** True if anything was done to the body. */

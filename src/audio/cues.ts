@@ -32,6 +32,7 @@ export type SoundCue =
   | 'mirrorLance'
   | 'sunshadeMove'
   | 'aerosolSpray'
+  | 'worksBeam'
   | 'milestone'
   | 'ventBurst'
   | 'starNear'
@@ -67,6 +68,7 @@ export const SOUND_CUES: readonly SoundCue[] = [
   'mirrorLance',
   'sunshadeMove',
   'aerosolSpray',
+  'worksBeam',
   'milestone',
   'ventBurst',
   'starNear',
@@ -203,6 +205,8 @@ export const cueParams: Record<SoundCue, CueSpec> = {
   sunshadeMove: oneShot(),
   // The aerosol spray held, from the press until it's let go.
   aerosolSpray: { ...travel(), volume: 0.6, fadeIn: 0.1, fadeOut: 0.3, loopCrossfade: 0.3 },
+  // A greenhouse factory or a carbon sink beamed down onto the ground, or back up (the Terraform tab); it lands with dropImpact.
+  worksBeam: oneShot(),
   // A terraforming milestone reached (first air, first rain, the seas thawing, breathable air, a tier reached or lost).
   milestone: oneShot(),
   // A vent near the camera bursting into eruption (geysers, plumes, fumaroles; see VentSounds).

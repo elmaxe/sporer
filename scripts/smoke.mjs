@@ -3407,7 +3407,71 @@ await section('terraform', async () => {
     const log = levels.terraforming.logs.actions('${key}');
     return { mirrors: inst.mirrors, ready: inst.ready, shade: inst.shade, starlight: s.starlight, aerosol: s.aerosol, tools: log.filter((a) => a.tool).map((a) => a.tool),
       sprays: log.filter((a) => a.lever === 'aerosol').length, haze: !!planet.globe.haze?.visible, projects: document.querySelector('#climate-chart .chart-projects')?.textContent ?? '' }; })()`);
-  const heard = (await evaluate(`__cues`)).filter((c) => ['magicRay', 'milestone', 'mirrorDeploy', 'sunshadeMove', 'aerosolSpray', 'mirrorLance'].includes(c));
+  // Greenhouse (10, then the 11th slot): a factory and a sink set down on dry land with real clicks, run, and the factory beamed back up.
+  const landTarget = async (offset) => evaluate(`(() => {
+    const up = planet.ship.object.position.clone().normalize();
+    const east = new up.constructor(0, 1, 0).cross(up).normalize();
+    const north = up.clone().cross(east);
+    const r = game.renderer.domElement.getBoundingClientRect();
+    for (let ring = 1; ring < 40; ring++) for (let k = 0; k < 24; k++) {
+      const a = (k / 24) * Math.PI * 2 + ${offset};
+      const d = up.clone().addScaledVector(east, Math.cos(a) * ring * 0.004).addScaledVector(north, Math.sin(a) * ring * 0.004).normalize();
+      if (planet.globe.landingAt(d) !== 'land') continue;
+      const v = d.clone().multiplyScalar(planet.groundRadius(d)).project(game.camera);
+      if (Math.abs(v.x) > 0.8 || Math.abs(v.y) > 0.8 || v.z > 1) continue;
+      const x = r.left + (v.x + 1) / 2 * r.width, y = r.top + (1 - v.y) / 2 * r.height;
+      return { x, y };
+    }
+    return null;
+  })()`);
+  const clickAt = async (at) => {
+    await send('Input.dispatchMouseEvent', { type: 'mousePressed', ...at, button: 'left', clickCount: 1 });
+    await drawFrames(2);
+    await send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...at, button: 'left', clickCount: 1 });
+    await drawFrames(3);
+  };
+  const landA = await landTarget(0);
+  await press('Digit0', '0');
+  const factoryArmed = await evaluate(`({ selected: planet.selected, cost: document.querySelector('.item-slot[data-item=factory] .item-cost')?.textContent ?? null, key: document.querySelector('.item-slot[data-item=factory] .item-key')?.textContent ?? null })`);
+  if (landA) await clickAt(landA);
+  const factoryHint = await evaluate(`document.getElementById('item-hint').textContent`);
+  await evaluate(`levels.terraforming.advance(5)`);
+  await drawFrames(5);
+  await evaluate(`document.querySelector('.item-slot[data-item=sink]').click()`);
+  await drawFrames(3);
+  const sinkSelected = await evaluate(`planet.selected`);
+  const landB = landA ? await evaluate(`(() => {
+    const ws = planet.greenhouse.groundWorks.runs; const f = ws[0];
+    const r = game.renderer.domElement.getBoundingClientRect();
+    const up = new planet.ship.object.position.constructor(...f.site);
+    const east = new up.constructor(0, 1, 0).cross(up).normalize();
+    const north = up.clone().cross(east);
+    for (let ring = 10; ring < 60; ring++) for (let k = 0; k < 24; k++) {
+      const a = (k / 24) * Math.PI * 2;
+      const d = up.clone().addScaledVector(east, Math.cos(a) * ring * 0.004).addScaledVector(north, Math.sin(a) * ring * 0.004).normalize();
+      if (planet.globe.landingAt(d) !== 'land') continue;
+      const v = d.clone().multiplyScalar(planet.groundRadius(d)).project(game.camera);
+      if (Math.abs(v.x) > 0.85 || Math.abs(v.y) > 0.85 || v.z > 1) continue;
+      return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height };
+    }
+    return null;
+  })()`) : null;
+  if (landB) await clickAt(landB);
+  await evaluate(`levels.terraforming.advance(5)`);
+  await drawFrames(10);
+  const worksUp = await evaluate(`(() => { const w = planet.greenhouse.groundWorks; return { factories: w.factoriesRunning, sinks: w.sinksRunning, drawn: planet.greenhouse.look.count,
+    upkeep: levels.energy.upkeep, projects: document.querySelector('#climate-chart .chart-projects')?.textContent ?? '', energy: document.getElementById('item-energy')?.textContent ?? '' }; })()`);
+  const worksShot = join(outDir, 'terraform-works.png');
+  writeFileSync(worksShot, await page.screenshot());
+  // A click on the factory beams it back up.
+  if (landA) await clickAt(landA);
+  await evaluate(`levels.terraforming.advance(5)`);
+  await drawFrames(5);
+  const worksAfter = await evaluate(`(() => { const w = planet.greenhouse.groundWorks; const log = levels.terraforming.logs.actions('${key}').filter((a) => a.tool === 'factory' || a.tool === 'sink');
+    return { factories: w.factories, sinks: w.sinks, drawn: planet.greenhouse.look.count, log: log.map((a) => a.tool + a.level) }; })()`);
+  await press('Digit0', '0');
+  const works = { landA, landB, factoryArmed, factoryHint, sinkSelected, worksUp, worksAfter, worksShot };
+  const heard = (await evaluate(`__cues`)).filter((c) => ['magicRay', 'milestone', 'mirrorDeploy', 'sunshadeMove', 'aerosolSpray', 'mirrorLance', 'worksBeam', 'dropImpact'].includes(c));
   await evaluate(`levels.leavePlanet()`);
   await until(`levels.mode === 'system' && !levels.transitioning`, 60000);
   await drawFrames(5);
@@ -3425,10 +3489,10 @@ await section('terraform', async () => {
   const rebuilt = await evaluate(`(() => { const b = world.planets.find((p) => p.name === __terraformed.name); return { live: b.climate !== b.config.climate, tier: b.climate.habitability }; })()`);
   // Back to Relaxed for whatever comes next.
   await evaluate(`(() => { while (levels.terraforming.mode !== 'relaxed') document.getElementById('gameplay-terraform').click(); })()`);
-  terraform = { inSpace, armed, heating, heated, gas, airing, aired, modes, settled, live, mirrorArmed, mirrorHint, spraying, lancing, light, heard, system, rebuilt, base, lowShot, systemShot };
+  terraform = { inSpace, armed, heating, heated, gas, airing, aired, modes, settled, live, mirrorArmed, mirrorHint, spraying, lancing, light, works, heard, system, rebuilt, base, lowShot, systemShot };
   terraform.ok =
     inSpace.tab === 'terraform' &&
-    inSpace.slots.join(',') === 'heatRay,coolRay,airRay,vacuumRay,waterRay,mirror,lance,sunshade,aerosol' &&
+    inSpace.slots.join(',') === 'heatRay,coolRay,airRay,vacuumRay,waterRay,mirror,lance,sunshade,aerosol,factory,sink' &&
     /down to a planet or moon/.test(inSpace.hint) &&
     /∞/.test(inSpace.energy ?? '') &&
     armed.selected === 'heatRay' &&
@@ -3477,7 +3541,22 @@ await section('terraform', async () => {
     light.aerosol > 0 &&
     light.haze &&
     /Mirrors 1\/12/.test(light.projects) &&
-    ['magicRay', 'milestone', 'mirrorDeploy', 'sunshadeMove', 'aerosolSpray', 'mirrorLance'].every((c) => heard.includes(c)) &&
+    ['magicRay', 'milestone', 'mirrorDeploy', 'sunshadeMove', 'aerosolSpray', 'mirrorLance', 'worksBeam', 'dropImpact'].every((c) => heard.includes(c)) &&
+    works.landA !== null &&
+    works.landB !== null &&
+    works.factoryArmed.selected === 'factory' &&
+    works.factoryArmed.key === '0' &&
+    /free|\/s/.test(works.factoryArmed.cost ?? '') &&
+    /greenhouse factory/i.test(works.factoryHint) &&
+    works.sinkSelected === 'sink' &&
+    works.worksUp.factories === 1 &&
+    works.worksUp.sinks === 1 &&
+    works.worksUp.drawn === 2 &&
+    /Factories 1\/12 · sinks 1\/12/.test(works.worksUp.projects) &&
+    works.worksAfter.factories === 0 &&
+    works.worksAfter.sinks === 1 &&
+    works.worksAfter.drawn === 1 &&
+    works.worksAfter.log.join(',') === 'factory1,sink1,factory0' &&
     system.live &&
     system.tier === 3 &&
     system.rigs === 1 &&
