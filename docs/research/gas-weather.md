@@ -128,35 +128,38 @@ console.log("spot drift 2 deg/yr x 3 yr =", 6, "deg; per s over 450 s:", (6/D/45
 - **A dark spot's drift.** 2°/yr over a ~3-year life is ~6°. Spread over the game's 450 s life, that's 2.33·10⁻⁴ rad/s.
 
 The game's own code is checked against these in `tests/gasWeather.test.ts`:
-- a plume's wake is never longer than 26°;
+- a plume's wake is never longer than 40° (26° measured, drawn longer);
 - Saturn's great storm wraps round at 55/201 of its life, with its head grown at 10/201;
-- its head is 20 000–34 000 km long on Saturn;
+- its head is drawn 28 000–44 000 km long on Saturn (20 000–34 000 km measured);
 - a dark spot moves towards the equator and never crosses it;
-- a great storm flashes more than 6× as often as a plume (the target is 10×; the flash pool's 8 slots cap the busiest moments);
-- a Jupiter has a storm going more than 95% of the time.
+- a great storm flashes more than 3.5× as often as a plume (10/s against 2/s: one flash per 0.1 s slot caps a storm at 10/s);
+- a Jupiter has a storm going more than 95% of the time;
+- they're easy to spot: more than 4 strong storms on Sol's Jupiter on average, more than 3 on Uranus and Neptune, never none, and a great white storm on Saturn more than 60% of the time.
+
+**Easy to spot (deliberate).** The first version kept close to the real sizes and rates, and in play nothing showed: a Jupiter plume was 1–2% of the planet's width, the lightning came from 2–3 of them for a quarter of a second at a time, and Saturn's first great storm in Sol came half an hour in. The owner asked for them to be very easy to spot, so the sizes, counts and rates below are well past the real ones.
 
 ## Game mapping (`src/gen/gasWeather.ts`, drawn by `src/world/gasLook.ts`)
 
 - **Long-lived ovals** stay in the layout (gas-giants.md): they last decades or centuries, longer than anything the game shows.
 - **Plumes** (every gas giant):
   - Born in a dark belt between the banded latitudes (5° to the polar edge, at most 65°), weighted by the belt's width. Lightning sits in cyclonic belts (Fletcher's paper; Cassini at 13°S–34°N, Juno most often past 40°N).
-  - A bright, billowing head 3000–6500 km long, aspect 1.3. That's about 1.5× Galileo's 4000 km so it reads from the system view (**stylised**); the aspect wasn't measured.
-  - Its wake trails 10–26° of longitude along the faster-moving side of its latitude (the jet next to it), growing over its life, in clumps of white with darker gaps (the "bright and dark spots"). The edge is in shadow.
-  - Four staggered channels, each with a storm in 85% of its slots, keep about 2.5 going ("typically a few at the same time").
-  - A few days become 60–120 s (**compressed**).
+  - A bright, billowing head 8000–14 000 km long, aspect 1.3. That's 2–3.5× Galileo's 4000 km so it's easy to spot from the system view (**deliberate**); the aspect wasn't measured.
+  - Its wake trails 16–40° of longitude (the measured 11–26°, drawn longer) along the faster-moving side of its latitude (the jet next to it), growing over its life, in clumps of white with darker gaps (the "bright and dark spots"). The edge is in shadow.
+  - Eight staggered channels, each with a storm in 95% of its slots, keep about 7 going, against "typically a few at the same time" (**deliberate**).
+  - A few days become 80–120 s (**compressed**).
 - **Great white storms** (giants at least halfway to Saturn-like, `layout.saturn ≥ 0.5`):
-  - A head 20 000–34 000 km long, aspect 3.7, at 0–40° (the 2010 storm at 35°N; 1933 and 1990 near the equator).
+  - A head 28 000–44 000 km long (2010's was 20 000–34 000 km; drawn bigger, **deliberate**), aspect 3.7, at 0–40° (the 2010 storm at 35°N; 1933 and 1990 near the equator).
   - It is fully grown at 10/201 of its life, and its trail wraps all the way round at 55/201, after which the whole band is disturbed.
-  - It lasts 450–800 s instead of 201 days. One slot in four, of 900 s each, has one: a great storm is under way 17% of the time instead of 1.9% (**deliberate**, so a player sees one).
+  - It lasts 400–580 s instead of 201 days. Two staggered channels of 600 s slots, four slots in five with one: a great storm is under way about 70% of the time instead of 1.9%, one already going when the game starts in Sol (**deliberate**, so a player sees one).
 - **Ice giants**:
-  - *Outbursts* (methane-ice clouds): 2000–10 000 km, aspect 3, at 5–50°. The trail reaches 60° by 0.4 of the life (Uranus's tail grew 60° in ~10 days of a storm lasting a month or more). Months become 60–150 s.
-  - *Dark spots*: 7000–11 000 km, aspect 2.2, at 15–40°, each with a bright companion cloud over its poleward edge (stylised placement, as in gas-giants.md). They live 300–600 s ("one to six years"), half the slots have one ("one every four to six years"), and they drift 6° towards the equator over a life before fading out. 2018's and Voyager's spots went equatorwards; 2015's went poleward, which the game ignores.
+  - *Outbursts* (methane-ice clouds): drawn 6000–14 000 km (real ones 2000–10 000 km, **deliberate**), aspect 3, at 5–50°. The trail reaches 60° by 0.4 of the life (Uranus's tail grew 60° in ~10 days of a storm lasting a month or more). Six channels, nine slots in ten with one (**deliberate**). Months become 90–150 s.
+  - *Dark spots*: 7000–11 000 km, aspect 2.2, at 15–40°, each with a bright companion cloud over its poleward edge (stylised placement, as in gas-giants.md). They live 400–600 s ("one to six years"), on two channels with one in nine slots in ten, against "one every four to six years" (**deliberate**), and they drift 6° towards the equator over a life before fading out. 2018's and Voyager's spots went equatorwards; 2015's went poleward, which the game ignores.
 - **Lightning** (`GAS_LIGHTNING`, `collectGasFlashes`):
   - Flashes sit in a storm's head. None of them strike anything: they are deep under the cloud tops.
   - Each is drawn with the solid bodies' stroke model (`gen/weather.ts`).
-  - Plumes flash 0.8/s at full strength, the stylised order of Juno's peak 4 strokes/s. Great storms flash 8/s, ten times a plume's, as Fischer et al. measured (peaks past 10/s).
-  - Ice giants' outbursts flash 1/40 s⁻¹. That is rare (Voyager: 16 whistlers in ~20 min at Neptune) but seen at all, like the Venus decks' (**deliberate**). Dark spots don't flash.
-  - The shader adds each flash as light glowing through the clouds, 0.012 rad wide (**stylised**: ~15× the real patch, so it shows from the system view). It is faded out wherever the sun's direct light on the cloud exceeds ~10% of noon's, so it shows on the night side and through dusk and is lost in daylight. That is how every spacecraft has seen it ("night-side optical imaging"); Saturn's day-side detection needed image subtraction.
+  - Plumes flash 2/s at full strength, the stylised order of Juno's peak 4 strokes/s. Great storms flash 10/s, the most one storm can (one per 0.1 s flash slot), as Fischer et al. measured (peaks past 10/s); that's 5× a plume instead of the measured 10×, since the plumes flash more than real ones (**deliberate**).
+  - Ice giants' outbursts flash 0.3/s, far more than Voyager heard (16 whistlers in ~20 min at Neptune), so they are seen (**deliberate**). Dark spots don't flash.
+  - The shader adds each flash as light glowing through the clouds, 0.03 rad wide (**stylised**: ~40× the real patch, so it's easy to spot from the system view; at most 16 at once). It is faded out wherever the sun's direct light on the cloud exceeds ~20% of noon's, so it shows on the night side and through dusk and is lost in daylight. That is how every spacecraft has seen it ("night-side optical imaging"); Saturn's day-side detection needed image subtraction.
 - **Times**: each kind keeps its real proportions (how far the wake gets and when, when the head is grown), but lifetimes are compressed by different factors, as step 22 did for thunderstorms and cyclones.
 - **Where it's drawn**: everything is per pixel in `GAS_GLSL`, so the system view's globe, low orbit's globe and the planet map show the same storms. It is a pure function of the clock (`GasStormSchedule` caches the slots; storms ride their latitude's drift at the view's pace). The menu's Weather setting off hides the passing storms and lightning; the bands and ovals stay.
 

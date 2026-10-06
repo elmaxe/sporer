@@ -124,13 +124,13 @@ describe('the storms', () => {
     }
   });
 
-  it("trails a plume's wake downstream: along the jet next to it, as far as the measured wake", () => {
+  it("trails a plume's wake downstream: along the jet next to it, a little past the measured wake", () => {
     const { layout, weather } = sol('jupiter', false);
     const plumes = allStorms(weather, layout, 5000);
     expect(plumes.length).toBeGreaterThan(50);
     for (const e of plumes) {
-      // 13 000–30 000 km behind over its life at 24°N: up to 26° of longitude.
-      expect(Math.abs(e.tail)).toBeLessThanOrEqual(26 * DEG + 1e-9);
+      // 13 000–30 000 km behind over its life at 24°N (up to 26° of longitude), drawn up to 40°.
+      expect(Math.abs(e.tail)).toBeLessThanOrEqual(40 * DEG + 1e-9);
       expect(Math.abs(e.tail)).toBeGreaterThan(5 * DEG);
       const side = Math.sign(e.tailShift);
       const shear = gasDrift(layout, e.lat + side * Math.abs(e.tailShift) / 0.6) - gasDrift(layout, e.lat);
@@ -150,9 +150,9 @@ describe('the storms', () => {
       expect(Math.abs(gasStormTail(e, e.start + (e.life * 55) / 402))).toBeCloseTo(Math.PI, 1);
       expect(gasStormStrength(e, e.start + (e.life * 10) / 201)).toBeCloseTo(e.strength);
       expect(gasStormStrength(e, e.start + (e.life * 3) / 201)).toBeLessThan(e.strength * 0.5);
-      // Its head 20 000–34 000 km long on Saturn.
-      expect(2 * e.size * 60_268).toBeGreaterThan(19_000);
-      expect(2 * e.size * 60_268).toBeLessThan(35_000);
+      // Its head 20 000–34 000 km long on Saturn, drawn 28 000–44 000 km so it's easy to spot.
+      expect(2 * e.size * 60_268).toBeGreaterThan(27_000);
+      expect(2 * e.size * 60_268).toBeLessThan(45_000);
       expect(Math.abs(e.lat)).toBeLessThanOrEqual(40 * DEG);
     }
   });
@@ -196,6 +196,31 @@ describe('the storms', () => {
       if (schedule.events.some((e) => gasStormStrength(e, t) > 0)) busy++;
     }
     expect(busy / n).toBeGreaterThan(0.95);
+  });
+
+  it('is easy to spot: several storms on every giant, and a great white storm on a Saturn most of the time', () => {
+    const live = (name: keyof typeof SOL_SEEDS, ice: boolean) => {
+      const { layout, weather } = sol(name, ice);
+      const schedule = new GasStormSchedule(weather, layout);
+      const counts: number[] = [];
+      let great = 0;
+      for (let t = 0; t < 6000; t += 5) {
+        schedule.advance(t);
+        const strong = schedule.events.filter((e) => gasStormStrength(e, t) > 0.3);
+        counts.push(strong.length);
+        if (strong.some((e) => e.kind === 'great')) great++;
+      }
+      return { mean: counts.reduce((a, b) => a + b, 0) / counts.length, busy: counts.filter((n) => n > 0).length / counts.length, great: great / counts.length };
+    };
+    const jupiter = live('jupiter', false);
+    expect(jupiter.mean).toBeGreaterThan(4);
+    expect(jupiter.busy).toBeGreaterThan(0.99);
+    expect(live('saturn', false).great).toBeGreaterThan(0.6);
+    for (const name of ['uranus', 'neptune'] as const) {
+      const g = live(name, true);
+      expect(g.mean).toBeGreaterThan(3);
+      expect(g.busy).toBeGreaterThan(0.99);
+    }
   });
 
   it('a schedule that jumps about matches a fresh one', () => {
@@ -257,7 +282,7 @@ describe('lightning', () => {
     expect(flashes).toBeGreaterThan(10);
   });
 
-  it("flashes at the stylised rates: a great storm an order of magnitude more than a plume (Saturn 2010's > 10/s)", () => {
+  it("flashes at the stylised rates: a great storm several times a plume (Saturn 2010's > 10/s)", () => {
     const jupiter = sol('jupiter', false);
     const saturn = sol('saturn', false);
     const plume = allStorms(jupiter.weather, jupiter.layout, 2000)[0]!;
@@ -266,8 +291,8 @@ describe('lightning', () => {
     const g = flashRate(great) / great.strength;
     expect(p).toBeGreaterThan(plume.lightning * 0.6);
     expect(p).toBeLessThan(plume.lightning * 1.4);
-    // The pool's 8 slots cap the busiest moments a little.
-    expect(g / p).toBeGreaterThan(6);
+    // One flash per flash slot at most caps a great storm at 10/s.
+    expect(g / p).toBeGreaterThan(3.5);
     expect(g).toBeGreaterThan(5);
   });
 

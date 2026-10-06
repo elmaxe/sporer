@@ -52,13 +52,13 @@ const MAX_STORMS = 12;
 const TABLE_ROWS = 512;
 const KIND_CODE: Record<GasStormKind, number> = { red: 0, white: 1, dark: 2, streak: 3 };
 /** Flashes lit at once (the shader's slots). */
-export const MAX_GAS_FLASHES = 8;
+export const MAX_GAS_FLASHES = 16;
 /**
  * A flash lights the clouds this far round (radians, the glow's 1/e width):
- * stylised, ~15× the real patches (30–80 km on Jupiter, 200 km on Saturn), so
- * one shows from the system view (docs/research/gas-weather.md).
+ * stylised, ~40× the real patches (30–80 km on Jupiter, 200 km on Saturn), so
+ * one is easy to spot from the system view (docs/research/gas-weather.md).
  */
-const GAS_FLASH_WIDTH = 0.012;
+const GAS_FLASH_WIDTH = 0.03;
 /** A flash's glow at its centre at full brightness (emitted light, added after the sun's). */
 const GAS_FLASH_PEAK = 1.6;
 
@@ -472,7 +472,7 @@ export class GasLook {
             // How strongly the sun lights this pixel (its direct light over the cloud's own colour): lightning
             // shows on the night side and through the dusk, and is lost in the sunlit cloud tops.
             float gasSun = dot(reflectedLight.directDiffuse, vec3(1.0)) / max(dot(diffuseColor.rgb, vec3(1.0)), 0.02);
-            totalEmissiveRadiance += vec3(0.8, 0.87, 1.0) * gasFlashGlow(normalize(vGasDir)) * uGasFlashGain * ${GAS_FLASH_PEAK.toFixed(2)} * (1.0 - smoothstep(0.0, 0.1, gasSun));
+            totalEmissiveRadiance += vec3(0.8, 0.87, 1.0) * gasFlashGlow(normalize(vGasDir)) * uGasFlashGain * ${GAS_FLASH_PEAK.toFixed(2)} * (1.0 - smoothstep(0.0, 0.2, gasSun));
           }`,
         );
     };

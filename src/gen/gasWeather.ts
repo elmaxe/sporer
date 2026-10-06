@@ -29,7 +29,7 @@ export type GasEventKind = 'plume' | 'great' | 'outburst' | 'spot';
 /** The cloud shader's shape code per kind. */
 export const GAS_EVENT_SHAPE: Record<GasEventKind, number> = { plume: 0, great: 1, outburst: 2, spot: 3 };
 /** Most passing storms on one giant at once (the shader's slots): the channels of its specs together never exceed it. */
-export const MAX_GAS_EVENTS = 6;
+export const MAX_GAS_EVENTS = 12;
 
 const DEG = Math.PI / 180;
 
@@ -103,36 +103,38 @@ const NEPTUNE_KM = 24_764;
 /**
  * Stylised flash rates, flashes per second at full strength. Saturn's great
  * storm of 2010 flashed "about an order of magnitude" more than earlier storms,
- * peaking past 10 per second (Fischer et al. 2011): great = 10 × plume (the
- * shader's 8 slots hold that). The ice giants' are rare (Voyager 2: 16
- * whistlers in ~20 min at Neptune), drawn once every ~40 s per storm so they
- * are seen at all, like the Venus decks' (deliberate).
+ * peaking past 10 per second (Fischer et al. 2011): great = 10 per second, the
+ * most one storm can flash (one per 0.1 s flash slot). Plumes flash 2 per second,
+ * more than the measured ratio says, so a giant's night side is always
+ * flickering somewhere (deliberate: lightning should be easy to spot). The ice
+ * giants' are rare (Voyager 2: 16 whistlers in ~20 min at Neptune), drawn every
+ * ~3 s per storm so they are seen at all (deliberate).
  */
-export const GAS_LIGHTNING = { plume: 0.8, great: 8, ice: 1 / 40 } as const;
+export const GAS_LIGHTNING = { plume: 2, great: 10, ice: 0.3 } as const;
 
 /**
  * A convective plume in a belt (Jupiter's moist convection): lightning storms
  * under 1500 km to Galileo's 4000 km long storm, living "a few days" (one
- * plume of the 2010 SEB revival only 3): a 3000–6500 km head, about 1.5× the
- * real ones so it reads from the system view. Its wake trails it along the
- * band: 2016's plumes ran at 155–175 m/s through a wake moving at
- * 100–125 m/s, ~50 m/s apart, so over 3–7 days the wake reaches
- * 13 000–30 000 km behind: 11–26° of longitude at 24°N. Jupiter has
- * "typically a few storms at the same time" (Fischer et al.): four channels,
- * busy two thirds of the time, keep ~2.5 going. Times compressed: a few days
- * → 1–2 minutes.
+ * plume of the 2010 SEB revival only 3): an 8000–14 000 km head, 3–4× the
+ * real ones so it's easy to spot from the system view (deliberate). Its wake
+ * trails it along the band: 2016's plumes ran at 155–175 m/s through a wake
+ * moving at 100–125 m/s, ~50 m/s apart, so over 3–7 days the wake reaches
+ * 13 000–30 000 km behind: 11–26° of longitude at 24°N, drawn up to 40°.
+ * Jupiter has "typically a few storms at the same time" (Fischer et al.);
+ * eight channels, nearly always busy, keep ~7 going so one is always in
+ * sight (deliberate). Times compressed: a few days → 1.3–2 minutes.
  */
 const PLUME: GasStormSpec = {
   kind: 'plume',
-  channels: 4,
+  channels: 8,
   interval: 120,
-  chance: 0.85,
-  life: [60, 120],
-  size: [1500 / JUPITER_KM, 3250 / JUPITER_KM],
+  chance: 0.95,
+  life: [80, 120],
+  size: [4000 / JUPITER_KM, 7000 / JUPITER_KM],
   aspect: 1.3,
   // Jupiter's lightning storms sit in its cyclonic belts, from 13°S to past 50°N (Cassini, Juno).
   latitude: [5 * DEG, 65 * DEG],
-  tail: 26 * DEG,
+  tail: 40 * DEG,
   tailBy: 1,
   rise: 0.1,
   equatorward: 0,
@@ -144,16 +146,17 @@ const PLUME: GasStormSpec = {
  * in about ten days and measured 9200 × 34 000 km (a 17 000 km half-length,
  * aspect 3.7); its trail went all the way round in ~55 of its 201 days.
  * Once per Saturn year (29.5 years), at 35°N in 2010 and near the equator in
- * 1933 and 1990. Drawn far more often (deliberate: a quarter of the slots)
- * and 450–800 s long instead of seven months.
+ * 1933 and 1990. Drawn nearly always instead (deliberate, so it's easy to
+ * spot): two staggered channels, four slots in five, 400–580 s long instead
+ * of seven months, the head 28 000–44 000 km long.
  */
 const GREAT: GasStormSpec = {
   kind: 'great',
-  channels: 1,
-  interval: 900,
-  chance: 0.25,
-  life: [450, 800],
-  size: [10_000 / SATURN_KM, 17_000 / SATURN_KM],
+  channels: 2,
+  interval: 600,
+  chance: 0.8,
+  life: [400, 580],
+  size: [14_000 / SATURN_KM, 22_000 / SATURN_KM],
   aspect: 3.7,
   latitude: [0, 40 * DEG],
   tail: 2 * Math.PI,
@@ -167,15 +170,16 @@ const GREAT: GasStormSpec = {
  * An ice giant's bright outburst: Uranus's spots of 2000–4000 km up to its
  * 2014 storm of ~25° of longitude at 15°N (10 000–17 000 km by 4300 km), whose
  * trail stretched 60° back in about 10 days; Neptune's 2017 storm (8500 km)
- * lasted 7 months. Months → 1–2.5 minutes.
+ * lasted 7 months. Drawn 6000–14 000 km long, six channels nearly always
+ * busy (deliberate, so they're easy to spot). Months → 1.5–2.5 minutes.
  */
 const OUTBURST: GasStormSpec = {
   kind: 'outburst',
-  channels: 3,
+  channels: 6,
   interval: 150,
-  chance: 0.5,
-  life: [60, 150],
-  size: [1000 / URANUS_KM, 5000 / URANUS_KM],
+  chance: 0.9,
+  life: [90, 150],
+  size: [3000 / URANUS_KM, 7000 / URANUS_KM],
   aspect: 3,
   latitude: [5 * DEG, 50 * DEG],
   tail: 60 * DEG,
@@ -188,15 +192,16 @@ const OUTBURST: GasStormSpec = {
 /**
  * A dark spot like Neptune's: 11 000 × 5000 km at 23°N (2018), living one to
  * six years, one every four to six; they drift ~2° a year (2015's poleward,
- * 2018's and Voyager's equatorward) and fade away. Years → 5–10 minutes,
- * ~6° of drift towards the equator over a life.
+ * 2018's and Voyager's equatorward) and fade away. Years → 7–10 minutes,
+ * ~6° of drift towards the equator over a life; two channels, nearly always
+ * busy (deliberate, so one is easy to spot).
  */
 const SPOT: GasStormSpec = {
   kind: 'spot',
-  channels: 1,
+  channels: 2,
   interval: 600,
-  chance: 0.5,
-  life: [300, 600],
+  chance: 0.9,
+  life: [400, 600],
   size: [3500 / NEPTUNE_KM, 5500 / NEPTUNE_KM],
   aspect: 2.2,
   latitude: [15 * DEG, 40 * DEG],
