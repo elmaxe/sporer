@@ -34,6 +34,8 @@ import {
   type SeamlessZoom,
 } from './seamlessZoom';
 import { ARRIVAL_DISTANCE, SystemLevel } from './SystemLevel';
+import { Terraforming, type TerraformBody } from '../terraform/Terraforming';
+import type { TerraformMode } from '../gen/terraform';
 
 /**
  * The origin: the system's barycentre, where the system camera looks during the
@@ -44,6 +46,9 @@ const ORIGIN = new THREE.Vector3();
 const BACK = new THREE.Vector3(0, 0, 1);
 /** The ecliptic's north: the ship hovers this way from a body. */
 const UP = new THREE.Vector3(0, 1, 0);
+
+/** Terraformed bodies' looks in the system view (and their milestones) are brought up to date this often, s. */
+const LIVE_INTERVAL = 0.1;
 
 /** Seconds since the blast that a busted body's debris is shown at in a newly built system (long settled). */
 const SETTLED_DEBRIS = 600;
@@ -103,6 +108,12 @@ export class SceneManager implements Entity {
   readonly switches = new ItemSwitches();
   /** Pictures of plant and animal species (the item bar's cargo, the planet map's Species tab), drawn once each. */
   readonly icons: SpeciesIcons;
+  /** Terraforming: the game clock, every body's action log, the ship's energy, the milestones (terraform/Terraforming.ts). */
+  readonly terraforming: Terraforming;
+  /** The current system's solid bodies, as terraforming knows them, for their live looks. */
+  private liveBodies: { body: Planet; terraform: TerraformBody }[] = [];
+  private sinceLive = 0;
+  private liveVersion = -1;
   private seamless: SeamlessTransition | null = null;
   // Scratch for the seamless zoom (live: the cameras read them every frame).
   private readonly view = new THREE.Quaternion();
@@ -122,13 +133,26 @@ export class SceneManager implements Entity {
     start: StarRef,
     private readonly debug: Debug,
     private readonly sfx: SoundEffects,
+    /** How terraforming plays (the menu's Gameplay setting). */
+    terraformMode?: TerraformMode,
   ) {
     const { camera, input, renderer } = game;
+    this.terraforming = new Terraforming(terraformMode);
     this.icons = { plants: new PlantIcons(renderer), animals: new AnimalIcons(renderer) };
     this.nebulas = galaxy.nebulas;
     this.stars = galaxy.stars;
-    this.galaxyLevel = new GalaxyLevel(galaxy, start, camera, input, renderer.domElement, this.tooltip, debug, sfx, () =>
-      this.toSystem(),
+    const t = this.terraforming;
+    this.galaxyLevel = new GalaxyLevel(
+      galaxy,
+      start,
+      camera,
+      input,
+      renderer.domElement,
+      this.tooltip,
+      debug,
+      sfx,
+      () => this.toSystem(),
+      { climateOf: (b) => t.climate({ key: bodyKey(b), climate: b.climate }), version: () => Math.floor(t.time / 5) * 1e6 + t.logs.version },
     );
     this._systemLevel = this.createSystem(start);
     game.setLevel(this._systemLevel);
@@ -150,6 +174,11 @@ export class SceneManager implements Entity {
     z?.add(zoomCurveParams, 'lowAltitude', 1, 20);
     z?.add(zoomCurveParams, 'highRadii', 0.5, 4);
     z?.add(zoomCurveParams, 'altitudeCurve', 0.5, 3);
+  }
+
+  /** The ship's energy (terraforming's). */
+  get energy(): Terraforming['energy'] {
+    return this.terraforming.energy;
   }
 
   get systemLevel(): SystemLevel {
@@ -426,7 +455,18 @@ export class SceneManager implements Entity {
     });
   }
 
+  fixedUpdate(dt: number): void {
+    this.terraforming.advance(dt);
+  }
+
   update(frameDt: number): void {
+    this.sinceLive += frameDt;
+    // Also at once when a log changed (a debug dump restored, while paused).
+    if (this.sinceLive >= LIVE_INTERVAL || this.terraforming.logs.version !== this.liveVersion) {
+      this.sinceLive = 0;
+      this.liveVersion = this.terraforming.logs.version;
+      this.updateLive();
+    }
     // Flying into a planet or moon takes you down to it too.
     if (!this.transitioning && this.mode === 'system') {
       const body = this._systemLevel.bodyInReach();
@@ -511,6 +551,21 @@ export class SceneManager implements Entity {
     return Math.min(maxDistance, Math.max(ARRIVAL_DISTANCE, pastHandover * handover, leaveParams.reach * reach));
   }
 
+  /**
+   * Terraformed bodies in the current system look as their climate is now
+   * (the game clock runs on wherever the ship is), and their milestones are
+   * announced as they're reached.
+   */
+  private updateLive(bodies = this.liveBodies): void {
+    const t = this.terraforming;
+    for (const { body, terraform } of bodies) {
+      if (body.busted || !t.touched(terraform.key)) continue;
+      const climate = t.snapshot(terraform)!.climate;
+      body.setLive(climate);
+      t.checkMilestones(terraform, climate);
+    }
+  }
+
   private createPlanet(body: Planet, side: THREE.Vector3): PlanetLevel {
     const { camera, input } = this.game;
     this._planetLevel = new PlanetLevel(
@@ -533,6 +588,7 @@ export class SceneManager implements Entity {
       this.inventory,
       this.switches,
       this.icons,
+      this.terraforming,
     );
     return this._planetLevel;
   }
@@ -563,12 +619,22 @@ export class SceneManager implements Entity {
       if (this.busted.isBusted(key)) body.bust(level.world.time - SETTLED_DEBRIS);
       else for (const site of this.surfaceChanges.find(key)?.volcanoes ?? []) body.addVolcano(site, null);
     }
+    this.liveBodies = [...level.world.planets, ...level.world.moons]
+      .filter((body) => body.config.climate && !isGas(body.config))
+      .map((body) => ({ body, terraform: terraformBody(body) }));
+    this.updateLive(this.liveBodies);
     // Remember the system in the URL, so a reload comes back here.
     const url = new URL(location.href);
     url.searchParams.set('star', String(ref.id));
     history.replaceState(null, '', url);
     return level;
   }
+}
+
+/** A planet or moon as terraforming knows it. */
+export function terraformBody(body: Planet): TerraformBody {
+  const { config } = body;
+  return { key: bodyKey(config), name: config.name, type: config.type as TerraformBody['type'], climate: config.climate! };
 }
 
 /** Descending to it means a reentry: it has an atmosphere, or is a gas giant (all atmosphere). */

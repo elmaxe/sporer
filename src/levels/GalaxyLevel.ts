@@ -84,6 +84,8 @@ export class GalaxyLevel extends Level {
     sfx: SoundEffects,
     /** Called when the player scrolls in past the closest zoom (to enter a system). */
     onZoomIn: () => void,
+    /** Terraformed bodies' climates now, for the systems' summaries. */
+    live: ConstructorParameters<typeof GalaxyHud>[9] = null,
   ) {
     super();
     this.radius = galaxy.radius;
@@ -132,7 +134,7 @@ export class GalaxyLevel extends Level {
       new GalaxyPicker(camera, input, canvas, galaxy, [...galaxy.stars, ...galaxy.rogues], positions, this.ship, this.root, sfx),
     );
     this.hud = this.add(
-      new GalaxyHud(this.scene, camera, input, galaxy, this.ship, picker, tooltip, this.map, this.root),
+      new GalaxyHud(this.scene, camera, input, galaxy, this.ship, picker, tooltip, this.map, this.root, live),
     );
   }
 

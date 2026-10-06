@@ -105,7 +105,7 @@ import { launch, sleep, StallError } from './lib/browser.mjs';
 
 const args = process.argv.slice(2);
 const option = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
-const SECTIONS = ['core', 'galaxy', 'nebulas', 'rogues', 'blackholes', 'dust', 'audio', 'planet', 'types', 'lab', 'plants', 'animals', 'stars', 'touch', 'cargo', 'volcano', 'buster'];
+const SECTIONS = ['core', 'galaxy', 'nebulas', 'rogues', 'blackholes', 'dust', 'audio', 'planet', 'types', 'lab', 'plants', 'animals', 'stars', 'touch', 'cargo', 'volcano', 'terraform', 'buster'];
 const only = option('--only')?.split(',');
 if (only?.some((name) => !SECTIONS.includes(name))) {
   console.error(`--only takes some of: ${SECTIONS.join(', ')}`);
@@ -164,6 +164,7 @@ let lab = null;
 let buster = null;
 let cargo = null;
 let volcano = null;
+let terraform = null;
 let plantLab = null;
 let touch = null;
 let touchLab = null;
@@ -3044,7 +3045,7 @@ await section('cargo', async () => {
       release = { released: (await evaluate(`${animalChanges}.releasedCount`)) - before, hint: await evaluate(`document.getElementById('item-hint').textContent`) };
     }
     // The laser: Tab to the Weapons, a real 1 arms it; held on an animal, then on a tree, it kills them.
-    if (await evaluate(`document.getElementById('item-bar').dataset.tab !== 'weapons'`)) await key('Tab', 'Tab');
+    for (let i = 0; i < 3 && (await evaluate(`document.getElementById('item-bar').dataset.tab !== 'weapons'`)); i++) await key('Tab', 'Tab');
     await key('Digit1', '1');
     const laserArmed = await evaluate(`({ selected: planet.selected, cursor: document.body.classList.contains('aiming'), hint: document.getElementById('item-hint').textContent })`);
     const fire = async (target, what) => {
@@ -3288,6 +3289,152 @@ await section('volcano', async () => {
     rebuilt === 1;
   return volcano.ok;
 });
+await section('terraform', async () => {
+  // A fresh game.
+  if (!(await page.goto(url, READY, 60000))) return false;
+  await drawFrames(20);
+  for (let i = 0; i < 40 && (await evaluate(`levels.transitioning || levels.mode !== 'system'`)); i++) {
+    if (await evaluate(`levels.mode === 'planet' && !levels.transitioning`)) await evaluate(`levels.leavePlanet()`);
+    if (await evaluate(`levels.mode === 'galaxy' && !levels.transitioning`)) await evaluate(`levels.toSystem()`);
+    await sleep(500);
+  }
+  const press = async (code, key) => {
+    for (const type of ['keyDown', 'keyUp']) {
+      await send('Input.dispatchKeyEvent', { type, code, key });
+      await drawFrames(2);
+    }
+  };
+  // The Terraform tab (Tab twice from Weapons) and its first ray, in space: only in low orbit.
+  await press('Tab', 'Tab');
+  await press('Tab', 'Tab');
+  await press('Digit1', '1');
+  const inSpace = await evaluate(`({ tab: document.getElementById('item-bar').dataset.tab, slots: [...document.querySelectorAll('.item-slot[data-item]')].map((s) => s.dataset.item),
+    hint: document.getElementById('item-hint').textContent, energy: document.getElementById('item-energy')?.textContent ?? null })`);
+  // Down to a world that isn't habitable yet (the home system's Haikrai III).
+  await evaluate(`(() => {
+    const solid = world.planets.filter((p) => p.config.type !== 'gas' && p.config.climate);
+    const b = solid.find((p) => p.config.climate.habitability === 0 && p.config.climate.retentionClass === 'holds') ?? solid[0];
+    window.__terraformed = b; ship.parkAt(b); levels.systemLevel.orbit.lookFrom(world.stars[0].position.clone().sub(b.position)); levels.toPlanet(b);
+  })()`);
+  await until(`levels.mode === 'planet' && !levels.transitioning`, 60000);
+  await drawFrames(5);
+  await evaluate(`(() => {
+    window.__cues = [];
+    const play = audio.play.bind(audio), start = audio.start.bind(audio);
+    audio.play = (c) => (__cues.push(c), play(c));
+    audio.start = (c) => (__cues.push(c), start(c));
+  })()`);
+  const key = await evaluate(`planet.terraformBody.key`);
+  const base = await evaluate(`planet.terraformBody.climate.temperature`);
+  // The heat ray (1): a real press held on the ground under the ship.
+  await press('Digit1', '1');
+  const armed = await evaluate(`({ selected: planet.selected, aiming: document.body.classList.contains('aiming'), hint: document.getElementById('item-hint').textContent,
+    chart: !document.getElementById('climate-chart').hidden, cost: document.querySelector('.item-slot[data-item=heatRay] .item-cost')?.textContent ?? null })`);
+  const target = await evaluate(`(() => {
+    const d = planet.ship.object.position.clone().normalize();
+    const g = d.clone().multiplyScalar(planet.groundRadius(d));
+    const v = g.project(game.camera);
+    const r = game.renderer.domElement.getBoundingClientRect();
+    return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height };
+  })()`);
+  const hold = async (seconds) => {
+    await send('Input.dispatchMouseEvent', { type: 'mousePressed', ...target, button: 'left', clickCount: 1 });
+    const t0 = await evaluate(`levels.terraforming.time`);
+    await until(`levels.terraforming.time > ${t0} + ${seconds}`, 60000);
+    const during = await evaluate(`({ on: planet.rays.on, draining: levels.energy.draining, hint: document.getElementById('item-hint').textContent })`);
+    await send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...target, button: 'left', clickCount: 1 });
+    await drawFrames(3);
+    return during;
+  };
+  const heating = await hold(2.5);
+  const heated = await evaluate(`(() => { const s = levels.terraforming.snapshot(planet.terraformBody); const log = levels.terraforming.logs.actions('${key}');
+    return { actions: log.length, levers: [...new Set(log.map((a) => a.lever))], target: s.target.temperature, settlesIn: s.settlesIn, spent: levels.energy.spent, enRoute: planet.ship.enRoute }; })()`);
+  // The air ray (3) with oxygen picked by G.
+  await press('Digit3', '3');
+  await press('KeyG', 'g');
+  const gas = await evaluate(`levels.terraforming.choice.gas`);
+  const airing = await hold(2);
+  const aired = await evaluate(`levels.terraforming.logs.actions('${key}').filter((a) => a.lever === '${gas}').length`);
+  await press('Digit3', '3');
+  // A world made habitable at once (as if held for long): air, water and heat; its milestones and looks follow.
+  await evaluate(`(() => { const t = levels.terraforming, s = t.time;
+    for (const [lever, amount] of [['n2', 0.8], ['o2', 0.22], ['water', 0.5], ['heat', 260]]) t.logs.record('${key}', { lever, start: s, duration: 0, amount });
+    for (let i = 0; i < 2; i++) document.getElementById('gameplay-terraform').click();
+  })()`);
+  const modes = await evaluate(`({ mode: levels.terraforming.mode, changes: levels.terraforming.logs.modes.map((m) => m.mode), button: document.getElementById('gameplay-terraform').textContent })`);
+  // Ten minutes on (as if the ship had been away): it has settled.
+  await evaluate(`levels.terraforming.advance(600)`);
+  const settled = await until(`levels.terraforming.snapshot(planet.terraformBody).settlesIn < 2`, 20000);
+  await drawFrames(10);
+  const live = await evaluate(`(() => { const c = levels.terraforming.snapshot(planet.terraformBody).climate;
+    return { temperature: c.temperature, pressure: c.pressure, composition: c.composition, water: c.waterState, tier: c.habitability,
+      hud: document.getElementById('hud-climate').textContent, sea: planet.globe.seaRadius, radius: planet.radius, weather: !!planet.globe.weather,
+      banners: milestones.shownTitles.slice(), logged: levels.terraforming.milestones.log('${key}').map((e) => e.id) }; })()`);
+  await evaluate(`planet.orbit.zoomTo(planet.radius * 1.6)`);
+  await drawFrames(30);
+  const lowShot = join(outDir, 'terraform-low-orbit.png');
+  writeFileSync(lowShot, await page.screenshot());
+  const heard = (await evaluate(`__cues`)).filter((c) => c === 'magicRay' || c === 'milestone');
+  await evaluate(`levels.leavePlanet()`);
+  await until(`levels.mode === 'system' && !levels.transitioning`, 60000);
+  await drawFrames(5);
+  const system = await evaluate(`({ details: __terraformed.details, live: __terraformed.climate !== __terraformed.config.climate, tier: __terraformed.climate.habitability })`);
+  await evaluate(`(() => { const o = levels.systemLevel.orbit; o.setFocus(__terraformed.renderPosition); o.setDistance(__terraformed.radius * 4); })()`);
+  await drawFrames(20);
+  const systemShot = join(outDir, 'terraform-system.png');
+  writeFileSync(systemShot, await page.screenshot());
+  await evaluate(`levels.systemLevel.orbit.setFocus(null)`);
+  // Out to the galaxy and back: the system is built afresh, the world still as terraformed.
+  await evaluate(`levels.toGalaxy()`);
+  await until(`levels.mode === 'galaxy' && !levels.transitioning`, 60000);
+  await evaluate(`levels.toSystem()`);
+  await until(`levels.mode === 'system' && !levels.transitioning`, 60000);
+  const rebuilt = await evaluate(`(() => { const b = world.planets.find((p) => p.name === __terraformed.name); return { live: b.climate !== b.config.climate, tier: b.climate.habitability }; })()`);
+  // Back to Relaxed for whatever comes next.
+  await evaluate(`(() => { while (levels.terraforming.mode !== 'relaxed') document.getElementById('gameplay-terraform').click(); })()`);
+  terraform = { inSpace, armed, heating, heated, gas, airing, aired, modes, settled, live, heard, system, rebuilt, base, lowShot, systemShot };
+  terraform.ok =
+    inSpace.tab === 'terraform' &&
+    inSpace.slots.join(',') === 'heatRay,coolRay,airRay,vacuumRay,waterRay' &&
+    /down to a planet or moon/.test(inSpace.hint) &&
+    /∞/.test(inSpace.energy ?? '') &&
+    armed.selected === 'heatRay' &&
+    armed.aiming &&
+    armed.chart &&
+    /\/s|free/.test(armed.cost ?? '') &&
+    /hold/i.test(armed.hint) &&
+    heating.on &&
+    heating.draining > 0 &&
+    /heat/i.test(heating.hint) &&
+    heated.actions >= 2 &&
+    heated.levers.join(',') === 'heat' &&
+    heated.target > base + 2 &&
+    heated.spent > 0 &&
+    !heated.enRoute &&
+    gas === 'o2' &&
+    airing.on &&
+    aired >= 1 &&
+    modes.mode === 'sandbox' &&
+    modes.changes.join(',') === 'relaxed,real,sandbox' &&
+    /Sandbox/.test(modes.button) &&
+    settled &&
+    live.tier === 3 &&
+    live.composition === 'oxygenNitrogen' &&
+    live.water === 'liquid' &&
+    /T3/.test(live.hud) &&
+    live.sea !== null &&
+    live.weather &&
+    // The banners show one at a time: the first is up, the rest queued behind it.
+    live.banners.length >= 1 &&
+    ['firstAir', 'firstRain', 'seasThaw', 'breathable', 'tierUp'].every((id) => live.logged.includes(id)) &&
+    heard.includes('magicRay') &&
+    heard.includes('milestone') &&
+    system.live &&
+    system.tier === 3 &&
+    rebuilt.live &&
+    rebuilt.tier === 3;
+  return terraform.ok;
+});
 await section('buster', async () => {
   // A fresh game (the lab section leaves the page on lab.html).
   if (!(await page.goto(url, READY, 60000))) return false;
@@ -3409,7 +3556,7 @@ const ok = started && !stalled && Object.keys(sections).length > 0 && Object.val
 console.error(`[smoke] ${ok ? 'ok' : 'FAILED'} in ${Math.round((Date.now() - T0) / 1000)} s${errors.length ? `, ${errors.length} console errors` : ''}`);
 console.log(
   JSON.stringify(
-    { ok, started, stalled, sections, before, after, autopilot, pick, systemMap, sky, living, comet, belt, galaxyLoop, nebulas, rogues, blackHoles, dust, seamless, audio, planetLoop, heldZoom, cometLoop, asteroidLoops, planetTypes, touch, touchLab, cargo, volcano, buster, lab, plantLab, animalLab, gameAnimals, starLab, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
+    { ok, started, stalled, sections, before, after, autopilot, pick, systemMap, sky, living, comet, belt, galaxyLoop, nebulas, rogues, blackHoles, dust, seamless, audio, planetLoop, heldZoom, cometLoop, asteroidLoops, planetTypes, touch, touchLab, cargo, volcano, terraform, buster, lab, plantLab, animalLab, gameAnimals, starLab, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
     null,
     2,
   ),

@@ -520,8 +520,8 @@ const BEAM_FRAGMENT = /* glsl */ `
   }
 `;
 
-/** The beam: a hot white core in a red glow, from the ship's underside to where it meets the ground, with a glow at each end. */
-class LaserLook {
+/** The beam: a hot white core in a red glow (or the colours given), from the ship's underside to where it meets the ground, with a glow at each end. */
+export class LaserLook {
   private readonly core: THREE.Mesh<THREE.CylinderGeometry, THREE.ShaderMaterial>;
   private readonly halo: THREE.Mesh<THREE.CylinderGeometry, THREE.ShaderMaterial>;
   private readonly geometry = new THREE.CylinderGeometry(1, 1, 1, 12, 1, true).translate(0, 0.5, 0);
@@ -531,7 +531,11 @@ class LaserLook {
   private readonly middle = new THREE.Vector3();
   private time = 0;
 
-  constructor(private readonly scene: THREE.Scene) {
+  constructor(
+    private readonly scene: THREE.Scene,
+    core: THREE.Color = CORE_COLOR,
+    glow: THREE.Color = GLOW_COLOR,
+  ) {
     const material = (color: THREE.Color, sharp: number) =>
       new THREE.ShaderMaterial({
         vertexShader: BEAM_VERTEX,
@@ -543,11 +547,11 @@ class LaserLook {
         side: THREE.DoubleSide,
         toneMapped: false,
       });
-    this.core = new THREE.Mesh(this.geometry, material(CORE_COLOR, 1.5));
-    this.halo = new THREE.Mesh(this.geometry, material(GLOW_COLOR, 2.5));
+    this.core = new THREE.Mesh(this.geometry, material(core, 1.5));
+    this.halo = new THREE.Mesh(this.geometry, material(glow, 2.5));
     this.ends = [0, 1].map(() => {
       const sprite = new THREE.Sprite(
-        new THREE.SpriteMaterial({ map: this.texture, color: GLOW_COLOR, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, toneMapped: false }),
+        new THREE.SpriteMaterial({ map: this.texture, color: glow, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, toneMapped: false }),
       );
       sprite.renderOrder = RENDER_ORDER + 1;
       return sprite;

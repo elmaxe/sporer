@@ -1,3 +1,4 @@
+import { describeClimateDetail } from '../gen/climate';
 import type { Entity } from '../core/Entity';
 import type { Input } from '../core/Input';
 import { celsius, describeAtmosphere } from '../gen/climate';
@@ -166,6 +167,15 @@ export class LabInfo implements Entity {
         `${fmt(climate.heatFlow)} W/m² · ${GEOTHERMAL[Math.min(4, Math.floor(climate.geothermal * 5))]} (${fmt(climate.geothermal)})`,
       ]);
       rows.push(['Habitability', `T${climate.habitability}`]);
+      // The magic rays' work (the Terraform folder), at the time shown.
+      const tf = this.lab.terraformSnapshot;
+      if (tf) {
+        const t = this.lab.terraformState!;
+        rows.push([
+          'Terraformed',
+          `at ${Math.round(t.time)} s (${t.actions.length} actions, ${t.mode}): ${describeClimateDetail(tf.climate)}${tf.settlesIn > 0.5 ? ` · settling at ${celsius(tf.target.temperature)}` : ''}`,
+        ]);
+      }
       const life = labLife(planet, view.star);
       if (life) rows.push(['Life', describeLifeDetail(life)]);
       const look = planet.atmosphere ? atmosphereLook(climate, planet.radius) : null;

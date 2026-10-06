@@ -20,6 +20,8 @@ import { ViewFreezeControl } from './ui/ViewFreezeControl';
 import { ThirdPersonControl } from './ui/ThirdPersonControl';
 import { ItemBar } from './ui/ItemBar';
 import { GraphicsSettingsControl, loadGraphicsSettings } from './ui/GraphicsSettings';
+import { GameplaySettingsControl, loadGameplaySettings } from './ui/GameplaySettings';
+import { MilestoneBanner } from './terraform/MilestoneBanner';
 import { installConsoleLog } from './debug/consoleLog';
 import { DebugDumpControl } from './debug/DebugDump';
 import { gameDumpSource } from './debug/gameState';
@@ -50,7 +52,11 @@ async function main(): Promise<void> {
   new VolumeControl(audio, audioSettings);
   new GraphicsSettingsControl(loadGraphicsSettings());
   new FullscreenButton();
-  const levels = game.add(new SceneManager(game, galaxy, start, debug, audio));
+  const gameplay = loadGameplaySettings();
+  const levels = game.add(new SceneManager(game, galaxy, start, debug, audio, gameplay.terraform));
+  new GameplaySettingsControl(gameplay, (s) => levels.terraforming.setMode(s.terraform));
+  const milestones = game.add(new MilestoneBanner(audio));
+  levels.terraforming.onMilestone = (body, event) => milestones.push(body.name, event);
   const menu = new GameMenu(game, levels);
   game.add(new FpsCounter());
   const freeze = game.add(new ViewFreezeControl(game));
@@ -65,7 +71,7 @@ async function main(): Promise<void> {
   // Handles for poking at the game from the browser console / automation.
   // ship / world / system follow the current system level, planet the planet level (or null).
   if (import.meta.env.DEV) {
-    Object.assign(window, { game, galaxy, levels, audio, menu, debugDump, freeze, thirdPerson, generateSystem, geyserKind, weatherKind, volcanicLightning, meteorShowers, nextShowerPeak, waveParams });
+    Object.assign(window, { game, galaxy, levels, audio, menu, debugDump, freeze, thirdPerson, milestones, generateSystem, geyserKind, weatherKind, volcanicLightning, meteorShowers, nextShowerPeak, waveParams });
     Object.defineProperties(window, {
       ship: { get: () => levels.systemLevel.ship, configurable: true },
       world: { get: () => levels.systemLevel.world, configurable: true },

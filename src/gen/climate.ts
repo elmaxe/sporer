@@ -113,7 +113,9 @@ export interface ClimateData extends ClimateSetting, ClimateState {
 // --- Physical constants and reference bodies (docs/research/climate.md) ---
 
 /** Stefan–Boltzmann constant, W m⁻² K⁻⁴ (exact, SI 2019). */
-const SIGMA = 5.670374419e-8;
+export const SIGMA = 5.670374419e-8;
+/** The cosmic microwave background's temperature, K (Fixsen 2009): nothing in space is colder. */
+export const CMB_TEMPERATURE = 2.725;
 /** Solar irradiance at Earth, W/m² (NASA Earth fact sheet). */
 export const SOLAR_CONSTANT = 1361;
 /** Earth's escape velocity, km/s (NASA). */
@@ -161,7 +163,8 @@ function tauFor(surface: number, equilibrium: number): number {
 }
 
 function blackBody(irradiance: number, albedo: number, heatFlow = 0): number {
-  return Math.pow((irradiance * (1 - albedo)) / 4 / SIGMA + heatFlow / SIGMA, 0.25);
+  // A magic cooling ray can take more heat than the body gets: it can't be colder than the sky (the CMB, 2.725 K, Fixsen 2009).
+  return Math.max(CMB_TEMPERATURE, Math.pow(Math.max(0, (irradiance * (1 - albedo)) / 4 / SIGMA + heatFlow / SIGMA), 0.25));
 }
 
 /**

@@ -69,6 +69,13 @@ import { GroundRocks } from '../surface/GroundRocks';
 import { rockSetup } from '../surface/rockSetup';
 import { DEBRIS_REACH, debrisLookFor } from '../gen/debris';
 import { DEBRIS_NEAR, DebrisField } from '../world/DebrisField';
+import type { ClimateData } from '../gen/climate';
+import { leakRate } from '../gen/terraform';
+import { isRayTool } from '../combat/items';
+import { MagicRay } from '../terraform/MagicRay';
+import { ClimateChart, CHART_REFRESH } from '../terraform/ClimateChart';
+import { forecastClimate, type RayId } from '../terraform/rays';
+import type { TerraformBody, Terraforming } from '../terraform/Terraforming';
 
 /**
  * Low-orbit camera, in planet-level units (an Earth-sized globe's radius is
@@ -105,6 +112,10 @@ const SKY_MIN_PIXELS = 1.5;
 /** The sky camera's clipping range, in system units. */
 const SKY_NEAR = 0.2;
 const SKY_FAR = 20000;
+/** A terraformed globe follows its climate this often, s. */
+const LIVE_INTERVAL = 0.1;
+/** The chart's arrow: where the selected ray takes the world in this many seconds. */
+const FORECAST_SECONDS = 5;
 
 /**
  * Low orbit over one planet or moon, in its own body frame and units (see
@@ -183,15 +194,28 @@ export class PlanetLevel extends Level implements ItemUser {
   private readonly start = new THREE.Vector3();
   private readonly cameraDir = new THREE.Vector3();
   private readonly cameraParams: OrbitParams;
+  /** The magic terraforming rays (solid bodies with a climate, not once busted). */
+  rays: MagicRay | null = null;
+  /** The body as terraforming knows it (null for giants and small bodies without a climate). */
+  readonly terraformBody: TerraformBody | null;
+  /** The climate chart, while the Terraform tab is on show or a ray is selected. */
+  private chart: ClimateChart | null = null;
+  private sinceLive = LIVE_INTERVAL;
+  private liveVersion = -1;
+  private sinceChart = CHART_REFRESH;
+  /** The climate now (a terraformed body's live one). */
+  private liveClimate: ClimateData | null;
+  private active = false;
+  private readonly detailExtras: string;
 
   constructor(
     private readonly system: SystemLevel,
     readonly body: Planet,
     /** System-space direction from the body where the player arrives (the side the ship was on). */
     side: THREE.Vector3,
-    camera: THREE.PerspectiveCamera,
+    private readonly camera: THREE.PerspectiveCamera,
     input: Input,
-    debug: Debug,
+    private readonly debug: Debug,
     /** Called when the player scrolls out past low orbit (back to the system). */
     onZoomOut: () => void,
     /** What has been done to this body's surface entities, kept by the scene manager across visits. */
@@ -209,8 +233,13 @@ export class PlanetLevel extends Level implements ItemUser {
     private readonly switches: ItemSwitches,
     /** Pictures of species for the map's Species tab (none in tests). */
     icons: SpeciesIcons | null = null,
+    /** Terraforming for the whole game (the magic rays need it). */
+    private readonly terraforming: Terraforming | null = null,
   ) {
     super();
+    this.terraformBody =
+      body.config.climate && !isGas(body.config) ? { key: bodyKey(body.config), name: body.name, type: body.config.type as TerraformBody['type'], climate: body.config.climate } : null;
+    this.liveClimate = body.config.climate ?? null;
     this.frame = this.add(new PlanetFrame(body, system.world.time, debug));
     const globe = (this.globe = this.add(new PlanetGlobe(this.scene, body.config, this.frame, camera, debug)));
     const busted = blastTime !== null;
@@ -218,6 +247,8 @@ export class PlanetLevel extends Level implements ItemUser {
       globe.bust(globe.radius * DEBRIS_REACH);
       this.addDebris(blastTime);
     }
+    // A terraformed body's climate as it is now, before what follows it (the rain and bolts) is made.
+    this.followClimate(true);
     this.eruptions =
       globe.lava && !busted
         ? this.add(new LavaEruptions(this.scene, this.frame, globe.lava.activity, body.config.seed, body.config.style.sea!, debug))
@@ -319,7 +350,7 @@ export class PlanetLevel extends Level implements ItemUser {
     this.weather =
       globe.weather && !busted
         ? this.add(
-            new Weather(this.scene, this.frame, globe.weather, config, camera, globe.sun, globe.sunLight, globe.ambientLight, debug),
+            new Weather(this.scene, this.frame, globe.weather, body.liveConfig, camera, globe.sun, globe.sunLight, globe.ambientLight, debug),
           )
         : null;
     // After the camera: a rising volcano shakes it.
@@ -363,8 +394,21 @@ export class PlanetLevel extends Level implements ItemUser {
     this.laser = this.add(
       new Laser(this.scene, camera, input, globe, this.ship, this, sfx, () => (this.busy ? 'Not while the planet buster goes off' : null), bodyKey(config), debug),
     );
-    // Before the picker: a press the beam takes isn't a click that flies the ship.
-    const world = { climate: config.climate ?? null, weather: weatherKind(config.type, config.climate) };
+    // Before the beam and the picker: a press a ray takes is neither.
+    this.rays =
+      this.terraformBody && terraforming && !busted
+        ? this.add(new MagicRay(this.scene, camera, input, globe, this.ship, terraforming, this.terraformBody, sfx, () => this.rayBlock(), debug))
+        : null;
+    // Before the picker: a press the beam takes isn't a click that flies the ship. What lands meets the climate as it is now.
+    const level = this;
+    const world = {
+      get climate() {
+        return level.liveClimate;
+      },
+      get weather() {
+        return weatherKind(config.type, level.liveClimate);
+      },
+    };
     this.cargo = this.plantings
       ? this.add(
           new CargoBeam(
@@ -409,14 +453,11 @@ export class PlanetLevel extends Level implements ItemUser {
       ),
     );
     const { climate } = config;
-    const weatherLine = globe.weather ? describeWeather(globe.weather.data) : '';
+    this.detailExtras = (geysers ? ` · ${describeGeysers(geysers.kind)}` : '');
     const detail = busted
       ? BUSTED_DETAIL
       : climate
-        ? describeClimateDetail(climate) +
-          (geysers ? ` · ${describeGeysers(geysers.kind)}` : '') +
-          (weatherLine ? ` · ${weatherLine}` : '') +
-          (config.life ? ` · ${describeLife(config.life)}` : '')
+        ? this.climateDetail()
         : config.small === 'comet' && config.shape
           ? describeNucleus(config.shape, activity())
           : config.shape
@@ -459,6 +500,7 @@ export class PlanetLevel extends Level implements ItemUser {
     this.hud = this.add(new PlanetHud(this.ship, `${body.name} · ${body.description}`, input, detail, showerLine));
     const species = new SpeciesTab(bodyKey(config), animalsSetup?.plan.species ?? [], plantsSetup?.plan.species ?? [], this.radar, icons, () => switches.isOn('radar'));
     this.map = this.add(new PlanetMap(config, body.name, this.ship, globe, input, debug, species));
+    if (this.rays && terraforming) this.chart = new ClimateChart(terraforming.choice);
     debug
       .folder('Planet lab')
       ?.add({ open: () => window.open(this.labLink(), '_blank') }, 'open')
@@ -497,7 +539,7 @@ export class PlanetLevel extends Level implements ItemUser {
 
   /** The item bar's view of this level: the planet buster, the volcano bomb and the laser can be fired from here, and the beam used. */
   get selected(): ItemId | null {
-    return this.buster.armed ? 'planetBuster' : this.volcanoBomb.armed ? 'volcanoBomb' : this.laser.armed ? 'laser' : (this.cargo?.selected ?? null);
+    return this.buster.armed ? 'planetBuster' : this.volcanoBomb.armed ? 'volcanoBomb' : this.laser.armed ? 'laser' : (this.rays?.armed ?? this.cargo?.selected ?? null);
   }
 
   status(item: ItemId): ItemStatus {
@@ -505,6 +547,7 @@ export class PlanetLevel extends Level implements ItemUser {
     if (item === 'planetBuster') return this.buster.status();
     if (item === 'volcanoBomb') return this.volcanoBomb.status();
     if (item === 'laser') return this.laser.status();
+    if (isRayTool(item)) return this.rays ? this.rays.status(item) : { available: false, hint: '', reason: this.rayBlock() ?? 'Nothing here to terraform' };
     if (this.cargo) return this.cargo.status(item);
     return { available: false, hint: '', reason: item === 'abduct' ? 'Nothing left here to beam up' : 'Nothing here to set it down on' };
   }
@@ -514,10 +557,13 @@ export class PlanetLevel extends Level implements ItemUser {
     if (item !== 'planetBuster') this.buster.arm(false);
     if (item !== 'volcanoBomb') this.volcanoBomb.arm(false);
     if (item !== 'laser') this.laser.arm(false);
+    const ray = item !== null && isRayTool(item) ? item : null;
+    if (ray === null) this.rays?.arm(null);
     if (item === 'planetBuster') this.buster.arm(true);
     if (item === 'volcanoBomb') this.volcanoBomb.arm(true);
     if (item === 'laser') this.laser.arm(true);
-    this.cargo?.arm(item === 'planetBuster' || item === 'volcanoBomb' || item === 'laser' ? null : item);
+    if (ray) this.rays?.arm(ray);
+    this.cargo?.arm(item === 'planetBuster' || item === 'volcanoBomb' || item === 'laser' || ray ? null : item);
   }
 
   /** The radar's line above the item bar while it's on (a switch: always available). */
@@ -533,6 +579,77 @@ export class PlanetLevel extends Level implements ItemUser {
       available: true,
       hint: state === 'tracking' ? `Radar: the nearest ${name} is ${radar.proximity}` : state === 'none' ? `Radar: no ${name} found here` : `Radar: searching for ${name}…`,
     };
+  }
+
+  /** Why the magic rays can't be used here now, or null if they can. */
+  private rayBlock(): string | null {
+    if (!this.terraformBody) return isGas(this.body.config) ? 'A giant is all atmosphere: nothing to terraform' : 'Nothing here to terraform';
+    if (this.busted) return 'Nothing left here to terraform';
+    if (this.busy) return 'Not while the planet buster goes off';
+    return null;
+  }
+
+  /** The HUD's climate line for the climate now. */
+  private climateDetail(): string {
+    const climate = this.liveClimate!;
+    const weatherLine = this.globe.weather ? describeWeather(this.globe.weather.data) : '';
+    const life = this.body.config.life;
+    return describeClimateDetail(climate) + this.detailExtras + (weatherLine ? ` · ${weatherLine}` : '') + (life ? ` · ${describeLife(life)}` : '');
+  }
+
+  /**
+   * A terraformed body (anything done to it) looks as its climate is now:
+   * the globe's air, weather, seas and ice, the rain and bolts, the HUD's
+   * line. `first`: building the level (the HUD isn't made yet).
+   */
+  private followClimate(first = false): void {
+    const t = this.terraforming;
+    const tb = this.terraformBody;
+    if (!t || !tb || this.busted || !t.touched(tb.key)) return;
+    const climate = t.snapshot(tb)!.climate;
+    this.liveClimate = climate;
+    const rebuilt = this.globe.setLive(climate);
+    if (rebuilt && !first) this.rebuildWeather();
+    if (!first) this.hud.setClimate(this.climateDetail());
+  }
+
+  /** The rain and bolts follow the globe's rebuilt weather. */
+  private rebuildWeather(): void {
+    if (this.weather) this.remove(this.weather);
+    const globe = this.globe;
+    this.weather = globe.weather
+      ? this.add(
+          new Weather(this.scene, this.frame, globe.weather, this.body.liveConfig, this.camera, globe.sun, globe.sunLight, globe.ambientLight, this.debug),
+        )
+      : null;
+  }
+
+  /** The chart: shown while the item bar's Terraform tab is on show or a ray is selected (and the level is the one playing). */
+  private updateChart(frameDt: number): void {
+    const chart = this.chart;
+    const t = this.terraforming;
+    const tb = this.terraformBody;
+    if (!chart || !t || !tb) return;
+    const tab = document.getElementById('item-bar')?.dataset.tab;
+    const ray = this.rays?.armed ?? null;
+    const want = this.active && !this.busted && !this.zoomLocked && (tab === 'terraform' || ray !== null);
+    if (!want) {
+      if (chart.visible) chart.hide();
+      return;
+    }
+    this.sinceChart += frameDt;
+    if (chart.visible && this.sinceChart < CHART_REFRESH) return;
+    this.sinceChart = 0;
+    const snapshot = t.snapshot(tb) ?? { climate: tb.climate, target: tb.climate, settlesIn: 0 };
+    chart.show({
+      name: this.body.name,
+      snapshot,
+      mode: t.mode,
+      forecast: ray ? forecastClimate(snapshot.target, ray as RayId, t.choice, FORECAST_SECONDS) : null,
+      leak: leakRate(snapshot.climate, t.mode),
+      milestones: t.milestones.log(tb.key),
+      picker: ray === 'airRay' || ray === 'vacuumRay' ? 'gas' : ray === 'waterRay' ? 'water' : null,
+    });
   }
 
   /** Why a volcano bomb can't be fired here now, or null if it can. */
@@ -619,6 +736,7 @@ export class PlanetLevel extends Level implements ItemUser {
 
   override dispose(): void {
     this.debris?.dispose();
+    this.chart?.root.remove();
     super.dispose();
   }
 
@@ -664,6 +782,14 @@ export class PlanetLevel extends Level implements ItemUser {
     }
     super.update(frameDt, alpha);
     this.poseDebris();
+    this.sinceLive += frameDt;
+    const version = this.terraforming?.logs.version ?? 0;
+    if (this.sinceLive >= LIVE_INTERVAL || version !== this.liveVersion) {
+      this.sinceLive = 0;
+      this.liveVersion = version;
+      this.followClimate();
+    }
+    this.updateChart(frameDt);
     if (this.zoomLocked) return;
     // Scrolling lifts or lowers the ship, and high up the camera tips over to look down on the globe.
     const { minDistance, maxDistance } = this.cameraParams;
@@ -734,6 +860,7 @@ export class PlanetLevel extends Level implements ItemUser {
   }
 
   override enter(): void {
+    this.active = true;
     this.ventSounds?.mute(false);
     this.hud.activate();
     if (!this.busted) this.map.activate();
@@ -742,6 +869,9 @@ export class PlanetLevel extends Level implements ItemUser {
   }
 
   override exit(): void {
+    this.active = false;
+    this.chart?.hide();
+    this.rays?.arm(null);
     this.ventSounds?.mute(true);
     this.buster.arm(false);
     this.volcanoBomb.arm(false);

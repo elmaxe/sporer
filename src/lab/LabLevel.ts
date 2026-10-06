@@ -1,3 +1,5 @@
+import type { ClimateData } from '../gen/climate';
+import { liveAtmosphereColor } from '../terraform/liveLook';
 import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
@@ -245,7 +247,7 @@ export class LabLevel extends Level {
   /** Comets (globe view): jets, coma and tails, as active as `planet.zone` makes it. */
   readonly comet: CometActivity | null = null;
   /** Rain, lightning bolts and their light (globe view, bodies with weather). */
-  readonly weather: Weather | null = null;
+  weather: Weather | null = null;
   /** Plants on habitable bodies (globe view; the lab's menu-free switch is plantParams.enabled). */
   readonly plants: SurfaceEntities | null = null;
   /** Loose rocks on the ground near the camera (globe view, solid bodies). */
@@ -273,7 +275,7 @@ export class LabLevel extends Level {
     readonly clock: LabClock,
     private readonly camera: THREE.PerspectiveCamera,
     input: Input,
-    debug: Debug,
+    private readonly debug: Debug,
     carry: LabCarry | null,
   ) {
     super(view.view === 'system' ? Physics.create(FIXED_DT) : null);
@@ -378,6 +380,19 @@ export class LabLevel extends Level {
     this.scene.add(this.axes);
     this.applyLive();
     this.buildMs = performance.now() - start;
+  }
+
+  /** Follows a terraformed climate (the lab's Terraform folder): the globe's or the system view's body, as the game's do. */
+  applyTerraform(climate: ClimateData): void {
+    this.bodies?.planet.setLive(climate);
+    const globe = this.globe;
+    if (!globe || !globe.setLive(climate)) return;
+    // The weather was rebuilt: the rain and bolts follow it.
+    if (this.weather) this.remove(this.weather);
+    const config = { ...toPlanetConfig(this.planet), climate, atmosphere: liveAtmosphereColor(toPlanetConfig(this.planet), climate) };
+    this.weather = globe.weather
+      ? this.add(new Weather(this.scene, this.clock, globe.weather, config, this.camera, globe.sun, globe.sunLight, globe.ambientLight, this.debug))
+      : null;
   }
 
   /** Copies the view options that don't need a rebuild (the axes; the wireframe is read as it draws). */

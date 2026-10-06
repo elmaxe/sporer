@@ -69,13 +69,20 @@ function markOf(c: ClimateData): BodyMark {
   return { warmth: warmthOf(c.habitability, c.temperature), air: airOf(c) };
 }
 
-export function summarizeSystem(system: SystemData): SystemSummary {
+/** A body's climate now (a terraformed one's), from its generated data. */
+export type ClimateOf = (body: { name: string; seed: number; climate: ClimateData }) => ClimateData;
+
+/** The system's bodies as the galaxy map's tooltip lists them; `climateOf` gives terraformed bodies' climates now. */
+export function summarizeSystem(system: SystemData, climateOf: ClimateOf = (b) => b.climate): SystemSummary {
   let moonCount = 0;
   const planets = system.planets.map((p): PlanetRow => {
     moonCount += p.moons.length;
-    const moons = p.moons.map((m): MoonMark => ({ ...markOf(m.climate), big: m.radius >= MOON_RADIUS.bigMin }));
+    const moons = p.moons.map((m): MoonMark => ({ ...markOf(climateOf(m)), big: m.radius >= MOON_RADIUS.bigMin }));
     const row = { name: p.name, size: p.size, rings: p.rings !== null, moons };
-    if (p.climate) return { ...row, tier: p.climate.habitability, ...markOf(p.climate) };
+    if (p.climate) {
+      const c = climateOf({ name: p.name, seed: p.seed, climate: p.climate });
+      return { ...row, tier: c.habitability, ...markOf(c) };
+    }
     // Gas giants: no climate; the same starlight as generateSystem gives them.
     const insolation = (system.habitableRadius / p.orbit.radius) ** 2;
     const temperature = EARTH_ANALOGUE_TEMPERATURE * insolation ** 0.25;

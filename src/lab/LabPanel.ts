@@ -1,3 +1,4 @@
+import type { TerraformMode } from '../gen/terraform';
 import type GUI from 'lil-gui';
 import { GASES, compositionOf, gasesOf, totalPressure, type Composition, type Gas } from '../gen/climate';
 import { MOON_RADIUS, gasStyle, type MoonType, type PlanetType } from '../gen/planets';
@@ -199,6 +200,7 @@ export class LabPanel {
     if (p.type !== 'gas') {
       this.buildAtmosphere();
       this.buildClimate();
+      this.buildTerraform();
     }
     if (p.kind !== 'moon') {
       this.buildRings();
@@ -495,6 +497,58 @@ export class LabPanel {
     s.add(setting, 'gravity', 0.005, 5, 0.001).name('gravity (g)').onChange(changed).listen();
     s.add(setting, 'escapeVelocity', 0.1, 40, 0.01).name('escape velocity (km/s)').onChange(changed).listen();
     s.add(log, 'heatFlow', -4, 1, 0.01).name('log₁₀ heat flow (W/m²)').onChange(changed).listen();
+  }
+
+  /**
+   * The magic rays over time, as the game plays them (gen/terraform.ts): each
+   * button holds a ray for `seconds` from the time shown, which moves on by
+   * as much; the time slider scrubs through the log; the chart shows it.
+   */
+  private buildTerraform(): void {
+    const lab = this.lab;
+    const f = this.folder('Terraform (magic rays)', true);
+    const gasName: Record<Gas, string> = { n2: 'N₂', o2: 'O₂', co2: 'CO₂', h2: 'H₂' };
+    f.add(lab, 'raySeconds', 1, 30, 1).name('hold each ray (s)');
+    f.add(lab.rayChoice, 'gas', Object.fromEntries(GASES.map((g) => [gasName[g], g]))).name('air / vacuum gas').onChange(() => lab.showChartNow());
+    f.add(lab.rayChoice, 'water', { rain: 'add', steam: 'take' }).name('water ray').onChange(() => lab.showChartNow());
+    const rays = {
+      heat: () => void lab.ray('heatRay'),
+      cool: () => void lab.ray('coolRay'),
+      air: () => void lab.ray('airRay'),
+      vacuum: () => void lab.ray('vacuumRay'),
+      water: () => void lab.ray('waterRay'),
+      clear: () => void lab.clearTerraform(),
+    };
+    f.add(rays, 'heat').name('Heat ray');
+    f.add(rays, 'cool').name('Cool ray');
+    f.add(rays, 'air').name('Air ray');
+    f.add(rays, 'vacuum').name('Vacuum ray');
+    f.add(rays, 'water').name('Water ray');
+    const time = {
+      get mode(): TerraformMode {
+        return lab.terraformState?.mode ?? 'relaxed';
+      },
+      set mode(m: TerraformMode) {
+        void lab.setTerraformMode(m);
+      },
+      get time(): number {
+        return lab.terraformState?.time ?? 0;
+      },
+      set time(t: number) {
+        void lab.setTerraformTime(t);
+      },
+      get chart(): boolean {
+        return lab.showChart;
+      },
+      set chart(on: boolean) {
+        lab.showChart = on;
+        lab.showChartNow();
+      },
+    };
+    f.add(time, 'mode', { Sandbox: 'sandbox', Relaxed: 'relaxed', Real: 'real' }).name('mode').listen();
+    f.add(time, 'time', 0, 1800, 1).name('time (s)').listen();
+    f.add(time, 'chart').name('show the chart').listen();
+    f.add(rays, 'clear').name('Undo all terraforming');
   }
 
   private buildRings(): void {

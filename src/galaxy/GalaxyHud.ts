@@ -13,7 +13,7 @@ import { galaxyStarSize } from './appearance';
 import type { GalaxyMap } from './GalaxyMap';
 import type { GalaxyPicker } from './GalaxyPicker';
 import type { GalaxyShip } from './GalaxyShip';
-import { summarizeSystem, type SystemSummary } from './systemSummary';
+import { summarizeSystem, type ClimateOf, type SystemSummary } from './systemSummary';
 import { renderSystemSummary } from './systemSummaryView';
 
 const REFRESH_SECONDS = 0.1;
@@ -56,6 +56,8 @@ export class GalaxyHud implements Entity {
     private readonly map: GalaxyMap,
     /** The galaxy's rotating root; star positions are in its frame, the rings in the scene's. */
     private readonly root: THREE.Object3D,
+    /** Terraformed bodies' climates now, and a number that changes when they may have (the summaries are kept till then). */
+    private readonly live: { climateOf: ClimateOf; version(): number } | null = null,
   ) {
     this.currentRing = new MarkerRing(scene, '#66ffcc', 0, 0.08);
     this.destinationRing = new MarkerRing(scene, '#66ffcc', 0.08, 0.08);
@@ -139,11 +141,18 @@ export class GalaxyHud implements Entity {
     return line;
   }
 
+  private summariesVersion = 0;
+
   /** The hovered system's bodies, generated on first hover and kept for the next few. */
   private summary(star: StarRef): SystemSummary {
+    const version = this.live?.version() ?? 0;
+    if (version !== this.summariesVersion) {
+      this.summaries.clear();
+      this.summariesVersion = version;
+    }
     let summary = this.summaries.get(star.id);
     if (!summary) {
-      summary = summarizeSystem(generateSystem(star));
+      summary = summarizeSystem(generateSystem(star), this.live?.climateOf);
       if (this.summaries.size >= SUMMARY_CACHE) this.summaries.delete(this.summaries.keys().next().value!);
       this.summaries.set(star.id, summary);
     }

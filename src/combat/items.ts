@@ -3,12 +3,15 @@
  * Pure data; what an item does lives with the level that can use it (in low
  * orbit: the planet buster, combat/PlanetBuster.ts; the volcano bomb,
  * combat/VolcanoBomb.ts; the laser, combat/Laser.ts; the abduction beam and the cargo it brings up:
- * cargo/CargoBeam.ts; the radar, radar/Radar.ts).
+ * cargo/CargoBeam.ts; the radar, radar/Radar.ts; the magic terraforming
+ * rays, terraform/MagicRay.ts).
  */
 
-export type ItemTab = 'weapons' | 'inventory';
+export type ItemTab = 'weapons' | 'inventory' | 'terraform';
+/** The magic terraforming rays (terraform/rays.ts RayId). */
+export type RayToolId = 'heatRay' | 'coolRay' | 'airRay' | 'vacuumRay' | 'waterRay';
 /** The tools: always in their tab's first slots. */
-export type ToolId = 'planetBuster' | 'volcanoBomb' | 'laser' | 'abduct' | 'radar';
+export type ToolId = 'planetBuster' | 'volcanoBomb' | 'laser' | 'abduct' | 'radar' | RayToolId;
 /** What a slot holds: a tool, or a stack of cargo in the hold (`cargo:` and the stack's key, see cargo/inventory.ts). */
 export type ItemId = ToolId | `cargo:${string}`;
 
@@ -43,6 +46,7 @@ export interface ItemDef {
 export const ITEM_TABS: readonly { id: ItemTab; name: string }[] = [
   { id: 'weapons', name: 'Weapons' },
   { id: 'inventory', name: 'Inventory' },
+  { id: 'terraform', name: 'Terraform' },
 ];
 
 export const ITEMS: readonly ItemDef[] = [
@@ -78,7 +82,44 @@ export const ITEMS: readonly ItemDef[] = [
     switch: true,
     startsOn: true,
   },
+  {
+    id: 'heatRay',
+    tab: 'terraform',
+    name: 'Heat Ray',
+    description: 'A magic ray that pours heat into the world while held: it warms as fast as its oceans and air let it.',
+  },
+  {
+    id: 'coolRay',
+    tab: 'terraform',
+    name: 'Cool Ray',
+    description: 'A magic ray that draws heat out of the world while held.',
+  },
+  {
+    id: 'airRay',
+    tab: 'terraform',
+    name: 'Air Ray',
+    description: 'A magic ray that pours gas into the air while held (pick the gas on the climate chart, or G).',
+  },
+  {
+    id: 'vacuumRay',
+    tab: 'terraform',
+    name: 'Vacuum Ray',
+    description: 'A magic ray that sucks a gas out of the air while held (pick the gas on the climate chart, or G).',
+  },
+  {
+    id: 'waterRay',
+    tab: 'terraform',
+    name: 'Water Ray',
+    description: 'A magic ray that rains water onto the world while held, or (on the climate chart, or G) boils it away.',
+  },
 ];
+
+/** The magic rays' item ids. */
+export const RAY_TOOLS: readonly RayToolId[] = ['heatRay', 'coolRay', 'airRay', 'vacuumRay', 'waterRay'];
+
+export function isRayTool(id: ItemId): id is RayToolId {
+  return (RAY_TOOLS as readonly string[]).includes(id);
+}
 
 /** The item `id`'s definition. */
 export function itemDef(id: ToolId): ItemDef {
@@ -114,6 +155,8 @@ export function slotKey(index: number): { code: string; label: string } | null {
 export interface ItemStatus {
   available: boolean;
   hint: string;
+  /** What it costs, as its slot shows it (e.g. "8/s"), if anything. */
+  cost?: string;
   /** Said when the player tries an unavailable item. */
   reason?: string;
 }

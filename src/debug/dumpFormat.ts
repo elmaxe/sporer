@@ -1,5 +1,6 @@
 import type { VolcanoSite } from '../combat/volcano';
 import type { InventoryData } from '../cargo/inventory';
+import type { TerraformingData } from '../terraform/Terraforming';
 import type { SurfaceChangesData } from '../surface/changes';
 import type { LogEntry } from './consoleLog';
 import type { FrameStats } from './frameTimes';
@@ -95,6 +96,15 @@ export interface GameState {
    * from before it).
    */
   radar?: { on?: boolean; tracking: number | null; species: string | null; state: string; distance: number | null };
+  /**
+   * Terraforming (missing in dumps from before it): the game clock, every body's action log, the ship's energy, the
+   * milestones, the rays' gas and water way (`data`), the mode played in, and the body below's climate now.
+   */
+  terraform?: {
+    data: TerraformingData;
+    mode: string;
+    here: { name: string; temperature: number; pressure: number; composition: string; tier: number; settlesIn: number } | null;
+  };
   /** What the DOM overlays showed (text the screenshot's game picture leaves out). */
   ui: {
     touchMode: boolean;
@@ -277,6 +287,13 @@ export function summaryLines(dump: Omit<DebugDump, 'images'>): string[] {
       const air = c.inFlight.length > 0 ? ` · in the air: ${c.inFlight.map((l) => `${l.species} (${l.fate ?? l.state})`).join(', ')}` : '';
       const laser = c.laser && (c.laser.firing || c.laser.killed > 0) ? ` · laser ${c.laser.firing ? 'firing, ' : ''}${c.laser.killed} killed` : '';
       lines.push(`Cargo: ${hold}${c.selected ? ` · armed: ${c.selected}` : ''}${here}${air}${laser}`);
+    }
+    const tf = s.terraform;
+    const touched = tf ? Object.keys(tf.data.logs.bodies).length : 0;
+    if (tf && (touched > 0 || tf.here)) {
+      const h = tf.here;
+      const here = h ? ` · ${h.name}: ${(h.temperature - 273.15).toFixed(0)} °C, ${h.pressure.toPrecision(2)} bar ${h.composition}, T${h.tier}${h.settlesIn > 0 ? `, settling (${h.settlesIn.toFixed(0)} s)` : ''}` : '';
+      lines.push(`Terraforming: ${tf.mode} · game time ${tf.data.time.toFixed(0)} s · ${touched} bod${touched === 1 ? 'y' : 'ies'} changed${here}`);
     }
     const radar = s.radar;
     if (radar && (radar.tracking !== null || radar.on)) {

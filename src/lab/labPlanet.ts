@@ -15,6 +15,7 @@ import {
   type StateSpec,
 } from '../gen/climate';
 import { hexToRgb, rgbToHex } from '../gen/color';
+import { LEVERS, TERRAFORM_MODES, type TerraformAction, type TerraformMode } from '../gen/terraform';
 import { NAMED_RADIUS_KM, asteroidBody, asteroidRadius, type AsteroidClass } from '../gen/belts';
 import { NUCLEUS_RADIUS, cometNucleus } from '../gen/comets';
 import { perihelion, type Orbit } from '../gen/orbit';
@@ -176,6 +177,30 @@ export interface LabState {
   planet: LabPlanet;
   view: LabView;
   source?: LabSource;
+  /** What the magic rays did to it (the Terraform folder), if anything. */
+  terraform?: LabTerraform;
+}
+
+/** The planet's terraforming in the lab: its action log, the time it's shown at and the mode played in. */
+export interface LabTerraform {
+  actions: TerraformAction[];
+  /** Game time, s, from the first action's clock (0). */
+  time: number;
+  mode: TerraformMode;
+}
+
+/** A terraforming log from a link, or undefined if it isn't one. */
+export function parseLabTerraform(raw: unknown): LabTerraform | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as Partial<LabTerraform>;
+  if (!Array.isArray(r.actions)) return undefined;
+  const actions = r.actions.filter(
+    (a): a is TerraformAction =>
+      !!a && (LEVERS as readonly string[]).includes(a.lever) && [a.start, a.duration, a.amount].every((v) => typeof v === 'number' && Number.isFinite(v)),
+  );
+  const mode = (TERRAFORM_MODES as readonly string[]).includes(r.mode as string) ? (r.mode as TerraformMode) : 'relaxed';
+  const time = typeof r.time === 'number' && Number.isFinite(r.time) ? Math.max(0, r.time) : 0;
+  return { actions, time, mode };
 }
 
 /** A body at rest at the origin. */
@@ -624,6 +649,7 @@ export function decodeLab(text: string): LabState | null {
       planet: Partial<LabPlanet>;
       view: Partial<LabView>;
       source: LabSource;
+      terraform: unknown;
     }>;
     const p = raw.planet;
     if (!p || typeof p !== 'object') return null;
@@ -640,6 +666,8 @@ export function decodeLab(text: string): LabState | null {
     // Links from before the atmosphere was split into gases still open.
     const state: LabState = { planet: withUpgradedClimate(planet), view: { ...DEFAULT_VIEW, ...raw.view } };
     if (raw.source && typeof raw.source.star === 'number') state.source = raw.source;
+    const terraform = parseLabTerraform(raw.terraform);
+    if (terraform && terraform.actions.length > 0) state.terraform = terraform;
     return state;
   } catch {
     return null;
