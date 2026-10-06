@@ -55,12 +55,12 @@ const KIND_CODE: Record<GasStormKind, number> = { red: 0, white: 1, dark: 2, str
 export const MAX_GAS_FLASHES = 16;
 /**
  * A flash lights the clouds this far round (radians, the glow's 1/e width):
- * stylised, ~40× the real patches (30–80 km on Jupiter, 200 km on Saturn), so
+ * stylised, ~60× the real patches (30–80 km on Jupiter, 200 km on Saturn), so
  * one is easy to spot from the system view (docs/research/gas-weather.md).
  */
-const GAS_FLASH_WIDTH = 0.03;
+const GAS_FLASH_WIDTH = 0.045;
 /** A flash's glow at its centre at full brightness (emitted light, added after the sun's). */
-const GAS_FLASH_PEAK = 1.6;
+const GAS_FLASH_PEAK = 2.2;
 
 /**
  * GLSL for a giant's cloud tops at a unit direction `dir` of its body frame

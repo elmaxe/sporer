@@ -123,7 +123,7 @@ console.log("spot drift 2 deg/yr x 3 yr =", 6, "deg; per s over 450 s:", (6/D/45
 - **A plume's wake.** 2016's plumes ran at 155–175 m/s through a wake moving at 100–125 m/s, about 50 m/s apart. Over a plume's "few days" (3–7), the wake reaches 12 960–30 240 km behind it, which is 11.4–26.5° of longitude at 24°N.
 - **The great storm's timeline.** The tail closes round the planet at 55/201 = 0.274 of the storm's life. The head is fully grown by 10/201 = 0.050 of it.
 - **Aspect ratios.** Saturn 2010's head is 34 000/9200 = 3.70. Neptune's NDS-2018 is 2.20. Uranus 2014's storm is 3.95 (Hueso's figures).
-- **Flash sizes.** Jupiter's flashes light 30–80 km (HWHM), which is 4.2·10⁻⁴ to 1.1·10⁻³ rad. The game draws 0.012 rad (858 km on Jupiter).
+- **Flash sizes.** Jupiter's flashes light 30–80 km (HWHM), which is 4.2·10⁻⁴ to 1.1·10⁻³ rad. The game first drew 0.012 rad (858 km on Jupiter), now 0.045 rad (3200 km) so the flashes are easy to spot.
 - **How often a great storm is under way.** On Saturn, 201 days in 29.5 years is 1.87% of the time. In the game it's 17.4%.
 - **A dark spot's drift.** 2°/yr over a ~3-year life is ~6°. Spread over the game's 450 s life, that's 2.33·10⁻⁴ rad/s.
 
@@ -159,7 +159,7 @@ The game's own code is checked against these in `tests/gasWeather.test.ts`:
   - Each is drawn with the solid bodies' stroke model (`gen/weather.ts`).
   - Plumes flash 2/s at full strength, the stylised order of Juno's peak 4 strokes/s. Great storms flash 10/s, the most one storm can (one per 0.1 s flash slot), as Fischer et al. measured (peaks past 10/s); that's 5× a plume instead of the measured 10×, since the plumes flash more than real ones (**deliberate**).
   - Ice giants' outbursts flash 0.3/s, far more than Voyager heard (16 whistlers in ~20 min at Neptune), so they are seen (**deliberate**). Dark spots don't flash.
-  - The shader adds each flash as light glowing through the clouds, 0.03 rad wide (**stylised**: ~40× the real patch, so it's easy to spot from the system view; at most 16 at once). It is faded out wherever the sun's direct light on the cloud exceeds ~20% of noon's, so it shows on the night side and through dusk and is lost in daylight. That is how every spacecraft has seen it ("night-side optical imaging"); Saturn's day-side detection needed image subtraction.
+  - The shader adds each flash as light glowing through the clouds, 0.045 rad wide (**stylised**: ~60× the real patch, so it's easy to spot from the system view; at most 16 at once). It is faded out wherever the sun's direct light on the cloud exceeds ~20% of noon's, so it shows on the night side and through dusk and is lost in daylight. That is how every spacecraft has seen it ("night-side optical imaging"); Saturn's day-side detection needed image subtraction.
 - **Times**: each kind keeps its real proportions (how far the wake gets and when, when the head is grown), but lifetimes are compressed by different factors, as step 22 did for thunderstorms and cyclones.
 - **Where it's drawn**: everything is per pixel in `GAS_GLSL`, so the system view's globe, low orbit's globe and the planet map show the same storms. It is a pure function of the clock (`GasStormSchedule` caches the slots; storms ride their latitude's drift at the view's pace). The menu's Weather setting off hides the passing storms and lightning; the bands and ovals stay.
 
