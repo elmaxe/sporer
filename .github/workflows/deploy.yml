@@ -25,9 +25,10 @@ permissions:
   pull-requests: write
 
 # A newer push to the same branch, tag or pull request cancels its older run; others publish side by side.
-# A release's notes have a group of their own, so they never cancel the publishing of its tag.
+# A release's notes have a group of their own, so they never cancel the publishing of its tag. So does an edit
+# of a pull request that leaves its title alone (it publishes nothing): it mustn't cancel the build under way.
 concurrency:
-  group: deploy-${{ github.event_name == 'release' && 'notes' || github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || github.ref }}
+  group: deploy-${{ github.event_name == 'release' && 'notes' || (github.event.action == 'edited' && !github.event.changes.title) && format('edit-{0}', github.run_id) || github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -58,7 +59,16 @@ jobs:
           case "$GITHUB_REF" in
             refs/tags/*) target=release label="Release $GITHUB_REF_NAME" ref=$GITHUB_REF_NAME sha=$GITHUB_SHA ;;
             refs/heads/main) target=preview label="Preview (main)" ref=main sha=$GITHUB_SHA ;;
-            refs/pull/*) target=pr/$PR label="PR #$PR: $TITLE" ref=$HEAD_REF sha=$HEAD_SHA ;;
+            refs/pull/*) target=pr/$PR label="PR #$PR: $TITLE" ref=$HEAD_REF sha=$HEAD_SHA number=$PR ;;
+            refs/heads/*)
+              # Run by hand on a branch: published as its open pull request's preview, if it has one.
+              number=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$GITHUB_REF_NAME" --state open --json number --jq '.[0].number // empty')
+              if [ -z "$number" ]; then
+                echo "Only main, v* tags and pull requests are published, and $GITHUB_REF_NAME has no open pull request" >&2
+                exit 1
+              fi
+              title=$(gh pr view "$number" --repo "$GITHUB_REPOSITORY" --json title --jq .title)
+              target=pr/$number label="PR #$number: $title" ref=$GITHUB_REF_NAME sha=$GITHUB_SHA ;;
             *) echo "Only main, v* tags and pull requests are published, not $GITHUB_REF" >&2; exit 1 ;;
           esac
           # PUBLISH_* for scripts/pages-publish.sh, BUILD_* and PAGES_PATH for the build info (vite.config.ts).
@@ -70,6 +80,7 @@ jobs:
             echo "BUILD_BRANCH=$ref"
             echo "BUILD_COMMIT=$sha"
             echo "PAGES_PATH=$([ "$target" = release ] || echo "$target/")"
+            echo "PR_NUMBER=${number:-}"
           } >>"$GITHUB_ENV"
       # A pull request's own commit (not GitHub's merge of it into main), so the build is what the branch holds.
       - uses: actions/checkout@v4
@@ -86,10 +97,10 @@ jobs:
       - name: Publish
         run: scripts/pages-publish.sh "$TARGET" dist
       - name: Link it from the pull request
-        if: github.event_name == 'pull_request'
         run: |
-          url="https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/pr/$PR/"
-          scripts/pages-pr-comment.sh "$PR" "**Preview:** $url (\`$PUBLISH_COMMIT\`). Also in the game's menu, under Version. It's removed when this pull request is closed."
+          [ -n "$PR_NUMBER" ] || exit 0
+          url="https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/pr/$PR_NUMBER/"
+          scripts/pages-pr-comment.sh "$PR_NUMBER" "**Preview:** $url (\`$PUBLISH_COMMIT\`). Also in the game's menu, under Version. It's removed when this pull request is closed."
 
   remove:
     if: >-
