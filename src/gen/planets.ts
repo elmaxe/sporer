@@ -1,4 +1,5 @@
 import { hslToHex, jitterHsl, type Hsl } from './color';
+import { ICE_CLASSES, iceHex } from './iceColor';
 import type { Rng } from './rng';
 
 export type PlanetType = 'lava' | 'barren' | 'desert' | 'terran' | 'ocean' | 'ice' | 'gas';
@@ -14,6 +15,37 @@ export interface PlanetStyle {
   high: string;
   /** Terrain height as a fraction of the radius. */
   relief: number;
+  /** Impact craters' density, 0 (none, or unset) to 1 (heavily cratered, as airless rock is); see gen/craters.ts. */
+  craters?: number;
+  /**
+   * How much the land is flattened into lowland plains under its mountains, 0
+   * (none, or unset: height rises evenly with the noise) to 1; see
+   * `landElevation`.
+   */
+  plains?: number;
+}
+
+/**
+ * At full `plains`, the share of the evenly rising height a lowland keeps:
+ * the slope of `landElevation` at the shore. Low ground is gentle, and the
+ * mountains rise steeply above it (docs/research/terran-ground.md).
+ */
+export const PLAINS_SLOPE = 0.5;
+
+/**
+ * Where the land stands, 0 (the shore) to 1 (the highest peaks), at
+ * `height`, the noise's share of the way from sea level (or the lowest point)
+ * to its top. Evenly, h, without `plains`; with them a cubic,
+ * a·h + (1 − a)·h³, whose slope at the shore is a: Earth's land is mostly low
+ * (its mean height is 9% of its highest), so lowlands are flattened into
+ * plains and the uplands rise into mountains (stylised: the land's mean is a
+ * third of its peaks, not a tenth). Every view of the ground reads it.
+ */
+export function landElevation(style: PlanetStyle, height: number): number {
+  const p = style.plains ?? 0;
+  if (!(p > 0) || height <= 0) return height;
+  const a = 1 - p * (1 - PLAINS_SLOPE);
+  return height * (a + (1 - a) * height * height);
 }
 
 /**
@@ -234,6 +266,8 @@ export function planetStyle(rng: Rng, type: Exclude<PlanetType, 'gas'> | MoonTyp
         low: hslToHex(h, s, rng.range(0.2, 0.3)),
         high: hslToHex(h + rng.range(-20, 20), s, rng.range(0.55, 0.7)),
         relief: rng.range(0.04, 0.07),
+        // Airless rock keeps every impact (gen/craters.ts). Not a draw, so nothing else moves.
+        craters: 1,
       };
     }
     case 'desert': {
@@ -255,16 +289,22 @@ export function planetStyle(rng: Rng, type: Exclude<PlanetType, 'gas'> | MoonTyp
         seaLevel: type === 'ocean' ? rng.range(0.25, 0.4) : rng.range(-0.15, 0.15),
         low: jitterHsl(rng, vegetation),
         high: jitterHsl(rng, [rng.range(30, 50), 0.2, 0.85]),
-        relief: rng.range(0.03, 0.05),
+        // Lower than the barren and desert worlds' and flattened into plains (landElevation): green worlds are mostly
+        // lowland under a few mountain ranges, as in Spore. The same draws as ever, so nothing else moves.
+        relief: rng.range(0.02, 0.035),
+        plains: 1,
       };
     }
     case 'ice': {
+      // Real ice's colours (gen/iceColor.ts), turned to the world's own blue: a frozen sea of blue ice (albedo 0.5–0.62;
+      // stylised: bare sea ice is as pale as the firn, and Spore's frozen seas read blue), lowlands of firn (0.6–0.75),
+      // highlands of snow. The same draws as ever, so nothing else moves.
       const h = rng.range(185, 215);
       return {
-        sea: hslToHex(h, 0.45, rng.range(0.6, 0.7)),
+        sea: iceHex({ ...ICE_CLASSES.blueIce, albedo: rng.range(0.5, 0.62) }, h),
         seaLevel: rng.range(-0.4, 0.1),
-        low: hslToHex(h, 0.25, rng.range(0.78, 0.86)),
-        high: '#ffffff',
+        low: iceHex({ ...ICE_CLASSES.firn, albedo: rng.range(0.6, 0.75) }, h),
+        high: iceHex(ICE_CLASSES.snow, h),
         relief: rng.range(0.025, 0.045),
       };
     }

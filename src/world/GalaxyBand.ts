@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { markSky } from './skyCapture';
 import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
 import { BULGE_GLOW_COLOR, DISC_GLOW_COLOR } from '../galaxy/appearance';
@@ -118,6 +119,7 @@ export class GalaxyBand implements Entity {
     this.sphere.name = 'Galaxy band';
     this.sphere.frustumCulled = false;
     this.sphere.renderOrder = -3;
+    markSky(this.sphere);
     scene.add(this.sphere);
 
     const rng = new Rng(hashSeed(system.seed, 'bandStars'));
@@ -148,6 +150,7 @@ export class GalaxyBand implements Entity {
     this.stars.name = 'Galaxy band stars';
     this.stars.frustumCulled = false;
     this.stars.renderOrder = -2;
+    markSky(this.stars);
     this.stars.onBeforeRender = (renderer) => {
       starMaterial.uniforms.pixelRatio!.value = renderer.getPixelRatio();
     };

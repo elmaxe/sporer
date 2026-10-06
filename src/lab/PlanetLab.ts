@@ -2,7 +2,7 @@ import { gasStormCentre } from '../gen/gasWeather';
 import { Vector3 } from 'three';
 import type { Debug } from '../core/Debug';
 import type { Game } from '../core/Game';
-import type { ClimateData, ClimateState } from '../gen/climate';
+import { changeState, type ClimateData, type StateSpec } from '../gen/climate';
 import { generateGalaxy, systemRef } from '../gen/galaxy';
 import { hashSeed, parseSeed } from '../gen/rng';
 import { generateSystem } from '../gen/system';
@@ -249,10 +249,11 @@ export class PlanetLab {
   }
 
   /** Changes the terraformable climate state, e.g. `terraform({ pressure: 1, composition: 'oxygenNitrogen' })`. */
-  terraform(change: Partial<ClimateState>): Promise<void> {
+  terraform(change: StateSpec): Promise<void> {
     const climate = this.planet.climate;
     if (!climate) return Promise.resolve();
-    return this.replace({ ...this.planet, climate: { ...climate, state: { ...climate.state, ...change } } });
+    const state = changeState(climate.state, change, climate.setting.gravity);
+    return this.replace({ ...this.planet, climate: { ...climate, state } });
   }
 
   /** A new seed, deterministic in the current one and how many were asked for. */

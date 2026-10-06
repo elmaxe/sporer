@@ -16,6 +16,9 @@ import { Planet } from './Planet';
 import { CometTrail, addCometTrailDebug } from './CometTrail';
 import { DustDisc, addDustDiscDebug } from './DustDisc';
 import { Star } from './Star';
+import { SkyCapture } from './skyCapture';
+import { addBlackHoleDebug } from './BlackHoleLook';
+import { isBlackHole } from '../gen/blackHoles';
 import { addAtmosphereDebug, type AtmosphereSun } from './atmosphereShell';
 import { stormParams } from './StarStorms';
 import { createGlowTexture } from './glowTexture';
@@ -67,7 +70,11 @@ export class StarSystem implements Entity {
   private readonly airLight = { value: galacticLightParams.air };
   private readonly ambient: THREE.HemisphereLight;
   private readonly glowTexture: THREE.CanvasTexture;
+  /** The sky a black hole bends, baked from the scene's sky layer on its first draw (null without a black hole). */
+  readonly sky: SkyCapture | null;
   private _time = 0;
+  /** System seconds per real second (1 in the game; the star lab pauses and fast-forwards with it). */
+  speed = 1;
   private readonly scratch = new THREE.Vector3();
 
   constructor(
@@ -80,6 +87,7 @@ export class StarSystem implements Entity {
   ) {
     this.glowTexture = createGlowTexture();
     const binary = data.stars.length > 1;
+    this.sky = data.stars.some(isBlackHole) ? new SkyCapture() : null;
     this.stars = data.stars.map(
       (s, i) =>
         new Star(
@@ -88,6 +96,7 @@ export class StarSystem implements Entity {
           binary ? `${data.name} ${'AB'[i]}` : data.name,
           s,
           hashSeed(data.seed, 'star', i),
+          this.sky,
         ),
     );
     // Atmospheres are lit from the main star, wherever it is drawn; with none, from the galactic centre.
@@ -143,6 +152,7 @@ export class StarSystem implements Entity {
 
     if (debug) {
       if (this.galacticLight) addGalacticLightDebug(debug);
+      if (this.sky) addBlackHoleDebug(debug);
       addAtmosphereDebug(debug);
       addLavaDebug(debug);
       addGasDebug(debug);
@@ -187,7 +197,7 @@ export class StarSystem implements Entity {
   }
 
   fixedUpdate(dt: number): void {
-    this._time += dt;
+    this._time += dt * this.speed;
     for (const s of this.stars) s.step(this._time, dt);
     for (const p of this.planets) p.step(this._time, dt);
     for (const m of this.moons) m.step(this._time, dt);
@@ -234,7 +244,7 @@ export class StarSystem implements Entity {
     for (const m of this.moons) m.update(frameDt, alpha);
     for (const n of this.small) n.update(frameDt, alpha);
     // The clock between the last two fixed steps, as the bodies are interpolated.
-    const time = this._time - FIXED_DT * (1 - alpha);
+    const time = this._time - FIXED_DT * this.speed * (1 - alpha);
     for (const p of this.planets) if (p.spinAt) p.spinAngle = p.spinAt(time);
     for (const m of this.moons) if (m.spinAt) m.spinAngle = m.spinAt(time);
     for (const n of this.small) if (n.spinAt) n.spinAngle = n.spinAt(time);
@@ -269,6 +279,7 @@ export class StarSystem implements Entity {
       this.galacticLight.dispose();
     }
     this.glowTexture.dispose();
+    this.sky?.dispose();
   }
 
   private posePlanet(p: Planet, time: number, observer: THREE.Vector3, minAngle: number): void {

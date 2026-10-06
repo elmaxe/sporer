@@ -268,9 +268,9 @@ export const DEBRIS_SHARE: Record<StarData['spectralClass'], number> = {
   M: 0.02,
 };
 
-/** The chance of a debris disc round a system's main star (none round giants or white dwarfs). */
+/** The chance of a debris disc round a system's main star (none round giants, white dwarfs or black holes, which have their accretion disc). */
 export function debrisChance(star: StarData | undefined): number {
-  if (!star || star.kind === 'whiteDwarf' || star.kind === 'redGiant' || star.kind === 'blueGiant') return 0;
+  if (!star || star.kind === 'whiteDwarf' || star.kind === 'redGiant' || star.kind === 'blueGiant' || star.kind === 'blackHole') return 0;
   return DEBRIS_SHARE[star.spectralClass];
 }
 
@@ -304,8 +304,10 @@ export const DEBRIS_ASPECT = [0.08, 0.21] as const;
  * belt further out, like the Kuiper belt's dust or Fomalhaut's ring. Its
  * own stream (`rng.fork('dust')`). `extent` is how far the planets reach.
  */
-export function generateDebrisDisc(rng: Rng, ctx: DiscContext, extent: number): DustDiscData | null {
-  if (!rng.chance(debrisChance(ctx.stars[0]))) return null;
+export function generateDebrisDisc(rng: Rng, ctx: DiscContext, extent: number, force?: boolean): DustDiscData | null {
+  // Drawn even when forced, so the disc's own draws stay as they were.
+  const drawn = rng.chance(debrisChance(ctx.stars[0]));
+  if (!(force ?? drawn)) return null;
   const inner = ctx.starZone * 1.5;
   const taper = Math.max(inner * 2, ctx.toSystem(rng.range(...WARM_TAPER_AU)));
   const disc: DustDiscData = {

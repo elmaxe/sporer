@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
+import { isBlackHole } from '../gen/blackHoles';
 import type { GalaxyData, StarRef } from '../gen/galaxy';
 import { STAR_DIMMING_GLSL, starDimmingUniforms } from '../world/nebulaLook';
 import { GLOW_NEAR, binaryLayout, galaxyGlows, galaxyMemberSize, type GalaxyGlow } from './appearance';
@@ -40,6 +41,7 @@ export class GalaxyMap implements Entity {
   /** ...and how far its dots have moved there, 0–1. */
   private readonly converge = { value: 0 };
   private readonly cameraLocal = new THREE.Vector3();
+  private readonly centre = new THREE.Vector3();
   private readonly inverse = new THREE.Matrix4();
   private time = 0;
 
@@ -58,6 +60,8 @@ export class GalaxyMap implements Entity {
     const ids = new Float32Array(dots);
     // Binary turn: offset from the centre of mass (signed, so the members sit opposite), phase, speed.
     const orbits = new Float32Array(dots * 3);
+    // 1 for a black hole: drawn as a glowing ring round a dark middle with its disc across it.
+    const holes = new Float32Array(dots);
     const color = new THREE.Color();
     let dot = 0;
     galaxy.stars.forEach((ref, i) => {
@@ -68,6 +72,7 @@ export class GalaxyMap implements Entity {
         dotPositions.set([x, y, z], dot * 3);
         color.set(star.color).toArray(colors, dot * 3);
         sizes[dot] = galaxyMemberSize(star);
+        holes[dot] = isBlackHole(star) ? 1 : 0;
         ids[dot] = ref.id;
         if (layout) orbits.set([layout.offsets[member]! * (member ? -1 : 1), layout.phase, layout.speed], dot * 3);
         dot++;
@@ -80,6 +85,7 @@ export class GalaxyMap implements Entity {
     geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
     geometry.setAttribute('starId', new THREE.BufferAttribute(ids, 1));
     geometry.setAttribute('orbit', new THREE.BufferAttribute(orbits, 3));
+    geometry.setAttribute('hole', new THREE.BufferAttribute(holes, 1));
 
     const material = new THREE.ShaderMaterial({
       uniforms: {
@@ -106,6 +112,7 @@ export class GalaxyMap implements Entity {
         attribute vec3 color;
         attribute float starId;
         attribute vec3 orbit;
+        attribute float hole;
         uniform float scale;
         uniform float minSize;
         uniform float maxSize;
@@ -119,6 +126,7 @@ export class GalaxyMap implements Entity {
         uniform vec3 cameraLocal;
         varying vec3 vColor;
         varying float vDim;
+        varying float vHole;
         ${STAR_DIMMING_GLSL}
         void main() {
           vec4 mv = modelViewMatrix * vec4(position, 1.0);
@@ -149,14 +157,33 @@ export class GalaxyMap implements Entity {
           vDim *= starDimming(cameraLocal, position);
 
           vColor = color;
+          vHole = hole;
+          // A black hole shines steadily (it's its disc), and its ring needs room to read.
+          if (hole > 0.5) {
+            vDim = clamp(px / minSize, 0.6, 1.0) * starDimming(cameraLocal, position);
+            if (fading) vDim *= 1.0 - faded.y;
+            gl_PointSize = clamp(px * 1.6, minSize * 4.0, maxSize);
+          }
           gl_Position = projectionMatrix * mv;
         }`,
       fragmentShader: /* glsl */ `
         varying vec3 vColor;
         varying float vDim;
+        varying float vHole;
         void main() {
-          float d = length(gl_PointCoord - 0.5) * 2.0;
+          vec2 q = (gl_PointCoord - 0.5) * 2.0;
+          float d = length(q);
           if (d > 1.0) discard;
+          if (vHole > 0.5) {
+            // The shadow's bright photon ring, the disc's lensed far side over it, and the disc seen edge on across it.
+            float ring = exp(-pow((d - 0.42) / 0.09, 2.0));
+            float disc = exp(-pow(q.y / 0.07, 2.0)) * smoothstep(1.0, 0.45, abs(q.x)) * step(0.42, abs(q.x));
+            float glow = 0.25 * pow(1.0 - d, 2.0) * step(0.42, d);
+            vec3 c = mix(vColor, vec3(1.0), 0.35) * (ring + disc * 0.9 + glow);
+            gl_FragColor = vec4(c * vDim, 1.0);
+            #include <colorspace_fragment>
+            return;
+          }
           // Hot white-ish core and a coloured halo.
           float core = smoothstep(0.35, 0.0, d);
           float halo = pow(1.0 - d, 2.0);
@@ -196,6 +223,14 @@ export class GalaxyMap implements Entity {
   /** Dots drawn: one per star, two per binary. */
   get dotCount(): number {
     return this.points.geometry.getAttribute('position').count;
+  }
+
+  /** Dots drawn as black holes. */
+  get holeCount(): number {
+    const holes = this.points.geometry.getAttribute('hole');
+    let n = 0;
+    for (let i = 0; i < holes.count; i++) n += holes.getX(i);
+    return n;
   }
 
   /** Stars (by id) that shine steadily instead of twinkling, e.g. the current and hovered one. */
@@ -241,6 +276,16 @@ export class GalaxyMap implements Entity {
     const radii = new THREE.Vector3(g.radii.x, g.radii.y, g.radii.z);
     const glow = createGlowVolume(radii, g.color, g.faceOnOpacity, g.maxBrightness, GLOW_NEAR);
     glow.renderOrder = -1;
+    const range = g.zoomedOut;
+    if (range) {
+      // The glow is centred on the galaxy's origin, so the camera's distance from it is its distance from the centre.
+      const brightness = glow.material.uniforms.maxBrightness!;
+      const at = new THREE.Vector3();
+      glow.onBeforeRender = (_renderer, _scene, camera) => {
+        const d = at.setFromMatrixPosition(camera.matrixWorld).distanceTo(this.parent.getWorldPosition(this.centre));
+        brightness.value = g.maxBrightness * THREE.MathUtils.smoothstep(d, range[0], range[1]);
+      };
+    }
     this.parent.add(glow);
     this.glows.push(glow);
   }

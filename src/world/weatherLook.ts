@@ -17,7 +17,7 @@ import {
 } from '../gen/weather';
 import type { Vec3Tuple } from '../gen/starActivity';
 import { cumulusField, type CumulusField, type GroundRadius } from '../gen/cumulus';
-import { detailedTerrain } from '../gen/noise';
+import { surfaceNoise } from '../gen/craters';
 import { RELIEF_SCALE, globeRadius } from '../planet/frame';
 import type { AtmosphereSun } from './atmosphereShell';
 import { createCubeSphere } from './cubeSphere';
@@ -472,7 +472,7 @@ export function createWeatherLook(config: PlanetConfig, lava: LavaActivity | nul
 /** The ground as low orbit draws it (or the sea over it), by direction: where puffy clouds keep above. */
 function groundOf(config: PlanetConfig, R: number): GroundRadius {
   const sea = config.style.sea !== null;
-  const sample = terrainSampler(R, config.seed, config.style, { noise: detailedTerrain, reliefScale: RELIEF_SCALE, seaFloor: sea, shape: config.shape });
+  const sample = terrainSampler(R, config.seed, config.style, { noise: surfaceNoise(config, true), reliefScale: RELIEF_SCALE, seaFloor: sea, shape: config.shape });
   const dir = new THREE.Vector3();
   const color = new THREE.Color();
   return (x, y, z) => {

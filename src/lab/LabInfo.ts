@@ -5,6 +5,8 @@ import { celsius, describeAtmosphere } from '../gen/climate';
 import { EARTH_RADIUS_KM, atmosphereLook, scaleHeight } from '../gen/atmosphere';
 import { shapeExtents } from '../gen/shape';
 import { plantLabLink } from '../plantlab/labPlants';
+import { animalLabLink } from '../animallab/labAnimals';
+import { starLabLink } from '../starlab/labStars';
 import { describeLab, isSmallKind, labClimateData, labEarthRadii, labLife } from './labPlanet';
 import { formatChance, type LifeEstimate } from '../gen/life';
 import type { PlanetLab } from './PlanetLab';
@@ -24,7 +26,13 @@ export class LabInfo implements Entity {
   private readonly back = document.createElement('a');
   /** To the plant lab with this planet's species (shown when it has plants). */
   private readonly plants = document.createElement('a');
+  /** To the animal lab with this planet's species (shown when it has animals). */
+  private readonly animals = document.createElement('a');
+  /** To the star lab at the system the planet came from (shown when it came from one). */
+  private readonly star = document.createElement('a');
   private readonly details = document.createElement('button');
+  /** Opens the debug dump (DebugDumpControl finds it by its id). */
+  private readonly report = document.createElement('button');
   private readonly head = document.createElement('div');
   private readonly table = document.createElement('table');
   private readonly help = document.createElement('div');
@@ -45,9 +53,20 @@ export class LabInfo implements Entity {
     this.plants.className = 'lab-back';
     this.plants.textContent = 'Plants';
     this.plants.title = "This planet's plant species in the plant lab";
+    this.animals.className = 'lab-back';
+    this.animals.textContent = 'Animals';
+    this.animals.title = "This planet's animal species in the animal lab";
+    this.star.className = 'lab-back';
+    this.star.textContent = 'Star';
+    this.star.title = "This planet's star and system in the star lab";
+    this.report.type = 'button';
+    this.report.id = 'lab-dump';
+    this.report.className = 'lab-back';
+    this.report.textContent = 'Report';
+    this.report.title = 'Save a debug dump (F8): the screen, your marks and a note, and this planet, in one file to send';
     const links = document.createElement('div');
     links.className = 'lab-links';
-    links.append(this.back, this.plants);
+    links.append(this.back, this.star, this.plants, this.animals, this.report);
     top.append(links, this.details);
     this.help.className = 'lab-help';
     this.root.append(top, this.head, this.table, this.help);
@@ -70,12 +89,21 @@ export class LabInfo implements Entity {
     this.back.title = this.lab.gameLink ? 'The game, at this planet\'s system' : 'The game';
     this.head.innerHTML =
       `<h1>${escape(planet.name)}</h1>` + `<div class="lab-sub">${escape(describeLab(planet))}${from ? ` · ${escape(from)}` : ''}</div>`;
+    this.star.hidden = !source;
+    if (source) this.star.href = starLabLink(source.seed, source.star, location.href, 'system');
     const plants = this.lab.level?.plants;
     this.plants.hidden = !plants;
     if (plants) {
       const s = this.lab.source;
       const from = s && s.comet === undefined && s.asteroid === undefined ? { seed: s.seed, star: s.star, planet: s.planet, moon: s.moon } : null;
       this.plants.href = plantLabLink(plants.plan.species, plants.plan.tier, plants.plan.seed, from, location.href);
+    }
+    const animals = this.lab.level?.animals;
+    this.animals.hidden = !animals;
+    if (animals) {
+      const s = this.lab.source;
+      const from = s && s.comet === undefined && s.asteroid === undefined ? { seed: s.seed, star: s.star, planet: s.planet, moon: s.moon } : null;
+      this.animals.href = animalLabLink(animals.plan.species, animals.plan.tier, animals.plan.seed, animals.plan.gravity, from, location.href);
     }
     this.touch = null;
     this.render();
@@ -197,6 +225,16 @@ export class LabInfo implements Entity {
       ]);
     } else if (view.view === 'globe' && planet.type !== 'gas' && !planet.shape) {
       rows.push(['Plants', 'none']);
+    }
+    const rocks = level?.rocks;
+    if (rocks) {
+      const st = rocks.stats();
+      rows.push(['Rocks', st.cells ? `${st.rocks} in ${st.cells} cells · ${st.drawn} drawn` : 'none near (come closer to the ground)']);
+    }
+    const animals = level?.animals;
+    if (animals) {
+      const st = animals.stats();
+      rows.push(['Animals', `${animals.plan.species.length} species · ${st.animals} in ${st.herds} herds near · ${st.drawn} drawn · ${st.walking} walking, ${st.grazing} grazing`]);
     }
     if (planet.rings) {
       const rocks = level?.globe?.rings;

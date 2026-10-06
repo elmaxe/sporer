@@ -1,3 +1,4 @@
+import { chooseBlackHoles } from './blackHoles';
 import { hslToHex } from './color';
 import { chooseYoungStars } from './discs';
 import { generateName } from './names';
@@ -11,7 +12,11 @@ import { generateCompanion, generateStar, type StarData } from './stars';
 export const GALAXY_RADIUS = 1000;
 export const DEFAULT_STAR_COUNT = 4000;
 export const DEFAULT_DUST_COUNT = 1200;
-const BINARY_CHANCE = 0.15;
+/** The galaxy the game opens without a ?seed (as the URL's text). */
+export const DEFAULT_GALAXY_SEED = '1337';
+
+/** Share of systems with two stars. */
+export const BINARY_CHANCE = 0.15;
 
 /**
  * A star as seen on the galaxy map. Only this is generated up front; the
@@ -52,8 +57,8 @@ export interface GalaxyData {
 }
 
 /**
- * A soft, glowing dust/gas cloud along a spiral arm (visual only): an
- * ellipsoid stretched along the arm, flat like the disc.
+ * A soft, glowing gas cloud along a spiral arm (visual only): an ellipsoid
+ * stretched along the arm, flatter than it is wide. Gas clouds and haze.
  */
 export interface DustCloud {
   position: { x: number; y: number; z: number };
@@ -97,6 +102,8 @@ export function generateGalaxy(seed: number, count = DEFAULT_STAR_COUNT): Galaxy
   placeSol(stars, nebulas);
   // After Sol, so it's never young; its own stream, so nothing above changes.
   chooseYoungStars(seed, stars);
+  // Last, from its own stream: a few systems become black holes (never Sol, a young star or the home system).
+  chooseBlackHoles(seed, stars, nebulas);
   return { seed, radius: GALAXY_RADIUS, arms, twist, armOffset, stars, nebulas, rogues };
 }
 
@@ -146,8 +153,10 @@ export function systemRef(galaxy: Pick<GalaxyData, 'stars' | 'rogues'>, id: numb
 }
 
 /**
- * Dust clouds that trace the spiral arms, using the same arm layout as the
- * stars. Generated from its own stream, so it never changes the stars.
+ * Glowing gas clouds that trace the spiral arms, using the same arm layout as
+ * the stars. Puffy (about half as thick as they are wide), so they still read
+ * as clouds seen edge-on. Generated from its own stream, so it never changes
+ * the stars.
  */
 export function generateDust(galaxy: GalaxyData, count = DEFAULT_DUST_COUNT): DustCloud[] {
   const rng = new Rng(hashSeed(galaxy.seed, 'dust'));
@@ -165,9 +174,40 @@ export function generateDust(galaxy: GalaxyData, count = DEFAULT_DUST_COUNT): Du
       position,
       length: width * rng.range(1.6, 3.2),
       width,
-      thickness: rng.range(6, 16),
+      thickness: width * rng.range(0.4, 0.75),
       angle: armAngle(galaxy, position) + rng.gaussian(0, 0.2),
       color: hslToHex(hue, rng.range(0.5, 0.7), rng.range(0.5, 0.62)),
+    });
+  }
+  return clouds;
+}
+
+export const DEFAULT_HAZE_COUNT = 260;
+
+/**
+ * Faint haze round the arms: big, soft clouds a few times the size of the
+ * gas clouds and much thicker, so each arm has a glowing envelope that keeps
+ * its depth from any side (edge-on it puffs up above and below the disc).
+ */
+export function generateHaze(galaxy: GalaxyData, count = DEFAULT_HAZE_COUNT): DustCloud[] {
+  const rng = new Rng(hashSeed(galaxy.seed, 'haze'));
+  const clouds: DustCloud[] = [];
+  for (let i = 0; i < count; i++) {
+    const position = armPosition(rng, galaxy.arms, galaxy.twist, galaxy.armOffset);
+    // Puffed up above and below the disc.
+    position.y += rng.gaussian(0, GALAXY_RADIUS * 0.025);
+    const width = rng.range(110, 200);
+    const hue = rng.weighted<number>([
+      [rng.range(215, 240), 3],
+      [rng.range(250, 275), 2],
+    ]);
+    clouds.push({
+      position,
+      length: width * rng.range(1.4, 2.4),
+      width,
+      thickness: width * rng.range(0.65, 1),
+      angle: armAngle(galaxy, position) + rng.gaussian(0, 0.15),
+      color: hslToHex(hue, rng.range(0.4, 0.6), rng.range(0.55, 0.65)),
     });
   }
   return clouds;

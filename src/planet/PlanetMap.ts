@@ -2,11 +2,12 @@ import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
 import type { Input } from '../core/Input';
-import { detailedTerrain } from '../gen/noise';
+import { surfaceNoise, type TerrainNoise } from '../gen/craters';
 import { LAVA_SEA_GLSL } from '../world/lavaMaterial';
 import { GAS_GLSL } from '../world/gasLook';
 import { isGas, type PlanetConfig } from '../world/Planet';
 import { SHAPE_FLOOR, shapeRadius } from '../gen/shape';
+import { landElevation } from '../gen/planets';
 import { gasPainter, terrainPainter, type GasPainter, type TerrainPainter } from '../world/planetGeometry';
 import {
   EQUAL_EARTH_HEIGHT,
@@ -18,6 +19,7 @@ import {
 } from './equalEarth';
 import type { PlanetGlobe } from './PlanetGlobe';
 import type { PlanetShip } from './PlanetShip';
+import type { SpeciesTab } from './SpeciesTab';
 
 /** Tunables (debug: *Planet map*). */
 export const planetMapParams = {
@@ -48,6 +50,11 @@ const PATH_SAMPLES = 48;
 const TOGGLE_KEY = 'KeyN';
 const STORAGE_KEY = 'spore2.map';
 const ACCENT = '#66ffcc';
+
+/** The map panel's tabs: the map itself, or the planet's species (SpeciesTab). */
+export type MapTab = 'map' | 'species';
+/** The tab last shown, kept from planet to planet. */
+let lastTab: MapTab = 'map';
 
 const vertexShader = /* glsl */ `
   varying vec2 vUv;
@@ -118,7 +125,7 @@ const fragmentShader = /* glsl */ `
     vec3 col;
     #ifdef LAVA
     if (ground.a < 0.5) {
-      col = toneMapping(lavaSea(dir, lavaFlow(dir)));
+      col = toneMapping(lavaSea(dir, lavaFlow(dir), dir));
     } else
     #endif
     {
@@ -146,7 +153,9 @@ const fragmentShader = /* glsl */ `
  * glow in step with it. On top: the sun, the ship and its heading, and the
  * autopilot's destination and great-circle path. Click or tap it to fly
  * there; N (or its button) folds the desktop panel away, remembered in
- * localStorage.
+ * localStorage. Given a `SpeciesTab`, the title bar has two tabs, Map and
+ * Species (the planet's animals and plants, which the radar tracks); the
+ * tab picked is kept from planet to planet.
  *
  * The terrain is baked on the CPU a few rows per frame into a texture; the
  * level draws the map into the game's canvas under the panel (`render`),
@@ -160,6 +169,10 @@ export class PlanetMap implements Entity {
   private readonly toggle = document.getElementById('planet-map-toggle') as HTMLButtonElement;
   private readonly marksCanvas = document.getElementById('planet-map-marks') as HTMLCanvasElement;
   private readonly mapButton = document.getElementById('touch-map') as HTMLButtonElement;
+  /** The tab bar (none in the planet lab's page). */
+  private readonly tabs = document.getElementById('planet-map-tabs');
+  private readonly tabButtons: HTMLButtonElement[] = this.tabs ? [...this.tabs.querySelectorAll<HTMLButtonElement>('button[data-tab]')] : [];
+  private _tab: MapTab = 'map';
   private readonly width: number;
   private readonly height: number;
   /** Canvas pixels per projection unit. */
@@ -174,6 +187,8 @@ export class PlanetMap implements Entity {
   private bakedRows = 0;
   private sinceUpload = 0;
   private readonly terrain: TerrainPainter | null;
+  /** The ground's noise as low orbit's globe reads it (its craters too). */
+  private readonly noise: TerrainNoise;
   private readonly gas: GasPainter | null;
   private readonly relief: number;
   private active = false;
@@ -211,6 +226,8 @@ export class PlanetMap implements Entity {
     private readonly globe: PlanetGlobe,
     private readonly input: Input,
     debug: Debug,
+    /** The Species tab, if the map has one (the game's; not the planet lab's). */
+    private readonly species: SpeciesTab | null = null,
   ) {
     // Baked for the size it will mostly be shown at (the touch overlay is bigger).
     const pixelRatio = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
@@ -229,6 +246,7 @@ export class PlanetMap implements Entity {
     // Gas giants' clouds are drawn by the globe's shader (GAS); the bake only fills the outline.
     this.gas = gas ? gasPainter(config.seed, config.bands, config.size === 'iceGiant') : null;
     this.terrain = gas ? null : terrainPainter(config.style, false, config.seed);
+    this.noise = surfaceNoise(config, true);
     this.relief = gas ? 0 : config.style.relief;
     this.lava = globe.lava !== null;
     this.folded = loadFolded();
@@ -239,7 +257,7 @@ export class PlanetMap implements Entity {
       fragmentShader,
       defines: this.lava ? { LAVA: '' } : globe.gas ? { GAS: '' } : {},
       uniforms: {
-        ...(globe.lava ? globe.lava.seaUniforms(globe.sun, globe.sunLight, globe.ambientLight) : { uSun: { value: globe.sun } }),
+        ...(globe.lava ? globe.lava.seaUniforms(globe.sun, globe.sunLight, globe.ambientLight, globe.radius) : { uSun: { value: globe.sun } }),
         ...(globe.gas ? { ...globe.gas.uniforms, uGasFp: { value: (2 * Math.PI) / this.width } } : {}),
         uMap: { value: this.texture },
         uExtent: { value: new THREE.Vector2(this.width / this.scale, this.height / this.scale) },
@@ -265,9 +283,31 @@ export class PlanetMap implements Entity {
     return this.bakedRows >= this.height;
   }
 
-  /** True while the map is on screen. */
+  /** True while the panel is open on screen (on either tab). */
   get visible(): boolean {
     return this.shown && !this.hidesBody;
+  }
+
+  /** True while the map itself is drawn (the panel open on the Map tab). */
+  get drawing(): boolean {
+    return this.visible && this._tab === 'map';
+  }
+
+  /** The tab on show. */
+  get tab(): MapTab {
+    return this._tab;
+  }
+
+  /** Shows tab `tab` (the map only, without a Species tab). */
+  setTab(tab: MapTab): void {
+    if (!this.species) tab = 'map';
+    this._tab = tab;
+    if (this.active) lastTab = tab;
+    for (const b of this.tabButtons) b.setAttribute('aria-selected', String(b.dataset.tab === tab));
+    this.marksCanvas.hidden = tab !== 'map';
+    this.species?.show(this.active && tab === 'species');
+    this.rectDirty = true;
+    this.sinceMarks = Infinity;
   }
 
   /** The desktop panel folded down to its title bar. */
@@ -296,6 +336,12 @@ export class PlanetMap implements Entity {
     this.mapButton.addEventListener('click', this.onMapButton);
     this.marksCanvas.addEventListener('click', this.onClick);
     window.addEventListener('resize', this.onResize);
+    if (this.tabs) this.tabs.hidden = !this.species;
+    if (this.species) {
+      this.species.attach();
+      for (const b of this.tabButtons) b.addEventListener('click', this.onTab);
+    }
+    this.setTab(lastTab);
     this.sinceMarks = Infinity;
     this.rectDirty = true;
   }
@@ -308,6 +354,10 @@ export class PlanetMap implements Entity {
     this.mapButton.removeEventListener('click', this.onMapButton);
     this.marksCanvas.removeEventListener('click', this.onClick);
     window.removeEventListener('resize', this.onResize);
+    for (const b of this.tabButtons) b.removeEventListener('click', this.onTab);
+    this.species?.detach();
+    this.marksCanvas.hidden = false;
+    this.tabs?.classList.remove('tracking');
   }
 
   update(frameDt: number): void {
@@ -325,7 +375,11 @@ export class PlanetMap implements Entity {
     }
     // Touch players open it from the Map button; never while zooming in or out (input is blocked then).
     this.setShown((!this.input.touchMode || this.open) && !this.input.blocked);
-    if (!this.visible) return;
+    if (this.species) {
+      this.species.update(frameDt);
+      this.tabs?.classList.toggle('tracking', this.species.active);
+    }
+    if (!this.drawing) return;
 
     if (!this.baked) {
       this.bake();
@@ -344,7 +398,7 @@ export class PlanetMap implements Entity {
 
   /** Draws the map into the game's canvas, under the panel. Called by the level after its scene. */
   render(renderer: THREE.WebGLRenderer): void {
-    if (!this.visible) return;
+    if (!this.drawing) return;
     if (this.rectDirty) this.measure(renderer.domElement);
     const { x, y, w, h } = this.rect;
     if (w <= 0 || h <= 0) return;
@@ -407,6 +461,8 @@ export class PlanetMap implements Entity {
     const start = performance.now();
     // Relief shading: a slope's brightness from its height change per pixel against the angle a pixel spans.
     const shadeGain = planetMapParams.hillshade * this.relief * this.scale;
+    // The angle a pixel spans: craters smaller than that are left out (they'd only speckle it).
+    const spacing = 1 / this.scale;
     while (this.bakedRows < height && performance.now() - start < BAKE_BUDGET_MS) {
       const j = this.bakedRows++;
       const y = (height / 2 - j - 0.5) / this.scale;
@@ -426,14 +482,14 @@ export class PlanetMap implements Entity {
           // A small body: the ground's radius in relief units (its shape plus the detail, read at the surface
           // point as the globe does), never negative, so the whole of it is shaded as land.
           const r = shapeRadius(shape, dx, dy, dz);
-          const h = (heights[p] = this.terrain!(detailedTerrain(dx * r, dy * r, dz * r, seed), color, dx, dy, dz) + (r - SHAPE_FLOOR) / this.relief);
+          const h = (heights[p] = this.terrain!(this.noise(dx * r, dy * r, dz * r, seed, spacing), color, dx, dy, dz) + (r - SHAPE_FLOOR) / this.relief);
           if (i > 0 && j > 0 && heights[p - 1]! >= 0 && heights[p - width]! >= 0) {
             const slope = heights[p - 1]! + heights[p - width]! - 2 * h;
             color.multiplyScalar(THREE.MathUtils.clamp(1 - slope * shadeGain, 0.55, 1.45));
           }
         } else {
-          const n = detailedTerrain(dx, dy, dz, seed);
-          const h = (heights[p] = this.terrain!(n, color, dx, dy, dz));
+          const n = this.noise(dx, dy, dz, seed, spacing);
+          const h = (heights[p] = landElevation(this.config.style, this.terrain!(n, color, dx, dy, dz)));
           if (this.lava && n < this.config.style.seaLevel) alpha = 0;
           // Lit from the upper left: darker where the ground falls away towards the lower right.
           if (h > 0 && i > 0 && j > 0 && heights[p - 1]! >= 0 && heights[p - width]! >= 0) {
@@ -614,6 +670,11 @@ export class PlanetMap implements Entity {
 
   private onMapButton = () => {
     if (!this.input.blocked) this.setOpen(!this.open);
+  };
+
+  private onTab = (e: Event) => {
+    const tab = (e.currentTarget as HTMLElement).dataset.tab;
+    if (tab === 'map' || tab === 'species') this.setTab(tab);
   };
 
   private onResize = () => {

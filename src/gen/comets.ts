@@ -36,6 +36,8 @@ export interface CometContext {
   outerEdge: number;
   /** Orbital period (seconds) for a semi-major axis, from the system's Kepler law. */
   period: (semiMajor: number) => number;
+  /** How many comets instead of the drawn number (tools: the star lab's system tuner). */
+  count?: number;
 }
 
 /** Nucleus radius range, system units (its longest reach). */
@@ -50,12 +52,13 @@ export const COMET_MIN_PERIHELION_RADII = 3.5;
  * stream (`rng.fork('comets')`), so adding comets changed nothing else.
  */
 export function generateComets(rng: Rng, ctx: CometContext): CometData[] {
-  const count = rng.weighted<number>([
+  const drawn = rng.weighted<number>([
     [0, 4],
     [1, 4],
     [2, 2],
     [3, 1],
   ]);
+  const count = ctx.count ?? drawn;
   const minPerihelion = Math.max(ctx.starZone + ctx.starRadius * 2, ctx.starRadius * COMET_MIN_PERIHELION_RADII);
   const outer = Math.max(ctx.outerEdge, minPerihelion * 4);
 

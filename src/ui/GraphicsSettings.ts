@@ -1,4 +1,6 @@
+import { animalParams } from '../surface/animalParams';
 import { plantParams } from '../surface/plantParams';
+import { rockParams } from '../surface/GroundRocks';
 import { weatherParams } from '../world/weatherLook';
 import { wireframeParams } from '../world/wireframe';
 
@@ -10,13 +12,17 @@ export interface GraphicsSettings {
   weather: boolean;
   /** Plants standing on habitable planets (see gen/plants.ts). Off by default on touch devices. */
   plants: boolean;
+  /** Animals roaming habitable planets (see gen/animals.ts). Off by default on touch devices, like plants. */
+  animals: boolean;
+  /** Loose rocks on solid ground in low orbit (see gen/rocks.ts). On everywhere by default: they're cheap. */
+  rocks: boolean;
   /** Surfaces drawn as their triangles' edges (see world/wireframe.ts): to see the meshes and their level of detail. */
   wireframe: boolean;
 }
 
 /** The settings before the player changes any: plants start off on touch devices (`touch`: the main pointer is coarse). */
 export function defaultGraphicsSettings(touch: boolean): GraphicsSettings {
-  return { weather: true, plants: !touch, wireframe: false };
+  return { weather: true, plants: !touch, animals: !touch, rocks: true, wireframe: false };
 }
 
 /** Settings from stored JSON; anything missing or malformed falls back to the defaults. */
@@ -26,9 +32,11 @@ export function parseGraphicsSettings(json: string | null, touch = false): Graph
   try {
     const raw: unknown = JSON.parse(json);
     if (typeof raw === 'object' && raw !== null) {
-      const { weather, plants, wireframe } = raw as Record<string, unknown>;
+      const { weather, plants, animals, rocks, wireframe } = raw as Record<string, unknown>;
       if (typeof weather === 'boolean') out.weather = weather;
       if (typeof plants === 'boolean') out.plants = plants;
+      if (typeof animals === 'boolean') out.animals = animals;
+      if (typeof rocks === 'boolean') out.rocks = rocks;
       if (typeof wireframe === 'boolean') out.wireframe = wireframe;
     }
   } catch {
@@ -63,24 +71,30 @@ function saveGraphicsSettings(s: GraphicsSettings): void {
 export function applyGraphicsSettings(s: GraphicsSettings): void {
   weatherParams.enabled = s.weather;
   plantParams.enabled = s.plants;
+  animalParams.enabled = s.animals;
+  rockParams.enabled = s.rocks;
   wireframeParams.enabled = s.wireframe;
 }
 
 /**
  * The graphics settings in the menu's Display section (#graphics-weather,
- * #graphics-plants and #graphics-wireframe in index.html, see GameMenu): a
- * Weather toggle for clouds, storms, rain and lightning, a Plants toggle and
- * a Wireframe toggle. Changes apply live and are saved to localStorage.
+ * #graphics-plants, #graphics-animals, #graphics-rocks and #graphics-wireframe in index.html,
+ * see GameMenu): a Weather toggle for clouds, storms, rain and lightning,
+ * Plants, Animals and Rocks toggles and a Wireframe toggle. Changes apply live and are saved to localStorage.
  */
 export class GraphicsSettingsControl {
   private readonly weatherButton = document.getElementById('graphics-weather') as HTMLButtonElement;
   private readonly plantsButton = document.getElementById('graphics-plants') as HTMLButtonElement;
+  private readonly animalsButton = document.getElementById('graphics-animals') as HTMLButtonElement;
+  private readonly rocksButton = document.getElementById('graphics-rocks') as HTMLButtonElement;
   private readonly wireframeButton = document.getElementById('graphics-wireframe') as HTMLButtonElement;
 
   constructor(private settings: GraphicsSettings) {
     applyGraphicsSettings(settings);
     this.weatherButton.addEventListener('click', this.onWeather);
     this.plantsButton.addEventListener('click', this.onPlants);
+    this.animalsButton.addEventListener('click', this.onAnimals);
+    this.rocksButton.addEventListener('click', this.onRocks);
     this.wireframeButton.addEventListener('click', this.onWireframe);
     this.render();
   }
@@ -88,6 +102,8 @@ export class GraphicsSettingsControl {
   dispose(): void {
     this.weatherButton.removeEventListener('click', this.onWeather);
     this.plantsButton.removeEventListener('click', this.onPlants);
+    this.animalsButton.removeEventListener('click', this.onAnimals);
+    this.rocksButton.removeEventListener('click', this.onRocks);
     this.wireframeButton.removeEventListener('click', this.onWireframe);
   }
 
@@ -98,6 +114,12 @@ export class GraphicsSettingsControl {
     const plants = this.settings.plants;
     this.plantsButton.textContent = `Plants: ${plants ? 'on' : 'off'}`;
     this.plantsButton.setAttribute('aria-pressed', String(plants));
+    const animals = this.settings.animals;
+    this.animalsButton.textContent = `Animals: ${animals ? 'on' : 'off'}`;
+    this.animalsButton.setAttribute('aria-pressed', String(animals));
+    const rocks = this.settings.rocks;
+    this.rocksButton.textContent = `Rocks: ${rocks ? 'on' : 'off'}`;
+    this.rocksButton.setAttribute('aria-pressed', String(rocks));
     const wireframe = this.settings.wireframe;
     this.wireframeButton.textContent = `Wireframe: ${wireframe ? 'on' : 'off'}`;
     this.wireframeButton.setAttribute('aria-pressed', String(wireframe));
@@ -109,6 +131,14 @@ export class GraphicsSettingsControl {
 
   private onPlants = () => {
     this.change({ plants: !this.settings.plants });
+  };
+
+  private onAnimals = () => {
+    this.change({ animals: !this.settings.animals });
+  };
+
+  private onRocks = () => {
+    this.change({ rocks: !this.settings.rocks });
   };
 
   private onWireframe = () => {

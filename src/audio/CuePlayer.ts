@@ -71,16 +71,17 @@ export class CuePlayer {
   }
 
   /**
-   * Plays a variant of `cue` once and returns its length in seconds (0 if
-   * its files are still decoding: it then plays as soon as they're ready,
-   * if that's within `LATE_LIMIT`).
+   * Plays a variant of `cue` once at playback rate `rate` (1 as recorded,
+   * higher is higher and quicker) and returns how long it lasts in seconds
+   * (0 if its files are still decoding: it then plays as soon as they're
+   * ready, if that's within `LATE_LIMIT`).
    */
-  play(cue: SoundCue): number {
+  play(cue: SoundCue, rate = 1): number {
     const buffers = this.buffers[cue];
-    if (buffers) return this.playOnce(cue, buffers);
+    if (buffers) return this.playOnce(cue, buffers, rate);
     const asked = this.ctx.currentTime;
     void this.ready[cue].then((list) => {
-      if (this.ctx.currentTime - asked <= LATE_LIMIT) this.playOnce(cue, list);
+      if (this.ctx.currentTime - asked <= LATE_LIMIT) this.playOnce(cue, list, rate);
     });
     return 0;
   }
@@ -113,12 +114,13 @@ export class CuePlayer {
     return loop;
   }
 
-  private playOnce(cue: SoundCue, buffers: AudioBuffer[]): number {
+  private playOnce(cue: SoundCue, buffers: AudioBuffer[], rate: number): number {
     const i = this.variants.next(cue, buffers.length);
     if (i < 0) return 0;
     const buffer = buffers[i]!;
     const source = this.ctx.createBufferSource();
     source.buffer = buffer;
+    source.playbackRate.value = rate;
     const gain = this.ctx.createGain();
     gain.gain.value = cueParams[cue].volume;
     source.connect(gain).connect(this.outs[cueParams[cue].channel]);
@@ -127,7 +129,7 @@ export class CuePlayer {
       gain.disconnect();
     };
     source.start(this.ctx.currentTime + LEAD);
-    return buffer.duration;
+    return buffer.duration / rate;
   }
 
   private async decode(cue: SoundCue, data: Promise<ArrayBuffer>): Promise<AudioBuffer | null> {

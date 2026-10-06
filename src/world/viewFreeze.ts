@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { cullingCamera } from './thirdPerson';
 
 /**
  * The frozen view (the menu's Freeze button, or F; the lab's panel): what is
@@ -114,17 +115,24 @@ const culledMasks: number[] = [];
 const kept: THREE.Object3D[] = [];
 let active = false;
 
+const liveFrustum = new THREE.Frustum();
+const liveMatrix = new THREE.Matrix4();
+
 /**
- * Before drawing `scene` with `camera` while the view is frozen: objects the
- * frozen frustum leaves out are taken off every layer (so the renderer skips
- * them, but not their children, as its own culling does), and those it keeps
- * aren't culled again by the live camera. Undone by `endFrozenCulling`.
- * Nothing happens when the view isn't frozen. Allocation-free once frozen.
+ * Before drawing `scene` with `camera` while the view is frozen, or while
+ * the third-person view draws it (world/thirdPerson.ts): objects the frozen
+ * frustum, or the game camera's, leaves out are taken off every layer (so
+ * the renderer skips them, but not their children, as its own culling does),
+ * and those it keeps aren't culled again by the camera drawing. Undone by
+ * `endFrozenCulling`. Nothing happens otherwise. Allocation-free once frozen.
  */
 export function beginFrozenCulling(scene: THREE.Scene, camera: THREE.Camera): void {
-  if (!viewFreeze.enabled || active) return;
+  const eye = cullingCamera(camera);
+  if ((!viewFreeze.enabled && eye === camera) || active) return;
   active = true;
-  const { frustum } = frozenView(scene, camera);
+  const frustum = viewFreeze.enabled
+    ? frozenView(scene, eye).frustum
+    : liveFrustum.setFromProjectionMatrix(liveMatrix.multiplyMatrices(eye.projectionMatrix, eye.matrixWorldInverse));
   scene.updateMatrixWorld();
   scene.traverseVisible((o) => {
     if (!o.frustumCulled || !(o instanceof THREE.Mesh || o instanceof THREE.Points || o instanceof THREE.Line || o instanceof THREE.Sprite)) return;
@@ -155,5 +163,5 @@ export function endFrozenCulling(): void {
 
 /** The frozen frustum's outline for `scene` drawn by `camera`, to add while drawing (null when not frozen). */
 export function frozenOutline(scene: THREE.Scene, camera: THREE.Camera): THREE.LineSegments | null {
-  return viewFreeze.enabled ? frozenView(scene, camera).helper : null;
+  return viewFreeze.enabled ? frozenView(scene, cullingCamera(camera)).helper : null;
 }

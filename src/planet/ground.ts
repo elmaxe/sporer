@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { PlantSpecies } from '../gen/plants';
 
 /*
  * The ground under the UFO in low orbit (step 24): pure maths, unit-tested in
@@ -33,6 +34,30 @@ export const groundParams = {
   rayRefine: 14,
   rayMaxSteps: 6000,
 };
+
+/**
+ * The UFO's hull as obstacles meet it: a disc this wide (radius) whose underside
+ * is half an ellipsoid this deep below its centre (player/Ship.ts buildUfoMesh:
+ * a sphere of radius 2 squashed to 0.28 of its height).
+ */
+export const HULL_RADIUS = 2;
+export const HULL_DEPTH = 0.56;
+
+/**
+ * Things standing on the ground (plants) that the ship flies through, shaking
+ * them as it goes (surface/plantShake.ts), queried along the stretch it covered.
+ */
+export interface Obstacles {
+  /**
+   * Calls `visit` with everything standing on the ground that the hull, its
+   * centre `radius` from the planet's centre, passes through anywhere on the
+   * short arc from unit direction `from` to `to`.
+   */
+  touchAlong(from: THREE.Vector3, to: THREE.Vector3, radius: number, visit: ObstacleVisit): void;
+}
+
+/** A plant the hull touched: its unit direction, crown radius, the radius of its top from the planet's centre, and its species. */
+export type ObstacleVisit = (x: number, y: number, z: number, crown: number, top: number, species: PlantSpecies) => void;
 
 const scratch = new THREE.Vector3();
 const point = new THREE.Vector3();
@@ -72,15 +97,61 @@ export function groundAhead(
   p = groundParams,
 ): number {
   let highest = height(u);
+  for (let k = 1; k <= p.samples; k++) highest = Math.max(highest, height(aheadDirection(u, vel, heading, radius, k / p.samples, scratch, p)));
+  return highest;
+}
+
+/**
+ * The unit direction `share` of the way along the stretch `groundAhead`
+ * looks over (`footprint` plus `lookAhead` seconds of `vel`, along `heading`
+ * when nearly still), written into `out`.
+ */
+export function aheadDirection(
+  u: THREE.Vector3,
+  vel: THREE.Vector3,
+  heading: THREE.Vector3,
+  radius: number,
+  share: number,
+  out: THREE.Vector3,
+  p = groundParams,
+): THREE.Vector3 {
   const speed = vel.length();
   const reach = p.footprint + speed * p.lookAhead;
   const toward = speed > 1 ? point.copy(vel).divideScalar(speed) : point.copy(heading);
-  for (let k = 1; k <= p.samples; k++) {
-    const angle = (reach * k) / p.samples / radius;
-    scratch.copy(u).multiplyScalar(Math.cos(angle)).addScaledVector(toward, Math.sin(angle));
-    highest = Math.max(highest, height(scratch));
-  }
-  return highest;
+  const angle = (reach * share) / radius;
+  return out.copy(u).multiplyScalar(Math.cos(angle)).addScaledVector(toward, Math.sin(angle));
+}
+
+/**
+ * The lowest radius at which the hull's centre clears an obstacle anywhere on
+ * the short arc from unit direction `from` to `to` (taken as the straight
+ * chord, a few hull widths at most): an upright cylinder `crown` wide (radius)
+ * round unit direction (`bx`, `by`, `bz`), up to radius `top` from the
+ * planet's centre. Over the cylinder the hull's lowest point just touches its
+ * top; nearer its rim the hull's underside is shallower, so it may come lower.
+ * -Infinity if the hull never passes over it. A hull flying lower than this
+ * goes through it.
+ */
+export function obstacleClearance(
+  bx: number,
+  by: number,
+  bz: number,
+  crown: number,
+  top: number,
+  from: THREE.Vector3,
+  to: THREE.Vector3,
+): number {
+  const ex = to.x - from.x;
+  const ey = to.y - from.y;
+  const ez = to.z - from.z;
+  const length2 = ex * ex + ey * ey + ez * ez;
+  let t = length2 > 0 ? ((bx - from.x) * ex + (by - from.y) * ey + (bz - from.z) * ez) / length2 : 0;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  // How far the hull's axis passes from the obstacle's, at the obstacle's top.
+  const offset = Math.hypot(bx - from.x - ex * t, by - from.y - ey * t, bz - from.z - ez * t) * top - crown;
+  if (offset >= HULL_RADIUS) return -Infinity;
+  const rim = offset <= 0 ? 0 : offset / HULL_RADIUS;
+  return top + HULL_DEPTH * Math.sqrt(1 - rim * rim);
 }
 
 /**

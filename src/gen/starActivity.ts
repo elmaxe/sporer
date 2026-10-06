@@ -53,8 +53,13 @@ export interface StarActivity {
 
 const NONE = [0, 0] as const;
 
-/** Per-kind behaviour: dwarfs flicker fast and flare often and small, giants churn slowly and erupt big. */
+/** How `star` lives: its own `activity` if it has one (the star lab's), else its kind's (`kindActivity`). */
 export function starActivity(star: StarData): StarActivity {
+  return star.activity ?? kindActivity(star);
+}
+
+/** Per-kind behaviour: dwarfs flicker fast and flare often and small, giants churn slowly and erupt big. */
+export function kindActivity(star: Pick<StarData, 'kind' | 'spectralClass'>): StarActivity {
   switch (star.kind) {
     case 'redDwarf':
       return {
@@ -106,6 +111,19 @@ export function starActivity(star: StarData): StarActivity {
       };
     case 'mainSequence':
       return mainSequence(star.spectralClass);
+    case 'blackHole':
+      // No surface and no storms: its disc lives in world/BlackHoleLook.ts.
+      return {
+        pace: 1,
+        granulation: 0,
+        contrast: 0,
+        spots: 0,
+        rotationPeriod: 60,
+        pulse: 0,
+        pulsePeriod: 10,
+        prominence: { interval: 10, chance: 0, life: [1, 1], size: NONE, speed: NONE, particles: 0 },
+        flare: { interval: 10, chance: 0, life: [1, 1], size: NONE, speed: NONE, particles: 0 },
+      };
   }
 }
 

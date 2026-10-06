@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EARTH_HEAT_FLOW, evaluateClimate } from '../src/gen/climate';
+import { EARTH_HEAT_FLOW, climateStateOf, evaluateClimate } from '../src/gen/climate';
 import { generateGalaxy, systemRef } from '../src/gen/galaxy';
 import { geyserKind } from '../src/gen/geysers';
 import { ROGUE_CLEARANCE, ROGUES_PER_STAR, describeRogue, isRogue } from '../src/gen/rogues';
@@ -170,7 +170,7 @@ describe('the hydrogen greenhouse', () => {
   const surface = (pressure: number, heatFlow: number, gravity = 1) =>
     evaluateClimate(
       { insolation: 0, gravity, escapeVelocity: 11.2, heatFlow },
-      { pressure, composition: 'hydrogen', greenhouse: 1, water: 0.6, surfaceAlbedo: 0.3 },
+      climateStateOf({ pressure, composition: 'hydrogen', greenhouse: 1, water: 0.6, surfaceAlbedo: 0.3 }, gravity),
     );
 
   it('matches the model rogues it was fitted to (Mol Lous et al. 2022, 1 Earth mass at 4.5 Gyr)', () => {

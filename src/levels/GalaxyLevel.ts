@@ -3,7 +3,7 @@ import type { SoundEffects } from '../audio/sfx';
 import type { Debug } from '../core/Debug';
 import type { Input } from '../core/Input';
 import { generateDistantGalaxies } from '../gen/distantGalaxies';
-import { generateDust, type GalaxyData, type StarRef } from '../gen/galaxy';
+import { generateDust, generateHaze, type GalaxyData, type StarRef } from '../gen/galaxy';
 import type { SystemData } from '../gen/system';
 import { DistantGalaxies } from '../galaxy/DistantGalaxies';
 import { GalaxyDust } from '../galaxy/GalaxyDust';
@@ -17,7 +17,7 @@ import { GalaxySpin } from '../galaxy/GalaxySpin';
 import { StarCloseUp } from '../galaxy/StarCloseUp';
 import { OrbitCamera, type OrbitParams } from '../player/OrbitCamera';
 import type { Tooltip } from '../ui/Tooltip';
-import { Level } from './Level';
+import { Level, type Overview } from './Level';
 import { ease } from './seamlessZoom';
 
 /** Galaxy-scale camera: from a few stars around the ship out to the whole disc. */
@@ -62,12 +62,16 @@ export class GalaxyLevel extends Level {
   readonly spin: GalaxySpin;
   readonly distantGalaxies: DistantGalaxies;
   readonly nebulas: GalaxyNebulas;
+  /** The arms' gas and haze. */
+  readonly dust: GalaxyDust;
   private readonly hud: GalaxyHud;
   private readonly light: THREE.HemisphereLight;
   private closeUp: StarCloseUp | null = null;
   private dive = 0;
   private readonly members: THREE.Vector3[] = [];
   private readonly tilt = new THREE.Quaternion();
+  /** The galaxy's radius, galaxy units. */
+  private readonly radius: number;
 
   constructor(
     galaxy: GalaxyData,
@@ -82,6 +86,7 @@ export class GalaxyLevel extends Level {
     onZoomIn: () => void,
   ) {
     super();
+    this.radius = galaxy.radius;
     // Only the UFO is lit; stars and glows are unlit.
     this.light = new THREE.HemisphereLight('#cfe3ff', '#302040', 2);
     this.scene.add(this.light);
@@ -90,8 +95,16 @@ export class GalaxyLevel extends Level {
     // First, so everything below sees this frame's rotation.
     this.spin = this.add(new GalaxySpin(this.root, debug));
     this.distantGalaxies = this.add(new DistantGalaxies(this.scene, generateDistantGalaxies(galaxy.seed), debug));
-    this.add(new GalaxyDust(this.root, generateDust(galaxy), galaxy.radius));
     this.nebulas = this.add(new GalaxyNebulas(this.scene, this.root, galaxy.nebulas, galaxy.radius, debug));
+    this.dust = this.add(
+      new GalaxyDust(
+        this.root,
+        { gas: generateDust(galaxy), haze: generateHaze(galaxy) },
+        galaxy.radius,
+        this.nebulas.frame,
+        debug,
+      ),
+    );
     this.map = this.add(new GalaxyMap(this.root, galaxy, debug));
     this.rogues = this.add(new GalaxyRogues(this.root, galaxy, debug));
     this.ship = this.add(new GalaxyShip(this.root, start, debug, sfx));
@@ -166,6 +179,14 @@ export class GalaxyLevel extends Level {
   }
 
   /** The nebulas first, at low resolution; the scene lays them over the glow behind them. */
+  /** The whole galaxy round its centre. */
+  override overview(out: Overview): Overview {
+    this.root.getWorldPosition(out.centre);
+    out.radius = this.radius;
+    out.minDistance = 0;
+    return out;
+  }
+
   override render(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera): void {
     this.nebulas.renderVolumes(renderer, camera);
     super.render(renderer, camera);

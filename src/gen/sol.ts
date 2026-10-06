@@ -1,6 +1,6 @@
 import { MAX_SYSTEM_ROCKS, asteroidRadius, asteroidStyle, BELT_MARGIN, makeBelt, type AsteroidClass, type AsteroidData, type BeltContext, type BeltData, type TrojanHost } from './belts';
 import { hslToHex } from './color';
-import { evaluateClimate, type ClimateData, type Composition } from './climate';
+import { climateStateOf, evaluateClimate, type ClimateData, type Composition } from './climate';
 import { cometNucleus, type CometData } from './comets';
 import type { DustDiscData } from './discs';
 import { flatTilt } from './galactic';
@@ -96,7 +96,10 @@ interface ClimateSpec {
 function climate(c: ClimateSpec): ClimateData {
   return evaluateClimate(
     { insolation: c.insolation, gravity: c.gravity, escapeVelocity: c.escape, heatFlow: c.heat },
-    { pressure: c.pressure ?? 0, composition: c.composition ?? 'none', greenhouse: 1, water: c.water ?? 0, surfaceAlbedo: c.albedo },
+    climateStateOf(
+      { pressure: c.pressure ?? 0, composition: c.composition ?? 'none', greenhouse: 1, water: c.water ?? 0, surfaceAlbedo: c.albedo },
+      c.gravity,
+    ),
   );
 }
 
@@ -224,7 +227,8 @@ function planetSpecs(): PlanetSpec[] {
       tilt: 0.03,
       day: 4222.6,
       seed: SOL_SEEDS.mercury,
-      style: style('#4f4a45', '#b1aaa1', 0.04),
+      // Airless and heavily cratered (gen/craters.ts); the Moon's craters are in its real map instead.
+      style: { ...style('#4f4a45', '#b1aaa1', 0.04), craters: 1 },
       climate: { insolation: ins(0.387), gravity: 0.378, escape: 4.25, heat: 0.025, albedo: 0.088 },
       moons: [],
     },

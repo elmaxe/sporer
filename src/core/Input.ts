@@ -82,6 +82,8 @@ export class Input {
     element.addEventListener('pointerleave', this.onPointerLeave);
     element.addEventListener('wheel', this.onWheel, { passive: false });
     element.addEventListener('contextmenu', this.onContextMenu);
+    element.addEventListener('mousedown', this.onMouseDown);
+    element.addEventListener('dragstart', this.onDragStart);
   }
 
   get blocked(): boolean {
@@ -189,6 +191,8 @@ export class Input {
     this.element.removeEventListener('pointerleave', this.onPointerLeave);
     this.element.removeEventListener('wheel', this.onWheel);
     this.element.removeEventListener('contextmenu', this.onContextMenu);
+    this.element.removeEventListener('mousedown', this.onMouseDown);
+    this.element.removeEventListener('dragstart', this.onDragStart);
   }
 
   private onKeyDown = (e: KeyboardEvent) => {
@@ -282,6 +286,21 @@ export class Input {
   };
 
   private onContextMenu = (e: Event) => {
+    e.preventDefault();
+  };
+
+  /**
+   * A press on the game is never the browser's: Shift+press would otherwise
+   * extend the page's selection over the canvas, and Firefox then drags the
+   * whole page as an image. Cancelling it also keeps focus where it was, so
+   * blur whatever had it (a debug panel field), as a press on the page would.
+   */
+  private onMouseDown = (e: MouseEvent) => {
+    e.preventDefault();
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+  };
+
+  private onDragStart = (e: Event) => {
     e.preventDefault();
   };
 

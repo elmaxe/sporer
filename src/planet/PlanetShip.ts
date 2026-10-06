@@ -47,6 +47,8 @@ const ARRIVE_SPEED = 1;
  * every altitude);
  * WASD pushes it in the tangent plane relative to the camera. It stays level
  * with the ground (up = the radial direction) and turns to face its course.
+ * Whatever stands on the ground (trees, bushes) it flies straight through,
+ * shaking it (`PlantBrush`).
  */
 export class PlanetShip implements Entity {
   /** Interpolated render transform; read this for cameras and UI. */

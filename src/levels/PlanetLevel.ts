@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
 import type { Input } from '../core/Input';
+import { ParticlePool } from '../cargo/CargoFx';
+import { AFTER_ATMOSPHERE_RENDER_ORDER } from '../world/atmosphereShell';
 import { describeClimateDetail } from '../gen/climate';
 import { describeLife } from '../gen/life';
 import { cometActivity, describeNucleus } from '../gen/comets';
@@ -17,6 +19,8 @@ import { atmosphereLook } from '../gen/atmosphere';
 import { GIANT_ESCAPE_VELOCITY, METEOR_MIN_PRESSURE, describeShower, meteorShowers } from '../gen/meteors';
 import { Geysers } from '../planet/Geysers';
 import { Weather } from '../planet/Weather';
+import { ShipWake } from '../planet/ShipWake';
+import { VentSounds } from '../planet/VentSounds';
 import { LavaEruptions } from '../planet/LavaEruptions';
 import { LocalMoons } from '../planet/LocalMoons';
 import { PlanetFrame } from '../planet/PlanetFrame';
@@ -27,34 +31,43 @@ import { PlanetLights } from '../planet/PlanetLights';
 import { PlanetMap } from '../planet/PlanetMap';
 import { PlanetPicker } from '../planet/PlanetPicker';
 import { PlanetShip } from '../planet/PlanetShip';
+import { SpeciesTab, type SpeciesIcons } from '../planet/SpeciesTab';
+import { Radar } from '../radar/Radar';
 import { maxViewDistance, travelScale } from '../planet/frame';
 import { OrbitCamera, type OrbitParams } from '../player/OrbitCamera';
 import { flightAltitude, maxLookUpAt, minPitchAt, zoomCurveParams, zoomFraction } from '../player/zoomCurve';
 import type { SurfaceChanges } from '../surface/changes';
 import { PlantTooltip } from '../surface/PlantTooltip';
 import { plantSetup } from '../surface/plantSetup';
+import { animalSetup } from '../surface/animalSetup';
+import { SurfaceAnimals } from '../surface/SurfaceAnimals';
 import { SurfaceEntities } from '../surface/SurfaceEntities';
 import type { Tooltip } from '../ui/Tooltip';
 import { cometParams } from '../world/Comet';
 import { galacticLightParams } from '../world/galacticLight';
 import type { Planet } from '../world/Planet';
-import { Level } from './Level';
+import { Level, type Overview } from './Level';
 import type { SystemLevel } from './SystemLevel';
 import { renderScene } from '../world/wireframe';
 import type { SoundEffects } from '../audio/sfx';
+import { VolcanoSounds } from '../audio/VolcanoSounds';
 import { PlanetBuster } from '../combat/PlanetBuster';
 import { VolcanoBomb } from '../combat/VolcanoBomb';
+import { Laser } from '../combat/Laser';
 import { volcanoParams } from '../combat/volcano';
 import { Volcanoes } from '../planet/Volcanoes';
 import { hashSeed } from '../gen/rng';
 import { isGas } from '../world/Planet';
-import type { ItemId, ItemStatus, ItemUser } from '../combat/items';
+import type { ItemId, ItemStatus, ItemSwitches, ItemUser } from '../combat/items';
 import { bodyKey } from '../combat/busted';
 import { CargoBeam } from '../cargo/CargoBeam';
 import { bodyGravity } from '../cargo/beam';
 import type { Inventory } from '../cargo/inventory';
 import { weatherKind } from '../gen/weather';
+import { PlantBrush, createLeafTexture } from '../surface/PlantBrush';
 import { Plantings } from '../surface/Plantings';
+import { GroundRocks } from '../surface/GroundRocks';
+import { rockSetup } from '../surface/rockSetup';
 import { DEBRIS_REACH, debrisLookFor } from '../gen/debris';
 import { DEBRIS_NEAR, DebrisField } from '../world/DebrisField';
 
@@ -117,10 +130,14 @@ export class PlanetLevel extends Level implements ItemUser {
   eruptions: LavaEruptions | null = null;
   /** Bodies with geothermal activity only (see gen/geysers.ts). */
   geysers: Geysers | null = null;
+  /** The geysers' sound, as loud as the vents erupting near the camera are. */
+  ventSounds: VentSounds | null = null;
   /** Bodies with weather only: rain, lightning bolts and their light (the clouds are the globe's). */
   weather: Weather | null = null;
   /** Bodies whose orbit crosses a comet's dust stream: meteors (or impact flashes) while it does (not once busted). */
   meteors: Meteors | null = null;
+  /** Water and lava seas (not once busted): the ship's downwash on the sea below it. */
+  wake: ShipWake | null = null;
   /** Comets only: their jets, coma and tails, as active as the comet is close to the star. */
   comet: CometActivity | null = null;
   /** A comet's orbit, which bends its dust tail back. */
@@ -129,8 +146,16 @@ export class PlanetLevel extends Level implements ItemUser {
   private readonly now = new THREE.Vector3();
   /** Habitable bodies (T1 and up) only: plants standing on the ground (see gen/plants.ts). */
   plants: SurfaceEntities | null = null;
+  /** Solid bodies (not once busted): the loose rocks on the ground, loaded as the camera comes near it (gen/rocks.ts). */
+  rocks: GroundRocks | null = null;
+  /** The animals roaming it (gen/animals.ts), where plants grow. */
+  animals: SurfaceAnimals | null = null;
+  /** The radar, tracking a species of those animals picked on the map's Species tab (not once busted). */
+  radar: Radar | null = null;
   /** Plants the player set down here that took root (not once busted). */
   plantings: Plantings | null = null;
+  /** Shakes the plants the ship goes through and knocks their leaves off. */
+  readonly plantBrush: PlantBrush;
   private plantTooltip: PlantTooltip | null = null;
   /** The abduction beam and the cargo it sets down (not once busted). */
   cargo: CargoBeam | null = null;
@@ -138,8 +163,12 @@ export class PlanetLevel extends Level implements ItemUser {
   readonly buster: PlanetBuster;
   /** The volcano bomb, fired from here at solid ground (not on giants or once busted). */
   readonly volcanoBomb: VolcanoBomb;
+  /** The laser, killing the animals and plants it touches. */
+  readonly laser: Laser;
   /** Solid bodies only (and not once busted): the volcanoes raised on it, kept in its change list. */
   volcanoes: Volcanoes | null = null;
+  /** The volcanoes as heard from the camera (wherever they can stand; silent until one does, and while the level isn't the active one). */
+  private volcanoSounds: VolcanoSounds | null = null;
   /** Once busted: its debris field, and the system time of the blast. */
   private debris: DebrisField | null = null;
   private blastTime = 0;
@@ -177,6 +206,10 @@ export class PlanetLevel extends Level implements ItemUser {
     private readonly onBust: (blastTime: number) => void,
     /** The ship's cargo hold (kept by the scene manager for the whole game). */
     inventory: Inventory,
+    /** Which switch items are on: the radar tracks only while it is (kept by the scene manager for the whole game). */
+    private readonly switches: ItemSwitches,
+    /** Pictures of species for the map's Species tab (none in tests). */
+    icons: SpeciesIcons | null = null,
   ) {
     super();
     this.frame = this.add(new PlanetFrame(body, system.world.time, debug));
@@ -279,6 +312,10 @@ export class PlanetLevel extends Level implements ItemUser {
         'Planet camera',
       ),
     );
+    // After the camera: heard from where it is this frame.
+    this.ventSounds = this.geysers ? this.add(new VentSounds(this.geysers, camera, this.frame, sfx, debug)) : null;
+    // After the ship: the downwash under it on the water or lava, where it's drawn this frame.
+    this.wake = ShipWake.wanted(globe) && !busted ? this.add(new ShipWake(this.scene, globe, this.ship.object, camera, globe.sun)) : null;
     // After the camera: the bolts face this frame's view.
     this.weather =
       globe.weather && !busted
@@ -293,15 +330,40 @@ export class PlanetLevel extends Level implements ItemUser {
         : null);
     // Those raised on earlier visits stand there, risen and settled.
     if (volcanoes) for (const site of changes.volcanoes) volcanoes.add(site, null);
+    // After the volcanoes, so it hears them from where the shaken camera is.
+    this.volcanoSounds = volcanoes ? this.add(new VolcanoSounds(camera, volcanoes, sfx, debug)) : null;
     const plantsSetup = busted ? null : plantSetup(config);
     this.plants = plantsSetup ? this.add(new SurfaceEntities(this.scene, plantsSetup.plan, plantsSetup.ground, camera, changes, debug)) : null;
+    const rocks = busted ? null : rockSetup(config);
+    this.rocks = rocks ? this.add(new GroundRocks(this.scene, rocks.plan, rocks.ground, camera, debug)) : null;
     this.buryPlants();
+    const animalsSetup = busted ? null : animalSetup(config, plantsSetup);
+    this.animals = animalsSetup ? this.add(new SurfaceAnimals(this.scene, animalsSetup.plan, animalsSetup.ground, camera, this.frame, debug, changes)) : null;
+    // After the ship and the camera: its waves spread round where the ship is drawn this frame.
+    this.radar = animalsSetup
+      ? this.add(new Radar(this.scene, animalsSetup.plan, animalsSetup.ground, this.ship, camera, this.frame, sfx, () => switches.isOn('radar'), debug, changes))
+      : null;
     this.plantings = busted ? null : this.add(new Plantings(this.scene, changes));
+    // The plants the ship goes through shake and lose leaves: the planet's own and those set down (gone once it's busted).
+    this.plantBrush = this.add(
+      new PlantBrush(
+        this.ship,
+        camera,
+        globe.sun,
+        () => [this.plants, this.plantings],
+        new ParticlePool(this.scene, false, AFTER_ATMOSPHERE_RENDER_ORDER, createLeafTexture()),
+        debug,
+      ),
+    );
     this.plantTooltip = this.plantings
-      ? this.add(new PlantTooltip(camera, input, this.plants, this.plantings, tooltip, (ray, out) => globe.groundHit(ray, out)))
+      ? this.add(new PlantTooltip(camera, input, this.plants, this.plantings, tooltip, this.animals, (ray, out) => globe.groundHit(ray, out)))
       : null;
     const events = { fire: (time: number) => this.fire(time), blast: () => this.blast(), done: () => this.settled() };
     this.buster = this.add(new PlanetBuster(this.scene, this.frame, camera, input, globe, this.ship.object, sfx, events, busted, debug));
+    // Before the beam and the picker: a press the laser takes is neither (the beam takes every press it sees).
+    this.laser = this.add(
+      new Laser(this.scene, camera, input, globe, this.ship, this, sfx, () => (this.busy ? 'Not while the planet buster goes off' : null), bodyKey(config), debug),
+    );
     // Before the picker: a press the beam takes isn't a click that flies the ship.
     const world = { climate: config.climate ?? null, weather: weatherKind(config.type, config.climate) };
     this.cargo = this.plantings
@@ -314,6 +376,7 @@ export class PlanetLevel extends Level implements ItemUser {
             this.ship,
             this.plants,
             this.plantings,
+            this.animals,
             inventory,
             { key: bodyKey(config), name: body.name, world, gravity: bodyGravity(config) },
             sfx,
@@ -401,7 +464,8 @@ export class PlanetLevel extends Level implements ItemUser {
         .filter(Boolean)
         .join(' · ');
     this.hud = this.add(new PlanetHud(this.ship, `${body.name} · ${body.description}`, input, detail, nowLine));
-    this.map = this.add(new PlanetMap(config, body.name, this.ship, globe, input, debug));
+    const species = new SpeciesTab(bodyKey(config), animalsSetup?.plan.species ?? [], plantsSetup?.plan.species ?? [], this.radar, icons, () => switches.isOn('radar'));
+    this.map = this.add(new PlanetMap(config, body.name, this.ship, globe, input, debug, species));
     debug
       .folder('Planet lab')
       ?.add({ open: () => window.open(this.labLink(), '_blank') }, 'open')
@@ -438,14 +502,16 @@ export class PlanetLevel extends Level implements ItemUser {
     return this.globe.busted;
   }
 
-  /** The item bar's view of this level: the planet buster and the volcano bomb can be fired from here, and the beam used. */
+  /** The item bar's view of this level: the planet buster, the volcano bomb and the laser can be fired from here, and the beam used. */
   get selected(): ItemId | null {
-    return this.buster.armed ? 'planetBuster' : this.volcanoBomb.armed ? 'volcanoBomb' : (this.cargo?.selected ?? null);
+    return this.buster.armed ? 'planetBuster' : this.volcanoBomb.armed ? 'volcanoBomb' : this.laser.armed ? 'laser' : (this.cargo?.selected ?? null);
   }
 
   status(item: ItemId): ItemStatus {
+    if (item === 'radar') return this.radarStatus();
     if (item === 'planetBuster') return this.buster.status();
     if (item === 'volcanoBomb') return this.volcanoBomb.status();
+    if (item === 'laser') return this.laser.status();
     if (this.cargo) return this.cargo.status(item);
     return { available: false, hint: '', reason: item === 'abduct' ? 'Nothing left here to beam up' : 'Nothing here to set it down on' };
   }
@@ -454,9 +520,26 @@ export class PlanetLevel extends Level implements ItemUser {
     // The weapons put away before the one chosen is armed (they share the aiming cursor), and before the beam, so its cursor isn't undone.
     if (item !== 'planetBuster') this.buster.arm(false);
     if (item !== 'volcanoBomb') this.volcanoBomb.arm(false);
+    if (item !== 'laser') this.laser.arm(false);
     if (item === 'planetBuster') this.buster.arm(true);
     if (item === 'volcanoBomb') this.volcanoBomb.arm(true);
-    this.cargo?.arm(item === 'planetBuster' || item === 'volcanoBomb' ? null : item);
+    if (item === 'laser') this.laser.arm(true);
+    this.cargo?.arm(item === 'planetBuster' || item === 'volcanoBomb' || item === 'laser' ? null : item);
+  }
+
+  /** The radar's line above the item bar while it's on (a switch: always available). */
+  private radarStatus(): ItemStatus {
+    const radar = this.radar;
+    if (!this.switches.isOn('radar')) return { available: true, hint: '' };
+    if (!radar) return { available: true, hint: 'Radar: no animals live here' };
+    const tracking = radar.tracking;
+    if (tracking === null) return { available: true, hint: "Radar on: pick an animal on the map's Species tab to track it" };
+    const name = radar.plan.species[tracking]!.name;
+    const state = radar.state;
+    return {
+      available: true,
+      hint: state === 'tracking' ? `Radar: the nearest ${name} is ${radar.proximity}` : state === 'none' ? `Radar: no ${name} found here` : `Radar: searching for ${name}…`,
+    };
   }
 
   /** Why a volcano bomb can't be fired here now, or null if it can. */
@@ -486,7 +569,9 @@ export class PlanetLevel extends Level implements ItemUser {
   /** The plants where volcanoes stand are buried under them. */
   private buryPlants(): void {
     const volcanoes = this.volcanoes;
-    if (this.plants && volcanoes && volcanoes.count > 0) this.plants.setBuried((dir) => volcanoes.covers(dir));
+    if (!volcanoes || volcanoes.count === 0) return;
+    this.plants?.setBuried((dir) => volcanoes.covers(dir));
+    this.rocks?.setBuried((dir) => volcanoes.covers(dir));
   }
 
   /** The buster is away: hold the ship where it is and pull the camera back to watch. */
@@ -503,10 +588,12 @@ export class PlanetLevel extends Level implements ItemUser {
   private blast(): void {
     this.globe.bust(this.radius * DEBRIS_REACH);
     this.cargo?.clear(false);
-    for (const entity of [this.eruptions, this.geysers, this.weather, this.comet, this.plants, this.cargo, this.plantings, this.volcanoes, this.meteors])
+    this.laser.clear();
+    for (const entity of [this.eruptions, this.geysers, this.ventSounds, this.weather, this.comet, this.plants, this.rocks, this.wake, this.animals, this.radar, this.cargo, this.plantings, this.volcanoes, this.volcanoSounds, this.meteors])
       if (entity) this.remove(entity);
-    this.eruptions = this.geysers = this.weather = this.comet = this.plants = this.cargo = this.plantings = this.meteors = null;
+    this.eruptions = this.geysers = this.ventSounds = this.weather = this.comet = this.plants = this.rocks = this.wake = this.animals = this.radar = this.cargo = this.plantings = this.meteors = null;
     this.volcanoes = null;
+    this.volcanoSounds = null;
     if (this.plantTooltip) {
       this.plantTooltip.deactivate();
       this.remove(this.plantTooltip);
@@ -608,6 +695,14 @@ export class PlanetLevel extends Level implements ItemUser {
     };
   }
 
+  /** The whole globe, from outside it. */
+  override overview(out: Overview): Overview {
+    out.centre.set(0, 0, 0);
+    out.radius = this.radius;
+    out.minDistance = this.radius * 1.05;
+    return out;
+  }
+
   override render(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera): void {
     // The sky camera sits where this camera is, in system space, looking the same way.
     const sky = this.skyCamera;
@@ -646,17 +741,22 @@ export class PlanetLevel extends Level implements ItemUser {
   }
 
   override enter(): void {
+    this.ventSounds?.mute(false);
     this.hud.activate();
     if (!this.busted) this.map.activate();
     this.plantTooltip?.activate();
+    this.volcanoSounds?.mute(false);
   }
 
   override exit(): void {
+    this.ventSounds?.mute(true);
     this.buster.arm(false);
     this.volcanoBomb.arm(false);
+    this.laser.arm(false);
     this.cargo?.arm(null);
     this.hud.deactivate();
     this.map.deactivate();
     this.plantTooltip?.deactivate();
+    this.volcanoSounds?.mute(true);
   }
 }

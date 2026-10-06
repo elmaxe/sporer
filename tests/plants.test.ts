@@ -25,6 +25,11 @@ import { createPlantGeometry } from '../src/surface/plantLook';
 import { plantParams } from '../src/surface/plantParams';
 import { plantSetup } from '../src/surface/plantSetup';
 import { SurfaceEntities } from '../src/surface/SurfaceEntities';
+import { Plantings } from '../src/surface/Plantings';
+import { HULL_DEPTH, HULL_RADIUS } from '../src/planet/ground';
+import { PlantBrush, leafParams } from '../src/surface/PlantBrush';
+import type { Puff } from '../src/cargo/CargoFx';
+import { PlantShaker, SHAKE_SLOTS, plantShakeParams, plantShakeUniforms } from '../src/surface/plantShake';
 import { parseGraphicsSettings } from '../src/ui/GraphicsSettings';
 
 const RADIUS = 400;
@@ -255,7 +260,7 @@ describe('graphics settings: plants', () => {
     expect(parseGraphicsSettings(null, true).plants).toBe(false);
     expect(parseGraphicsSettings('{"plants":true}', true).plants).toBe(true);
     expect(parseGraphicsSettings('{"plants":false}', false).plants).toBe(false);
-    expect(parseGraphicsSettings('{"weather":false}', true)).toEqual({ weather: false, plants: false, wireframe: false });
+    expect(parseGraphicsSettings('{"weather":false}', true)).toEqual({ weather: false, plants: false, animals: false, rocks: true, wireframe: false });
     expect(parseGraphicsSettings('{"plants":"yes"}', false).plants).toBe(true);
   });
 });
@@ -366,5 +371,212 @@ describe('SurfaceEntities', () => {
     expect(surface.stats().plants).toBe(before - 1);
     expect(surface.promote(plants[1]!.id)).toBeNull();
     surface.dispose();
+  });
+
+  describe('as obstacles for the ship', () => {
+    const plantsOf = (surface: SurfaceEntities) =>
+      [...(surface as unknown as { cells: Map<string, { plants: PlantData[] }> }).cells.values()].flatMap((c) => c.plants);
+    const topOf = (p: PlantData) => p.radius + p3.species[p.species]!.height * p.scale;
+    const dirOf = (p: PlantData) => new THREE.Vector3(p.x, p.y, p.z);
+    const touched = (o: { touchAlong: SurfaceEntities['touchAlong'] }, from: THREE.Vector3, to: THREE.Vector3, radius: number) => {
+      const out: THREE.Vector3[] = [];
+      o.touchAlong(from, to, radius, (x, y, z) => out.push(new THREE.Vector3(x, y, z)));
+      return out;
+    };
+    const tallest = (surface: SurfaceEntities) =>
+      plantsOf(surface)
+        .filter((p) => p3.species[p.species]!.kind === 'tree')
+        .sort((a, b) => topOf(b) - topOf(a))[0]!;
+
+    it('touches a tree the hull goes through, under it or along the way, and not one it passes over', () => {
+      const { surface } = make();
+      const tree = tallest(surface);
+      const over = dirOf(tree);
+      const inside = topOf(tree) - 0.5;
+      expect(touched(surface, over, over, inside).some((d) => d.distanceTo(over) < 1e-6)).toBe(true);
+      // A stretch that passes through it from 15 units one side to 15 the other.
+      const side = new THREE.Vector3(0, 0, 1).cross(over).normalize().multiplyScalar(15 / RADIUS);
+      const from = over.clone().sub(side).normalize();
+      const to = over.clone().add(side).normalize();
+      expect(touched(surface, from, to, inside).some((d) => d.distanceTo(over) < 1e-6)).toBe(true);
+      // High above every plant, nothing.
+      expect(touched(surface, from, to, topOf(tree) + HULL_DEPTH + 0.01)).toEqual([]);
+      surface.dispose();
+    });
+
+    it('matches checking every plant one by one, wherever the ship is', () => {
+      const { surface } = make();
+      const plants = plantsOf(surface);
+      const at = new THREE.Vector3();
+      let some = 0;
+      for (let k = 0; k < 40; k++) {
+        // Spots round the camera, near the plants it loaded, at heights through the canopy.
+        at.set(Math.sin(k * 2.4) * 0.15, Math.cos(k * 2.4) * 0.15, 1).normalize();
+        const radius = RADIUS + 1 + (k % 5) * 2;
+        const expected = plants
+          .filter((p) => {
+            const s = p3.species[p.species]!;
+            const d = dirOf(p).sub(at).length() * topOf(p) - s.crownRadius * p.scale;
+            return d < HULL_RADIUS && radius < topOf(p) + HULL_DEPTH * Math.sqrt(1 - Math.max(0, d / HULL_RADIUS) ** 2);
+          })
+          .map((p) => p.id)
+          .sort();
+        const got = touched(surface, at, at, radius);
+        expect(got.length).toBe(expected.length);
+        if (expected.length > 0) some++;
+      }
+      // Some of the spots are in plants, some aren't.
+      expect(some).toBeGreaterThan(5);
+      expect(some).toBeLessThan(40);
+      surface.dispose();
+    });
+
+    it('stops touching a plant once it is removed or lifted, and touches nothing with plants off', () => {
+      const { surface } = make();
+      const tree = tallest(surface);
+      const over = dirOf(tree);
+      const has = () => touched(surface, over, over, topOf(tree) - 0.5).some((d) => d.distanceTo(over) < 1e-6);
+      expect(has()).toBe(true);
+      const live = surface.promote(tree.id)!;
+      expect(has()).toBe(false);
+      live.restore();
+      expect(has()).toBe(true);
+      surface.remove(tree.id);
+      expect(has()).toBe(false);
+      plantParams.enabled = false;
+      surface.update();
+      expect(touched(surface, over, over, RADIUS + 1)).toEqual([]);
+      plantParams.enabled = true;
+      surface.dispose();
+    });
+
+    it('touches the plants the player set down too', () => {
+      const changes = new SurfaceChanges();
+      const plantings = new Plantings(new THREE.Scene(), changes);
+      const tree = p3.species.find((s) => s.kind === 'tree')!;
+      const up = new THREE.Vector3(0, 1, 0);
+      expect(touched(plantings, up, up, RADIUS + 1)).toEqual([]);
+      plantings.plant({ speciesKey: 'x#0', species: tree, origin: 'Home', x: 0, y: 1, z: 0, radius: RADIUS, scale: 1, yaw: 0 });
+      expect(touched(plantings, up, up, RADIUS + tree.height - 0.1)).toHaveLength(1);
+      expect(touched(plantings, up, up, RADIUS + tree.height + HULL_DEPTH + 0.1)).toEqual([]);
+      plantings.dispose();
+    });
+
+    it('shakes the trees the ship flies through, along its course, knocks leaves off them, and lets them settle', () => {
+      const { surface } = make();
+      const tree = tallest(surface);
+      const over = dirOf(tree);
+      const side = new THREE.Vector3(0, 0, 1).cross(over).normalize();
+      const ship = { object: new THREE.Object3D(), speed: 30 };
+      // The leaves thrown, as the pool would get them.
+      const thrown: { position: THREE.Vector3; velocity: THREE.Vector3; color: THREE.Color }[] = [];
+      const leaves = {
+        live: 0,
+        emit: (p: Puff) => thrown.push({ position: p.position.clone(), velocity: p.velocity.clone(), color: (p.color as THREE.Color).clone() }),
+        setView: () => {},
+        update: () => {},
+        dispose: () => {},
+      };
+      const sun = over.clone();
+      const brush = new PlantBrush(ship, new THREE.PerspectiveCamera(), sun, () => [surface, null], leaves, debug);
+      const radius = topOf(tree) - 0.5;
+      const place = (along: number) => ship.object.position.copy(over).addScaledVector(side, along / RADIUS).normalize().multiplyScalar(radius);
+      // From 10 units before the tree to 10 past, at 30 units a second.
+      for (let along = -10; along <= 10; along += 0.5) {
+        place(along);
+        brush.update(1 / 60);
+      }
+      const u = plantShakeUniforms;
+      const count = u.uShakeCount.value;
+      expect(count).toBeGreaterThan(0);
+      const k = u.uShakeAt.value.slice(0, count).findIndex((a) => new THREE.Vector3(a.x, a.y, a.z).distanceTo(over) < 1e-6);
+      expect(k).toBeGreaterThanOrEqual(0);
+      const push = u.uShakePush.value[k]!;
+      // Pushed along the course, tangent to the ground, as hard as the speed says.
+      expect(push.x * side.x + push.y * side.y + push.z * side.z).toBeGreaterThan(0.5);
+      expect(Math.abs(push.x * over.x + push.y * over.y + push.z * over.z)).toBeLessThan(1e-6);
+      expect(push.w).toBeCloseTo(Math.min(plantShakeParams.maxStrength, plantShakeParams.strength + plantShakeParams.perSpeed * 30));
+      // Every plant shaken is inside the zone the shader checks first.
+      const zone = u.uShakeZone.value;
+      for (const a of u.uShakeAt.value.slice(0, count)) expect(a.x * zone.x + a.y * zone.y + a.z * zone.z).toBeGreaterThanOrEqual(zone.w);
+      // Leaves knocked out of the crowns, a burst per plant shaken, thrown along with the ship, in the plants' colours.
+      expect(thrown.length).toBeGreaterThanOrEqual(count * Math.min(leafParams.maxCount, Math.round(leafParams.count + leafParams.perSpeed * 30)));
+      const s = p3.species[tree.species]!;
+      const fromTree = thrown.filter((l) => l.position.clone().normalize().distanceTo(over) * RADIUS < s.crownRadius * tree.scale + 1);
+      expect(fromTree.length).toBeGreaterThan(0);
+      for (const l of fromTree) expect(l.position.length()).toBeLessThanOrEqual(topOf(tree) + 0.01);
+      const along = thrown.reduce((sum, l) => sum + l.velocity.dot(side), 0) / thrown.length;
+      expect(along).toBeGreaterThan(30 * leafParams.carry * 0.5);
+      const colours = new Set(p3.species.flatMap((x) => [x.leafColor, x.trunkColor]).map((c) => new THREE.Color(c).getHexString()));
+      // Under a noon sun, a leaf's colour is its species' a little lighter or darker.
+      for (const l of thrown) {
+        const near = [...colours].some((c) => {
+          const base = new THREE.Color(`#${c}`);
+          const k = l.color.r / Math.max(base.r, 1e-3);
+          return Math.abs(l.color.g - base.g * k) < 0.02 && Math.abs(l.color.b - base.b * k) < 0.02 && k > 0.75 && k < 1.25;
+        });
+        expect(near).toBe(true);
+      }
+      // Flown on, high above it all: the shakes die away and go.
+      ship.object.position.multiplyScalar(2);
+      for (let t = 0; t < 10; t += 1 / 30) brush.update(1 / 30);
+      expect(u.uShakeCount.value).toBe(0);
+      brush.dispose();
+      surface.dispose();
+    });
+  });
+});
+
+describe('PlantShaker', () => {
+  const uniforms = () => ({
+    uShakeTime: { value: 0 },
+    uShakeCount: { value: 0 },
+    uShakeZone: { value: new THREE.Vector4() },
+    uShakeAt: { value: Array.from({ length: SHAKE_SLOTS }, () => new THREE.Vector4()) },
+    uShakePush: { value: Array.from({ length: SHAKE_SLOTS }, () => new THREE.Vector4()) },
+    uShakeRates: { value: new THREE.Vector4() },
+  });
+  const push = new THREE.Vector3(1, 0, 0);
+
+  it('shakes a plant once, and again only once the last shake is old enough', () => {
+    const u = uniforms();
+    const shaker = new PlantShaker(u);
+    shaker.shake(0, 1, 0, push, 0.2);
+    shaker.shake(0, 1, 0, push, 0.2);
+    expect(shaker.active).toBe(1);
+    shaker.update(plantShakeParams.retrigger + 0.01);
+    shaker.shake(0, 1, 0, push, 0.2);
+    // Both swing at once: the new one adds to the old, so nothing jumps.
+    expect(shaker.active).toBe(2);
+    expect(u.uShakeAt.value[1]!.w).toBeCloseTo(plantShakeParams.retrigger + 0.01);
+  });
+
+  it('gives the slot of the shake that has died down most to a new one when all are taken', () => {
+    const u = uniforms();
+    const shaker = new PlantShaker(u);
+    for (let k = 0; k < SHAKE_SLOTS; k++) {
+      shaker.shake(Math.sin(k), Math.cos(k), 0, push, 0.2);
+      shaker.update(0.01);
+    }
+    shaker.shake(0, 0, 1, push, 0.2);
+    expect(shaker.active).toBe(SHAKE_SLOTS);
+    // The first one was the oldest.
+    expect(u.uShakeAt.value[0]!.z).toBe(1);
+  });
+
+  it('lets the shakes go once they have died away, and stops them all on clear', () => {
+    const u = uniforms();
+    const shaker = new PlantShaker(u);
+    shaker.shake(0, 1, 0, push, 0.2);
+    shaker.update(0.1);
+    shaker.shake(1, 0, 0, push, 0.2);
+    shaker.update(plantShakeParams.decay * 6 - 0.05);
+    expect(u.uShakeCount.value).toBe(1);
+    expect(u.uShakeAt.value[0]!.x).toBe(1);
+    shaker.update(0.1);
+    expect(u.uShakeCount.value).toBe(0);
+    shaker.shake(0, 1, 0, push, 0.2);
+    shaker.clear();
+    expect(u.uShakeCount.value).toBe(0);
   });
 });

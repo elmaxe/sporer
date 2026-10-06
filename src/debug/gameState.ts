@@ -7,13 +7,17 @@ import { bodyLabLink } from '../lab/bodyLink';
 import { lodParams } from '../planet/LodSurface';
 import type { OrbitCamera } from '../player/OrbitCamera';
 import { SurfaceChanges } from '../surface/changes';
+import { animalParams } from '../surface/animalParams';
+import { rockParams } from '../surface/GroundRocks';
 import { plantParams } from '../surface/plantParams';
 import type { CelestialBody } from '../world/CelestialBody';
 import type { Planet } from '../world/Planet';
 import type { StarSystem } from '../world/StarSystem';
 import { weatherParams } from '../world/weatherLook';
 import { wireframeParams } from '../world/wireframe';
+import type { DumpSource } from './DebugDump';
 import type { BodyRef, GameState, Quat4, Vec3 } from './dumpFormat';
+import { frames, overlayRects } from './page';
 
 /**
  * Reads the game's state into a debug dump (`captureGameState`) and puts the
@@ -99,18 +103,6 @@ const OVERLAYS = [
   'fps',
 ];
 
-function overlays(): GameState['ui']['overlays'] {
-  const out: GameState['ui']['overlays'] = [];
-  for (const id of OVERLAYS) {
-    const el = document.getElementById(id);
-    if (!el || el.hidden) continue;
-    const r = el.getBoundingClientRect();
-    if (r.width === 0 || r.height === 0) continue;
-    out.push({ id, rect: [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)] });
-  }
-  return out;
-}
-
 /** Everything a debug dump records about where the game is. */
 export function captureGameState(game: Game, levels: SceneManager): GameState {
   const params = new URL(location.href).searchParams;
@@ -177,7 +169,7 @@ export function captureGameState(game: Game, levels: SceneManager): GameState {
       levels.mode === 'galaxy'
         ? { spin: galaxy.spin.angle, current: galaxy.ship.current.id, destination: galaxy.ship.destination?.id ?? null }
         : null,
-    graphics: { weather: weatherParams.enabled, plants: plantParams.enabled, wireframe: wireframeParams.enabled },
+    graphics: { weather: weatherParams.enabled, plants: plantParams.enabled, animals: animalParams.enabled, rocks: rockParams.enabled, wireframe: wireframeParams.enabled },
     busted: {
       bodies: spinning(world).flatMap((b) =>
         b.blastedAt === null ? [] : [{ body: bodyRef(world, b) ?? { kind: 'planet' as const, index: -1, name: b.name }, time: b.blastedAt }],
@@ -192,8 +184,16 @@ export function captureGameState(game: Game, levels: SceneManager): GameState {
     cargo: {
       inventory: levels.inventory.toJSON(),
       surface: planet ? levels.surfaceChanges.forPlanet(bodyKey(planet.body.config)).toJSON() : null,
-      selected: planet?.cargo?.selected ?? null,
+      selected: planet?.selected ?? null,
       inFlight: planet?.cargo?.inFlight ?? [],
+      laser: planet ? { firing: planet.laser.on, killed: planet.laser.killed, burning: planet.laser.burning } : undefined,
+    },
+    radar: {
+      on: levels.switches.isOn('radar'),
+      tracking: planet?.radar?.tracking ?? null,
+      species: planet?.radar && planet.radar.tracking !== null ? planet.radar.plan.species[planet.radar.tracking]!.name : null,
+      state: planet?.radar?.state ?? 'off',
+      distance: planet?.radar && Number.isFinite(planet.radar.distance) ? planet.radar.distance : null,
     },
     ui: {
       touchMode: game.input.touchMode,
@@ -201,17 +201,11 @@ export function captureGameState(game: Game, levels: SceneManager): GameState {
       tooltip,
       systemMap: levels.mode === 'system' && system.map.visible,
       planetMap: !!planet?.map.visible,
-      overlays: overlays(),
+      mapTab: planet?.map.tab ?? 'map',
+      overlays: overlayRects(OVERLAYS),
     },
   };
 }
-
-const frames = (n: number) =>
-  new Promise<void>((resolve) => {
-    let i = 0;
-    const tick = () => (++i >= n ? resolve() : requestAnimationFrame(tick));
-    requestAnimationFrame(tick);
-  });
 
 async function settle(levels: SceneManager): Promise<void> {
   for (let i = 0; i < 6000 && levels.transitioning; i++) await frames(1);
@@ -256,6 +250,10 @@ export async function restoreGameState(game: Game, levels: SceneManager, state: 
   }
   weatherParams.enabled = state.graphics.weather;
   plantParams.enabled = state.graphics.plants;
+  // Older dumps have no animals switch: they were shown with the plants.
+  animalParams.enabled = state.graphics.animals ?? state.graphics.plants;
+  // Older dumps have no rocks switch: there were none.
+  rockParams.enabled = state.graphics.rocks ?? true;
   wireframeParams.enabled = state.graphics.wireframe;
   if (state.transitioning) notes.push(`taken mid-transition (crossfade ${state.crossfade ?? 'none'}): restored at the ${state.mode} level, settled`);
 
@@ -286,7 +284,7 @@ export async function restoreGameState(game: Game, levels: SceneManager, state: 
   }
   if (state.cargo) {
     levels.inventory.load(state.cargo.inventory);
-    if (state.cargo.inFlight.length > 0) notes.push(`${state.cargo.inFlight.length} plant(s) were on the beam or meeting their fate: left out`);
+    if (state.cargo.inFlight.length > 0) notes.push(`${state.cargo.inFlight.length} animal(s) or plant(s) were on the beam or meeting their fate: left out`);
   }
   if (state.busted?.firing) notes.push(`a planet buster was going off (${state.busted.elapsed?.toFixed(1)} s after firing): restored as busted`);
   const shipState = state.system.ship;
@@ -354,6 +352,15 @@ export async function restoreGameState(game: Game, levels: SceneManager, state: 
   // The HUD and maps refresh on timers that stand still while paused: re-entering the level redraws them now.
   game.level?.exit();
   game.level?.enter();
+  if (state.radar?.on !== undefined) levels.switches.set('radar', state.radar.on);
+  if (planet) {
+    planet.map.setTab(state.ui.mapTab ?? 'map');
+    // The radar surveys the globe a little each frame, and frames stand still: survey it all now.
+    if (state.radar?.tracking != null && planet.radar) {
+      planet.radar.census.finish();
+      planet.radar.track(state.radar.tracking);
+    }
+  }
   await frames(2);
   const map = planet ? planet.map : levels.mode === 'system' ? system.map : null;
   const mapShown = planet ? state.ui.planetMap : state.ui.systemMap;
@@ -364,4 +371,9 @@ export async function restoreGameState(game: Game, levels: SceneManager, state: 
   }
   await frames(4);
   return notes;
+}
+
+/** The game as the debug dump's source: its levels' state, captured and restored. */
+export function gameDumpSource(game: Game, levels: SceneManager): DumpSource {
+  return { app: 'game', capture: () => captureGameState(game, levels), restore: (state) => restoreGameState(game, levels, state) };
 }

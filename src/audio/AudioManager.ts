@@ -6,7 +6,7 @@ import { cueUrls } from './cueFiles';
 import { AMBIENT_CUES, cueParams, SOUND_CUES, type AmbientCue, type LoopCue, type SoundCue } from './cues';
 import { CuePlayer, fetchCueFiles, SILENT, type SoundHandle } from './CuePlayer';
 import { crossfadeLoop } from './loop';
-import type { AmbientSound, OneShotCue, SoundEffects } from './sfx';
+import { playbackRate, type AmbientSound, type OneShotCue, type PlayOptions, type SoundEffects } from './sfx';
 
 /** Seconds of the ambience loop's tail blended into its head. */
 const AMBIENCE_CROSSFADE = 3;
@@ -31,6 +31,8 @@ export interface PlayedSfx {
   seconds: number;
   /** How many cues have been asked for since audio was unlocked. */
   count: number;
+  /** The playback rate a one-shot was asked for at (1 as recorded; loops always 1). */
+  rate: number;
 }
 
 /**
@@ -120,13 +122,15 @@ export class AudioManager implements SoundEffects {
   /**
    * Plays a variant of a one-shot cue's files on the Effects channel. Does
    * nothing until audio is unlocked, or while it's suspended (tab hidden):
-   * an effect is only meaningful right when it happens.
+   * an effect is only meaningful right when it happens. `options.rate`
+   * pitches it up or down (see `PlayOptions`).
    */
-  play(cue: OneShotCue): void {
+  play(cue: OneShotCue, options?: PlayOptions): void {
     const mixer = this.running();
     if (!mixer) return;
     const heard = cueUrls[cue].length > 0;
-    this.played(cue, heard, heard ? mixer.cues.play(cue) : 0);
+    const rate = playbackRate(options?.rate);
+    this.played(cue, heard, heard ? mixer.cues.play(cue, rate) : 0, rate);
   }
 
   /**
@@ -184,8 +188,8 @@ export class AudioManager implements SoundEffects {
     return this.mixer?.ctx.state === 'running' ? this.mixer : null;
   }
 
-  private played(name: SoundCue, heard: boolean, seconds: number): void {
-    this._lastPlayed = { name, heard, seconds, count: (this._lastPlayed?.count ?? 0) + 1 };
+  private played(name: SoundCue, heard: boolean, seconds: number, rate = 1): void {
+    this._lastPlayed = { name, heard, seconds, count: (this._lastPlayed?.count ?? 0) + 1, rate };
   }
 
   private onGesture = (e: Event) => {

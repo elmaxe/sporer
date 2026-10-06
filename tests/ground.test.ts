@@ -2,7 +2,19 @@ import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { detailedTerrain } from '../src/gen/noise';
 import { RELIEF_SCALE, globeRadius } from '../src/planet/frame';
-import { climbStep, flightRadius, followWeight, groundAhead, groundHit, groundParams, type GroundHeight } from '../src/planet/ground';
+import {
+  HULL_DEPTH,
+  HULL_RADIUS,
+  aheadDirection,
+  climbStep,
+  flightRadius,
+  followWeight,
+  groundAhead,
+  groundHit,
+  groundParams,
+  obstacleClearance,
+  type GroundHeight,
+} from '../src/planet/ground';
 import { peakRadius, terrainSampler } from '../src/world/planetGeometry';
 import type { PlanetStyle } from '../src/gen/system';
 
@@ -140,5 +152,44 @@ describe('groundHit', () => {
     // The first surface along the ray is the target or something in front of it: never beyond it.
     expect(t!).toBeLessThanOrEqual(target.distanceTo(origin) + 0.1);
     expect(out.length()).toBeCloseTo(height(out.clone().normalize()), 2);
+  });
+});
+
+describe('obstacleClearance', () => {
+  // A tree at +Y on a ball of radius 100: 2 wide (radius), its top 10 above the ground.
+  const tree = [0, 1, 0, 2, 110] as const;
+  const clear = (from: THREE.Vector3, to: THREE.Vector3) => obstacleClearance(...tree, from.normalize(), to.normalize());
+
+  it('is where the hull just touches the top when right over it', () => {
+    expect(clear(v(0, 1, 0), v(0, 1, 0))).toBeCloseTo(110 + HULL_DEPTH);
+  });
+
+  it('lets the hull come lower near its rim, and ignores it once past the rim', () => {
+    const at = (x: number) => clear(v(x / 110, 1, 0), v(x / 110, 1, 0));
+    // Within the crown, still the full depth; between the crown's edge and the rim, less and less.
+    expect(at(1.9)).toBeCloseTo(110 + HULL_DEPTH, 1);
+    expect(at(2 + HULL_RADIUS * 0.5)).toBeLessThan(110 + HULL_DEPTH);
+    expect(at(2 + HULL_RADIUS * 0.5)).toBeGreaterThan(110);
+    expect(at(2 + HULL_RADIUS + 0.05)).toBe(-Infinity);
+  });
+
+  it('counts a tree anywhere along the stretch, not just at its ends', () => {
+    // From 10 units one side of the tree to 10 units the other.
+    expect(clear(v(-0.1, 1, 0), v(0.1, 1, 0))).toBeCloseTo(110 + HULL_DEPTH, 1);
+    // A stretch passing well beside it.
+    expect(clear(v(-0.1, 1, 0.1), v(0.1, 1, 0.1))).toBe(-Infinity);
+  });
+});
+
+describe('aheadDirection', () => {
+  it('reaches the footprint ahead along the heading when still, and further along the velocity when moving', () => {
+    const u = v(0, 1, 0);
+    const out = v(0, 0, 0);
+    aheadDirection(u, v(0, 0, 0), v(0, 0, 1), 100, 1, out);
+    expect(out.angleTo(u) * 100).toBeCloseTo(groundParams.footprint);
+    expect(out.z).toBeGreaterThan(0);
+    aheadDirection(u, v(-20, 0, 0), v(0, 0, 1), 100, 1, out);
+    expect(out.angleTo(u) * 100).toBeCloseTo(groundParams.footprint + 20 * groundParams.lookAhead);
+    expect(out.x).toBeLessThan(0);
   });
 });

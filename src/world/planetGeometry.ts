@@ -5,6 +5,8 @@ import { gasTone, generateGasLayout } from '../gen/gasGiants';
 import { paletteAt } from './gasLook';
 import { SHAPE_FLOOR, shapeRadius, type ShapeData } from '../gen/shape';
 import type { PlanetStyle, RingData } from '../gen/system';
+import { landElevation } from '../gen/planets';
+import { SAND } from '../gen/terranGround';
 import { ringAt, ringProfile } from '../gen/rings';
 import { createCubeSphere } from './cubeSphere';
 import type { Vec3Like } from './cubeSphereMath';
@@ -17,7 +19,12 @@ import type { Vec3Like } from './cubeSphereMath';
  */
 
 
-export type TerrainNoise = (x: number, y: number, z: number, seed: number) => number;
+/**
+ * Terrain noise (gen/noise.ts): the value in [-1, 1] at direction (x, y, z).
+ * `spacing`, where given, is how far apart (radians) the surface is sampled:
+ * features too small for it may be left out (gen/craters.ts craterNoise).
+ */
+export type TerrainNoise = (x: number, y: number, z: number, seed: number, spacing?: number) => number;
 
 export interface TerrainOptions {
   /** Cube sphere segments per cube face edge. */
@@ -56,10 +63,15 @@ export type TerrainPainter = (n: number, out: THREE.Color, x: number, y: number,
  * `seed`: a real body's (gen/realSurface.ts) ground takes its colour map's
  * colour at the point's direction (x, y, z) instead of the height ramp.
  */
+/** How deep (a share of the deepest floor) the sea floor's sand along the shore (gen/terranGround.ts SAND) gives way to the sea's colour. */
+const SAND_DEPTH = 0.3;
+
 export function terrainPainter(style: PlanetStyle, seaFloor = false, seed?: number): TerrainPainter {
   const sea = style.sea === null ? null : new THREE.Color(style.sea);
   const low = new THREE.Color(style.low);
   const high = new THREE.Color(style.high);
+  // A pale sand, a little of the low ground's colour in it.
+  const sand = new THREE.Color(SAND).lerp(low, 0.2);
   // Without a sea, terrain spans the full noise range [-1, 1].
   const base = sea === null ? -1 : style.seaLevel;
   const real = seed === undefined ? undefined : realSurface(seed);
@@ -67,7 +79,12 @@ export function terrainPainter(style: PlanetStyle, seaFloor = false, seed?: numb
   return (n, out, x, y, z) => {
     const underwater = sea !== null && n < base;
     const height = !underwater ? (n - base) / (1 - base) : seaFloor ? (n - base) / (base + 1) : 0;
-    if (underwater) out.copy(sea).multiplyScalar(seaFloor ? 0.75 + 0.25 * height : 1);
+    // The floor under a sea (seen through clear shallows in low orbit): sand along the shore, going to the sea's own
+    // colour, darkened, further out.
+    if (underwater) {
+      if (seaFloor) out.lerpColors(sand, sea, Math.min(1, -height / SAND_DEPTH)).multiplyScalar(0.85 + 0.15 * height);
+      else out.copy(sea);
+    }
     else if (real) out.setRGB(...surfaceColor(real, x, y, z, rgb), THREE.SRGBColorSpace);
     else out.lerpColors(low, high, height);
     return height;
@@ -78,8 +95,10 @@ export function terrainPainter(style: PlanetStyle, seaFloor = false, seed?: numb
  * A planet's surface as a function of direction: for the unit direction
  * `dir`, writes the colour into `color` and returns the radius there. The
  * whole-globe meshes and the planet level's LOD chunks are built from these.
+ * `spacing` (radians) is how far apart the caller samples, when it samples
+ * a grid: detail too small for it may be left out, so it doesn't alias.
  */
-export type SurfaceSampler = (dir: Vec3Like, color: THREE.Color) => number;
+export type SurfaceSampler = (dir: Vec3Like, color: THREE.Color, spacing?: number) => number;
 
 /** Terrain displaced by noise and coloured by height (see TerrainOptions; `segments` is unused). */
 export function terrainSampler(
@@ -92,14 +111,14 @@ export function terrainSampler(
   const relief = style.relief * reliefScale;
   if (shape) {
     // No sea on small bodies: the relief is added on top of the shape.
-    return (dir, color) => {
+    return (dir, color, spacing) => {
       const s = shapeRadius(shape, dir.x, dir.y, dir.z);
-      return radius * (s + relief * paint(noise(dir.x * s, dir.y * s, dir.z * s, seed), color, dir.x, dir.y, dir.z));
+      return radius * (s + relief * paint(noise(dir.x * s, dir.y * s, dir.z * s, seed, spacing), color, dir.x, dir.y, dir.z));
     };
   }
-  return (dir, color) => {
-    const height = paint(noise(dir.x, dir.y, dir.z, seed), color, dir.x, dir.y, dir.z);
-    return radius * (1 + relief * (height < 0 ? SEA_FLOOR_DEPTH : 1) * height);
+  return (dir, color, spacing) => {
+    const height = paint(noise(dir.x, dir.y, dir.z, seed, spacing), color, dir.x, dir.y, dir.z);
+    return radius * (1 + relief * (height < 0 ? SEA_FLOOR_DEPTH * height : landElevation(style, height)));
   };
 }
 
@@ -123,7 +142,7 @@ export function createTerrainGeometry(
   style: PlanetStyle,
   options: TerrainOptions,
 ): THREE.BufferGeometry {
-  return sampledSphere(createCubeSphere(1, options.segments), terrainSampler(radius, seed, style, options), true);
+  return sampledSphere(createCubeSphere(1, options.segments), terrainSampler(radius, seed, style, options), true, Math.PI / 2 / options.segments);
 }
 
 /**
@@ -132,14 +151,14 @@ export function createTerrainGeometry(
  * its triangles, so the surface stays watertight. `displaced` recomputes the
  * normals (else they stay pointing straight out: a smooth sphere).
  */
-function sampledSphere(geometry: THREE.BufferGeometry, sample: SurfaceSampler, displaced: boolean): THREE.BufferGeometry {
+function sampledSphere(geometry: THREE.BufferGeometry, sample: SurfaceSampler, displaced: boolean, spacing?: number): THREE.BufferGeometry {
   const position = geometry.getAttribute('position') as THREE.BufferAttribute;
   const colors = new Float32Array(position.count * 3);
   const dir = new THREE.Vector3();
   const color = new THREE.Color();
   for (let i = 0; i < position.count; i++) {
     dir.fromBufferAttribute(position, i);
-    dir.multiplyScalar(sample(dir, color));
+    dir.multiplyScalar(sample(dir, color, spacing));
     position.setXYZ(i, dir.x, dir.y, dir.z);
     color.toArray(colors, i * 3);
   }

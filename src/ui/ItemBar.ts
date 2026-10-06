@@ -1,15 +1,26 @@
-import type { Entity } from '../core/Entity';
-import type { Input } from '../core/Input';
-import type { Inventory } from '../cargo/inventory';
-import { CARGO_STACKS, STACK_SIZE } from '../cargo/inventory';
-import { ITEMS, ITEM_TABS, cargoItem, slotKey, type ItemId, type ItemTab, type ItemUser, type ToolId } from '../combat/items';
-import { PLANT_KINDS } from '../gen/plants';
-import type { LevelMode } from '../levels/SceneManager';
-import type { PlantIcons } from './plantIcons';
-import type { Tooltip } from './Tooltip';
+import type { Entity } from "../core/Entity";
+import type { Input } from "../core/Input";
+import type { Inventory } from "../cargo/inventory";
+import { CARGO_STACKS, STACK_SIZE } from "../cargo/inventory";
+import {
+  ITEMS,
+  ITEM_TABS,
+  cargoItem,
+  slotKey,
+  type ItemId,
+  type ItemSwitches,
+  type ItemTab,
+  type ItemUser,
+  type ToolId,
+} from "../combat/items";
+import { PLANT_KINDS } from "../gen/plants";
+import { describeAnimal, type SpeciesIcons } from "../planet/SpeciesTab";
+import type { LevelMode } from "../levels/SceneManager";
+import type { Tooltip } from "./Tooltip";
 
-/** Slots per tab on a mouse screen (empty ones show there's room for more); touch shows only the filled ones. */
-const SLOTS_PER_TAB = 1 + CARGO_STACKS;
+/** Slots per tab on a mouse screen (the Inventory's tools and the hold's stacks; empty ones show there's room for more); touch shows only the filled ones. */
+const SLOTS_PER_TAB =
+  ITEMS.filter((i) => i.tab === "inventory").length + CARGO_STACKS;
 /** Seconds a hint from clicking an unusable slot stays up. */
 const NOTE_SECONDS = 2.5;
 
@@ -25,12 +36,23 @@ const ICONS: Record<ToolId, string> = {
     '<path d="M2 21h20l-7-10.5h-6z" />' +
     '<path d="M9.5 10.5l1.2 3 1.3-1.6 1.3 1.6 1.2-3" />' +
     '<path d="M10 7.5c-1-1.2-.4-2.8 1-3 .3-1.6 2.6-1.8 3.2-.4 1.4-.2 2.2 1.4 1.3 2.5" /></svg>',
+  laser:
+    '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M3 5.5c0-1.2 3.1-2 7-2s7 .8 7 2-3.1 2-7 2-7-.8-7-2z" />' +
+    '<path d="M10 7.5 17.5 18" stroke-width="2.2" />' +
+    '<path d="M17.5 18l3.5-1M17.5 18l1.5 3.5M17.5 18l-3 2.5M17.5 18l.5-3.8" /></svg>',
   abduct:
     '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
     '<path d="M4 6.5c0-1.4 3.6-2.5 8-2.5s8 1.1 8 2.5S16.4 9 12 9 4 7.9 4 6.5z" />' +
     '<path d="M8.5 4.6C9 3.1 10.4 2 12 2s3 1.1 3.5 2.6" />' +
     '<path d="M9 9.2 5 21M15 9.2l4 11.8" stroke-dasharray="1.5 2" />' +
     '<path d="M12 21v-3.5M12 17.5l-2.2-.4 1.2-2.1-1.1-.2L12 12l2.1 2.8-1.1.2 1.2 2.1z" /></svg>',
+  radar:
+    '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M3.5 9.5a8 8 0 0 0 11 11z" />' +
+    '<path d="M9 15l4-4" /><circle cx="13.6" cy="10.4" r="1" />' +
+    '<path d="M15.5 6a4 4 0 0 1 2.5 2.5M16.5 2.5a8 8 0 0 1 5 5" />' +
+    '<path d="M7 18.5 5 22h7" /></svg>',
 };
 
 /** What the bar needs to know about the game: where the player is, what can use items there, and what's in the hold. */
@@ -40,6 +62,8 @@ export interface ItemBarSource {
   /** The level the player can use items in now (low orbit), or null. */
   readonly itemUser: ItemUser | null;
   readonly inventory: Inventory;
+  /** Which switch items (the radar) are on: they can be turned on or off anywhere. */
+  readonly switches: ItemSwitches;
 }
 
 /** What a slot shows: a tool, or a stack of cargo. */
@@ -51,34 +75,38 @@ interface SlotItem {
   icon: string;
   /** A cargo stack's count. */
   count: number | null;
+  /** A switch (`ItemDef.switch`): turned on or off, not selected. */
+  switch: boolean;
 }
 
 /**
  * The item bar (#item-bar in index.html): tabs of item slots at the bottom
- * of the screen. Weapons (red) holds the planet buster and the volcano
- * bomb; Inventory (grey) the abduction beam and, after it, the cargo hold's
- * stacks, a plant's picture and count each (cargo/inventory.ts). The bar
+ * of the screen. Weapons (red) holds the laser, the volcano bomb and the
+ * planet buster; Inventory (grey) the abduction beam, the radar and, after them, the
+ * cargo hold's stacks, an animal's or a plant's picture and count each (cargo/inventory.ts). The bar
  * takes the colour of the tab on show, its tooltips too. Click a slot or
  * press its number (the tab on show's slots are 1, 2, …) to select the item
- * and again to put it away; Tab switches tabs. What a selected item does is
+ * and again to put it away; a switch (the radar) is turned on or off
+ * instead, anywhere, and keeps its light on while it's on; Tab switches tabs. What a selected item does is
  * up to the level (`ItemUser`): in low orbit the planet buster and the
- * volcano bomb fire at the next click on the planet, the beam lifts the
- * plant held under the pointer, and a stack sets one of its plants down
+ * volcano bomb fire at the next click on the planet, the laser fires while
+ * the pointer is held, the beam lifts the animals and plants held under the
+ * pointer, and a stack sets one of them down
  * where the pointer is held. Elsewhere the slots show but can't be used, and
  * say where they can. A global entity; hidden on the galaxy map.
  */
 export class ItemBar implements Entity {
-  private readonly root = document.getElementById('item-bar')!;
-  private readonly tabsEl = document.getElementById('item-tabs')!;
-  private readonly slotsEl = document.getElementById('item-slots')!;
-  private readonly hintEl = document.getElementById('item-hint')!;
+  private readonly root = document.getElementById("item-bar")!;
+  private readonly tabsEl = document.getElementById("item-tabs")!;
+  private readonly slotsEl = document.getElementById("item-slots")!;
+  private readonly hintEl = document.getElementById("item-hint")!;
   private readonly slots = new Map<ItemId, HTMLButtonElement>();
   private readonly tabs = new Map<ItemTab, HTMLButtonElement>();
   private tab: ItemTab = ITEM_TABS[0]!.id;
   /** The tab on show's items, in slot order. */
   private items: SlotItem[] = [];
   private readonly keyWasDown = new Map<string, boolean>();
-  private note = '';
+  private note = "";
   private noteTime = 0;
   private shownHint: string | null = null;
   private shown: boolean | null = null;
@@ -92,21 +120,22 @@ export class ItemBar implements Entity {
     private readonly input: Input,
     /** The game's own hover tooltip (as for planets and stars), shown over a slot. */
     private readonly tooltip: Tooltip,
-    private readonly icons: PlantIcons,
+    /** Pictures of the hold's species. */
+    private readonly icons: SpeciesIcons,
   ) {
     for (const t of ITEM_TABS) {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'item-tab';
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "item-tab";
       button.dataset.tab = t.id;
-      button.setAttribute('role', 'tab');
+      button.setAttribute("role", "tab");
       button.textContent = t.name;
       button.title = `${t.name} (Tab switches)`;
-      button.addEventListener('click', () => this.showTab(t.id));
+      button.addEventListener("click", () => this.showTab(t.id));
       this.tabsEl.append(button);
       this.tabs.set(t.id, button);
     }
-    window.addEventListener('keydown', this.onKeyDown);
+    window.addEventListener("keydown", this.onKeyDown);
     this.showTab(this.tab);
   }
 
@@ -117,15 +146,16 @@ export class ItemBar implements Entity {
 
   update(frameDt: number): void {
     const { mode, inventory } = this.source;
-    const shown = mode !== 'galaxy';
+    const shown = mode !== "galaxy";
     if (shown !== this.shown) {
       this.shown = shown;
       this.root.hidden = !shown;
-      document.documentElement.classList.toggle('items', shown);
+      document.documentElement.classList.toggle("items", shown);
       if (!shown) this.unhover();
     }
     if (!shown) return;
-    if (this.tab === 'inventory' && inventory.version !== this.inventoryVersion) this.showTab(this.tab);
+    if (this.tab === "inventory" && inventory.version !== this.inventoryVersion)
+      this.showTab(this.tab);
     const user = this.source.itemUser;
     this.items.forEach((item, i) => {
       const key = slotKey(i);
@@ -136,21 +166,27 @@ export class ItemBar implements Entity {
     });
 
     // Every tool's status (whichever tab shows), and the cargo stacks' on show; the selected item's hint wins.
-    let hint = '';
+    let hint = "";
     let seenSelected = false;
-    const look = (id: ItemId): void => {
+    const look = (id: ItemId, isSwitch = false): void => {
       const status = user ? user.status(id) : null;
       const selected = user?.selected === id;
       seenSelected ||= selected;
       const slot = this.slots.get(id);
       if (slot) {
-        slot.classList.toggle('unavailable', !(status?.available ?? false));
-        slot.classList.toggle('selected', selected);
-        slot.setAttribute('aria-pressed', String(selected));
+        // A switch works anywhere: never greyed out, lit while on.
+        const on = isSwitch && this.source.switches.isOn(id as ToolId);
+        slot.classList.toggle(
+          "unavailable",
+          !isSwitch && !(status?.available ?? false),
+        );
+        slot.classList.toggle("selected", selected);
+        slot.classList.toggle("on", on);
+        slot.setAttribute("aria-pressed", String(selected || on));
       }
       if (status?.hint && (selected || !hint)) hint = status.hint;
     };
-    for (const item of ITEMS) look(item.id);
+    for (const item of ITEMS) look(item.id, item.switch);
     for (const item of this.items) if (item.count !== null) look(item.id);
     // A selected cargo stack's hint even when its tab isn't on show.
     const selected = user?.selected;
@@ -168,7 +204,7 @@ export class ItemBar implements Entity {
   }
 
   dispose(): void {
-    window.removeEventListener('keydown', this.onKeyDown);
+    window.removeEventListener("keydown", this.onKeyDown);
     this.unhover();
     this.root.hidden = true;
     this.tabsEl.replaceChildren();
@@ -177,19 +213,41 @@ export class ItemBar implements Entity {
 
   /** Tab switches tabs (while the bar shows, and focus isn't in a field or the menu). */
   private readonly onKeyDown = (e: KeyboardEvent): void => {
-    if (e.code !== 'Tab' || !this.shown || e.ctrlKey || e.altKey || e.metaKey) return;
+    if (e.code !== "Tab" || !this.shown || e.ctrlKey || e.altKey || e.metaKey)
+      return;
     const t = e.target;
-    if (t instanceof HTMLElement && t !== document.body && !(t instanceof HTMLCanvasElement) && !this.root.contains(t)) return;
+    if (
+      t instanceof HTMLElement &&
+      t !== document.body &&
+      !(t instanceof HTMLCanvasElement) &&
+      !this.root.contains(t)
+    )
+      return;
     e.preventDefault();
     const i = ITEM_TABS.findIndex((x) => x.id === this.tab);
-    this.showTab(ITEM_TABS[(i + (e.shiftKey ? ITEM_TABS.length - 1 : 1)) % ITEM_TABS.length]!.id);
+    this.showTab(
+      ITEM_TABS[
+        (i + (e.shiftKey ? ITEM_TABS.length - 1 : 1)) % ITEM_TABS.length
+      ]!.id,
+    );
   };
 
-  /** Selects the item, or puts it away if it's selected; says why not if it can't be used here. */
+  /** Selects the item, or puts it away if it's selected; says why not if it can't be used here. A switch is turned on or off. */
   private toggle(item: SlotItem): void {
     const user = this.source.itemUser;
+    if (item.switch) {
+      const on = this.source.switches.flip(item.id as ToolId);
+      this.say(
+        `${item.name} ${on ? "on" : "off"}${on && !user ? ": it works in low orbit" : ""}`,
+      );
+      return;
+    }
     if (!user) {
-      this.say(this.source.transitioning ? '' : `${item.name}: go down to a planet or moon to use it`);
+      this.say(
+        this.source.transitioning
+          ? ""
+          : `${item.name}: go down to a planet or moon to use it`,
+      );
       return;
     }
     if (user.selected === item.id) {
@@ -198,7 +256,7 @@ export class ItemBar implements Entity {
     }
     const status = user.status(item.id);
     if (!status.available) {
-      this.say(status.reason ?? '');
+      this.say(status.reason ?? "");
       return;
     }
     user.select(item.id);
@@ -217,15 +275,32 @@ export class ItemBar implements Entity {
     const status = user?.status(item.id) ?? null;
     const index = this.items.indexOf(item);
     const keyLabel = slotKey(index)?.label;
-    const press = keyLabel ? `${keyLabel} or click` : 'Click';
+    const press = keyLabel ? `${keyLabel} or click` : "Click";
     let details: string;
-    if (!user) details = 'Go down to a planet or moon to use it';
-    else if (user.selected === item.id) details = `${status?.hint || 'Selected'} · ${press} to put it away`;
-    else if (status && !status.available) details = status.reason ?? status.hint;
+    if (item.switch) {
+      const on = this.source.switches.isOn(item.id as ToolId);
+      details = `${on ? "On" : "Off"}${status?.hint ? ` · ${status.hint}` : ""} · ${press} to turn it ${on ? "off" : "on"}`;
+    } else if (!user) details = "Go down to a planet or moon to use it";
+    else if (user.selected === item.id)
+      details = `${status?.hint || "Selected"} · ${press} to put it away`;
+    else if (status && !status.available)
+      details = status.reason ?? status.hint;
     else details = `${press} to select`;
-    const info = item.count !== null ? `${item.description} (${item.count} of ${STACK_SIZE})` : item.description;
+    const info =
+      item.count !== null
+        ? `${item.description} (${item.count} of ${STACK_SIZE})`
+        : item.description;
     // Centred above the pointer, clear of the bar. The text is rewritten only when the subject changes: make the status part of it.
-    this.tooltip.showClaimed(this.tab, `item:${item.id}:${item.count}:${details}`, item.name, info, h.x, h.y, details, true);
+    this.tooltip.showClaimed(
+      this.tab,
+      `item:${item.id}:${item.count}:${details}`,
+      item.name,
+      info,
+      h.x,
+      h.y,
+      details,
+      true,
+    );
   }
 
   private unhover(): void {
@@ -241,16 +316,27 @@ export class ItemBar implements Entity {
 
   /** The items of tab `tab`, in slot order: its tools, then (Inventory) the hold's stacks. */
   private itemsOf(tab: ItemTab): SlotItem[] {
-    const tools: SlotItem[] = ITEMS.filter((i) => i.tab === tab).map((i) => ({ id: i.id, name: i.name, description: i.description, icon: ICONS[i.id], count: null }));
-    if (tab !== 'inventory') return tools;
+    const tools: SlotItem[] = ITEMS.filter((i) => i.tab === tab).map((i) => ({
+      id: i.id,
+      name: i.name,
+      description: i.description,
+      icon: ICONS[i.id],
+      count: null,
+      switch: !!i.switch,
+    }));
+    if (tab !== "inventory") return tools;
     const { inventory } = this.source;
     this.inventoryVersion = inventory.version;
     const cargo = inventory.stacks.map((s) => ({
       id: cargoItem(s.key),
       name: s.species.name,
-      description: `${PLANT_KINDS[s.species.kind].label} from ${s.origin}: set it down with the beam`,
-      icon: `<img class="item-picture" src="${this.icons.url(s.key, s.species)}" alt="" draggable="false">`,
+      description:
+        s.kind === "animal"
+          ? `${describeAnimal(s.species)}, from ${s.origin}: set it down with the beam`
+          : `${PLANT_KINDS[s.species.kind].label} from ${s.origin}: set it down with the beam`,
+      icon: `<img class="item-picture" src="${s.kind === "animal" ? this.icons.animals.url(s.key, s.species) : this.icons.plants.url(s.key, s.species)}" alt="" draggable="false">`,
       count: s.count,
+      switch: false,
     }));
     return tools.concat(cargo);
   }
@@ -259,39 +345,45 @@ export class ItemBar implements Entity {
     this.tab = tab;
     this.root.dataset.tab = tab;
     for (const [id, button] of this.tabs) {
-      button.classList.toggle('active', id === tab);
-      button.setAttribute('aria-selected', String(id === tab));
+      button.classList.toggle("active", id === tab);
+      button.setAttribute("aria-selected", String(id === tab));
     }
     this.slots.clear();
     this.unhover();
     this.items = this.itemsOf(tab);
     const slots: HTMLElement[] = this.items.map((item, index) => {
-      const slot = document.createElement('button');
-      slot.type = 'button';
-      slot.className = 'item-slot';
+      const slot = document.createElement("button");
+      slot.type = "button";
+      slot.className = item.switch ? "item-slot switch" : "item-slot";
       slot.dataset.item = item.id;
       const key = slotKey(index);
-      slot.setAttribute('aria-label', key ? `${item.name} (${key.label})` : item.name);
-      slot.setAttribute('aria-pressed', 'false');
-      const count = item.count !== null ? `<span class="item-count">${item.count}</span>` : '';
-      slot.innerHTML = `${item.icon}${key ? `<span class="item-key">${key.label}</span>` : ''}${count}<span class="item-name">${item.name}</span>`;
-      slot.addEventListener('click', () => this.toggle(item));
+      slot.setAttribute(
+        "aria-label",
+        key ? `${item.name} (${key.label})` : item.name,
+      );
+      slot.setAttribute("aria-pressed", "false");
+      const count =
+        item.count !== null
+          ? `<span class="item-count">${item.count}</span>`
+          : "";
+      slot.innerHTML = `${item.icon}${key ? `<span class="item-key">${key.label}</span>` : ""}${count}<span class="item-name">${item.name}</span>`;
+      slot.addEventListener("click", () => this.toggle(item));
       // Mouse only: on touch the hint line above the bar says what to do.
       const hover = (e: PointerEvent) => {
-        if (e.pointerType !== 'mouse') return;
+        if (e.pointerType !== "mouse") return;
         this.hovered = { item, x: e.clientX, y: e.clientY };
         this.showTooltip();
       };
-      slot.addEventListener('pointerenter', hover);
-      slot.addEventListener('pointermove', hover);
-      slot.addEventListener('pointerleave', () => this.unhover());
+      slot.addEventListener("pointerenter", hover);
+      slot.addEventListener("pointermove", hover);
+      slot.addEventListener("pointerleave", () => this.unhover());
       this.slots.set(item.id, slot);
       return slot;
     });
     for (let i = this.items.length; i < SLOTS_PER_TAB; i++) {
-      const empty = document.createElement('div');
-      empty.className = 'item-slot empty';
-      empty.setAttribute('aria-hidden', 'true');
+      const empty = document.createElement("div");
+      empty.className = "item-slot empty";
+      empty.setAttribute("aria-hidden", "true");
       slots.push(empty);
     }
     this.slotsEl.replaceChildren(...slots);

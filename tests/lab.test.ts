@@ -1,3 +1,4 @@
+import { climateStateOf, gasesOf, type StateSpec } from '../src/gen/climate';
 import { describe, expect, it } from 'vitest';
 import { generateGalaxy } from '../src/gen/galaxy';
 import { nominalStar } from '../src/gen/stars';
@@ -256,7 +257,7 @@ describe('editing', () => {
   it('derives the climate from the edited state', () => {
     const p = generateLabPlanet(5, { type: 'barren', kind: 'earth' });
     const cold = labClimateData(p)!;
-    p.climate!.state = { ...p.climate!.state, composition: 'carbonDioxide', pressure: 90 };
+    p.climate!.state = { ...p.climate!.state, gases: gasesOf(90, 'carbonDioxide') };
     const venus = labClimateData(p)!;
     expect(venus.temperature).toBeGreaterThan(cold.temperature + 100);
     expect(venus.albedo).toBeCloseTo(0.77);
@@ -275,6 +276,23 @@ describe('lab links', () => {
   it('keep non-ASCII names', () => {
     const planet = { ...generateLabPlanet(1), name: 'Ærø–Ω ☄' };
     expect(decodeLab(encodeLab({ planet, view: DEFAULT_VIEW }))!.planet.name).toBe('Ærø–Ω ☄');
+  });
+
+  it('open links from before the air was split into gases, with the same climate', () => {
+    // A Titan-like moon and a planet's state as links wrote them: a pressure, a composition, greenhouse × reference.
+    const p = withMoons(generateLabPlanet(8, { type: 'desert', kind: 'earth' }), 1);
+    const oldState = { pressure: 1.467, composition: 'nitrogen', greenhouse: 1, water: 0.2, surfaceAlbedo: 0.3 };
+    const setting = p.climate!.setting;
+    const moon = { ...p.moons[0]!, climate: { ...p.moons[0]!.climate, gases: undefined, pressure: 92, composition: 'carbonDioxide', greenhouse: 1 } };
+    const link = encodeLab({ planet: { ...p, climate: { setting, state: oldState as never }, moons: [moon as never] }, view: DEFAULT_VIEW });
+    const state = decodeLab(link)!;
+    const climate = labClimateData(state.planet)!;
+    expect(climate.composition).toBe('nitrogen');
+    expect(climate.pressure).toBeCloseTo(1.467, 12);
+    expect(state.planet.climate!.state.starlight).toBe(1);
+    const same = labClimateData({ ...p, climate: { setting, state: climateStateOf(oldState as StateSpec, setting.gravity) } })!;
+    expect(climate.temperature).toBeCloseTo(same.temperature, 9);
+    expect(state.planet.moons[0]!.climate.gases.co2).toBeCloseTo(92, 12);
   });
 
   it('fill in what an old or partial link leaves out, and reject junk', () => {

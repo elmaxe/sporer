@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { thirdPersonMarker } from './thirdPerson';
 import { beginFrozenCulling, endFrozenCulling, frozenOutline } from './viewFreeze';
 
 /** The wireframe view (the menu's Wireframe switch; the lab has its own): surfaces drawn as their triangles' edges. */
@@ -15,6 +16,8 @@ const others: THREE.Object3D[] = [];
  * `renderer.render`. Clears like `renderer.render` does (per autoClear).
  * While the view is frozen (world/viewFreeze.ts) objects are culled by the
  * frozen camera's frustum, which is drawn too unless `outline` is false.
+ * Drawn by the third-person view's overview camera (world/thirdPerson.ts),
+ * they're culled by the game camera's, which is drawn as a marker.
  */
 export function renderScene(
   renderer: THREE.WebGLRenderer,
@@ -26,8 +29,11 @@ export function renderScene(
   beginFrozenCulling(scene, camera);
   const helper = outline ? frozenOutline(scene, camera) : null;
   if (helper) scene.add(helper);
+  const marker = thirdPersonMarker(camera);
+  if (marker) scene.add(marker);
   if (wireframe) renderWireframe(renderer, scene, camera);
   else renderer.render(scene, camera);
+  if (marker) scene.remove(marker);
   if (helper) scene.remove(helper);
   endFrozenCulling();
 }

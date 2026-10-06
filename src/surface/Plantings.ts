@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Entity } from '../core/Entity';
 import type { PlantSpecies } from '../gen/plants';
+import { obstacleClearance, type ObstacleVisit, type Obstacles } from '../planet/ground';
 import { GROUND_DETAIL_LAYER } from '../world/groundDepth';
 import type { PlantedPlant, SurfaceChanges } from './changes';
 import { PLANT_LODS, createPlantGeometry, createPlantMaterial, setLodTint, type PlantFadeUniforms } from './plantLook';
@@ -35,9 +36,10 @@ interface SpeciesBatches {
  * rewritten whenever one is planted, picked up or put back. There are only
  * ever a handful, so every one is in every level's batch and the shader picks.
  * Like `SurfaceEntities`, it can `pick` one along a ray and `promote` one to a
- * live object for the beam to lift. Static in the body frame.
+ * live object for the beam to lift. Static in the body frame. As `Obstacles`,
+ * it says which of them the ship's hull goes through (to shake them).
  */
-export class Plantings implements Entity {
+export class Plantings implements Entity, Obstacles {
   readonly object = new THREE.Group();
   private readonly bySpecies = new Map<string, SpeciesBatches>();
   private readonly promoted = new Set<string>();
@@ -131,6 +133,17 @@ export class Plantings implements Entity {
       hit.plant = p;
       hit.distance = distance;
       visit(hit);
+    }
+  }
+
+  /** As `SurfaceEntities.touchAlong`: visits every standing planted plant the ship's hull, its centre at `radius`, goes through on the arc `from` → `to`. */
+  touchAlong(from: THREE.Vector3, to: THREE.Vector3, radius: number, visit: ObstacleVisit): void {
+    if (!plantParams.enabled) return;
+    for (const p of this.changes.plantedPlants) {
+      if (this.promoted.has(p.id)) continue;
+      const top = p.radius + p.species.height * p.scale;
+      const crown = p.species.crownRadius * p.scale;
+      if (radius < obstacleClearance(p.x, p.y, p.z, crown, top, from, to)) visit(p.x, p.y, p.z, crown, top, p.species);
     }
   }
 

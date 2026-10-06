@@ -3,11 +3,13 @@
 # (called by .github/workflows/deploy.yml):
 #   scripts/pages-publish.sh <target> <build>   replace the target's folder with the contents of <build>
 #   scripts/pages-publish.sh <target>           remove the target's folder
+#   scripts/pages-publish.sh notes              only update releases.json (a release was published or edited)
 # <target> is "release" (the site's root, whose preview/ and pr/ folders are kept), "preview" (main) or
 # "pr/<number>". A published folder gets a version.json ({id, label, path, ref, commit, date}; label and ref
 # from $PUBLISH_LABEL and $PUBLISH_REF, commit from $PUBLISH_COMMIT), and the root's versions.json lists them
 # all for the game's version picker (src/ui/versions.ts). With $GH_TOKEN, folders of pull requests that are
-# no longer open are removed too.
+# no longer open are removed too, and the root's releases.json gets the notes of the GitHub Releases
+# ({releases: [{tag, name, date, url, body}]}, newest first) for the game's What's new (src/ui/releaseNotes.ts).
 # gh-pages is always a single commit, so old builds don't pile up in the repository. Several workflows can
 # publish at once: a push that lost the race starts again from the new gh-pages.
 set -euo pipefail
@@ -18,7 +20,8 @@ case "$target" in
   release) folder=. id=release path='' ;;
   preview) folder=preview id=preview path=preview/ ;;
   pr/[0-9]*) folder=$target id=pr-${target#pr/} path=$target/ ;;
-  *) echo "Not a target: $target (release, preview or pr/<number>)" >&2; exit 1 ;;
+  notes) folder='' build='' path='' ;;
+  *) echo "Not a target: $target (release, preview, pr/<number> or notes)" >&2; exit 1 ;;
 esac
 site=$(mktemp -u)
 trap 'git worktree remove --force "$site" 2>/dev/null || true' EXIT
@@ -28,6 +31,14 @@ open_prs=unknown
 if [ -n "${GH_TOKEN:-}" ] && [ -n "${GITHUB_REPOSITORY:-}" ]; then
   open_prs=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls?state=open&per_page=100" --jq '.[].number') || open_prs=unknown
 fi
+# The releases' notes as JSON, or empty (the site's releases.json is then left as it is).
+releases=''
+if [ -n "${GH_TOKEN:-}" ] && [ -n "${GITHUB_REPOSITORY:-}" ]; then
+  releases=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=50" --jq \
+    '{releases: ([.[] | select(.draft | not) | {tag: .tag_name, name: (.name // .tag_name), date: .published_at, url: .html_url, body: (.body // "")}] | sort_by(.date) | reverse)}') ||
+    releases=''
+fi
+[ "$target" != notes ] || [ -n "$releases" ] || { echo "Could not get the releases from GitHub" >&2; exit 1; }
 
 for attempt in $(seq 10); do
   git worktree remove --force "$site" 2>/dev/null || true
@@ -47,8 +58,8 @@ for attempt in $(seq 10); do
   fi
 
   if [ "$folder" = . ]; then
-    find "$site" -mindepth 1 -maxdepth 1 ! -name .git ! -name preview ! -name pr -exec rm -rf {} +
-  else
+    find "$site" -mindepth 1 -maxdepth 1 ! -name .git ! -name preview ! -name pr ! -name releases.json -exec rm -rf {} +
+  elif [ -n "$folder" ]; then
     rm -rf "${site:?}/$folder"
   fi
   if [ -n "$build" ]; then
@@ -76,6 +87,7 @@ for attempt in $(seq 10); do
     [ ${#prs[@]} -gt 0 ] && files+=($(printf '%s\n' "${prs[@]}" | sort -t/ -k2,2nr))
     if [ ${#files[@]} -gt 0 ]; then jq -s '{versions: .}' "${files[@]}"; else echo '{"versions":[]}'; fi
   ) >"$site/versions.json"
+  [ -z "$releases" ] || printf '%s\n' "$releases" >"$site/releases.json"
   touch "$site/.nojekyll"  # serve the files as they are, without Jekyll
 
   git -C "$site" add -A
@@ -83,12 +95,16 @@ for attempt in $(seq 10); do
     echo "gh-pages is already up to date"
     exit 0
   fi
-  if [ -n "$build" ]; then message="Publish $target ${PUBLISH_REF:-} ${PUBLISH_COMMIT:-}"; else message="Remove $target"; fi
+  if [ -n "$build" ]; then message="Publish $target ${PUBLISH_REF:-} ${PUBLISH_COMMIT:-}"
+  elif [ "$target" = notes ]; then message="Update the release notes"
+  else message="Remove $target"; fi
   commit=$(git -C "$site" commit-tree "$(git -C "$site" write-tree)" -m "$message")
   if git push --quiet --force-with-lease="refs/heads/gh-pages:$old" origin "$commit:refs/heads/gh-pages"; then
     if [ -n "${GITHUB_REPOSITORY:-}" ]; then
       url="https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/$path"
-      if [ -n "$build" ]; then summary="Published ${PUBLISH_LABEL:-$target} to $url"; else summary="Removed $url"; fi
+      if [ -n "$build" ]; then summary="Published ${PUBLISH_LABEL:-$target} to $url"
+      elif [ "$target" = notes ]; then summary="Updated the release notes at ${url}releases.json"
+      else summary="Removed $url"; fi
       echo "$summary" | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
     fi
     exit 0

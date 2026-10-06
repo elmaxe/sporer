@@ -6,6 +6,7 @@ import type { GalaxyData, StarRef } from '../gen/galaxy';
 import type { NebulaData } from '../gen/nebulas';
 import type { GalaxyShip } from './GalaxyShip';
 import { pickNebula, pickPoint } from './pickPoint';
+import { pointerCamera } from '../world/thirdPerson';
 
 /** How close (in CSS pixels) the pointer must be to a star's dot (or a rogue planet's ring) to pick it. */
 const PICK_RADIUS_PX = 10;
@@ -63,7 +64,7 @@ export class GalaxyPicker implements Entity {
 
   /** The pointer's ray in galaxy coordinates. */
   private ray(ndcX: number, ndcY: number): THREE.Raycaster {
-    this.raycaster.setFromCamera(this.ndc.set(ndcX, ndcY), this.camera);
+    this.raycaster.setFromCamera(this.ndc.set(ndcX, ndcY), pointerCamera(this.camera));
     // A pure rotation, so angles (and the pick radius) are unchanged.
     this.raycaster.ray.applyMatrix4(this.inverse.copy(this.root.matrixWorld).invert());
     return this.raycaster;

@@ -1,3 +1,4 @@
+import { starReach } from './blackHoles';
 import { flatTilt, type Quat } from './galactic';
 import { BELT_MARGIN, generateBelts, reserveMainBelt, wantsMainBelt, type BeltData } from './belts';
 import { generateComets, type CometData } from './comets';
@@ -138,8 +139,34 @@ export interface SystemData {
 const REFERENCE_ORBIT = 90;
 const REFERENCE_PERIOD = 50;
 
+/**
+ * Changes to how a system is generated, for tools (the star lab's system
+ * tuner); the game never passes any. Each replaces a drawn value after it was
+ * drawn, so everything else in the system stays as it was. They apply to
+ * ordinary star systems, not to Sol, young stars' or rogue planets'.
+ */
+export interface SystemTuning {
+  /** How many planets (instead of the drawn 0–8). Planets past the drawn ones are made like any other. */
+  planets?: number;
+  /** Multiplies the empty space between one planet's neighbourhood and the next (1: as drawn). */
+  spacing?: number;
+  /** Moons per planet instead of the drawn number. */
+  moons?: number;
+  /** A main asteroid belt before the first giant (true), none (false), or as drawn. Needs a giant. */
+  mainBelt?: boolean;
+  /** How many comets (instead of the drawn 0–3). */
+  comets?: number;
+  /** A faint debris disc (true), none (false), or as drawn by the star's class. */
+  debris?: boolean;
+}
+
 /** Generates a star's full system. Pure and deterministic: same ref, same system. */
 export function generateSystem(ref: StarRef): SystemData {
+  return tuneSystem(ref, {});
+}
+
+/** `generateSystem` with `tuning`'s changes (see SystemTuning; `{}` gives exactly the game's system). */
+export function tuneSystem(ref: StarRef, tuning: SystemTuning): SystemData {
   if (isSol(ref)) return solSystem(ref);
   if (isRogue(ref)) return generateRogueSystem(ref);
   if (ref.young) return generateYoungSystem(ref);
@@ -147,10 +174,11 @@ export function generateSystem(ref: StarRef): SystemData {
   const stars = placeStars(rng.fork('stars'), ref.stars);
   const totalMass = ref.stars.reduce((m, s) => m + s.mass, 0);
   const totalLuminosity = ref.stars.reduce((l, s) => l + s.luminosity, 0);
-  const starZone = Math.max(...stars.map((s) => s.orbit.radius + s.radius));
+  // A black hole's zone is as far as it bends light (its disc and lensing), so planets orbit clear of it.
+  const starZone = Math.max(...stars.map((s) => s.orbit.radius + starReach(s)));
   const habitableRadius = clamp(140 * Math.sqrt(totalLuminosity), 60, 600);
 
-  const planetCount = rng.weighted<number>([
+  const drawnPlanets = rng.weighted<number>([
     [0, 1],
     [1, 2],
     [2, 3],
@@ -161,18 +189,20 @@ export function generateSystem(ref: StarRef): SystemData {
     [7, 3],
     [8, 2],
   ]);
+  const planetCount = tuning.planets ?? drawnPlanets;
 
   const planets: PlanetData[] = [];
   // Inner edge of the free space where the next planet's neighbourhood can start.
   let edge = starZone * 1.5 + 25;
   // A main belt goes before the first giant, which moves out to make room (its own stream, so no planet draw changes).
   const beltRng = rng.fork('belts');
-  const wantsBelt = wantsMainBelt(beltRng);
+  const drawnBelt = wantsMainBelt(beltRng);
+  const wantsBelt = tuning.mainBelt ?? drawnBelt;
   let mainBelt: [number, number] | null = null;
   for (let i = 0; i < planetCount; i++) {
     const prng = rng.fork('planet', i);
     const name = `${ref.name} ${romanNumeral(i + 1)}`;
-    const gap = prng.range(20, 50) * (1 + i * 0.4);
+    const gap = prng.range(20, 50) * (1 + i * 0.4) * (tuning.spacing ?? 1);
 
     // The type depends on distance, but the final distance depends on the
     // planet's extent, so classify at the nearest possible orbit. The size
@@ -193,7 +223,9 @@ export function generateSystem(ref: StarRef): SystemData {
           : null
         : // Own stream, so the draws of gas giants and everything else stay as they were.
           generateSolidRings(prng.fork('rings'), type, radius);
-    const moonOrbits = generateMoons(prng.fork('moons'), name, size, radius, rings);
+    const moonsRng = prng.fork('moons');
+    const drawnMoons = moonsRng.weighted<number>(MOON_COUNT_WEIGHTS[size]);
+    const moonOrbits = generateMoons(moonsRng, name, size, radius, rings, tuning.moons ?? drawnMoons);
     const extent = Math.max(
       radius,
       rings?.outer ?? 0,
@@ -261,6 +293,7 @@ export function generateSystem(ref: StarRef): SystemData {
     starRadius: Math.max(...stars.map((s) => s.radius)),
     outerEdge: last ? last.orbit.radius + last.extent : 0,
     period: (a) => keplerPeriod(a, totalMass),
+    count: tuning.comets,
   });
 
   // Own stream too: belts sit in the gaps the planets left.
@@ -276,7 +309,7 @@ export function generateSystem(ref: StarRef): SystemData {
   let extent = starZone;
   for (const p of planets) extent = Math.max(extent, p.orbit.radius + p.extent);
   for (const b of belts) extent = Math.max(extent, b.outer);
-  const dust = generateDebrisDisc(rng.fork('dust'), discContext(stars, starZone, habitableRadius), extent);
+  const dust = generateDebrisDisc(rng.fork('dust'), discContext(stars, starZone, habitableRadius), extent, tuning.debris);
 
   return {
     id: ref.id,
@@ -311,7 +344,8 @@ export function generateYoungSystem(ref: StarRef): SystemData {
   const stars = placeStars(rng.fork('stars'), ref.stars);
   const totalMass = ref.stars.reduce((m, s) => m + s.mass, 0);
   const totalLuminosity = ref.stars.reduce((l, s) => l + s.luminosity, 0);
-  const starZone = Math.max(...stars.map((s) => s.orbit.radius + s.radius));
+  // A black hole's zone is as far as it bends light (its disc and lensing), so planets orbit clear of it.
+  const starZone = Math.max(...stars.map((s) => s.orbit.radius + starReach(s)));
   const habitableRadius = clamp(140 * Math.sqrt(totalLuminosity), 60, 600);
   const { disc, planets: forming } = generateProtoplanetaryDisc(rng.fork('disc'), discContext(stars, starZone, habitableRadius));
   const planets: PlanetData[] = [];
@@ -511,7 +545,8 @@ function placeStars(rng: Rng, stars: StarData[]): SystemStar[] {
 
   // Binary: both orbit the barycentre, the lighter star further out.
   const [a, b] = stars as [StarData, StarData];
-  const separation = (a.radius + b.radius) * rng.range(1.6, 2.4);
+  // Reach, not radius: a black hole's disc and lensing keep its companion further out (stars: their radius).
+  const separation = (starReach(a) + starReach(b)) * rng.range(1.6, 2.4);
   const total = a.mass + b.mass;
   const period = rng.range(40, 80);
   const phase = rng.range(0, Math.PI * 2);

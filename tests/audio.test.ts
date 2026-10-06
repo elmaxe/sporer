@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { AMBIENT_CUES, cueParams, groupCueFiles, SOUND_CUES, VariantPicker } from '../src/audio/cues';
 import { starMix, starsMix, starSoundParams, type StarMix } from '../src/audio/starMix';
+import { volcanoMix, volcanoSoundParams, type VolcanoMix } from '../src/audio/volcanoMix';
 import { Rng } from '../src/gen/rng';
+import { VENT_CUE, eruptionLoudness, ventLevel, ventPitch, ventSoundParams, ventsLevel } from '../src/audio/ventMix';
 import { crossfadeLoop } from '../src/audio/loop';
 import { channelGain, DEFAULT_AUDIO_SETTINGS, parseAudioSettings, sliderToGain } from '../src/audio/settings';
 
@@ -142,11 +144,11 @@ describe('VariantPicker', () => {
 });
 
 describe('cueParams', () => {
-  it('loops exactly the travel, projectile and ambient cues', () => {
+  it('loops exactly the travel, projectile, beam and ambient cues', () => {
     for (const cue of SOUND_CUES) {
       const spec = cueParams[cue];
       const ambient = (AMBIENT_CUES as readonly string[]).includes(cue);
-      expect(spec.loop).toBe(ambient || cue === 'systemTravel' || cue === 'interstellarTravel' || cue === 'busterFlight' || cue === 'abductBeam' || cue === 'exportBeam');
+      expect(spec.loop).toBe(ambient || cue === 'systemTravel' || cue === 'interstellarTravel' || cue === 'busterFlight' || cue === 'abductBeam' || cue === 'exportBeam' || cue === 'laserBeam');
       expect(spec.channel).toBe(ambient ? 'ambience' : 'sfx');
     }
   });
@@ -190,5 +192,79 @@ describe('starMix', () => {
     expect(out.far).toBeCloseTo(Math.min(1, one.far * Math.SQRT2), 12);
     starsMix([], [], out);
     expect(out).toEqual({ near: 0, far: 0 });
+  });
+});
+
+describe('volcanoMix', () => {
+  const R = 48;
+  const mix = (d: number, elevation = 1, activity = 1): VolcanoMix => volcanoMix(d, R, elevation, activity, { near: 0, far: 0 });
+
+  it('is all near at the vent and all far well out', () => {
+    expect(mix(0)).toEqual({ near: 1, far: 0 });
+    const out = mix(R * (volcanoSoundParams.nearTo + 1));
+    expect(out.near).toBeCloseTo(0, 12);
+    expect(out.far).toBeGreaterThan(0);
+  });
+
+  it('crossfades at equal power and fades with distance', () => {
+    let last = Infinity;
+    for (let d = 0; d < 100 * R; d += R / 4) {
+      const { near, far } = mix(d);
+      const power = near * near + far * far;
+      expect(power).toBeLessThanOrEqual(1 + 1e-12);
+      expect(power).toBeLessThanOrEqual(last + 1e-12);
+      last = power;
+    }
+    const half = mix(R * volcanoSoundParams.reach);
+    expect(Math.hypot(half.near, half.far)).toBeCloseTo(0.5, 12);
+  });
+
+  it('is quieter settled than erupting, and silent before it rises', () => {
+    const loud = (activity: number) => Math.hypot(mix(R, 1, activity).near, mix(R, 1, activity).far);
+    expect(loud(0)).toBe(0);
+    expect(loud(0.3)).toBeLessThan(loud(1));
+    expect(loud(0.3)).toBeGreaterThanOrEqual(volcanoSoundParams.quiet * loud(1));
+  });
+
+  it('fades out beyond the curve of the globe', () => {
+    const at = (elevation: number) => mix(10 * R, elevation).far;
+    expect(at(0)).toBeCloseTo(mix(10 * R).far, 12);
+    expect(at(-volcanoSoundParams.belowHorizon / 2)).toBeLessThan(at(0));
+    expect(at(-volcanoSoundParams.belowHorizon)).toBe(0);
+  });
+});
+
+describe('ventMix', () => {
+  it('is full at a vent and half a reach away, falling off as the inverse square beyond', () => {
+    const peak = 20;
+    const reach = Math.max(ventSoundParams.minReach, ventSoundParams.reach * peak);
+    expect(ventLevel(0, peak, 1)).toBe(1);
+    expect(ventLevel(reach, peak, 1)).toBeCloseTo(0.5, 10);
+    expect(ventLevel(10 * reach, peak, 1) / ventLevel(20 * reach, peak, 1)).toBeCloseTo(4, 1);
+    expect(ventLevel(reach, peak, 0.5)).toBeCloseTo(0.25, 10);
+    // Small plumes are heard from at least minReach.
+    expect(ventLevel(ventSoundParams.minReach, 0.1, 1)).toBeCloseTo(0.5, 10);
+  });
+
+  it('adds vents up without going past full', () => {
+    expect(ventsLevel(0)).toBe(0);
+    expect(ventsLevel(0.01)).toBeCloseTo(0.01, 3);
+    expect(ventsLevel(50)).toBeLessThanOrEqual(1);
+    expect(ventsLevel(2)).toBeGreaterThan(ventsLevel(1));
+  });
+
+  it('swells as an eruption starts and dies away as it ends', () => {
+    expect(eruptionLoudness(-1, 10)).toBe(0);
+    expect(eruptionLoudness(0, 10)).toBe(0);
+    expect(eruptionLoudness(1.5, 10)).toBeGreaterThan(0.9);
+    expect(eruptionLoudness(9.99, 10)).toBeLessThan(0.01);
+    expect(eruptionLoudness(10, 10)).toBe(0);
+  });
+
+  it('gives every kind of vent a loop and a pitch', () => {
+    for (const kind of ['cryo', 'steam', 'sulphur', 'fumarole'] as const) {
+      expect((AMBIENT_CUES as readonly string[]).includes(VENT_CUE[kind])).toBe(true);
+      expect(ventPitch[kind]).toBeGreaterThan(0.25);
+    }
   });
 });

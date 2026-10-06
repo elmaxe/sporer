@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { tileableCloudNoise } from '../src/gen/cloudNoise';
 import { parseGraphicsSettings } from '../src/ui/GraphicsSettings';
-import { evaluateClimate, type ClimateData, type ClimateSetting, type ClimateState } from '../src/gen/climate';
+import { climateStateOf, evaluateClimate, type ClimateData, type ClimateSetting, type StateSpec } from '../src/gen/climate';
 import { generateGalaxy } from '../src/gen/galaxy';
 import { lavaActivity } from '../src/gen/lavaActivity';
 import { generateSystem } from '../src/gen/system';
@@ -48,8 +48,8 @@ for (const ref of generateGalaxy(1337).stars.slice(0, 250)) {
 }
 const withWeather = bodies.filter((b) => b.weather !== null) as { body: WeatherBody; radius: number; weather: WeatherData }[];
 
-function climate(setting: ClimateSetting, state: Partial<ClimateState>): ClimateData {
-  return evaluateClimate(setting, { pressure: 0, composition: 'none', greenhouse: 1, water: 0, surfaceAlbedo: 0.3, ...state });
+function climate(setting: ClimateSetting, state: StateSpec): ClimateData {
+  return evaluateClimate(setting, climateStateOf({ pressure: 0, composition: 'none', greenhouse: 1, water: 0, surfaceAlbedo: 0.3, ...state }));
 }
 
 // Reference bodies (docs/research/climate.md and weather.md).
