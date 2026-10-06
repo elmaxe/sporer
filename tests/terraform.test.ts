@@ -116,7 +116,8 @@ describe('actions', () => {
     expect(c.gases.co2).toBe(0);
     expect(c.water).toBe(1);
     expect(c.composition).toBe('oxygenNitrogen');
-    expect(c.greenhouse).toBe(1);
+    // Trace greenhouse gas breaks down again with its lifetime (phase 4: only running factories keep it up).
+    expect(c.greenhouse).toBeCloseTo(Math.exp(-100 / TERRAFORM_TUNING.relaxed.greenhouseLifetime), 9);
   });
 
   it('are a pure function of the log and the time, however the timeline is queried', () => {
@@ -258,7 +259,8 @@ describe('the home system’s first project (Haikrai III)', () => {
       { lever: 'n2', start: 0, duration: 20, amount: 0.79 },
       { lever: 'o2', start: 0, duration: 20, amount: 0.21 },
       { lever: 'water', start: 30, duration: 10, amount: 0.4 },
-      { lever: 'greenhouse', start: 40, duration: 20, amount: 12 },
+      // Three greenhouse factories (terraform/greenhouse.ts) hold its trace greenhouse at ×12.
+      ...[0, 1, 2].map((i): TerraformAction => ({ lever: 'greenhouse', start: 40, duration: 3, amount: 0, tool: 'factory', level: 1, site: [Math.cos(i), 0, Math.sin(i)] })),
     ];
     const timeline = new TerraformTimeline(base, actions);
     const at = (t: number) => timeline.at(t).climate;

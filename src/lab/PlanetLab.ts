@@ -7,7 +7,7 @@ import { hashSeed, parseSeed } from '../gen/rng';
 import { generateSystem } from '../gen/system';
 import { offsetDirection, stormCentre } from '../gen/weather';
 import type { PlanetConfig } from '../world/Planet';
-import { TerraformTimeline, leakRate, type TerraformMode, type TerraformSnapshot } from '../gen/terraform';
+import { TerraformTimeline, leakRate, type TerraformMode, type TerraformSnapshot, type WorksKind } from '../gen/terraform';
 import { ClimateChart } from '../terraform/ClimateChart';
 import { DEFAULT_RAY_CHOICE, forecastClimate, holdRay, type RayChoice, type RayId } from '../terraform/rays';
 import { Milestones, milestoneFlags } from '../terraform/milestones';
@@ -22,6 +22,7 @@ import {
   type MirrorWay,
   type ShadeWay,
 } from '../terraform/light';
+import { describeWorks, forecastWorks, placeAction, removeAction, worksAt, type GreenhouseToolId } from '../terraform/greenhouse';
 import { LabClock, LabLevel } from './LabLevel';
 import {
   DEFAULT_VIEW,
@@ -90,7 +91,7 @@ export class PlanetLab {
   readonly chart: ClimateChart;
   showChart = false;
   /** The ray or light tool the chart's arrow previews (the last one used). */
-  private lastRay: RayId | LightToolId | null = null;
+  private lastRay: RayId | LightToolId | GreenhouseToolId | null = null;
   /** Why the last light tool did nothing ('' when it worked), for the panel's readout. */
   lightNote = '';
   private rolls = 0;
@@ -356,6 +357,80 @@ export class PlanetLab {
     return this.terraformChanged();
   }
 
+  /**
+   * Beams a greenhouse works of `kind` down at the terraforming time, which
+   * moves on to when it has landed: at `site` (a unit vector in the body
+   * frame), or on the nearest dry land to the view that has room.
+   */
+  works(kind: WorksKind, site?: [number, number, number]): Promise<void> {
+    const base = labClimateData(this.planet);
+    if (!base) return Promise.resolve();
+    const t = (this.terraformState ??= { actions: [], time: 0, mode: 'relaxed' });
+    this.lastRay = kind;
+    const sites = site ? [site] : this.landSites();
+    let action: ReturnType<typeof placeAction> = 'No dry land here to set it down on';
+    for (const s of sites) {
+      action = placeAction(t.actions, t.time, t.mode, kind, s, base);
+      if (typeof action !== 'string' || !/close/.test(action)) break;
+    }
+    if (typeof action === 'string') {
+      this.lightNote = action;
+      return this.terraformChanged();
+    }
+    this.lightNote = '';
+    t.actions.push(action);
+    t.time = action.start + action.duration;
+    return this.terraformChanged();
+  }
+
+  /** Beams the last works of `kind` (or of any kind) still standing back up, at the terraforming time. */
+  removeWorks(kind?: WorksKind): Promise<void> {
+    const t = this.terraformState;
+    if (!t) return Promise.resolve();
+    const standing = worksAt(t.actions, t.time).runs.filter((r) => r.removed === null && (!kind || r.kind === kind));
+    const run = standing[standing.length - 1];
+    if (!run) {
+      this.lightNote = 'No works here to beam up';
+      return this.terraformChanged();
+    }
+    this.lightNote = '';
+    const action = removeAction(run, Math.max(t.time, run.from));
+    t.actions.push(action);
+    t.time = action.start + action.duration;
+    return this.terraformChanged();
+  }
+
+  /** Moves the terraforming time on by `seconds` (the works keep running). */
+  runOn(seconds = 60): Promise<void> {
+    if (!this.terraformState) return Promise.resolve();
+    return this.setTerraformTime(this.terraformState.time + seconds);
+  }
+
+  /** The works standing at the terraforming time. */
+  get groundWorks(): ReturnType<typeof worksAt> {
+    const t = this.terraformState;
+    return worksAt(t?.actions ?? [], t?.time ?? 0);
+  }
+
+  /** Dry land, nearest the view first (the globe view's own ground; any site in the system view). */
+  private landSites(): [number, number, number][] {
+    const globe = this._level?.globe ?? null;
+    const towards = this._level?.carry();
+    const view = towards?.ship ?? towards?.direction ?? new Vector3(0, 0, 1);
+    const out: { site: [number, number, number]; d: number }[] = [];
+    const n = 600;
+    const dir = new Vector3();
+    for (let i = 0; i < n; i++) {
+      const y = 1 - (2 * (i + 0.5)) / n;
+      const r = Math.sqrt(1 - y * y);
+      const a = i * Math.PI * (3 - Math.sqrt(5));
+      dir.set(Math.cos(a) * r, y, Math.sin(a) * r);
+      if (globe && globe.landingAt(dir) !== 'land') continue;
+      out.push({ site: [dir.x, dir.y, dir.z], d: -dir.dot(view) });
+    }
+    return out.sort((a, b) => a.d - b.d).map((o) => o.site);
+  }
+
   /** The mirrors and the shade up at the terraforming time. */
   get installations(): ReturnType<typeof installationsAt> {
     const t = this.terraformState;
@@ -403,6 +478,7 @@ export class PlanetLab {
     const snap = this.terraformSnapshot;
     if (snap) this._level?.applyTerraform(snap.climate);
     this._level?.setInstallations(this.installations, this.terraformState?.time ?? 0);
+    this._level?.setWorks(this.groundWorks, this.terraformState?.time ?? 0);
     this.showChartNow(snap);
   }
 
@@ -433,13 +509,20 @@ export class PlanetLab {
       leak: leakRate(s.climate, mode),
       milestones: milestones.log('lab'),
       picker: this.lastRay === 'mirror' ? 'mirror' : this.lastRay === 'sunshade' ? 'shade' : 'gas',
-      projects: t && t.actions.some((a) => a.tool) ? describeInstallations(this.installations, s.climate, mode) : undefined,
+      projects:
+        t && t.actions.some((a) => a.tool)
+          ? [describeInstallations(this.installations, s.climate, mode), describeWorks(this.groundWorks, s.climate, mode)].filter(Boolean).join(' · ')
+          : undefined,
     });
   }
 
   private forecast(target: ClimateData, mode: TerraformMode): ClimateData | null {
     const tool = this.lastRay;
     if (!tool) return null;
+    if (tool === 'factory' || tool === 'sink') {
+      const t = this.terraformState;
+      return forecastWorks(target, labClimateData(this.planet)!, t?.actions ?? [], t?.time ?? 0, mode, tool);
+    }
     if (tool === 'mirror' || tool === 'sunshade' || tool === 'lance' || tool === 'aerosol') {
       const t = this.terraformState;
       return forecastLight(target, t?.actions ?? [], t?.time ?? 0, mode, tool, this.rayChoice, this.raySeconds);

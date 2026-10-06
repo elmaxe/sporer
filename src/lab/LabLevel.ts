@@ -2,6 +2,8 @@ import type { ClimateData } from '../gen/climate';
 import { liveAtmosphereColor } from '../terraform/liveLook';
 import { LightRig } from '../terraform/LightRig';
 import type { Installations } from '../terraform/light';
+import type { GroundWorks } from '../terraform/greenhouse';
+import { WorksLook } from '../terraform/WorksLook';
 import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
@@ -256,6 +258,47 @@ class LabRig implements Entity {
   }
 }
 
+/**
+ * The greenhouse works on the globe (the Terraform folder's factories and
+ * sinks), drawn by the game's own WorksLook as they are at the
+ * terraforming time, the plants under them hidden. Globe view only (too
+ * small to see in the system view, as in the game).
+ */
+class LabWorks implements Entity {
+  readonly look: WorksLook;
+  private dirty = true;
+
+  constructor(
+    scene: THREE.Scene,
+    globe: PlanetGlobe,
+    private readonly plants: SurfaceEntities | null,
+    private readonly camera: THREE.PerspectiveCamera,
+    private works: GroundWorks,
+    private time: number,
+    seed: string,
+  ) {
+    this.look = new WorksLook(scene, globe.groundHeight, seed);
+  }
+
+  set(works: GroundWorks, time: number): void {
+    this.works = works;
+    this.time = time;
+    this.dirty = true;
+  }
+
+  update(frameDt: number): void {
+    this.look.setView(document.querySelector('canvas')?.height ?? 720, this.camera.fov);
+    // The plumes play on while the time shown stands still.
+    const changed = this.look.set(this.works, this.time, Math.min(frameDt, 0.1));
+    if (changed || this.dirty) this.plants?.setBuried(this.look.count > 0 ? (dir) => this.look.covers(dir) : null);
+    this.dirty = false;
+  }
+
+  dispose(): void {
+    this.look.dispose();
+  }
+}
+
 /** Where the camera was, to put the next level's camera in the same place (see LabLevel.carry). */
 export interface LabCarry {
   /** From the camera's centre to the camera. */
@@ -305,6 +348,7 @@ export class LabLevel extends Level {
   readonly mode: Pick<LabView, 'view' | 'camera'>;
   private readonly pivot = new THREE.Object3D();
   private rig: LabRig | null = null;
+  private works: LabWorks | null = null;
   private readonly axes: THREE.AxesHelper;
   private readonly center = new THREE.Vector3();
 
@@ -443,6 +487,16 @@ export class LabLevel extends Level {
     if (inst.slots.length === 0 && inst.shadeShown <= 0.001) return;
     const parent = this.bodies?.planet.object ?? this.scene;
     this.rig = this.add(new LabRig(parent, this.radius, this.sun, this.camera, inst, time));
+  }
+
+  /** Shows the greenhouse works (the Terraform folder's) as they are at terraforming time `time` (globe view). */
+  setWorks(works: GroundWorks, time: number): void {
+    if (this.works) {
+      this.works.set(works, time);
+      return;
+    }
+    if (works.runs.length === 0 || !this.globe) return;
+    this.works = this.add(new LabWorks(this.scene, this.globe, this.plants, this.camera, works, time, String(this.planet.seed)));
   }
 
   /** Copies the view options that don't need a rebuild (the axes; the wireframe is read as it draws). */

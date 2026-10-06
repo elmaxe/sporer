@@ -5,7 +5,7 @@
  * combat/VolcanoBomb.ts; the laser, combat/Laser.ts; the abduction beam and the cargo it brings up:
  * cargo/CargoBeam.ts; the radar, radar/Radar.ts; the magic terraforming
  * rays, terraform/MagicRay.ts; the heat-and-light terraforming tools,
- * terraform/LightTools.ts).
+ * terraform/LightTools.ts; the greenhouse works, terraform/GreenhouseTools.ts).
  */
 
 export type ItemTab = 'weapons' | 'inventory' | 'terraform';
@@ -13,8 +13,10 @@ export type ItemTab = 'weapons' | 'inventory' | 'terraform';
 export type RayToolId = 'heatRay' | 'coolRay' | 'airRay' | 'vacuumRay' | 'waterRay';
 /** The heat-and-light terraforming tools (terraform/light.ts LightToolId). */
 export type LightToolId = 'mirror' | 'lance' | 'sunshade' | 'aerosol';
+/** The greenhouse terraforming works (terraform/greenhouse.ts GreenhouseToolId). */
+export type GreenhouseToolId = 'factory' | 'sink';
 /** The tools: always in their tab's first slots. */
-export type ToolId = 'planetBuster' | 'volcanoBomb' | 'laser' | 'abduct' | 'radar' | RayToolId | LightToolId;
+export type ToolId = 'planetBuster' | 'volcanoBomb' | 'laser' | 'abduct' | 'radar' | RayToolId | LightToolId | GreenhouseToolId;
 /** What a slot holds: a tool, or a stack of cargo in the hold (`cargo:` and the stack's key, see cargo/inventory.ts). */
 export type ItemId = ToolId | `cargo:${string}`;
 
@@ -139,6 +141,18 @@ export const ITEMS: readonly ItemDef[] = [
     name: 'Aerosol Spray',
     description: 'Sprays a reflective haze into the air while held: it cools the world fast, then rains out. Needs air to hold it up.',
   },
+  {
+    id: 'factory',
+    tab: 'terraform',
+    name: 'Greenhouse Factory',
+    description: 'Beams a factory down onto dry land: it fills the air with greenhouse gas, warming the world slowly and for good. Click it again to beam it back up.',
+  },
+  {
+    id: 'sink',
+    tab: 'terraform',
+    name: 'Carbon Sink',
+    description: 'Beams a rock crusher down onto dry land: it locks CO₂ and greenhouse gas away in the rock while it runs, slowly cooling and thinning the air. Click it again to beam it back up.',
+  },
 ];
 
 /** The magic rays' item ids. */
@@ -153,6 +167,13 @@ export const LIGHT_TOOL_ITEMS: readonly LightToolId[] = ['mirror', 'lance', 'sun
 
 export function isLightTool(id: ItemId): id is LightToolId {
   return (LIGHT_TOOL_ITEMS as readonly string[]).includes(id);
+}
+
+/** The greenhouse works' item ids. */
+export const GREENHOUSE_TOOL_ITEMS: readonly GreenhouseToolId[] = ['factory', 'sink'];
+
+export function isGreenhouseTool(id: ItemId): id is GreenhouseToolId {
+  return (GREENHOUSE_TOOL_ITEMS as readonly string[]).includes(id);
 }
 
 /** The item `id`'s definition. */
@@ -180,9 +201,10 @@ export class ItemSwitches {
   }
 }
 
-/** The key that selects the item in slot `index` (0-based) of the tab on show, and how the bar labels it. */
+/** The key that selects the item in slot `index` (0-based) of the tab on show, and how the bar labels it: 1–9, then 0 for the tenth. */
 export function slotKey(index: number): { code: string; label: string } | null {
-  return index < 9 ? { code: `Digit${index + 1}`, label: String(index + 1) } : null;
+  if (index < 9) return { code: `Digit${index + 1}`, label: String(index + 1) };
+  return index === 9 ? { code: 'Digit0', label: '0' } : null;
 }
 
 /** Whether an item can be used right now, a line to show about it (how to use it, what it's doing; '' for none), and why not. */

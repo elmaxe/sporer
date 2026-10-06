@@ -71,7 +71,8 @@ describe('items', () => {
   it('keys the slots of the tab on show 1 to 9, and names cargo stacks by key', () => {
     expect(slotKey(0)).toEqual({ code: 'Digit1', label: '1' });
     expect(slotKey(8)?.code).toBe('Digit9');
-    expect(slotKey(9)).toBeNull();
+    expect(slotKey(9)).toEqual({ code: 'Digit0', label: '0' });
+    expect(slotKey(10)).toBeNull();
     expect(cargoKey(cargoItem('home#2'))).toBe('home#2');
     expect(cargoKey('abduct')).toBeNull();
   });
