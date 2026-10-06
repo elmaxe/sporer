@@ -78,9 +78,30 @@ Measured in the lab (Earth-sized ocean world gen=5, 1280×720, triangles a frame
 
 And a gas giant (gen=5), whole frame: 21.3k → 17.2k, 38.4k → 17.9k, 29.2k → 20.0k at the same views (most of what's left is its 16k-triangle atmosphere shell).
 
+## The lava sea, the atmosphere and the cloud sheet (issues #94, #95, #96)
+
+These were the last fixed cube spheres in low orbit (16,428, 16,428 and 27,648 triangles), drawn whole from anywhere, the lava sea twice (it's on the ground layer, for the haze's depth pass).
+
+- **Lava sea** (#94): its shader worked the broad flow out per vertex (`lavaFlow`, 3 simplex samples) and blended it across each triangle, so its glow would change as chunks split. It's now worked out per pixel, as the planet map already did, and the sea is a `LodSurface` like the water (`smooth: 'coast'`, `SEA_RENDER_ORDER`). The flow's finest term has a wavelength of about 0.2 rad, five cells of the old 37-segment sphere, so blending it per vertex was already close to exact: the picture is the same apart from the edges of the glowing rifts, a pixel or two sharper (an Earth-sized lava world at 3 R: 10.6k of 922k pixels more than 6% off, all along those edges). It still matches the system view's per-vertex paint across the zoom as before. Three noise samples more per pixel are small next to the crust's own (two noise samples and a Voronoi search per scale of cracks).
+- **Atmosphere** (#95), option (a): the shell's shader integrates the haze per pixel but only passes positions on per vertex, so a coarser mesh would save little. It's cut into fixed patches instead (`world/spherePatches.ts`: 6 faces × 4 × 4, the cube sphere's exact vertices and triangles, one shared material), so three.js frustum-culls each, and from outside the patches whose every triangle faces away from the camera aren't drawn either (`SpherePatches.cullBehind`: beyond the horizon of the sphere through the triangles' planes, so no front face is ever dropped; `tests/spherePatches.test.ts`). From inside (the camera within the vertices' sphere) only the frustum culls. The haze's outline against space is unchanged, being the same triangles.
+- **Cloud sheet** (#96), proposal step 1: the same patches at the same 48 segments, so the per-vertex drift and the storms' margin (`uNearMargin`) don't change and nothing shimmers. Off-screen patches are frustum-culled; above the sheet the far side's are skipped like the atmosphere's; from under it the whole sheet overhead stays. On puffy worlds, whose sheet only carries cyclones, dust, ash and lightning's glow, only the patches within reach of a sheet storm (its radius plus the margin) or a lit flash are drawn (`WeatherLook.cullSheet`). The puffs' own culling (#87) is as it was; skipping clusters outside the view as well (#96's optional step) is left for when the puffs show up in a measurement.
+
+Measured in the lab, before and after, at 1280×720 with `?quality=low` in headless Chrome (SwiftShader), triangles a frame including everything (sky, ground, puffs, depth pass), the camera over lon 20°, lat 15° (the cyclone: over its eye, with the clock paused). In brackets the triangles each part costs, found by hiding its material for a few frames (rough: the ground's LOD moves a little meanwhile):
+
+| World, view | Before: total (sea / air / clouds) | After: total (sea / air / clouds) |
+|---|---|---|
+| Lava world with a dust sheet (gen=1), 3 R | 92.6k (32.8k / 16.1k / 27.4k) | 48.8k (16.2k / 6.3k / 11.9k) |
+| same, 1.3 R | 153.0k (32.7k / 16.4k / 27.6k) | 119.9k (26.6k / 13.5k / 3.8k) |
+| same, 1.03 R | 151.8k (32.8k / 16.6k / 27.7k) | 113.0k (25.7k / 11.6k / 1.2k) |
+| Lava world under an acid deck (gen=2), 3 / 1.3 / 1.03 R | 94.8k / 153.0k / 147.9k | 52.7k / 118.8k / 128.9k (under the deck at 1.03 R: its whole sky stays) |
+| Puffy ocean world with a cyclone (gen=2), 3 / 1.3 / 1.03 R | 81.5k / 305.4k / 585.5k (clouds 33.6k / 32.0k / 31.0k) | 45.9k / 263.8k / 556.2k (clouds 7.7k / 6.1k / 7.1k) |
+| Terran world (gen=8), 3 / 1.3 / 1.03 R | 48.1k / 206.6k / 295.6k | 38.4k / 191.3k / 290.6k |
+| Ocean world (gen=5), 3 / 1.3 / 1.03 R | 52.7k / 156.3k / 131.4k | 42.8k / 152.7k / 125.0k |
+
+Close to the ground most of the frame is the terrain, so the saving there is smaller in share. Frame rates under SwiftShader moved with the triangles from far (the lava world 4.1 → 6.6 FPS at 3 R, the cyclone 4.9 → 6.1) and within run-to-run noise up close (2–3 FPS either way): there the cost is per pixel. Screenshots before and after at the same moment differ in a few hundred pixels of 922k for the clouds and haze (the cyclone at 3, 1.3 and 1.03 R: 289, 193 and 379 more than 6% off), the noise of two runs.
+
 ## Open questions
 
 - Where a chunk's edge collapses onto a coarser neighbour, the cells along that edge are triangulated differently from the parent's, so when a neighbour's level changes that one row of facets can shift slightly.
 - The blending is timed, not tied to distance, so a chunk built late (flying fast) still blends in over 0.4 s rather than popping, but lags behind the camera a little.
-- The lava sea, the atmosphere shell and the cloud layer are still fixed cube spheres (16,428, 16,428 and 27,648 triangles), drawn whole from anywhere. The lava sea computes its flow and glow per vertex, so its pattern would change as chunks split: it needs that moved per pixel first, or keeps its fixed sphere. The water now has its own `LodSurface` (see *Smooth surfaces* above).
 - Neighbours more than 4 levels apart would be snapped only to every 16th vertex (the whole chunk edge); with the split metric changing by at most 2× per level between neighbours this hasn't been seen.
