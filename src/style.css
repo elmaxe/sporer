@@ -1761,6 +1761,7 @@ body.beaming #app canvas {
 #climate-chart .chart-lamps,
 #climate-chart .chart-gas-label,
 #climate-chart .chart-water,
+#climate-chart .chart-projects,
 #climate-chart .chart-events {
   padding: 2px 4px 0;
 }
@@ -1812,6 +1813,11 @@ body.beaming #app canvas {
 
 #climate-chart .chart-events {
   color: #ffe08a;
+}
+
+#climate-chart .chart-projects {
+  font-size: 11px;
+  color: #ffd98a;
 }
 
 #climate-chart .chart-pickers {

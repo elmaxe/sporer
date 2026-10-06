@@ -20,6 +20,8 @@ export class PlanetLights implements Entity {
   private readonly lights: THREE.DirectionalLight[];
   private readonly ambient = new THREE.AmbientLight('#9bb8ff', 0.4);
   private readonly starPosition = new THREE.Vector3();
+  /** Each star's light as generated, before the body's brightness. */
+  private readonly intensity: number[];
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -32,9 +34,12 @@ export class PlanetLights implements Entity {
     ambientLight?: THREE.Color,
     /** System-space unit direction of the galactic centre: the light of a system with no star. */
     private readonly galacticCentre: THREE.Vector3 | null = null,
+    /** How much brighter (or dimmer) the first star's light is drawn: mirrors and a sunshade over the body (terraform/light.ts). */
+    private readonly brightness: { value: number } = { value: 1 },
   ) {
     // Same intensity as the star's point light in the system view.
     this.lights = stars.map((s) => new THREE.DirectionalLight(starLightColor(s.data), starLightIntensity(s.data)));
+    this.intensity = this.lights.map((l) => l.intensity);
     if (this.lights.length === 0) this.lights.push(new THREE.DirectionalLight(galacticLightParams.color, galacticLightParams.intensity));
     scene.add(this.ambient, ...this.lights);
     ambientLight?.copy(this.ambient.color).multiplyScalar(this.ambient.intensity);
@@ -51,6 +56,7 @@ export class PlanetLights implements Entity {
       this.sun.copy(light.position);
       light.position.multiplyScalar(LIGHT_DISTANCE);
     }
+    if (this.stars.length > 0) this.lights[0]!.intensity = this.intensity[0]! * this.brightness.value;
     this.sunLight?.copy(this.lights[0]!.color).multiplyScalar(this.lights[0]!.intensity);
     for (let i = 0; i < this.stars.length; i++) {
       const light = this.lights[i]!;

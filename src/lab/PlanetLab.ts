@@ -11,6 +11,17 @@ import { TerraformTimeline, leakRate, type TerraformMode, type TerraformSnapshot
 import { ClimateChart } from '../terraform/ClimateChart';
 import { DEFAULT_RAY_CHOICE, forecastClimate, holdRay, type RayChoice, type RayId } from '../terraform/rays';
 import { Milestones, milestoneFlags } from '../terraform/milestones';
+import {
+  describeInstallations,
+  forecastLight,
+  holdAerosol,
+  installationsAt,
+  mirrorAction,
+  shadeAction,
+  type LightToolId,
+  type MirrorWay,
+  type ShadeWay,
+} from '../terraform/light';
 import { LabClock, LabLevel } from './LabLevel';
 import {
   DEFAULT_VIEW,
@@ -78,8 +89,10 @@ export class PlanetLab {
   /** The climate chart (shown while there's a terraforming log, or `showChart`). */
   readonly chart: ClimateChart;
   showChart = false;
-  /** The ray the chart's arrow previews (the last one used). */
-  private lastRay: RayId | null = null;
+  /** The ray or light tool the chart's arrow previews (the last one used). */
+  private lastRay: RayId | LightToolId | null = null;
+  /** Why the last light tool did nothing ('' when it worked), for the panel's readout. */
+  lightNote = '';
   private rolls = 0;
   private vent = -1;
 
@@ -303,6 +316,52 @@ export class PlanetLab {
     return this.terraformChanged();
   }
 
+  /** Deploys or recalls an orbital mirror at the terraforming time, which moves on to when it's unfolded or folded away. */
+  mirror(way: MirrorWay = 'deploy'): Promise<void> {
+    this.rayChoice.mirror = way;
+    return this.lightAction('mirror', (t) => mirrorAction(t.actions, t.time, t.mode, way));
+  }
+
+  /** Closes or opens the sunshade a step at the terraforming time, which moves on to when it has. */
+  shade(way: ShadeWay = 'close'): Promise<void> {
+    this.rayChoice.shade = way;
+    return this.lightAction('sunshade', (t) => shadeAction(t.actions, t.time, t.mode, way));
+  }
+
+  /** Sprays aerosol for `seconds` (raySeconds) from the terraforming time, which then moves on by as much. */
+  aerosol(seconds = this.raySeconds): Promise<void> {
+    if (!labClimateData(this.planet)) return Promise.resolve();
+    const t = (this.terraformState ??= { actions: [], time: 0, mode: 'relaxed' });
+    const added = holdAerosol(this.timeline(t), t.time, seconds);
+    this.lightNote = added.length === 0 ? 'No air here to hold a haze up, or the haze is as thick as it gets' : '';
+    t.actions.push(...added);
+    t.time += seconds;
+    this.lastRay = 'aerosol';
+    return this.terraformChanged();
+  }
+
+  private lightAction(tool: LightToolId, make: (t: LabTerraform) => ReturnType<typeof mirrorAction>): Promise<void> {
+    if (!labClimateData(this.planet)) return Promise.resolve();
+    const t = (this.terraformState ??= { actions: [], time: 0, mode: 'relaxed' });
+    const action = make(t);
+    this.lastRay = tool;
+    if (typeof action === 'string') {
+      this.lightNote = action;
+      return this.terraformChanged();
+    }
+    this.lightNote = '';
+    t.actions.push(action);
+    // On to when it's in place, as a held ray moves the time on.
+    t.time = action.start + action.duration;
+    return this.terraformChanged();
+  }
+
+  /** The mirrors and the shade up at the terraforming time. */
+  get installations(): ReturnType<typeof installationsAt> {
+    const t = this.terraformState;
+    return installationsAt(t?.actions ?? [], t?.time ?? 0);
+  }
+
   /** Shows the terraformed climate at game time `time` (s from the first action). */
   setTerraformTime(time: number): Promise<void> {
     const t = (this.terraformState ??= { actions: [], time: 0, mode: 'relaxed' });
@@ -343,6 +402,7 @@ export class PlanetLab {
   private applyTerraform(): void {
     const snap = this.terraformSnapshot;
     if (snap) this._level?.applyTerraform(snap.climate);
+    this._level?.setInstallations(this.installations, this.terraformState?.time ?? 0);
     this.showChartNow(snap);
   }
 
@@ -369,11 +429,22 @@ export class PlanetLab {
       name: this.planet.name,
       snapshot: s,
       mode,
-      forecast: this.lastRay ? forecastClimate(s.target, this.lastRay, this.rayChoice, this.raySeconds) : null,
+      forecast: this.forecast(s.target, mode),
       leak: leakRate(s.climate, mode),
       milestones: milestones.log('lab'),
-      picker: 'gas',
+      picker: this.lastRay === 'mirror' ? 'mirror' : this.lastRay === 'sunshade' ? 'shade' : 'gas',
+      projects: t && t.actions.some((a) => a.tool) ? describeInstallations(this.installations, s.climate, mode) : undefined,
     });
+  }
+
+  private forecast(target: ClimateData, mode: TerraformMode): ClimateData | null {
+    const tool = this.lastRay;
+    if (!tool) return null;
+    if (tool === 'mirror' || tool === 'sunshade' || tool === 'lance' || tool === 'aerosol') {
+      const t = this.terraformState;
+      return forecastLight(target, t?.actions ?? [], t?.time ?? 0, mode, tool, this.rayChoice, this.raySeconds);
+    }
+    return forecastClimate(target, tool, this.rayChoice, this.raySeconds);
   }
 
   /** A new seed, deterministic in the current one and how many were asked for. */

@@ -12,6 +12,8 @@ export interface ShipEnergyData {
   level: number;
   /** Everything ever spent (counted while infinite too). */
   spent: number;
+  /** Everything ever given back (mirrors recalled, the shade opened). */
+  refunded?: number;
 }
 
 /** A full bar when energy is finite (tunable; the finite-energy phase sets it per mode). */
@@ -23,6 +25,8 @@ export class ShipEnergy {
   level = ENERGY_CAPACITY;
   /** Everything ever spent. */
   spent = 0;
+  /** Everything ever given back. */
+  refunded = 0;
   /** What's being spent a second right now (a ray held), for the bar's "about to spend" segment; set by whoever spends. */
   draining = 0;
 
@@ -40,6 +44,13 @@ export class ShipEnergy {
     return true;
   }
 
+  /** Gives `amount` back (a mirror recalled, the shade opened): the bar fills up to full at most. */
+  refund(amount: number): void {
+    if (!(amount > 0)) return;
+    if (!this.infinite) this.level = Math.min(this.capacity, this.level + amount);
+    this.refunded += amount;
+  }
+
   /** The bar's fill, 0–1 (1 while infinite). */
   get fill(): number {
     return this.infinite ? 1 : Math.max(0, Math.min(1, this.level / this.capacity));
@@ -52,7 +63,7 @@ export class ShipEnergy {
   }
 
   toJSON(): ShipEnergyData {
-    return { infinite: this.infinite, capacity: this.capacity, level: this.level, spent: this.spent };
+    return { infinite: this.infinite, capacity: this.capacity, level: this.level, spent: this.spent, refunded: this.refunded };
   }
 
   load(data: Partial<ShipEnergyData>): void {
@@ -60,6 +71,7 @@ export class ShipEnergy {
     if (typeof data.capacity === 'number') this.capacity = data.capacity;
     if (typeof data.level === 'number') this.level = data.level;
     if (typeof data.spent === 'number') this.spent = data.spent;
+    if (typeof data.refunded === 'number') this.refunded = data.refunded;
   }
 }
 

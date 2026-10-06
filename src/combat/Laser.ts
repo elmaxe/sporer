@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { SoundHandle } from '../audio/CuePlayer';
+import type { LoopCue } from '../audio/cues';
 import type { SoundEffects } from '../audio/sfx';
 import { ParticlePool, type Puff } from '../cargo/CargoFx';
 import { cargoSize } from '../cargo/inventory';
@@ -41,6 +42,40 @@ export interface LaserTargets {
 
 /** The beam leaves from this far below the ship's centre: its underside. */
 const MUZZLE_DROP = 0.75;
+/** The most beams at once (the mirror lance: one from each mirror that sees the spot). */
+const MAX_BEAMS = 12;
+
+/**
+ * Another beam that burns what it touches the way the laser does: the
+ * mirror lance (terraform/LightTools.ts), the mirrors' light focused on a
+ * spot. Everything left out is the laser's own.
+ */
+export interface LaserOptions {
+  /** The beams' core and glow colours, and the ring's. */
+  core?: string;
+  glow?: string;
+  ring?: string;
+  /** How wide the beams are drawn, × the laser's. */
+  width?: number;
+  /** Animals and plants this far round where it meets the ground burn too, units. */
+  reach?: number;
+  /** The loop while it's on. */
+  cue?: LoopCue;
+  /** The debug folder of its tunables (none: the laser's own `Laser` folder). */
+  folder?: string | null;
+  /**
+   * Where the beams come from to reach `foot` (a point in the scene): writes
+   * them into `out` and returns how many (0: none can reach it). The ship's
+   * underside if not given.
+   */
+  sources?: (foot: THREE.Vector3, out: THREE.Vector3[]) => number;
+  /** Each frame it fires: pays for `dt` seconds of it; a reason stops it. */
+  pay?: (dt: number) => string | null;
+  /** Its hint lines: ready (by touch or mouse), and firing. */
+  hints?: { ready: (touch: boolean) => string; firing: string; unseen?: string };
+  /** Throws extra puffs where it meets the ground, `dt` seconds' worth (steam off ice). */
+  ground?: (foot: THREE.Vector3, dt: number) => void;
+}
 /** How far past the ground's hit an animal or a plant can still be hit: it's wider than a point. */
 const GROUND_SLACK = 1;
 /** Seconds a note (what it killed) stays on the hint line. */
@@ -92,7 +127,11 @@ export class Laser implements Entity {
   private note = '';
   private noteTime = 0;
   private kills = 0;
-  private readonly look: LaserLook;
+  private readonly looks: LaserLook[] = [];
+  private readonly sources: THREE.Vector3[] = Array.from({ length: MAX_BEAMS }, () => new THREE.Vector3());
+  /** How many beams reach the spot now. */
+  private beams = 0;
+  private readonly reach: number;
   private readonly reticle: MarkerRing;
   private readonly sparks: ParticlePool;
   private readonly smoke: ParticlePool;
@@ -139,13 +178,14 @@ export class Laser implements Entity {
     /** Seeds its sparks (everything visual is seeded). */
     seed: string,
     debug: Debug,
+    private readonly options: LaserOptions = {},
   ) {
-    this.rng = new Rng(hashSeed('laser', seed));
-    this.look = new LaserLook(scene);
-    this.reticle = new MarkerRing(scene, '#ff4a3a', 0.1, 0.16);
+    this.rng = new Rng(hashSeed(options.cue ?? 'laser', seed));
+    this.reach = options.reach ?? laserParams.reach;
+    this.reticle = new MarkerRing(scene, options.ring ?? '#ff4a3a', 0.1, 0.16);
     this.sparks = new ParticlePool(scene, true, RENDER_ORDER + 1);
     this.smoke = new ParticlePool(scene, false, RENDER_ORDER);
-    const f = debug.folder('Laser');
+    const f = options.folder === undefined ? debug.folder('Laser') : options.folder === null ? undefined : debug.folder(options.folder);
     f?.add(laserParams, 'width', 0.02, 1);
     f?.add(laserParams, 'minAngle', 0, 0.01);
     f?.add(laserParams, 'reach', 0, 6);
@@ -163,6 +203,11 @@ export class Laser implements Entity {
   /** True while it fires (held). */
   get on(): boolean {
     return this.firing;
+  }
+
+  /** How many beams reach the spot now (for tests; 1 for the laser while it fires at something). */
+  get beamCount(): number {
+    return this.firing ? this.beams : 0;
   }
 
   /** How many animals and plants it has killed on this visit, and how many are still burning (for tests). */
@@ -188,7 +233,10 @@ export class Laser implements Entity {
     if (reason !== null) return { available: false, hint: '', reason };
     if (!this._armed) return { available: true, hint: '' };
     if (this.noteTime > 0) return { available: true, hint: this.note };
-    if (this.firing) return { available: true, hint: 'Hold it on animals and plants to burn them' };
+    const hints = this.options.hints;
+    if (this.firing && this.beams === 0) return { available: true, hint: hints?.unseen ?? 'Nothing can reach that spot' };
+    if (this.firing) return { available: true, hint: hints?.firing ?? 'Hold it on animals and plants to burn them' };
+    if (hints) return { available: true, hint: hints.ready(this.input.touchMode) };
     return { available: true, hint: this.input.touchMode ? 'Touch and hold to fire the laser' : 'Click and hold to fire the laser' };
   }
 
@@ -209,13 +257,25 @@ export class Laser implements Entity {
     if (this.firing) {
       const { pointer } = this.input;
       if (pointer.inside) this.aimAt(pointer.ndcX, pointer.ndcY);
-      this.hit();
-      this.throwSparks(dt);
+      this.beams = this.findSources();
+      const stop = this.beams > 0 ? (this.options.pay?.(dt) ?? null) : null;
+      if (stop !== null) {
+        this.say(stop);
+        this.stop();
+      } else if (this.beams > 0) {
+        this.hit();
+        this.throwSparks(dt);
+        this.options.ground?.(this.foot, dt);
+      }
     }
     for (let i = this.deaths.length - 1; i >= 0; i--) this.burnAway(this.deaths[i]!, i, dt);
     this.aim(frameDt);
-    if (this.firing) this.look.show(this.muzzle, this.foot, this.camera, frameDt);
-    else this.look.hide();
+    const shown = this.firing ? this.beams : 0;
+    while (this.looks.length < shown) this.looks.push(this.newLook());
+    for (let i = 0; i < this.looks.length; i++) {
+      if (i < shown) this.looks[i]!.show(this.sources[i]!, this.foot, this.camera, frameDt);
+      else this.looks[i]!.hide();
+    }
     const height = this.canvas?.height ?? 720;
     this.sparks.setView(height, this.camera.fov);
     this.smoke.setView(height, this.camera.fov);
@@ -232,7 +292,7 @@ export class Laser implements Entity {
   dispose(): void {
     this.clear();
     this.arm(false);
-    this.look.dispose();
+    for (const look of this.looks) look.dispose();
     this.reticle.dispose();
     this.sparks.dispose();
     this.smoke.dispose();
@@ -240,11 +300,27 @@ export class Laser implements Entity {
 
   private start(): void {
     this.firing = true;
-    this.sound = this.sfx.start('laserBeam');
+    this.beams = this.findSources();
+    this.sound = this.sfx.start(this.options.cue ?? 'laserBeam');
+  }
+
+  private newLook(): LaserLook {
+    const { core, glow, width } = this.options;
+    return new LaserLook(this.scene, core ? new THREE.Color(core) : CORE_COLOR, glow ? new THREE.Color(glow) : GLOW_COLOR, width ?? 1);
+  }
+
+  /** Where the beams come from now (the ship's underside, or the options' sources); how many reach the spot. */
+  private findSources(): number {
+    if (!this.options.sources) {
+      this.sources[0]!.copy(this.muzzle);
+      return 1;
+    }
+    return Math.min(MAX_BEAMS, this.options.sources(this.foot, this.sources));
   }
 
   private stop(): void {
     this.firing = false;
+    this.beams = 0;
     this.sound?.stop();
     this.sound = null;
   }
@@ -277,11 +353,12 @@ export class Laser implements Entity {
   /** Kills what the beam touches now: the first thing along it, and anything round where it meets the ground. */
   private hit(): void {
     const { animals, plants, plantings } = this.targets;
-    // Along the beam itself, from the ship to its end.
-    this.raycaster.ray.origin.copy(this.muzzle);
-    this.raycaster.ray.direction.subVectors(this.foot, this.muzzle);
-    const length = this.raycaster.ray.direction.length();
-    if (length > 1e-6) {
+    // Along each beam itself, from where it comes from to its end.
+    for (let i = 0; i < this.beams; i++) {
+      this.raycaster.ray.origin.copy(this.sources[i]!);
+      this.raycaster.ray.direction.subVectors(this.foot, this.sources[i]!);
+      const length = this.raycaster.ray.direction.length();
+      if (length <= 1e-6) continue;
       this.raycaster.ray.direction.divideScalar(length);
       const reach = length + GROUND_SLACK;
       const animal = animals?.pick(this.raycaster.ray, reach) ?? null;
@@ -291,7 +368,7 @@ export class Laser implements Entity {
       const planted = plantings?.pick(this.raycaster.ray, reach) ?? null;
       if (planted) this.kill('planted', planted.id);
     }
-    const r = laserParams.reach;
+    const r = this.reach;
     if (r <= 0) return;
     animals?.within(this.ground, r, this.killAnimal);
     plants?.within(this.ground, r, this.killGrown);
@@ -435,7 +512,7 @@ export class Laser implements Entity {
     }
     this.up.copy(this.ground).normalize();
     this.v.copy(this.ground).addScaledVector(this.up, 0.3);
-    const size = Math.max(laserParams.reach, this.camera.position.distanceTo(this.v) * 0.015);
+    const size = Math.max(this.reach, this.camera.position.distanceTo(this.v) * 0.015);
     this.reticle.place(this.v, size, 0.9, this.up, frameDt);
   }
 
@@ -535,6 +612,8 @@ export class LaserLook {
     private readonly scene: THREE.Scene,
     core: THREE.Color = CORE_COLOR,
     glow: THREE.Color = GLOW_COLOR,
+    /** Drawn this much wider than the laser. */
+    private readonly widthScale = 1,
   ) {
     const material = (color: THREE.Color, sharp: number) =>
       new THREE.ShaderMaterial({
@@ -570,7 +649,7 @@ export class LaserLook {
     this.axis.divideScalar(Math.max(length, 1e-6));
     this.middle.lerpVectors(from, to, 0.5);
     // Wide enough to see from afar: by its distance from the camera at its middle and nearest end.
-    const width = laserWidth(Math.min(camera.position.distanceTo(this.middle), camera.position.distanceTo(to)));
+    const width = this.widthScale * laserWidth(Math.min(camera.position.distanceTo(this.middle), camera.position.distanceTo(to)));
     const flicker = 0.9 + 0.1 * Math.sin(this.time * 61) * Math.sin(this.time * 23);
     for (const [mesh, w] of [
       [this.core, width],

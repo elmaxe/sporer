@@ -168,6 +168,25 @@ Two physical numbers, the rest gameplay tunables (`terraform/rays.ts` `rayParams
 - **Ice caps on land** follow the snow line the green worlds' ground already uses (`snowTemperature`: 0 °C at the equator, 7 K colder at the poles, Ohmura et al. 1992), limited by the water there is to make them (`CAP_PER_WATER`, a tunable: water 0.1 can ice the poles from ~65°).
 - **The rays' rates** are tunables, not physics: the heat rays move the temperature a world settles at by `kelvinPerSecond` (3.5 K) a second through the energy it takes (dT_s/dF = T_s / 4F at fixed optical depth, which is exact for the grey model's T_s ∝ F^¼); the air rays add or take 75% of the air a second, compounding (a factor of √10 of pressure, one cell of the chart, in ~2 s); the water ray 3% of a global ocean a second.
 
+## Phase 3: heat and light (step 42)
+
+Sources, accessed 2026-10-06:
+
+- **Zubrin & McKay 1993** (above), on orbital mirrors: "a space-based mirror with a radius of 125 km could reflect enough sunlight to raise the entire area south of 70 degrees south latitude by 5 K"; "If made of solar sail type aluminized mylar material with a density of 4 tonnes/km2, such a sail would have a mass of 200,000 tonnes"; "if stationed near Mars, such a device would not have to orbit the planet. Rather, solar light pressure could be made to balance the planet's gravity, allowing it to hover as a 'statite'"; "For the sail density assumed, the required operating altitude would be 214,000 km." (Check: π × 125² km² × 4 t/km² = 196 000 t, computed.)
+- **Birch 1991**, "Terraforming Venus quickly", JBIS 44:157, as summarised in Wikipedia's *Terraforming of Venus* (the paper itself was not reachable): "a slatted system of mirrors near the L1 point between Venus and the Sun", whose "panels would not be perpendicular to the Sun's rays, but instead at an angle of 30 degrees, such that the reflected light would strike the next panel, negating the photon pressure"; a plain shade at L1 "would be four times the diameter of Venus itself", and light pressure would push a flat one out of place.
+- Aerosols: Pinatubo, as in phase 1's sources above.
+
+Measurements and choices (`terraform/light.ts`, `tests/terraformLight.test.ts`):
+
+- **Mirror size.** A flat mirror facing the star intercepts the light of its own area, so adding a share k of a body's starlight takes π r² = k π R², r = R √k: Zubrin's 125 km mirror is (125/3390)² = 0.14% of Mars's light (computed); the game's +25% mirror is a sail of half the body's radius (Mars: 1695 km, 36 million tonnes of their mylar, computed). The views draw each sail that big (tilted to its aim, r = R √(k / cos i), `sailRadius`). Stylised: the sails stand 2.6 body radii out over the day side, not at 214 000 km.
+- **Mirrors and the shade together.** The shade is far sunward of the mirrors, so it shades them too: starlight = (1 + k·mirrors)(1 − shade). Each use writes the change in `starlight` that takes the log from the old product to the new one, so the log's sum is always the product exactly, in any order (tested).
+- **One slatted shade**, not the design's two: it closes and opens in steps of 10% up to 70% (Real, the design's limit), 90% (Relaxed) or 95% (Sandbox). Drawn as a slatted disc 4 radii sunward, 1.6 radii wide (stylised: Birch's slats, as near as both views can show it).
+- **Venus with its CO₂ replaced** (1 bar N₂–O₂, water 0.6; measured with `gen/climate.ts`): shade 0 → 70.4 °C, 30% → 41.1 °C, 50% → 15.7 °C, 70% → −18.9 °C. The design's "30–50%" holds.
+- **Aerosol rate.** A second of spray adds reflectance 0.02 (one Pinatubo: optical depth 0.15, r ≈ 0.017–0.025, phase 1). Earth (measured): r 0 → 19.0 °C, 0.02 → 17.9 °C, 0.1 → 13.2 °C, 0.2 → 6.7 °C, 0.4 → −9.1 °C, 0.6 → −31.1 °C (the cap). It needs at least 0.01 bar of air to hold it up (a tunable: sulphate falls out of a vacuum), and it rains out with phase 1's half-life.
+- **The haze's look** is the atmosphere shader's at optical depth r / 0.14 (the middle of phase 1's r ≈ 0.11–0.17 τ), on a stratospheric shell, with red dusks (sulphate hazes redden sunsets).
+- **Brightness.** Low orbit draws the sunlight √starlight bright (0.25–2): stylised, so ×2 is brighter without blowing out and ×0.3 dimmer without going black.
+- Tunables, not physics: deploy and recall times (8 s, 4 s), the shade's step time (4 s), the costs (mirror 150, whole shade 400, spray and lance 6/s, × the surface area, half given back on recall), and the mode limits (mirrors 4 / 6 / 12).
+
 ## Open questions
 
 - **CO₂ between 3 and 90 bar** is only pinned at its ends: Wordsworth & Pierrehumbert's ocean Earth gives 412 K at 8.6 bar and 481 K at 48 bar under a clear sky, where the fit (with their 0.23 albedo and no clouds) gives 438 K and 674 K. Their profiles include an upper atmosphere that is free to cool and water vapour; the game's grey model doesn't. Generated Venuses of 14–90 bar came out 73 K warmer (median); they were T0 and still are.
@@ -176,4 +195,6 @@ Two physical numbers, the rest gameplay tunables (`terraform/rays.ts` `rayParams
 - **Titan's haze** still appears on any nitrogen air of 0.5 bar or more, with or without the methane that really makes it.
 - **The Venus deck** in reality depends on SO₂ and a dry surface (Loftus et al. 2019), not pressure. A terraformed Venus with oceans would lose it; not modelled.
 - **CO₂ at trace levels** is linear in this grey model (its real forcing is logarithmic), so Earth's 420 ppm is counted inside the trace greenhouse rather than as CO₂.
+- **The mirror lance** only burns (the laser's fates). Melting ice into water and subliming caps waits for frozen volatiles (phase 6).
+- **The system view** shows the sails and the shade but doesn't brighten or dim the body's day side (low orbit does).
 - **Super-greenhouse gases** (phase 4): Marinova et al. 2005 give C₃F₈ 0.56 K at 10⁻³ Pa and 33.5 K at 1 Pa on Mars (strongly sublinear); lifetimes CF₄ 50 000 yr, C₂F₆ 10 000, C₃F₈ 2 600, SF₆ 3 200 (IPCC AR5 table 8.A.1; Schwieterman et al. 2024 put SF₆ nearer 1 000). Their dependence on the background pressure wasn't found (Marinova's full text was not reachable).

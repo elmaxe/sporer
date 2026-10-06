@@ -1,4 +1,5 @@
 import { GASES, SIGMA, climateState, evaluateClimate, type ClimateData, type Gas } from '../gen/climate';
+import type { MirrorWay, ShadeWay } from './light';
 import { TERRAFORM_TUNING, applyLever, radiusFromSetting, type Lever, type TerraformAction, type TerraformMode, type TerraformTimeline } from '../gen/terraform';
 
 /*
@@ -22,13 +23,19 @@ export const RAYS: readonly RayId[] = ['heatRay', 'coolRay', 'airRay', 'vacuumRa
 /** Whether the water ray adds water (rain) or takes it away (steam). */
 export type WaterWay = 'add' | 'take';
 
-/** What the player picked for the rays that need it: the gas the air and vacuum rays move, and which way the water ray works. */
+/**
+ * What the player picked for the tools that need it: the gas the air and
+ * vacuum rays move, which way the water ray works, whether the mirror tool
+ * deploys or recalls, and whether the sunshade tool closes or opens.
+ */
 export interface RayChoice {
   gas: Gas;
   water: WaterWay;
+  mirror: MirrorWay;
+  shade: ShadeWay;
 }
 
-export const DEFAULT_RAY_CHOICE: RayChoice = { gas: 'n2', water: 'add' };
+export const DEFAULT_RAY_CHOICE: RayChoice = { gas: 'n2', water: 'add', mirror: 'deploy', shade: 'close' };
 
 export const rayParams = {
   /** The heat and cool rays: kelvin a second of holding moves the temperature the world settles at (at the body's present state). */
@@ -76,7 +83,7 @@ export function heatForKelvin(climate: Pick<ClimateData, 'equilibriumTemperature
  * rays): the air and vacuum rays move `choice.gas`, the water ray adds or
  * takes as `choice.water` says.
  */
-export function rayEffect(ray: RayId, climate: ClimateData, choice: RayChoice): RayEffect {
+export function rayEffect(ray: RayId, climate: ClimateData, choice: Pick<RayChoice, 'gas' | 'water'>): RayEffect {
   const k = rayParams.speed;
   switch (ray) {
     case 'heatRay':
@@ -98,7 +105,7 @@ export function rayEffect(ray: RayId, climate: ClimateData, choice: RayChoice): 
 }
 
 /** Why a ray can't do anything here now (nothing left to take), or null. */
-export function rayBlocked(ray: RayId, climate: ClimateData, choice: RayChoice): string | null {
+export function rayBlocked(ray: RayId, climate: ClimateData, choice: Pick<RayChoice, 'gas' | 'water'>): string | null {
   if (ray === 'vacuumRay' && !(climate.gases[choice.gas] > 1e-7)) return `No ${GAS_NAME[choice.gas]} left here to take`;
   if (ray === 'waterRay' && choice.water === 'take' && !(climate.water > 0)) return 'No water left here to take';
   if (ray === 'waterRay' && choice.water === 'add' && climate.water >= 1) return 'The world is all ocean already';
@@ -126,7 +133,7 @@ export function nextGas(gas: Gas): Gas {
  * state settles at now) with the ray's change added. Leaks and aerosols
  * aside, as the target is.
  */
-export function forecastClimate(target: ClimateData, ray: RayId, choice: RayChoice, seconds: number): ClimateData {
+export function forecastClimate(target: ClimateData, ray: RayId, choice: Pick<RayChoice, 'gas' | 'water'>, seconds: number): ClimateData {
   const state = climateState(target);
   let effect = rayEffect(ray, target, choice);
   // The gas rays compound second by second, as they're held.
@@ -144,7 +151,7 @@ export function forecastClimate(target: ClimateData, ray: RayId, choice: RayChoi
  * in low orbit writes them), recorded into `timeline` as it goes. For the
  * planet lab's buttons and tests.
  */
-export function holdRay(timeline: TerraformTimeline, start: number, seconds: number, ray: RayId, choice: RayChoice, mode: TerraformMode): TerraformAction[] {
+export function holdRay(timeline: TerraformTimeline, start: number, seconds: number, ray: RayId, choice: Pick<RayChoice, 'gas' | 'water'>, mode: TerraformMode): TerraformAction[] {
   const out: TerraformAction[] = [];
   const spread = TERRAFORM_TUNING[mode].spreadTime;
   for (let s = 0; s < seconds - 1e-9; s++) {

@@ -148,7 +148,7 @@ describe('cueParams', () => {
     for (const cue of SOUND_CUES) {
       const spec = cueParams[cue];
       const ambient = (AMBIENT_CUES as readonly string[]).includes(cue);
-      expect(spec.loop).toBe(ambient || cue === 'systemTravel' || cue === 'interstellarTravel' || cue === 'busterFlight' || cue === 'abductBeam' || cue === 'exportBeam' || cue === 'laserBeam' || cue === 'magicRay');
+      expect(spec.loop).toBe(ambient || cue === 'systemTravel' || cue === 'interstellarTravel' || cue === 'busterFlight' || cue === 'abductBeam' || cue === 'exportBeam' || cue === 'laserBeam' || cue === 'magicRay' || cue === 'mirrorLance' || cue === 'aerosolSpray');
       expect(spec.channel).toBe(ambient ? 'ambience' : 'sfx');
     }
   });

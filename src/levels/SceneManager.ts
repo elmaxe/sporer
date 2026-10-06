@@ -34,6 +34,8 @@ import {
   type SeamlessZoom,
 } from './seamlessZoom';
 import { ARRIVAL_DISTANCE, SystemLevel } from './SystemLevel';
+import { SystemRigs } from '../terraform/SystemRigs';
+import { installationsAt } from '../terraform/light';
 import { Terraforming, type TerraformBody } from '../terraform/Terraforming';
 import type { TerraformMode } from '../gen/terraform';
 
@@ -112,6 +114,8 @@ export class SceneManager implements Entity {
   readonly terraforming: Terraforming;
   /** The current system's solid bodies, as terraforming knows them, for their live looks. */
   private liveBodies: { body: Planet; terraform: TerraformBody }[] = [];
+  /** The mirrors and sunshades over the current system's bodies. */
+  private rigs: SystemRigs | null = null;
   private sinceLive = 0;
   private liveVersion = -1;
   private seamless: SeamlessTransition | null = null;
@@ -179,6 +183,11 @@ export class SceneManager implements Entity {
   /** The ship's energy (terraforming's). */
   get energy(): Terraforming['energy'] {
     return this.terraforming.energy;
+  }
+
+  /** The current system's mirrors and sunshades (tests). */
+  get systemRigs(): SystemRigs | null {
+    return this.rigs;
   }
 
   get systemLevel(): SystemLevel {
@@ -562,6 +571,7 @@ export class SceneManager implements Entity {
       if (body.busted || !t.touched(terraform.key)) continue;
       const climate = t.snapshot(terraform)!.climate;
       body.setLive(climate);
+      this.rigs?.set(body, installationsAt(t.logs.actions(terraform.key), t.time));
       t.checkMilestones(terraform, climate);
     }
   }
@@ -622,6 +632,8 @@ export class SceneManager implements Entity {
     this.liveBodies = [...level.world.planets, ...level.world.moons]
       .filter((body) => body.config.climate && !isGas(body.config))
       .map((body) => ({ body, terraform: terraformBody(body) }));
+    // After the camera (its glints face it).
+    this.rigs = level.add(new SystemRigs(level.world, camera, () => this.terraforming.time));
     this.updateLive(this.liveBodies);
     // Remember the system in the URL, so a reload comes back here.
     const url = new URL(location.href);

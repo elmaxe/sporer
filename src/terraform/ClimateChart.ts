@@ -16,8 +16,10 @@ export interface ChartData {
   leak: number;
   /** The body's milestones so far, oldest first. */
   milestones: readonly MilestoneEvent[];
-  /** Shows the gas and water pickers (a gas or water ray is selected). */
-  picker: 'gas' | 'water' | null;
+  /** Shows a picker: the gas (a gas ray is selected), rain or steam (the water ray), deploy or recall (the mirror), close or open (the sunshade). */
+  picker: 'gas' | 'water' | 'mirror' | 'shade' | null;
+  /** What stays over the world: its mirrors, shade, starlight and haze ('' for nothing; terraform/light.ts describeInstallations). */
+  projects?: string;
 }
 
 const WIDTH = 288;
@@ -33,8 +35,8 @@ export const CHART_REFRESH = 0.15;
  * tipping points; the world as a dot, a ghost dot where it's settling and
  * how long that takes, an arrow where the selected ray would take it; under
  * it the tier's lamps, a stacked bar of the gases, the water, the leak, the
- * last milestones, and the pickers for the air rays' gas and the water
- * ray's way. Laid out by terraform/chart.ts. A DOM panel made here.
+ * mirrors, shade and haze over it, the last milestones, and the pickers
+ * for the air rays' gas, the water ray's way, the mirror's and the shade's. Laid out by terraform/chart.ts. A DOM panel made here.
  */
 export class ClimateChart {
   readonly root = document.createElement('div');
@@ -49,6 +51,9 @@ export class ClimateChart {
   private readonly pickers = document.createElement('div');
   private readonly gasButtons = new Map<Gas, HTMLButtonElement>();
   private readonly waterButtons = new Map<'add' | 'take', HTMLButtonElement>();
+  private readonly mirrorButtons = new Map<'deploy' | 'recall', HTMLButtonElement>();
+  private readonly shadeButtons = new Map<'close' | 'open', HTMLButtonElement>();
+  private readonly projects = document.createElement('div');
   private readonly ctx: CanvasRenderingContext2D | null;
   private readonly point: ChartPoint = { x: 0, y: 0, offX: 0, offY: 0 };
   private readonly ghost: ChartPoint = { x: 0, y: 0, offX: 0, offY: 0 };
@@ -102,7 +107,36 @@ export class ClimateChart {
       this.waterButtons.set(way, b);
       this.pickers.append(b);
     }
-    this.root.append(this.title, this.canvas, this.line, this.lamps, this.gasBar, this.gasLabel, this.water, this.events, this.pickers);
+    for (const [way, label] of [
+      ['deploy', 'Deploy'],
+      ['recall', 'Recall'],
+    ] as const) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = label;
+      b.addEventListener('click', () => {
+        this.choice.mirror = way;
+        this.showPickers('mirror');
+      });
+      this.mirrorButtons.set(way, b);
+      this.pickers.append(b);
+    }
+    for (const [way, label] of [
+      ['close', 'Close'],
+      ['open', 'Open'],
+    ] as const) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = label;
+      b.addEventListener('click', () => {
+        this.choice.shade = way;
+        this.showPickers('shade');
+      });
+      this.shadeButtons.set(way, b);
+      this.pickers.append(b);
+    }
+    this.projects.className = 'chart-projects';
+    this.root.append(this.title, this.canvas, this.line, this.lamps, this.gasBar, this.gasLabel, this.water, this.projects, this.events, this.pickers);
     // Clicks on the panel are its own, not the world's.
     this.root.addEventListener('pointerdown', (e) => e.stopPropagation());
     parent.append(this.root);
@@ -131,6 +165,8 @@ export class ClimateChart {
     this.showGases(climate);
     const leak = d.leak > 0 ? ` · air leaking ${formatRate(d.leak)}` : '';
     this.water.textContent = `Water ${Math.round(climate.water * 100)}% · ${climate.waterState === 'none' ? 'none' : climate.waterState}${leak}`;
+    this.projects.textContent = d.projects ?? '';
+    this.projects.hidden = !d.projects;
     this.events.textContent = d.milestones
       .slice(-3)
       .map((e) => milestoneTitle(e))
@@ -167,6 +203,14 @@ export class ClimateChart {
     for (const [way, b] of this.waterButtons) {
       b.hidden = picker !== 'water';
       b.classList.toggle('on', this.choice.water === way);
+    }
+    for (const [way, b] of this.mirrorButtons) {
+      b.hidden = picker !== 'mirror';
+      b.classList.toggle('on', this.choice.mirror === way);
+    }
+    for (const [way, b] of this.shadeButtons) {
+      b.hidden = picker !== 'shade';
+      b.classList.toggle('on', this.choice.shade === way);
     }
   }
 
