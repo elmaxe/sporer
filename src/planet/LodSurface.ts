@@ -210,7 +210,7 @@ export class LodSurface {
   private readonly cornerMorph = new Float32Array(4);
   private readonly smooth: 'outlineError' | 'coastError' | null;
   private readonly renderOrder: number;
-  private readonly hiddenBelow: number;
+  private hiddenBelow: number;
   private readonly shallow: number;
 
   constructor(
@@ -218,7 +218,7 @@ export class LodSurface {
     private readonly floor: number,
     private readonly top: number,
     private readonly sample: SurfaceSampler,
-    private readonly material: THREE.Material,
+    readonly material: THREE.Material,
     { smooth = null, renderOrder = 0, hiddenBelow = -Infinity, shallow = -Infinity, name = 'Surface' }: LodSurfaceOptions = {},
   ) {
     this.smooth = smooth && `${smooth}Error`;
@@ -235,6 +235,21 @@ export class LodSurface {
       this.roots.push(root);
     }
     this.shownChanged = true;
+  }
+
+  /**
+   * Chunks wholly below `radius` aren't drawn from now on (a sea that rose or
+   * fell: terraforming); every built chunk is checked again, and the next
+   * update shows or hides them.
+   */
+  setHiddenBelow(radius: number): void {
+    if (radius === this.hiddenBelow) return;
+    this.hiddenBelow = radius;
+    const walk = (node: LodNode) => {
+      node.submerged = node.bounds.top < radius;
+      if (node.children) for (const k of node.children) walk(k);
+    };
+    for (const root of this.roots) walk(root);
   }
 
   /** True when the chunks the camera wants are all built, shown and done blending. */

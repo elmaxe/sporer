@@ -188,6 +188,17 @@ export function captureGameState(game: Game, levels: SceneManager): GameState {
       inFlight: planet?.cargo?.inFlight ?? [],
       laser: planet ? { firing: planet.laser.on, killed: planet.laser.killed, burning: planet.laser.burning } : undefined,
     },
+    terraform: {
+      data: levels.terraforming.toJSON(),
+      mode: levels.terraforming.mode,
+      here: (() => {
+        const tb = planet?.terraformBody;
+        const snap = tb ? levels.terraforming.snapshot(tb) : null;
+        if (!tb || !snap) return null;
+        const c = snap.climate;
+        return { name: tb.name, temperature: c.temperature, pressure: c.pressure, composition: c.composition, tier: c.habitability, settlesIn: snap.settlesIn };
+      })(),
+    },
     radar: {
       on: levels.switches.isOn('radar'),
       tracking: planet?.radar?.tracking ?? null,
@@ -281,6 +292,11 @@ export async function restoreGameState(game: Game, levels: SceneManager, state: 
       changes.addVolcano(site);
       body.addVolcano(site, null);
     }
+  }
+  // Terraforming before anything is built from it (the system view's bodies follow it at once, low orbit as it's built).
+  if (state.terraform) {
+    levels.terraforming.load(state.terraform.data);
+    if (state.terraform.mode !== levels.terraforming.mode) notes.push(`terraforming was played ${state.terraform.mode}: restored in this page's setting (${levels.terraforming.mode})`);
   }
   if (state.cargo) {
     levels.inventory.load(state.cargo.inventory);

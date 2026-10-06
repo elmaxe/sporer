@@ -26,6 +26,9 @@ import { CLOUD_RENDER_ORDER } from './weatherLook';
 import { DEBRIS_REACH, debrisLookFor } from '../gen/debris';
 import { DEBRIS_FAR, DebrisField } from './DebrisField';
 import { realSurface } from '../gen/realSurface';
+import { NEW_SEA_COLOR, airKey, liveAtmosphereColor, quantile, seaCoverage, shareBelow, weatherKey } from '../terraform/liveLook';
+import { applyLiveSurface, createLiveSurfaceUniforms, setLiveIce, type LiveSurfaceUniforms } from './liveSurface';
+import type { GroundLook } from './groundLook';
 
 /** What the renderer needs; generated PlanetData and MoonData both satisfy it. */
 export interface PlanetConfig {
@@ -122,7 +125,7 @@ export class Planet implements Entity, CelestialBody {
   readonly object = new THREE.Group();
   readonly position = new THREE.Vector3();
   readonly velocity = new THREE.Vector3();
-  private readonly climateLine: string | undefined;
+  private climateLine: string | undefined;
   /** Picked as a sphere this big when it's more than the body (a comet's coma); else its radius. */
   pickRadius: number | undefined = undefined;
   /**
@@ -138,8 +141,13 @@ export class Planet implements Entity, CelestialBody {
   readonly gas: GasLook | null;
   /** Icy bodies: snow, glacier ice, frozen seas and lineae. */
   private readonly ice: IceLook | null;
-  /** Bodies with weather: the clouds, storms and lightning (see gen/weather.ts). */
-  readonly weather: WeatherLook | null;
+  /** Bodies with weather: the clouds, storms and lightning (see gen/weather.ts). Rebuilt as a terraformed climate changes it. */
+  weather: WeatherLook | null;
+  /** Its cloud layer (on the surface, turning with it). */
+  private clouds: THREE.Group | null = null;
+  private readonly groundLook: GroundLook | null = null;
+  /** Once terraformed (`setLive`): the climate now, its seas' and ice's uniforms, its vertices' radii (sorted), the generated sea's share. */
+  private live: { climate: ClimateData; uniforms: LiveSurfaceUniforms; radii: Float64Array; baseCoverage: number; airKey: string; weatherKey: string } | null = null;
   private readonly body: RAPIER.RigidBody;
   private readonly prev = new THREE.Vector3();
   private readonly parentPosition = new THREE.Vector3();
@@ -147,7 +155,7 @@ export class Planet implements Entity, CelestialBody {
   private readonly whole: string;
   /** Holds the surface and rings, leaning with the axis. */
   private readonly tilted = new THREE.Group();
-  private readonly atmosphere: THREE.Object3D | null = null;
+  private atmosphere: THREE.Object3D | null = null;
   /** Once busted by a planet buster: its debris and the system time of the blast. */
   private debris: DebrisField | null = null;
   private blastTime = 0;
@@ -189,12 +197,12 @@ export class Planet implements Entity, CelestialBody {
     this.ice = gas ? null : createIceLook(config);
     this.ice?.applyGround(this.surface.material, radius, radius * style.relief, true, PLANET_SCALE);
     // Green worlds' grass, soil, sand, rock and snow, as low orbit draws them, averaged.
-    if (!gas) createGroundLook(config)?.apply(this.surface.material, radius, radius * style.relief, PLANET_SCALE, false);
+    if (!gas) (this.groundLook = createGroundLook(config))?.apply(this.surface.material, radius, radius * style.relief, PLANET_SCALE, false);
     this.gas = createGasLook(config);
     this.gas?.apply(this.surface.material);
     // Clouds turn with the ground; the same layer as low orbit's, in planet radii.
     this.weather = gas ? null : createWeatherLook(config, this.lava?.activity ?? null);
-    if (this.weather) this.surface.add(this.weather.createCloudLayer(radius / globeRadius(radius), CLOUD_SEGMENTS, sun));
+    if (this.weather) this.surface.add((this.clouds = this.weather.createCloudLayer(radius / globeRadius(radius), CLOUD_SEGMENTS, sun)));
 
     // The tilted group holds everything aligned with the equator: surface and rings.
     const tilted = this.tilted;
@@ -261,6 +269,95 @@ export class Planet implements Entity, CelestialBody {
     const { config } = this;
     this.debris = new DebrisField(config.seed, config.style, config.bands, config.radius, DEBRIS_FAR, this.sun, debrisLookFor(config));
     this.tilted.add(this.debris.object);
+  }
+
+  /** Its climate now: a terraformed one's (`setLive`), else as generated. */
+  get climate(): ClimateData | null {
+    return this.live?.climate ?? this.config.climate ?? null;
+  }
+
+  /** Its config as it is now: a terraformed body's climate and atmosphere colour. */
+  get liveConfig(): PlanetConfig {
+    const climate = this.live?.climate;
+    return climate ? { ...this.config, climate, atmosphere: liveAtmosphereColor(this.config, climate) } : this.config;
+  }
+
+  /**
+   * Follows a terraformed climate (terraform/liveLook.ts), as low orbit's
+   * globe does: the tooltip's line, the atmosphere, the weather, the sea
+   * (the terrain under its level flooded flat to it), sea ice and ice caps.
+   * The first call rebuilds the terrain with a sea floor under any sea (so
+   * a falling sea shows it) and prepares its material.
+   */
+  setLive(climate: ClimateData): void {
+    if (this.debris || isGas(this.config) || !this.config.climate) return;
+    const config = this.config;
+    const live = (this.live ??= this.goLive(climate));
+    live.climate = climate;
+    this.climateLine = describeClimate(climate) + (config.life ? ` · ${describeLife(config.life)}` : '');
+    const u = live.uniforms;
+    if (!this.lava && !config.shape) {
+      const coverage = seaCoverage(live.baseCoverage, config.climate!.water, climate);
+      u.uLiveSeaR.value = coverage > 0 ? Math.max(quantile(live.radii, coverage), live.radii[0]! + 1e-4) : 0;
+    }
+    setLiveIce(u, climate, config.type === 'barren' || config.type === 'desert');
+    this.groundLook?.setTemperature(climate.temperature);
+    const body = this.liveConfig;
+    const air = airKey(config, climate);
+    if (air !== live.airKey) {
+      live.airKey = air;
+      if (this.atmosphere) {
+        this.object.remove(this.atmosphere);
+        disposeObject(this.atmosphere);
+        this.atmosphere = null;
+      }
+      const look = body.atmosphere ? atmosphereLook(climate, config.radius) : null;
+      if (look) this.object.add((this.atmosphere = createAtmosphere(config.radius, body.atmosphere!, look, this.sun)));
+    }
+    const weather = weatherKey(config, climate);
+    if (weather !== live.weatherKey) {
+      live.weatherKey = weather;
+      if (this.clouds) {
+        this.surface.remove(this.clouds);
+        disposeObject(this.clouds);
+        this.clouds = null;
+      }
+      this.weather = createWeatherLook(body, this.lava?.activity ?? null);
+      if (this.weather) this.surface.add((this.clouds = this.weather.createCloudLayer(config.radius / globeRadius(config.radius), CLOUD_SEGMENTS, this.sun)));
+    }
+  }
+
+  private goLive(climate: ClimateData): NonNullable<Planet['live']> {
+    const { config } = this;
+    const uniforms = createLiveSurfaceUniforms();
+    const waterSea = config.style.sea !== null && !this.lava && !config.shape;
+    if (waterSea) {
+      // A sea floor under the sea, so the sea can fall (and the flood fills it back to the level).
+      const old = this.surface.geometry;
+      this.surface.geometry = createTerrainGeometry(config.radius, config.seed, config.style, {
+        segments: terrainSegments(config, false),
+        noise: surfaceNoise(config, false),
+        seaFloor: true,
+      });
+      old.dispose();
+    }
+    const pos = this.surface.geometry.getAttribute('position') as THREE.BufferAttribute;
+    const radii = new Float64Array(pos.count);
+    const v = new THREE.Vector3();
+    for (let i = 0; i < pos.count; i++) radii[i] = v.fromBufferAttribute(pos, i).length();
+    radii.sort();
+    uniforms.uLiveSeaColor.value.set(config.style.sea ?? NEW_SEA_COLOR);
+    uniforms.uLiveIceBase.value = config.type === 'ice' ? 1 : 0;
+    applyLiveSurface(this.surface.material, 'flood', uniforms);
+    const base = config.climate!;
+    return {
+      climate,
+      uniforms,
+      radii,
+      baseCoverage: waterSea ? shareBelow(radii, config.radius * (1 - 1e-6)) : 0,
+      airKey: airKey(config, base),
+      weatherKey: weatherKey(config, base),
+    };
   }
 
   get renderPosition(): THREE.Vector3 {
@@ -432,6 +529,16 @@ export class Planet implements Entity, CelestialBody {
     });
     this.physics.world.removeRigidBody(this.body);
   }
+}
+
+/** Disposes a mesh's or group's geometries and materials. */
+function disposeObject(object: THREE.Object3D): void {
+  object.traverse((o) => {
+    if (o instanceof THREE.Mesh) {
+      o.geometry.dispose();
+      (o.material as THREE.Material).dispose();
+    }
+  });
 }
 
 /**

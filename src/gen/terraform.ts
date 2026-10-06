@@ -154,7 +154,7 @@ function actionEnd(action: TerraformAction, spread: number): number {
   return action.start + action.duration + (isGas(action.lever) ? spread : 0);
 }
 
-function isGas(lever: Lever): lever is Gas {
+export function isGas(lever: Lever): lever is Gas {
   return (GASES as readonly string[]).includes(lever);
 }
 
@@ -297,7 +297,8 @@ export class TerraformTimeline {
       const a = this.modes[i];
       const b = next[i];
       if (a?.time !== b?.time || a?.mode !== b?.mode) {
-        from = Math.min(a?.time ?? Infinity, b?.time ?? Infinity);
+        // Before the first change its mode holds (modeAt): a new first change reaches back to the start.
+        from = i === 0 ? -Infinity : Math.min(a?.time ?? Infinity, b?.time ?? Infinity);
         break;
       }
     }
@@ -361,7 +362,7 @@ export class TerraformTimeline {
       const spread = isGas(action.lever) ? tuning.spreadTime : 0;
       if (actionEnd(action, spread) < from.time) continue;
       const change = delivered(action, t1, spread) - delivered(action, from.time, spread);
-      apply(s, action.lever, change);
+      applyLever(s, action.lever, change);
     }
 
     s.aerosol *= 0.5 ** (dt / tuning.aerosolHalfLife);
@@ -375,8 +376,8 @@ export class TerraformTimeline {
   }
 }
 
-/** Moves a lever of `s` by `change`, within its bounds. */
-function apply(s: ClimateState, lever: Lever, change: number): void {
+/** Moves a lever of `s` by `change`, within its bounds (changes `s`). */
+export function applyLever(s: ClimateState, lever: Lever, change: number): void {
   switch (lever) {
     case 'greenhouse':
       s.greenhouse = Math.max(0, s.greenhouse + change);
@@ -461,11 +462,15 @@ export interface TerraformLogsData {
 /**
  * Every body's action log and the game's mode changes, kept for the whole
  * game (levels are rebuilt on each visit, the logs stay). JSON-able for
- * save/load and the debug dump.
+ * save/load and the debug dump. `timeline(key, base)` keeps one timeline per
+ * body in step with its log (its checkpoints too), so the climate now is
+ * cheap to ask for every frame.
  */
 export class TerraformLogs {
   private readonly bodies = new Map<string, TerraformAction[]>();
   private readonly modeChanges: ModeChange[] = [];
+  private readonly timelines = new Map<string, TerraformTimeline>();
+  private _version = 0;
 
   /** A body's actions (empty if it was never touched). */
   actions(key: string): readonly TerraformAction[] {
@@ -476,17 +481,42 @@ export class TerraformLogs {
     return this.modeChanges;
   }
 
+  /** Goes up with every change (a recorded or grown action, a mode change). */
+  get version(): number {
+    return this._version;
+  }
+
   /** Bodies with actions. */
   keys(): string[] {
     return [...this.bodies.keys()];
   }
 
-  record(key: string, action: TerraformAction): void {
+  /** True if anything was ever done to the body. */
+  touched(key: string): boolean {
+    return (this.bodies.get(key)?.length ?? 0) > 0;
+  }
+
+  /** Adds an action to a body's log; returns its index there (for `update`, while it's still going on). */
+  record(key: string, action: TerraformAction): number {
     const list = this.bodies.get(key) ?? [];
     let i = list.length;
     while (i > 0 && list[i - 1]!.start > action.start) i--;
     list.splice(i, 0, { ...action });
     this.bodies.set(key, list);
+    this.timelines.get(key)?.record(action);
+    this._version++;
+    return i;
+  }
+
+  /** Changes the action at `index` of a body's log (a ray still held: its duration and amount grow), keeping its start. */
+  update(key: string, index: number, action: TerraformAction): void {
+    const list = this.bodies.get(key);
+    const old = list?.[index];
+    if (!list || !old) return;
+    const next = { ...action, start: old.start };
+    list[index] = next;
+    this.timelines.get(key)?.update(this.timelines.get(key)!.log.findIndex((a) => sameAction(a, old)), next);
+    this._version++;
   }
 
   /** Switches the mode from `time` on (a no-op if it's the mode already in force). */
@@ -494,6 +524,28 @@ export class TerraformLogs {
     if (modeAt(this.modeChanges, time) === mode && this.modeChanges.length > 0) return;
     this.modeChanges.push({ time, mode });
     this.modeChanges.sort((a, b) => a.time - b.time);
+    for (const t of this.timelines.values()) t.setModes(this.modeChanges);
+    this._version++;
+  }
+
+  /** The mode in force at `time`. */
+  modeAt(time: number): TerraformMode {
+    return modeAt(this.modeChanges, time);
+  }
+
+  /** A body's timeline from its generated climate `base` (made once and kept in step with the log). */
+  timeline(key: string, base: ClimateData): TerraformTimeline {
+    let t = this.timelines.get(key);
+    if (!t) {
+      t = new TerraformTimeline(base, this.actions(key), this.modeChanges);
+      this.timelines.set(key, t);
+    }
+    return t;
+  }
+
+  /** A body's climate at game time `time`, from its generated climate `base`. */
+  at(key: string, base: ClimateData, time: number): TerraformSnapshot {
+    return this.timeline(key, base).at(time);
   }
 
   toJSON(): TerraformLogsData {
@@ -505,9 +557,39 @@ export class TerraformLogs {
 
   static fromJSON(data: TerraformLogsData): TerraformLogs {
     const logs = new TerraformLogs();
-    for (const [key, actions] of Object.entries(data.bodies ?? {})) for (const a of actions) logs.record(key, a);
-    for (const m of data.modes ?? []) logs.modeChanges.push({ ...m });
-    logs.modeChanges.sort((a, b) => a.time - b.time);
+    logs.load(data);
     return logs;
   }
+
+  /** Replaces everything with `data` (restoring a debug dump). */
+  load(data: TerraformLogsData): void {
+    this.bodies.clear();
+    this.timelines.clear();
+    this.modeChanges.length = 0;
+    for (const [key, actions] of Object.entries(data.bodies ?? {})) for (const a of actions) this.record(key, a);
+    for (const m of data.modes ?? []) this.modeChanges.push({ ...m });
+    this.modeChanges.sort((a, b) => a.time - b.time);
+    this._version++;
+  }
+}
+
+function sameAction(a: TerraformAction, b: TerraformAction): boolean {
+  return a.start === b.start && a.lever === b.lever && a.duration === b.duration && a.amount === b.amount;
+}
+
+/**
+ * How fast the air is leaking away now, bar per second (0 when it isn't, or
+ * in a mode without leaks): each gas's share of the excess over what the
+ * body holds, over its leak time.
+ */
+export function leakRate(climate: ClimateData, mode: TerraformMode): number {
+  const tuning = TERRAFORM_TUNING[mode];
+  if (!tuning.leaks) return 0;
+  const stable = maxStablePressure(climate.retention);
+  const p = climate.pressure;
+  if (!(p > stable)) return 0;
+  const time = leakTime(climate.retention, tuning);
+  let rate = 0;
+  for (const gas of GASES) rate += ((climate.gases[gas] * (p - stable)) / p) * (LEAK_FACTOR[gas] / time);
+  return rate;
 }

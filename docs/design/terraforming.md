@@ -1,6 +1,6 @@
 # Terraforming: design
 
-Status: **phase 1 (the model) built** (roadmap step 40: `gen/climate.ts`, `gen/terraform.ts`, `docs/research/terraforming.md`); phases 2–8 not started. This document is the plan to implement from, one roadmap step at a time (see [Phases](#phases)). Every real-world number that goes into the code still goes through the `research` skill first; the numbers here are either measured with the game's own `gen/climate.ts` (marked *measured*) or gameplay tunables (marked *tunable*). Real-world sources are listed as leads to read, not as findings.
+Status: **phases 1 and 2 built**: the model (roadmap step 40: `gen/climate.ts`, `gen/terraform.ts`, `docs/research/terraforming.md`) and the magic rays, the climate chart, the energy bar, milestones, the Sandbox / Relaxed / Real setting and the live looks (step 41: `src/terraform/`, `world/liveSurface.ts`); phases 3–8 not started. This document is the plan to implement from, one roadmap step at a time (see [Phases](#phases)). Every real-world number that goes into the code still goes through the `research` skill first; the numbers here are either measured with the game's own `gen/climate.ts` (marked *measured*) or gameplay tunables (marked *tunable*). Real-world sources are listed as leads to read, not as findings.
 
 ## The short version
 
@@ -52,14 +52,14 @@ Re-measured after phase 1 (`docs/research/terraforming.md`; greenhouse is now tr
 
 ### Things the model must fix first
 
-Measuring turned up issues that would make terraforming feel wrong. Each is a task in [phase 1](#phases); 1–5 are done (step 40, see `docs/research/terraforming.md`), 6 is phase 2:
+Measuring turned up issues that would make terraforming feel wrong. Each is a task in [phase 1](#phases); 1–5 are done (step 40, see `docs/research/terraforming.md`), 6 in phase 2 (step 41):
 
 1. ✅ **Mirrors must not change retention.** `atmosphereRetention` uses `insolation`, so raising insolation for a mirror moves a body across the shoreline (Mars at ×2 starlight becomes "escapes"). Escape is driven by the star's X-ray and UV, which a mirror doesn't add. Mirrors and shades need their own factor in the state (`starlight`) that only enters the energy balance.
 2. ✅ **CO₂ at a few bar barely warms.** CO₂'s τ ∝ P² is fitted on Venus alone, so in the model Mars with 1 bar of CO₂ warms by 0 K and with 3 bar by 6 K. Published Mars models give a much larger warming at those pressures (to research; Kasting 1991 and the early-Mars literature are the place to start). As it stands, "thicken Mars's own CO₂" is a dead end, which is wrong. Refit with a low-pressure reference.
 3. ✅ **The Venus cloud deck is a cliff.** `cloudCovered` switches the albedo from the surface's to 0.77 at exactly 10 bar of CO₂, so 10 bar is 6 °C and 9 bar is 109 °C. Real cloud decks thin out; make it a ramp over a pressure range (to research), and present what is left of the jump as a tipping point.
 4. ✅ **One gas per atmosphere.** `Composition` is a single dominant gas. Terraforming mixes them (bring N₂ to a CO₂ world, let plants turn CO₂ into O₂), so the state needs partial pressures (below). Every generated body must come out exactly as it does today (step 12 did the same: 0 differences over 1500 systems, pinned by a test).
 5. ✅ **Leaks don't happen.** Living worlds above their stable pressure are flagged `leaking` but never lose anything. Terraforming needs a leak rate.
-6. **The looks are fixed at build time.** Sea colour and level, ground colours and ice come from the planet *type* (`planetStyle`), and the atmosphere, weather and plants are built once from `config.climate`. All of them must follow the live climate.
+6. ✅ **The looks are fixed at build time.** Sea colour and level, ground colours and ice come from the planet *type* (`planetStyle`), and the atmosphere, weather and plants are built once from `config.climate`. All of them must follow the live climate.
 
 ## The model, extended
 
@@ -319,7 +319,7 @@ When energy becomes finite (its own step, after the real tools):
 Each phase is a roadmap step that leaves the game playable and is verified (`typecheck`, `test`, `build`, `smoke`) before pushing.
 
 1. ✅ **Model** (step 40): the six fixes above (`starlight`, low-pressure CO₂, the cloud ramp, partial pressures, leaks, aerosol), the action log and its integration over time, pure and tested. Every generated body unchanged (0 differences over 1500 systems). Research notes in `docs/research/terraforming.md`.
-2. **Magic rays, chart and live looks**: the Terraform tab with the five magic rays; the energy bar (infinite, costs shown); the climate chart in low orbit and the lab; seas, ice, ground, atmosphere and weather following the live climate in both views; leaks; milestones; the Sandbox / Relaxed / Real setting. The first playable version of terraforming.
+2. ✅ **Magic rays, chart and live looks** (step 41): the Terraform tab with the five magic rays; the energy bar (infinite, costs shown); the climate chart in low orbit and the lab; seas, ice, ground, atmosphere and weather following the live climate in both views; leaks; milestones; the Sandbox / Relaxed / Real setting. The first playable version of terraforming.
 3. **Heat and light**: mirrors, the mirror lance, the sunshade, aerosols.
 4. **Greenhouse**: factories and carbon sinks (placed with the beam).
 5. **Air and water**: scoop and release, tugging comets and asteroids, impacts and craters.

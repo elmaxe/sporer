@@ -20,6 +20,10 @@ import { LodSurface, addCraterDebug, addLodDebug } from './LodSurface';
 import type { RenderClock } from './PlanetFrame';
 import { RingRocks } from './RingRocks';
 import { CLEAR_SEA_RENDER_ORDER, createSeaWaves, addWaveDebug, seaClear, seaDepthFrame, waveParams, type SeaWaveLook } from '../world/seaWaves';
+import type { ClimateData } from '../gen/climate';
+import { NEW_SEA_COLOR, airKey, fibonacciDirections, liveAtmosphereColor, quantile, seaCoverage, shareBelow, weatherKey } from '../terraform/liveLook';
+import { applyLiveSurface, createLiveSurfaceUniforms, setLiveIce, type LiveSurfaceUniforms } from '../world/liveSurface';
+import type { GroundLook } from '../world/groundLook';
 
 // Mountains' exaggeration up close lives in frame.ts (the system view's clouds need it too); re-exported here.
 export { RELIEF_SCALE };
@@ -65,27 +69,39 @@ export class PlanetGlobe implements Entity {
   readonly lava: LavaLook | null;
   /** Gas and ice giants: the cloud tops (the map draws them too). */
   readonly gas: GasLook | null;
-  /** Bodies with weather: the cloud layer's look, its storms and lightning (planet/Weather.ts draws the rain and bolts). */
-  readonly weather: WeatherLook | null;
+  /** Bodies with weather: the cloud layer's look, its storms and lightning (planet/Weather.ts draws the rain and bolts). Rebuilt as a terraformed climate changes it (`setLive`). */
+  weather: WeatherLook | null;
   /** Ringed bodies: the ring's rocks and ice up close. */
   readonly rings: RingRocks | null;
   /** Icy bodies: snow, glacier ice, the frozen sea and lineae. */
   private readonly ice: IceLook | null;
   /** Water seas: the wind's waves on them. */
-  readonly waves: SeaWaveLook | null = null;
+  waves: SeaWaveLook | null = null;
 
   private readonly surface: LodSurface;
-  /** A water (or ice) sea, refined and culled like the ground. */
-  private readonly water: LodSurface | null = null;
+  /** A water (or ice) sea, refined and culled like the ground (a terraformed world may gain one). */
+  private water: LodSurface | null = null;
+  /** The radius the water sea was built at (it's scaled to the live sea level). */
+  private waterRadius = 0;
+  /** The terrain's lit material, and green worlds' ground look. */
+  private readonly material: THREE.MeshStandardMaterial;
+  private readonly groundLook: GroundLook | null;
+  /** Once terraformed (`setLive`): its seas' and ice's uniforms, the terrain's sampled radii (sorted), the generated sea's share. */
+  private live: { uniforms: LiveSurfaceUniforms; radii: Float64Array; baseCoverage: number; airKey: string; weatherKey: string } | null = null;
+  /** The live sea level (null: none); the generated one until terraformed. */
+  private seaLevel: number | null;
+  /** The atmosphere shell and the cloud layer, replaced as a terraformed climate changes them. */
+  private atmosphere: THREE.Mesh | null = null;
+  private clouds: THREE.Group | null = null;
   /** The surface as drawn: radius (and colour) in a direction. */
   private readonly sample: SurfaceSampler;
-  /** Worlds with a sea: the ground is never lower than its surface. */
+  /** Worlds with a sea as generated: the ground is never lower than its surface. */
   private readonly sea: boolean;
   /** Gas and ice giants: the ground is their cloud tops. */
   private readonly gasGiant: boolean;
   private readonly groundColor = new THREE.Color();
   /** Bodies with an atmosphere: where the ground is, so the haze stops there (see renderDepth). */
-  private readonly ground: GroundDepth | null;
+  private ground: GroundDepth | null;
   private readonly cameraPosition = new THREE.Vector3();
   /** Once busted: the radius of the debris field, which is the ground from then on. */
   private bustedRadius: number | null = null;
@@ -94,7 +110,7 @@ export class PlanetGlobe implements Entity {
 
   constructor(
     private readonly scene: THREE.Scene,
-    config: PlanetConfig,
+    private readonly config: PlanetConfig,
     private readonly frame: RenderClock,
     /** The surface refines where this camera is. */
     private readonly camera: THREE.Camera,
@@ -108,18 +124,19 @@ export class PlanetGlobe implements Entity {
     this.lava = gas ? null : createLavaLook(config, VENT_RADIUS);
 
     this.sea = seaFloor;
+    this.seaLevel = seaFloor ? R : null;
     this.gasGiant = gas;
     this.sample = gas
       ? gasSampler(R, seed, config.bands, config.size === 'iceGiant')
       : terrainSampler(R, seed, style, { noise: surfaceNoise(config, true), reliefScale: RELIEF_SCALE, seaFloor, shape: config.shape });
-    const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 });
+    const material = (this.material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 }));
     this.gas = createGasLook(config);
     this.gas?.apply(material);
     const ice = (this.ice = gas ? null : createIceLook(config));
     if (ice) addIceDebug(debug);
     ice?.applyGround(material, R, R * style.relief * RELIEF_SCALE, false);
     // Green worlds' grass, soil, sand, rock and snow.
-    const ground = gas ? null : createGroundLook(config);
+    const ground = (this.groundLook = gas ? null : createGroundLook(config));
     if (ground) addGroundDebug(debug);
     ground?.apply(material, R, R * style.relief * RELIEF_SCALE);
     this.surface = new LodSurface(gas ? R : floorRadius(R, style, RELIEF_SCALE, seaFloor, config.shape != null), this.top, this.sample, material, {
@@ -138,6 +155,7 @@ export class PlanetGlobe implements Entity {
       this.waves = createSeaWaves(config, this.sun, this.sunLight);
       if (this.waves) addWaveDebug(debug);
       this.water = createWater(config.type, style.sea!, R, this.waves, this.sample, ice?.surface.frozenSea ? ice : null);
+      this.waterRadius = R;
       this.object.add(this.water.object);
     }
     if (config.rings) {
@@ -151,9 +169,9 @@ export class PlanetGlobe implements Entity {
     // The same look as in the system view (in planet radii), so the two match across the zoom.
     const look = config.atmosphere && config.climate ? atmosphereLook(config.climate, config.radius) : null;
     this.ground = look ? new GroundDepth() : null;
-    if (look) this.object.add(createAtmosphere(R, config.atmosphere!, look, { vector: this.sun, point: false, strength: this.sunStrength }, ATMOSPHERE_SEGMENTS, this.ground));
+    if (look) this.object.add((this.atmosphere = createAtmosphere(R, config.atmosphere!, look, { vector: this.sun, point: false, strength: this.sunStrength }, ATMOSPHERE_SEGMENTS, this.ground)));
     this.weather = gas ? null : createWeatherLook(config, this.lava?.activity ?? null);
-    if (this.weather) this.object.add(this.weather.createCloudLayer(1, CLOUD_SEGMENTS, { vector: this.sun, point: false, strength: this.sunStrength }));
+    if (this.weather) this.object.add((this.clouds = this.weather.createCloudLayer(1, CLOUD_SEGMENTS, { vector: this.sun, point: false, strength: this.sunStrength })));
     scene.add(this.object);
     this.update(0);
   }
@@ -165,7 +183,7 @@ export class PlanetGlobe implements Entity {
   groundRadius(dir: THREE.Vector3): number {
     if (this.bustedRadius !== null) return this.bustedRadius;
     const r = this.sample(dir, this.groundColor) + this.liftAt(dir);
-    return this.sea ? Math.max(r, this.radius) : r;
+    return this.seaLevel !== null ? Math.max(r, this.seaLevel) : r;
   }
 
   /** How far what was raised on the ground since (volcanoes) lifts it in unit direction `dir`. */
@@ -180,9 +198,9 @@ export class PlanetGlobe implements Entity {
     return this.sample(dir, color);
   }
 
-  /** The sea's radius, or null for a world without one (or a gas giant). */
+  /** The sea's radius, or null for a world without one (or a gas giant): a terraformed world's rises and falls. */
   get seaRadius(): number | null {
-    return this.sea ? this.radius : null;
+    return this.seaLevel;
   }
 
   /**
@@ -198,7 +216,7 @@ export class PlanetGlobe implements Entity {
   /** What something falling at unit direction `dir` lands on: a giant's clouds, the sea (or the lava sea) where it covers the terrain (and any volcano raised there), or land. */
   landingAt(dir: THREE.Vector3): Landing {
     if (this.gasGiant) return 'clouds';
-    if (this.busted || !this.sea || this.sample(dir, this.groundColor) + this.liftAt(dir) >= this.radius) return 'land';
+    if (this.busted || this.seaLevel === null || this.sample(dir, this.groundColor) + this.liftAt(dir) >= this.seaLevel) return 'land';
     return this.lava ? 'lava' : 'sea';
   }
 
@@ -241,6 +259,111 @@ export class PlanetGlobe implements Entity {
     for (const child of this.object.children) child.visible = false;
   }
 
+  /**
+   * Follows a terraformed climate (terraform/liveLook.ts): the atmosphere's
+   * colour and thickness, the weather, the sea level, sea ice and ice caps.
+   * The first call prepares the materials (a recompile, once); returns true
+   * when the weather was rebuilt (the level's rain and bolts follow it).
+   */
+  setLive(climate: ClimateData): boolean {
+    if (this.busted || this.gasGiant) return false;
+    const config = this.config;
+    const live = (this.live ??= this.goLive());
+    const lavaWorld = this.lava !== null;
+    // The sea, unless it's lava.
+    if (!lavaWorld && !config.shape) {
+      const coverage = seaCoverage(live.baseCoverage, config.climate?.water ?? 0, climate);
+      this.setSeaLevel(coverage > 0 ? Math.max(quantile(live.radii, coverage), this.lowest + 1e-3) : null, climate);
+    }
+    const u = live.uniforms;
+    u.uLiveSeaR.value = this.seaLevel ?? 0;
+    setLiveIce(u, climate, config.type === 'barren' || config.type === 'desert');
+    this.groundLook?.setTemperature(climate.temperature);
+    // The air and the weather, rebuilt when they've moved on by a step.
+    const body = { ...config, climate, atmosphere: liveAtmosphereColor(config, climate) };
+    const air = airKey(config, climate);
+    if (air !== live.airKey) {
+      live.airKey = air;
+      this.setAtmosphere(body);
+    }
+    const weather = weatherKey(config, climate);
+    if (weather === live.weatherKey) return false;
+    live.weatherKey = weather;
+    if (this.clouds) {
+      this.object.remove(this.clouds);
+      disposeObject(this.clouds);
+      this.clouds = null;
+    }
+    this.weather = createWeatherLook(body, this.lava?.activity ?? null);
+    if (this.weather) this.object.add((this.clouds = this.weather.createCloudLayer(1, CLOUD_SEGMENTS, { vector: this.sun, point: false, strength: this.sunStrength })));
+    return true;
+  }
+
+  /** The lowest the terrain goes (a sea sphere under it would draw nothing). */
+  private get lowest(): number {
+    return this.live?.radii[0] ?? this.radius;
+  }
+
+  private goLive(): NonNullable<PlanetGlobe['live']> {
+    const config = this.config;
+    const uniforms = createLiveSurfaceUniforms();
+    // The terrain's radii over the whole globe: the level a share of it lies under.
+    const n = 3000;
+    const dirs = fibonacciDirections(n);
+    const radii = new Float64Array(n);
+    const dir = new THREE.Vector3();
+    for (let i = 0; i < n; i++) radii[i] = this.sample(dir.set(dirs[i * 3]!, dirs[i * 3 + 1]!, dirs[i * 3 + 2]!), this.groundColor);
+    radii.sort();
+    const baseCoverage = this.sea && !this.lava ? shareBelow(radii, this.radius) : 0;
+    applyLiveSurface(this.material, 'ground', uniforms);
+    if (this.water) this.applyLiveWater(this.water, uniforms);
+    const climate = config.climate!;
+    return { uniforms, radii, baseCoverage, airKey: airKey(config, climate), weatherKey: weatherKey(config, climate) };
+  }
+
+  private applyLiveWater(water: LodSurface, uniforms: LiveSurfaceUniforms): void {
+    applyLiveSurface(water.material as THREE.MeshStandardMaterial, this.config.type === 'ice' ? 'iceSea' : 'sea', uniforms);
+  }
+
+  /** The sea at radius `level` from now on (null: none): scaled, made if there was none, hidden if it's gone. */
+  private setSeaLevel(level: number | null, climate: ClimateData): void {
+    if (level === this.seaLevel) return;
+    this.seaLevel = level;
+    if (level === null) {
+      if (this.water) this.water.object.visible = false;
+      this.surface.setHiddenBelow(-Infinity);
+      return;
+    }
+    if (!this.water) {
+      // A world that had no sea gains one: water, with waves if there's air to blow over it.
+      const config = { ...this.config, climate, style: { ...this.config.style, sea: NEW_SEA_COLOR } };
+      this.waves = createSeaWaves(config, this.sun, this.sunLight);
+      this.water = createWater(config.type, NEW_SEA_COLOR, level, this.waves, this.sample, null);
+      this.waterRadius = level;
+      this.applyLiveWater(this.water, this.live!.uniforms);
+      this.object.add(this.water.object);
+    }
+    this.water.object.visible = true;
+    this.water.object.scale.setScalar(level / this.waterRadius);
+    this.water.object.updateMatrixWorld();
+    // The ground under it isn't drawn (clear water shows its shallows).
+    this.surface.setHiddenBelow(this.waves ? level - waveParams.clearDepth : level);
+  }
+
+  /** A new atmosphere shell for `body`'s climate (none if it's too thin to see). */
+  private setAtmosphere(body: PlanetConfig): void {
+    if (this.atmosphere) {
+      this.object.remove(this.atmosphere);
+      disposeObject(this.atmosphere);
+      this.atmosphere = null;
+    }
+    const look = body.atmosphere && body.climate ? atmosphereLook(body.climate, body.radius) : null;
+    if (!look) return;
+    this.ground ??= new GroundDepth();
+    this.atmosphere = createAtmosphere(this.radius, body.atmosphere!, look, { vector: this.sun, point: false, strength: this.sunStrength }, ATMOSPHERE_SEGMENTS, this.ground);
+    this.object.add(this.atmosphere);
+  }
+
   /** Draws what the scene reads from textures, the ground's depth for the atmosphere and the sea's wave tiles: call before drawing the scene with `camera`. */
   renderDepth(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera): void {
     if (this.busted) return;
@@ -276,6 +399,16 @@ export class PlanetGlobe implements Entity {
       }
     });
   }
+}
+
+/** Disposes a mesh's or group's geometries and materials. */
+function disposeObject(object: THREE.Object3D): void {
+  object.traverse((o) => {
+    if (o instanceof THREE.Mesh) {
+      o.geometry.dispose();
+      (o.material as THREE.Material).dispose();
+    }
+  });
 }
 
 /**

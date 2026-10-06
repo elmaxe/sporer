@@ -7,6 +7,10 @@ import { hashSeed, parseSeed } from '../gen/rng';
 import { generateSystem } from '../gen/system';
 import { offsetDirection, stormCentre } from '../gen/weather';
 import type { PlanetConfig } from '../world/Planet';
+import { TerraformTimeline, leakRate, type TerraformMode, type TerraformSnapshot } from '../gen/terraform';
+import { ClimateChart } from '../terraform/ClimateChart';
+import { DEFAULT_RAY_CHOICE, forecastClimate, holdRay, type RayChoice, type RayId } from '../terraform/rays';
+import { Milestones, milestoneFlags } from '../terraform/milestones';
 import { LabClock, LabLevel } from './LabLevel';
 import {
   DEFAULT_VIEW,
@@ -26,6 +30,7 @@ import {
   type LabPlanet,
   type LabSource,
   type LabState,
+  type LabTerraform,
   type LabView,
 } from './labPlanet';
 
@@ -65,6 +70,16 @@ export class PlanetLab {
   /** Called when the planet was replaced as a whole (the panel rebinds its controls). */
   onReplaced: (() => void) | null = null;
   private waiters: (() => void)[] = [];
+  /** What the magic rays did to the planet (the Terraform folder), or null. */
+  terraformState: LabTerraform | null;
+  /** The rays' gas and water way, and how long a button holds a ray, s. */
+  readonly rayChoice: RayChoice = { ...DEFAULT_RAY_CHOICE };
+  raySeconds = 5;
+  /** The climate chart (shown while there's a terraforming log, or `showChart`). */
+  readonly chart: ClimateChart;
+  showChart = false;
+  /** The ray the chart's arrow previews (the last one used). */
+  private lastRay: RayId | null = null;
   private rolls = 0;
   private vent = -1;
 
@@ -78,6 +93,8 @@ export class PlanetLab {
     this.source = state.source ?? null;
     this.clock.paused = this.view.paused;
     this.clock.speed = this.view.speed;
+    this.terraformState = state.terraform ?? null;
+    this.chart = new ClimateChart(this.rayChoice);
     game.afterFrame = () => this.afterFrame();
   }
 
@@ -157,7 +174,12 @@ export class PlanetLab {
   }
 
   get state(): LabState {
-    return { planet: this.planet, view: this.view, ...(this.source ? { source: this.source } : {}) };
+    return {
+      planet: this.planet,
+      view: this.view,
+      ...(this.source ? { source: this.source } : {}),
+      ...(this.terraformState && this.terraformState.actions.length > 0 ? { terraform: this.terraformState } : {}),
+    };
   }
 
   /** The game at this planet's system (only for planets loaded from the game). */
@@ -253,6 +275,105 @@ export class PlanetLab {
     if (!climate) return Promise.resolve();
     const state = changeState(climate.state, change, climate.setting.gravity);
     return this.replace({ ...this.planet, climate: { ...climate, state } });
+  }
+
+  // --- Terraforming (the magic rays over time) ---
+
+  /** The planet's climate at the terraforming time, with where it's settling (null: nothing done to it, or a giant). */
+  get terraformSnapshot(): TerraformSnapshot | null {
+    const t = this.terraformState;
+    const base = labClimateData(this.planet);
+    if (!t || t.actions.length === 0 || !base) return null;
+    return this.timeline(t).at(t.time);
+  }
+
+  private timeline(t: LabTerraform): TerraformTimeline {
+    return new TerraformTimeline(labClimateData(this.planet)!, t.actions, [{ time: 0, mode: t.mode }]);
+  }
+
+  /** Holds `ray` for `seconds` (raySeconds) from the terraforming time, which then moves on by as much. */
+  ray(ray: RayId, seconds = this.raySeconds): Promise<void> {
+    const base = labClimateData(this.planet);
+    if (!base) return Promise.resolve();
+    const t = (this.terraformState ??= { actions: [], time: 0, mode: 'relaxed' });
+    const added = holdRay(this.timeline(t), t.time, seconds, ray, this.rayChoice, t.mode);
+    t.actions.push(...added);
+    t.time += seconds;
+    this.lastRay = ray;
+    return this.terraformChanged();
+  }
+
+  /** Shows the terraformed climate at game time `time` (s from the first action). */
+  setTerraformTime(time: number): Promise<void> {
+    const t = (this.terraformState ??= { actions: [], time: 0, mode: 'relaxed' });
+    t.time = Math.max(0, time);
+    return this.terraformChanged();
+  }
+
+  setTerraformMode(mode: TerraformMode): Promise<void> {
+    const t = (this.terraformState ??= { actions: [], time: 0, mode });
+    t.mode = mode;
+    return this.terraformChanged();
+  }
+
+  /** Undoes all terraforming: the planet as it is (the globe is rebuilt). */
+  clearTerraform(): Promise<void> {
+    this.terraformState = null;
+    this.lastRay = null;
+    this.rebuild();
+    return this.whenReady();
+  }
+
+  /** When the last action is over (for the time slider's range), s. */
+  get terraformEnd(): number {
+    const t = this.terraformState;
+    if (!t) return 0;
+    return t.actions.reduce((end, a) => Math.max(end, a.start + a.duration), 0);
+  }
+
+  private terraformChanged(): Promise<void> {
+    this.applyTerraform();
+    this.saveUrl();
+    this.onBuilt?.();
+    this.framesSinceBuild = 0;
+    return this.whenReady();
+  }
+
+  /** The level and the chart follow the terraformed climate. */
+  private applyTerraform(): void {
+    const snap = this.terraformSnapshot;
+    if (snap) this._level?.applyTerraform(snap.climate);
+    this.showChartNow(snap);
+  }
+
+  /** The chart for the climate now (hidden without terraforming, unless `showChart`). */
+  showChartNow(snap = this.terraformSnapshot): void {
+    const base = labClimateData(this.planet);
+    if (!base || (!snap && !this.showChart)) {
+      this.chart.hide();
+      return;
+    }
+    const s = snap ?? { climate: base, target: base, settlesIn: 0 };
+    const t = this.terraformState;
+    const mode = t?.mode ?? 'relaxed';
+    // Milestones as they'd have been reached, sampled every 5 s up to now.
+    const milestones = new Milestones();
+    const type = this.planet.type === 'gas' ? 'barren' : this.planet.type;
+    const flags = milestoneFlags(type, base);
+    if (t && t.actions.length > 0) {
+      const timeline = this.timeline(t);
+      for (let time = 0; time <= t.time; time += 5) milestones.check('lab', flags, milestoneFlags(type, timeline.at(Math.min(time, t.time)).climate), time);
+      milestones.check('lab', flags, milestoneFlags(type, s.climate), t.time);
+    }
+    this.chart.show({
+      name: this.planet.name,
+      snapshot: s,
+      mode,
+      forecast: this.lastRay ? forecastClimate(s.target, this.lastRay, this.rayChoice, this.raySeconds) : null,
+      leak: leakRate(s.climate, mode),
+      milestones: milestones.log('lab'),
+      picker: 'gas',
+    });
   }
 
   /** A new seed, deterministic in the current one and how many were asked for. */
@@ -362,6 +483,7 @@ export class PlanetLab {
     this.game.setLevel(level);
     old?.dispose();
     this.framesSinceBuild = 0;
+    this.applyTerraform();
     this.saveUrl();
     this.onBuilt?.();
   }

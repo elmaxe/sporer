@@ -50,6 +50,11 @@ export class PlanetHud implements Entity {
     this.climateEl.hidden = !text;
   }
 
+  /** A new climate line (a terraformed world's, as it changes). */
+  setClimate(detail: string): void {
+    this.climate = detail;
+  }
+
   /** New lines for a body just blown apart by a planet buster. */
   bust(location: string, detail: string): void {
     this.location = location;

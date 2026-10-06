@@ -159,6 +159,15 @@ Run with the game's code (scratch `cases.ts`), with water 0.4 where air is given
 - **Game time.** A system's own clock (`StarSystem.time`) starts afresh every time it's built (`SceneManager.createSystem`; busted debris is shown `SETTLED_DEBRIS` seconds after its blast). The logs therefore run on a game-wide clock, which phase 2 adds to the `SceneManager` (and saves) when the rays write the first actions.
 - Deliberate departures: game time is seconds for years; response times are compressed (ratio 4.5 instead of ~100); leak times are tunables, not computed escape rates; the deck's ramp width is a gameplay choice.
 
+## Phase 2: the magic rays and the live looks (step 41)
+
+Two physical numbers, the rest gameplay tunables (`terraform/rays.ts` `rayParams`, `terraform/liveLook.ts`):
+
+- **Nothing is colder than the sky.** A cooling ray can take more heat than the body gets; the energy balance is floored at the cosmic microwave background, 2.72548 ± 0.00057 K (Fixsen 2009, ApJ 707, 916), `CMB_TEMPERATURE` = 2.725 K.
+- **Sea water freezes at −1.9 °C**: at the ocean's mean salinity of 35 g/kg and surface pressure the freezing point is −1.92 °C (UNESCO 1983 / TEOS-10's `gsw_t_freezing`, IOC, SCOR & IAPSO 2010), `SEA_FREEZING` = 271.25 K. Sea ice is drawn poleward of the latitude whose annual mean (the plants' latitude model, `localTemperature`) is below it: for Earth's 15 °C that is ~62°, where the winter sea-ice edge lies in the North Atlantic and the Southern Ocean (60–65°).
+- **Ice caps on land** follow the snow line the green worlds' ground already uses (`snowTemperature`: 0 °C at the equator, 7 K colder at the poles, Ohmura et al. 1992), limited by the water there is to make them (`CAP_PER_WATER`, a tunable: water 0.1 can ice the poles from ~65°).
+- **The rays' rates** are tunables, not physics: the heat rays move the temperature a world settles at by `kelvinPerSecond` (3.5 K) a second through the energy it takes (dT_s/dF = T_s / 4F at fixed optical depth, which is exact for the grey model's T_s ∝ F^¼); the air rays add or take 75% of the air a second, compounding (a factor of √10 of pressure, one cell of the chart, in ~2 s); the water ray 3% of a global ocean a second.
+
 ## Open questions
 
 - **CO₂ between 3 and 90 bar** is only pinned at its ends: Wordsworth & Pierrehumbert's ocean Earth gives 412 K at 8.6 bar and 481 K at 48 bar under a clear sky, where the fit (with their 0.23 albedo and no clouds) gives 438 K and 674 K. Their profiles include an upper atmosphere that is free to cool and water vapour; the game's grey model doesn't. Generated Venuses of 14–90 bar came out 73 K warmer (median); they were T0 and still are.

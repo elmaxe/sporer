@@ -196,6 +196,11 @@ export class GroundLook {
     };
   }
 
+  /** The mean surface temperature its snow follows (a terraformed world's, as it changes), K. */
+  setTemperature(kelvin: number): void {
+    this.uniforms.uGTemp!.value = kelvin;
+  }
+
   /**
    * Adds the ground to a body's lit, vertex-coloured terrain `material`: its
    * sea level is at `radius` (units of the mesh) and its highest ground

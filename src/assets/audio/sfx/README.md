@@ -26,6 +26,8 @@ rebuild; no code changes needed. Volumes and fades are in `cueParams` (`src/audi
 | `radarPing/` | The radar (on unless switched off in the Inventory) sending its waves towards the nearest animal of the species picked on the planet map's Species tab: once per ping, more often and higher the closer they are (played from 0.56× speed far off to 1× right above the animals, so record it at the pitch you want to hear on top of them) | one-shot |
 | `laserBeam/` | The laser (a weapon) firing: starts on the press, fades out when it's let go. The file there is a synthesised placeholder: replace it with your own | loop |
 | `laserHit/` | The laser killing an animal or a plant (once for each). The file there is a synthesised placeholder: replace it with your own | one-shot |
+| `magicRay/` | A magic terraforming ray (the Terraform tab: heat, cool, air, vacuum, water) held on a world: starts on the press, fades out when it's let go | loop |
+| `milestone/` | A terraforming milestone reached: first breath of air, first rain, the seas thawing, breathable air, a tier reached or lost (with its banner) | one-shot |
 | `ventBurst/` | A geyser, plume or fumarole near the camera bursting into eruption (low orbit), louder the nearer it is | one-shot |
 | `starNear/` | A star close up: grows as the camera nears its surface, taking over from `starFar` | ambient |
 | `starFar/` | A star from across its system: fades with distance, giving way to `starNear` close up | ambient |

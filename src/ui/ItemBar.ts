@@ -15,6 +15,7 @@ import {
 } from "../combat/items";
 import { PLANT_KINDS } from "../gen/plants";
 import { describeAnimal, type SpeciesIcons } from "../planet/SpeciesTab";
+import { formatEnergy, type ShipEnergy } from "../terraform/energy";
 import type { LevelMode } from "../levels/SceneManager";
 import type { Tooltip } from "./Tooltip";
 
@@ -53,6 +54,23 @@ const ICONS: Record<ToolId, string> = {
     '<path d="M9 15l4-4" /><circle cx="13.6" cy="10.4" r="1" />' +
     '<path d="M15.5 6a4 4 0 0 1 2.5 2.5M16.5 2.5a8 8 0 0 1 5 5" />' +
     '<path d="M7 18.5 5 22h7" /></svg>',
+  heatRay:
+    '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M12 2v5" /><path d="M12 21c-3.3 0-5.5-2.3-5.5-5.2 0-2.6 2-4.2 3.2-6 .6 1.4 1.4 2.2 2.3 2.6.2-1.6.9-3 2.1-4.1.5 2.8 3.4 4.3 3.4 7.5 0 2.9-2.2 5.2-5.5 5.2z" />' +
+    '<path d="M12 21c-1.4 0-2.4-1-2.4-2.3 0-1.4 1.3-2.2 2.4-3.6 1.1 1.4 2.4 2.2 2.4 3.6 0 1.3-1 2.3-2.4 2.3z" /></svg>',
+  coolRay:
+    '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M12 2v20M3.3 7l17.4 10M3.3 17 20.7 7" />' +
+    '<path d="M9.5 3.5 12 6l2.5-2.5M9.5 20.5 12 18l2.5 2.5M4 10.4l3.4-.9-.9-3.4M20 13.6l-3.4.9.9 3.4M4 13.6l3.4.9-.9 3.4M20 10.4l-3.4-.9.9-3.4" /></svg>',
+  airRay:
+    '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M3 8h11a3 3 0 1 0-3-3" /><path d="M3 12h16a3 3 0 1 1-3 3" /><path d="M3 16h7a2.5 2.5 0 1 1-2.5 2.5" /></svg>',
+  vacuumRay:
+    '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M3 4h18l-6.5 8v6l-5 3v-9z" /><path d="M12 11V6.5M9.8 8.7 12 6.5l2.2 2.2" /></svg>',
+  waterRay:
+    '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M12 2.5c3.6 4.6 6 7.8 6 11a6 6 0 0 1-12 0c0-3.2 2.4-6.4 6-11z" /><path d="M9 14.5a3 3 0 0 0 3 3" /></svg>',
 };
 
 /** What the bar needs to know about the game: where the player is, what can use items there, and what's in the hold. */
@@ -64,6 +82,8 @@ export interface ItemBarSource {
   readonly inventory: Inventory;
   /** Which switch items (the radar) are on: they can be turned on or off anywhere. */
   readonly switches: ItemSwitches;
+  /** The ship's energy, which the terraforming tools are paid with (the bar above the slots). */
+  readonly energy: ShipEnergy;
 }
 
 /** What a slot shows: a tool, or a stack of cargo. */
@@ -100,6 +120,12 @@ export class ItemBar implements Entity {
   private readonly tabsEl = document.getElementById("item-tabs")!;
   private readonly slotsEl = document.getElementById("item-slots")!;
   private readonly hintEl = document.getElementById("item-hint")!;
+  /** The energy bar (made here, above the tabs). */
+  private readonly energyEl = document.createElement("div");
+  private readonly energyFill = document.createElement("div");
+  private readonly energyDrain = document.createElement("div");
+  private readonly energyText = document.createElement("span");
+  private shownEnergy = "";
   private readonly slots = new Map<ItemId, HTMLButtonElement>();
   private readonly tabs = new Map<ItemTab, HTMLButtonElement>();
   private tab: ItemTab = ITEM_TABS[0]!.id;
@@ -135,6 +161,13 @@ export class ItemBar implements Entity {
       this.tabsEl.append(button);
       this.tabs.set(t.id, button);
     }
+    this.energyEl.id = "item-energy";
+    this.energyEl.title = "The ship's energy: what the terraforming tools cost";
+    this.energyFill.className = "energy-fill";
+    this.energyDrain.className = "energy-drain";
+    this.energyText.className = "energy-text";
+    this.energyEl.append(this.energyFill, this.energyDrain, this.energyText);
+    this.hintEl.after(this.energyEl);
     window.addEventListener("keydown", this.onKeyDown);
     this.showTab(this.tab);
   }
@@ -183,6 +216,12 @@ export class ItemBar implements Entity {
         slot.classList.toggle("selected", selected);
         slot.classList.toggle("on", on);
         slot.setAttribute("aria-pressed", String(selected || on));
+        const cost = slot.querySelector<HTMLElement>(".item-cost");
+        if (cost) {
+          const text = status?.cost ?? "";
+          if (cost.textContent !== text) cost.textContent = text;
+          cost.hidden = !text;
+        }
       }
       if (status?.hint && (selected || !hint)) hint = status.hint;
     };
@@ -200,13 +239,34 @@ export class ItemBar implements Entity {
       this.hintEl.textContent = hint;
       this.hintEl.hidden = !hint;
     }
+    this.showEnergy();
     this.showTooltip();
+  }
+
+  /** The energy bar: full with an ∞ while energy is infinite; what a held tool spends a second shows as a lighter end. */
+  private showEnergy(): void {
+    const e = this.source.energy;
+    const drain = e.draining > 0 ? ` −${formatEnergy(e.draining)}/s` : "";
+    const text = `${e.infinite ? "∞" : formatEnergy(e.level)} energy${drain}`;
+    const fill = e.fill;
+    const key = `${text}:${fill.toFixed(3)}:${this.tab}`;
+    if (key === this.shownEnergy) return;
+    this.shownEnergy = key;
+    this.energyText.textContent = text;
+    this.energyFill.style.width = `${(fill * 100).toFixed(1)}%`;
+    const about = e.infinite || e.draining <= 0 ? 0 : Math.min(fill, e.draining / e.capacity);
+    this.energyDrain.style.width = `${(about * 100).toFixed(1)}%`;
+    this.energyDrain.style.left = `${((fill - about) * 100).toFixed(1)}%`;
+    this.energyDrain.hidden = !(e.draining > 0);
+    // Shown where it's spent: on the Terraform tab, or while something draws on it.
+    this.energyEl.hidden = this.tab !== "terraform" && e.draining <= 0;
   }
 
   dispose(): void {
     window.removeEventListener("keydown", this.onKeyDown);
     this.unhover();
     this.root.hidden = true;
+    this.energyEl.remove();
     this.tabsEl.replaceChildren();
     this.slotsEl.replaceChildren();
   }
@@ -286,6 +346,8 @@ export class ItemBar implements Entity {
     else if (status && !status.available)
       details = status.reason ?? status.hint;
     else details = `${press} to select`;
+    const cost = status?.cost ? ` · costs ${status.cost} energy` : "";
+    if (cost) details += cost;
     const info =
       item.count !== null
         ? `${item.description} (${item.count} of ${STACK_SIZE})`
@@ -366,7 +428,8 @@ export class ItemBar implements Entity {
         item.count !== null
           ? `<span class="item-count">${item.count}</span>`
           : "";
-      slot.innerHTML = `${item.icon}${key ? `<span class="item-key">${key.label}</span>` : ""}${count}<span class="item-name">${item.name}</span>`;
+      const cost = tab === "terraform" ? '<span class="item-cost" hidden></span>' : "";
+      slot.innerHTML = `${item.icon}${key ? `<span class="item-key">${key.label}</span>` : ""}${count}${cost}<span class="item-name">${item.name}</span>`;
       slot.addEventListener("click", () => this.toggle(item));
       // Mouse only: on touch the hint line above the bar says what to do.
       const hover = (e: PointerEvent) => {
