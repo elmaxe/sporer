@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateClimate } from '../src/gen/climate';
+import { climateStateOf, evaluateClimate } from '../src/gen/climate';
 import { generateGalaxy, solRef } from '../src/gen/galaxy';
 import {
   FLARES,
@@ -167,7 +167,7 @@ describe('chance of life: the parts', () => {
     // A thin-aired world with liquid water round a red dwarf loses most of its surface chance; round a G star, none.
     const climate = evaluateClimate(
       { insolation: 1.4, gravity: 0.5, escapeVelocity: 7, heatFlow: 0.05 },
-      { pressure: 0.05, composition: 'oxygenNitrogen', greenhouse: 1, water: 0.3, surfaceAlbedo: 0.3 },
+      climateStateOf({ pressure: 0.05, composition: 'oxygenNitrogen', greenhouse: 1, water: 0.3, surfaceAlbedo: 0.3 }),
     );
     const thin = { ...climate, habitability: 0 as const };
     const red = assessLife({ type: 'desert', climate: thin, stars: [nominalStar('redDwarf')], host: null });
@@ -196,7 +196,7 @@ describe('chance of life: the parts', () => {
   it('an Earth twin round a short-lived blue giant has a slim chance', () => {
     const climate = evaluateClimate(
       { insolation: 1, gravity: 1, escapeVelocity: 11.186, heatFlow: 0.092 },
-      { pressure: 1, composition: 'oxygenNitrogen', greenhouse: 1, water: 0.7, surfaceAlbedo: 0.3 },
+      climateStateOf({ pressure: 1, composition: 'oxygenNitrogen', greenhouse: 1, water: 0.7, surfaceAlbedo: 0.3 }),
     );
     // No plants: pretend it's T0 to see the estimate itself.
     const twin = assessLife({ type: 'terran', climate: { ...climate, habitability: 0 }, stars: [nominalStar('mainSequence', 'G')], host: null });

@@ -1,7 +1,9 @@
 import {
   atmosphereTint,
   climateSetting,
+  climateSettingOf,
   climateState,
+  climateStateOf,
   earthRadii,
   evaluateClimate,
   generateClimate,
@@ -10,6 +12,7 @@ import {
   type ClimateData,
   type ClimateSetting,
   type ClimateState,
+  type StateSpec,
 } from '../gen/climate';
 import { hexToRgb, rgbToHex } from '../gen/color';
 import { NAMED_RADIUS_KM, asteroidBody, asteroidRadius, type AsteroidClass } from '../gen/belts';
@@ -634,12 +637,37 @@ export function decodeLab(text: string): LabState | null {
     if (planet.type !== 'gas' && !planet.climate) planet.climate = base.climate;
     if (isSmallKind(planet.kind) && !planet.shape) planet.shape = base.shape;
     if (typeof planet.zone !== 'number' || !Number.isFinite(planet.zone)) planet.zone = base.zone;
-    const state: LabState = { planet, view: { ...DEFAULT_VIEW, ...raw.view } };
+    // Links from before the atmosphere was split into gases still open.
+    const state: LabState = { planet: withUpgradedClimate(planet), view: { ...DEFAULT_VIEW, ...raw.view } };
     if (raw.source && typeof raw.source.star === 'number') state.source = raw.source;
     return state;
   } catch {
     return null;
   }
+}
+
+/**
+ * A planet from a link or pasted JSON, its climate made whole: one from
+ * before the atmosphere was split into gases (a pressure and a composition)
+ * is turned into gases, and missing terraforming levers are untouched.
+ */
+export function withUpgradedClimate(planet: LabPlanet): LabPlanet {
+  const climate = planet.climate && { ...planet.climate, state: upgradeState(planet.climate.state, planet.climate.setting.gravity) };
+  const moons = Array.isArray(planet.moons)
+    ? planet.moons.map((m) => (m.climate && !m.climate.gases ? { ...m, climate: upgradeClimate(m.climate) } : m))
+    : planet.moons;
+  return { ...planet, climate, moons };
+}
+
+/** A climate state from a link, made whole: an older one (a pressure and a composition) is turned into gases. */
+function upgradeState(state: ClimateState | StateSpec, gravity: number): ClimateState {
+  const spec = state as StateSpec;
+  return climateStateOf(spec.gases ? { ...spec, pressure: undefined, composition: undefined } : spec, gravity);
+}
+
+/** A moon's whole climate from an older link, re-derived from its upgraded state. */
+function upgradeClimate(climate: ClimateData): ClimateData {
+  return evaluateClimate(climateSettingOf(climate), upgradeState(climate as StateSpec, climate.gravity));
 }
 
 /** Mixes two hex colours (t = 0 → a). */

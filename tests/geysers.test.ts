@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateClimate, type ClimateData, type ClimateSetting, type ClimateState } from '../src/gen/climate';
+import { climateStateOf, evaluateClimate, type ClimateData, type ClimateSetting, type StateSpec } from '../src/gen/climate';
 import { generateGalaxy } from '../src/gen/galaxy';
 import {
   FUMAROLE_FULL_HEAT_FLOW,
@@ -50,8 +50,8 @@ const active = bodies.filter((b) => b.activity !== null) as { body: GeyserBody; 
 const ofKind = (kind: GeyserKind) => active.filter((b) => b.activity.kind === kind);
 
 /** A climate from a setting and state (see gen/climate.ts). */
-function climate(setting: ClimateSetting, state: Partial<ClimateState>): ClimateData {
-  return evaluateClimate(setting, { pressure: 0, composition: 'none', greenhouse: 0, water: 0, surfaceAlbedo: 0.3, ...state });
+function climate(setting: ClimateSetting, state: StateSpec): ClimateData {
+  return evaluateClimate(setting, climateStateOf({ pressure: 0, composition: 'none', greenhouse: 0, water: 0, surfaceAlbedo: 0.3, ...state }));
 }
 
 describe('which bodies have geysers', () => {

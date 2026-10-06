@@ -1,6 +1,6 @@
 import { MAX_SYSTEM_ROCKS, asteroidRadius, asteroidStyle, BELT_MARGIN, makeBelt, type AsteroidClass, type AsteroidData, type BeltContext, type BeltData, type TrojanHost } from './belts';
 import { hslToHex } from './color';
-import { evaluateClimate, type ClimateData, type Composition } from './climate';
+import { climateStateOf, evaluateClimate, type ClimateData, type Composition } from './climate';
 import { cometNucleus, type CometData } from './comets';
 import type { DustDiscData } from './discs';
 import { flatTilt } from './galactic';
@@ -96,7 +96,10 @@ interface ClimateSpec {
 function climate(c: ClimateSpec): ClimateData {
   return evaluateClimate(
     { insolation: c.insolation, gravity: c.gravity, escapeVelocity: c.escape, heatFlow: c.heat },
-    { pressure: c.pressure ?? 0, composition: c.composition ?? 'none', greenhouse: 1, water: c.water ?? 0, surfaceAlbedo: c.albedo },
+    climateStateOf(
+      { pressure: c.pressure ?? 0, composition: c.composition ?? 'none', greenhouse: 1, water: c.water ?? 0, surfaceAlbedo: c.albedo },
+      c.gravity,
+    ),
   );
 }
 

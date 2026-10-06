@@ -1,6 +1,6 @@
 # Terraforming: design
 
-Status: **design only, nothing built yet.** This document is the plan to implement from, one roadmap step at a time (see [Phases](#phases)). Every real-world number that goes into the code still goes through the `research` skill first; the numbers here are either measured with the game's own `gen/climate.ts` (marked *measured*) or gameplay tunables (marked *tunable*). Real-world sources are listed as leads to read, not as findings.
+Status: **phase 1 (the model) built** (roadmap step 40: `gen/climate.ts`, `gen/terraform.ts`, `docs/research/terraforming.md`); phases 2–8 not started. This document is the plan to implement from, one roadmap step at a time (see [Phases](#phases)). Every real-world number that goes into the code still goes through the `research` skill first; the numbers here are either measured with the game's own `gen/climate.ts` (marked *measured*) or gameplay tunables (marked *tunable*). Real-world sources are listed as leads to read, not as findings.
 
 ## The short version
 
@@ -39,24 +39,26 @@ By system: **355 of 1 500 systems (24%)** have a body that holds air and needs o
 
 **Reference cases** (Sol, `?star=sol`):
 
+Re-measured after phase 1 (`docs/research/terraforming.md`; greenhouse is now trace gas in Earth's units, which a CO₂ world starts without):
+
 | Body | Today | What it takes in the model |
 |---|---|---|
-| Mars | −63 °C, 6 mbar CO₂, marginal | With 1 bar N₂–O₂ and 0.4 water: greenhouse ×3 gives 0 °C (T2), ×6 gives 36 °C (T3), ×10 gives 70 °C (T0 again). With ×3 plus mirrors: starlight ×1.2 is 12 °C (T3), ×1.5 is 29 °C. |
-| Venus | 464 °C, 92 bar CO₂ | Taking CO₂ away: 30 bar is 156 °C, 10 bar is 6 °C (T1), 9 bar jumps to 109 °C (the cloud deck goes, see below). Replaced with 1 bar N₂–O₂: 65 °C under today's sun, 36 °C (T3) behind a shade blocking 30%, 11 °C blocking 50%. |
+| Mars | −62 °C, 6 mbar CO₂, marginal | With 1 bar N₂–O₂ and 0.4 water: greenhouse ×3 gives −1 °C (T2), ×4 gives 13 °C, ×6 gives 35 °C, ×10 gives 69 °C (T0 again). With ×3 plus mirrors: starlight ×1.2 is 12 °C, ×1.5 is 28 °C. Or thicken its own CO₂: 1 bar −18 °C (T1), 2 bar 5 °C (T2), 3 bar 21 °C. |
+| Venus | 464 °C, 92 bar CO₂ | Taking CO₂ away: 30 bar is 236 °C, 10 bar 215 °C, 3 bar 174 °C, 1 bar 115 °C (no cliff now; between 14 and 30 bar the clouds thin as fast as the greenhouse weakens, a plateau). Replaced with 1 bar N₂–O₂: 86 °C under today's sun, 56 °C (T1) behind a shade blocking 30%, 29 °C (T3) blocking 50%, 13 °C blocking 60%. |
 | Moon | −3 °C, airless, escapes | 1 bar N₂–O₂ and water make it 32 °C and T3, but it can't keep the air. |
 | Titan | −180 °C, 1.5 bar N₂ | Hopeless to warm (starlight ×100 for T3); its value is as a nitrogen source. |
 
-**The home system** (Haikrai, every new game with the default seed) has a ready-made first project: **Haikrai III**, a barren super-Earth at −102 °C with a trace of CO₂ (0.2 mbar) that holds air well (retention 2.78). With 1 bar N₂–O₂ and 0.4 water it needs greenhouse ×8 for T2 (−6 °C), ×12 for T3 (19 °C), or mirrors (starlight ×2) and greenhouse ×4 (5 °C, T3). Next door are two T3 ocean worlds (plants, and air to take), a gas giant (hydrogen), three comets (water) and an asteroid belt. No nitrogen-rich body, so either rob a living neighbour or make a trip.
+**The home system** (Haikrai, every new game with the default seed) has a ready-made first project: **Haikrai III**, a barren super-Earth at −102 °C with a trace of CO₂ (0.2 mbar) that holds air well (retention 2.78). With 1 bar N₂–O₂ and 0.4 water it needs greenhouse ×8 for T2 (−5 °C), ×10 for T3 (7 °C), ×12 for 19 °C, or mirrors (starlight ×2) and greenhouse ×4 (5 °C, T3), or ×1.5 and ×6 (6 °C, T3). Next door are two T3 ocean worlds (plants, and air to take), a gas giant (hydrogen), three comets (water) and an asteroid belt. No nitrogen-rich body, so either rob a living neighbour or make a trip.
 
 ### Things the model must fix first
 
-Measuring turned up issues that would make terraforming feel wrong. Each is a task in [phase 1](#phases):
+Measuring turned up issues that would make terraforming feel wrong. Each is a task in [phase 1](#phases); 1–5 are done (step 40, see `docs/research/terraforming.md`), 6 is phase 2:
 
-1. **Mirrors must not change retention.** `atmosphereRetention` uses `insolation`, so raising insolation for a mirror moves a body across the shoreline (Mars at ×2 starlight becomes "escapes"). Escape is driven by the star's X-ray and UV, which a mirror doesn't add. Mirrors and shades need their own factor in the state (`starlight`) that only enters the energy balance.
-2. **CO₂ at a few bar barely warms.** CO₂'s τ ∝ P² is fitted on Venus alone, so in the model Mars with 1 bar of CO₂ warms by 0 K and with 3 bar by 6 K. Published Mars models give a much larger warming at those pressures (to research; Kasting 1991 and the early-Mars literature are the place to start). As it stands, "thicken Mars's own CO₂" is a dead end, which is wrong. Refit with a low-pressure reference.
-3. **The Venus cloud deck is a cliff.** `cloudCovered` switches the albedo from the surface's to 0.77 at exactly 10 bar of CO₂, so 10 bar is 6 °C and 9 bar is 109 °C. Real cloud decks thin out; make it a ramp over a pressure range (to research), and present what is left of the jump as a tipping point.
-4. **One gas per atmosphere.** `Composition` is a single dominant gas. Terraforming mixes them (bring N₂ to a CO₂ world, let plants turn CO₂ into O₂), so the state needs partial pressures (below). Every generated body must come out exactly as it does today (step 12 did the same: 0 differences over 1500 systems, pinned by a test).
-5. **Leaks don't happen.** Living worlds above their stable pressure are flagged `leaking` but never lose anything. Terraforming needs a leak rate.
+1. ✅ **Mirrors must not change retention.** `atmosphereRetention` uses `insolation`, so raising insolation for a mirror moves a body across the shoreline (Mars at ×2 starlight becomes "escapes"). Escape is driven by the star's X-ray and UV, which a mirror doesn't add. Mirrors and shades need their own factor in the state (`starlight`) that only enters the energy balance.
+2. ✅ **CO₂ at a few bar barely warms.** CO₂'s τ ∝ P² is fitted on Venus alone, so in the model Mars with 1 bar of CO₂ warms by 0 K and with 3 bar by 6 K. Published Mars models give a much larger warming at those pressures (to research; Kasting 1991 and the early-Mars literature are the place to start). As it stands, "thicken Mars's own CO₂" is a dead end, which is wrong. Refit with a low-pressure reference.
+3. ✅ **The Venus cloud deck is a cliff.** `cloudCovered` switches the albedo from the surface's to 0.77 at exactly 10 bar of CO₂, so 10 bar is 6 °C and 9 bar is 109 °C. Real cloud decks thin out; make it a ramp over a pressure range (to research), and present what is left of the jump as a tipping point.
+4. ✅ **One gas per atmosphere.** `Composition` is a single dominant gas. Terraforming mixes them (bring N₂ to a CO₂ world, let plants turn CO₂ into O₂), so the state needs partial pressures (below). Every generated body must come out exactly as it does today (step 12 did the same: 0 differences over 1500 systems, pinned by a test).
+5. ✅ **Leaks don't happen.** Living worlds above their stable pressure are flagged `leaking` but never lose anything. Terraforming needs a leak rate.
 6. **The looks are fixed at build time.** Sea colour and level, ground colours and ice come from the planet *type* (`planetStyle`), and the atmosphere, weather and plants are built once from `config.climate`. All of them must follow the live climate.
 
 ## The model, extended
@@ -99,7 +101,7 @@ How things move (all *tunable*, with real behaviour as the guide):
 - **Leaks** (see [Leaky worlds](#leaky-worlds)): pressure above the stable cap bleeds off as `dp/dt = −(p − p_stable) / τ_leak`, with τ_leak shorter the further below the shoreline the body is: minutes for a moon, an hour for a marginal Mars. Light gases go first (H₂ well before N₂; research the ordering with the Jeans escape parameter).
 - **Plants** turn CO₂ into O₂ at a rate set by plant cover, and stop when the CO₂ runs out.
 
-Does a world keep changing while you're in another system? Yes: it's a function of time, so you come back to see how it settled. That needs a game clock that keeps running across systems (check how system time behaves between visits when building phase 1).
+Does a world keep changing while you're in another system? Yes: it's a function of time, so you come back to see how it settled. That needs a game clock that keeps running across systems: checked in phase 1, a system's own clock (`StarSystem.time`) starts afresh every time the system is built (`SceneManager.createSystem`), so the logs use a game-wide clock that phase 2 adds to the `SceneManager` (and saves).
 
 ### Leaky worlds
 
@@ -316,7 +318,7 @@ When energy becomes finite (its own step, after the real tools):
 
 Each phase is a roadmap step that leaves the game playable and is verified (`typecheck`, `test`, `build`, `smoke`) before pushing.
 
-1. **Model**: the six fixes above (`starlight`, low-pressure CO₂, the cloud ramp, partial pressures, leaks, aerosol), the action log and its integration over time, pure and tested. Every generated body unchanged (0 differences over 1500 systems). Research notes in `docs/research/terraforming.md`.
+1. ✅ **Model** (step 40): the six fixes above (`starlight`, low-pressure CO₂, the cloud ramp, partial pressures, leaks, aerosol), the action log and its integration over time, pure and tested. Every generated body unchanged (0 differences over 1500 systems). Research notes in `docs/research/terraforming.md`.
 2. **Magic rays, chart and live looks**: the Terraform tab with the five magic rays; the energy bar (infinite, costs shown); the climate chart in low orbit and the lab; seas, ice, ground, atmosphere and weather following the live climate in both views; leaks; milestones; the Sandbox / Relaxed / Real setting. The first playable version of terraforming.
 3. **Heat and light**: mirrors, the mirror lance, the sunshade, aerosols.
 4. **Greenhouse**: factories and carbon sinks (placed with the beam).

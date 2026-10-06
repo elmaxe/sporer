@@ -8,22 +8,33 @@ import type { Rng } from './rng';
  *
  * - its setting (ClimateSetting): starlight, gravity, internal heat. Fixed by
  *   the body and its orbit; nothing the player does changes it.
- * - its state (ClimateState): the atmosphere, greenhouse gases, surface water
- *   and surface brightness. The knobs terraforming turns.
- * - everything derived (temperature, water phase, habitability, whether the
- *   air escapes), which evaluateClimate recomputes from the two. A terraformed
- *   world is `terraform(climate, { pressure: 1 })`; nothing is stored twice.
+ * - its state (ClimateState): the atmosphere's gases, trace greenhouse gases,
+ *   surface water and brightness, and the terraforming levers (mirrors and
+ *   shades, aerosol haze, magic heat). The knobs terraforming turns.
+ * - everything derived (pressure, composition, temperature, water phase,
+ *   habitability, whether the air escapes), which evaluateClimate recomputes
+ *   from the two. A terraformed world is `terraform(climate, { pressure: 1,
+ *   composition: 'oxygenNitrogen' })`; nothing is stored twice. How a state
+ *   changes over time, action by action, is gen/terraform.ts.
  *
  * Every constant and formula is sourced in docs/research/climate.md (and
- * planet-temperatures.md for the equilibrium temperature).
+ * planet-temperatures.md for the equilibrium temperature, terraforming.md for
+ * the gases, mirrors, hazes and breathable air).
  */
 
 /**
- * Dominant atmospheric gas. 'oxygenNitrogen' is the only breathable one.
- * 'hydrogen' is a rogue planet's primordial air: the only gas that stays a gas
- * at a starless world's ~35 K (see gen/rogues.ts).
+ * The atmosphere's character, derived from its gases (see compositionOf):
+ * 'oxygenNitrogen' is the only breathable one. 'nitrogen' is any other air of
+ * nitrogen and oxygen. 'hydrogen' is a rogue planet's primordial air: the
+ * only gas that stays a gas at a starless world's ~35 K (see gen/rogues.ts).
  */
 export type Composition = 'none' | 'oxygenNitrogen' | 'nitrogen' | 'carbonDioxide' | 'hydrogen';
+
+/** The gases an atmosphere is made of. */
+export type Gas = 'n2' | 'o2' | 'co2' | 'h2';
+export const GASES: readonly Gas[] = ['n2', 'o2', 'co2', 'h2'];
+/** Partial pressures in bar. */
+export type Gases = Record<Gas, number>;
 
 /** What the body is and where it is. Terraforming can't change these. */
 export interface ClimateSetting {
@@ -39,19 +50,35 @@ export interface ClimateSetting {
 
 /** The terraformable part of a climate. */
 export interface ClimateState {
-  /** Surface pressure in bar (Earth 1.01). 0 for airless bodies. */
-  pressure: number;
-  composition: Composition;
+  /** The atmosphere: partial pressures in bar (all 0 for airless bodies). */
+  gases: Gases;
   /**
-   * Greenhouse gas abundance relative to the composition's reference body
-   * (Earth's water vapour and CO₂ for oxygenNitrogen, Titan's methane for
-   * nitrogen; a CO₂ atmosphere is its own greenhouse gas). 1 = the reference.
+   * Trace greenhouse gases (water vapour, CO₂ in air, methane, factory-made
+   * gases) in units of Earth's: 1 gives an N₂–O₂ atmosphere Earth's
+   * greenhouse at its pressure. A CO₂ or hydrogen atmosphere is its own
+   * greenhouse gas on top of this (see opticalDepth); 0 is none.
    */
   greenhouse: number;
   /** Surface water inventory, 0 (dry) to 1 (global ocean or ice shell). */
   water: number;
   /** Bond albedo of the bare surface (clouds and hazes are added on top). */
   surfaceAlbedo: number;
+  /** Mirrors (> 1) and sunshades (< 1): a factor on the starlight absorbed. Not on escape (see atmosphereRetention). */
+  starlight: number;
+  /** Reflectance of a stratospheric haze laid over the planet (aerosols), 0 for none. */
+  aerosol: number;
+  /** Heat added (or, negative, taken) by the magic rays, W/m², in the energy balance like internal heat. */
+  magicHeat: number;
+}
+
+/**
+ * A state as generation and older code describe one: a total pressure and a
+ * composition instead of gases, and the greenhouse relative to the
+ * composition's reference body (see climateStateOf).
+ */
+export interface StateSpec extends Partial<ClimateState> {
+  pressure?: number;
+  composition?: Composition;
 }
 
 export type WaterState = 'none' | 'ice' | 'liquid' | 'steam';
@@ -61,6 +88,9 @@ export type Retention = 'holds' | 'marginal' | 'escapes';
 export type Habitability = 0 | 1 | 2 | 3;
 
 export interface ClimateData extends ClimateSetting, ClimateState {
+  /** Surface pressure in bar (the sum of the gases; Earth 1.01). */
+  pressure: number;
+  composition: Composition;
   /** Bond albedo of the whole planet, clouds and hazes included. */
   albedo: number;
   /** Black-body temperature (K) with no greenhouse. */
@@ -135,32 +165,72 @@ function blackBody(irradiance: number, albedo: number, heatFlow = 0): number {
 }
 
 /**
- * Optical depth τ = τ₀ (P / 1 bar)ⁿ per composition, each calibrated on its
- * reference body (T_eq from its irradiance and Bond albedo, surface T and P
- * measured). n: 1 for a well-mixed absorber (Earth's trace gases scale with
- * the column), 2 for pressure broadening (Venus, as Robinson & Catling 2012
- * recommend), 4/3 for Titan (McKay et al. 1999, as cited there).
+ * Optical depth τ = τ₀ (P / 1 bar)ⁿ per kind of atmosphere, each calibrated
+ * on its reference body (T_eq from its irradiance and Bond albedo, surface T
+ * and P measured). n: 1 for a well-mixed absorber (Earth's trace gases scale
+ * with the column), 2 for pressure broadening (Venus, as Robinson & Catling
+ * 2012 recommend), 4/3 for Titan (McKay et al. 1999, as cited there).
  * `gravity`, where set: the pressure is taken as P / g^gravity (g in Earth's).
+ * In a mixed atmosphere each absorber's column is its partial pressure and
+ * its lines are broadened by the total (see opticalDepth), so a pure one
+ * gives exactly τ₀ Pⁿ. See docs/research/climate.md and terraforming.md.
  */
-export const GREENHOUSE: Record<Exclude<Composition, 'none'>, { tau0: number; n: number; gravity?: number }> = {
-  // Earth: 1361 W/m², A 0.294, 288.15 K at 1.014 bar (NASA).
-  oxygenNitrogen: { tau0: tauFor(288.15, blackBody(1361, 0.294)) / 1.014, n: 1 },
-  // Venus: 2601.3 W/m², A 0.77, 737.15 K at 92 bar (NASA).
-  carbonDioxide: { tau0: tauFor(737.15, blackBody(2601.3, 0.77)) / 92 ** 2, n: 2 },
-  // Titan: 15.2 W/m², A 0.265 (Li et al. 2011), 93.65 K at 1.467 bar (Fulchignoni et al. 2005).
+/** CO₂'s low-pressure optical depth τ = a p^m (see GREENHOUSE). */
+const CO2_LOW = { tau0: 1.585, n: 0.78 } as const;
+
+export const GREENHOUSE = {
+  // Earth: 1361 W/m², A 0.294, 288.15 K at 1.014 bar (NASA). The trace gases (`greenhouse` 1) in any air.
+  trace: { tau0: tauFor(288.15, blackBody(1361, 0.294)) / 1.014, n: 1 },
+  // CO₂: a·p^m for its saturating bands at low pressure, fitted (rms 0.5 K) to Ramirez et al. 2014's Mars under
+  // today's Sun from 0.05 to 2.5 bar (terraforming.md), plus τ₀ p P, pressure-broadened, which carries Venus:
+  // 2601.3 W/m², A 0.77, 737.15 K at 92 bar (NASA).
+  carbonDioxide: {
+    low: CO2_LOW,
+    tau0: (tauFor(737.15, blackBody(2601.3, 0.77)) - CO2_LOW.tau0 * 92 ** CO2_LOW.n) / 92 ** 2,
+    n: 2,
+  },
+  // Titan: 15.2 W/m², A 0.265 (Li et al. 2011), 93.65 K at 1.467 bar (Fulchignoni et al. 2005). Its methane's
+  // greenhouse is expressed as trace gas (titanGreenhouse) when its air is turned into gases.
   nitrogen: { tau0: tauFor(93.65, blackBody(15.2, 0.265)) / 1.467 ** (4 / 3), n: 4 / 3 },
   // No real body to calibrate on: fitted (rms 3 K over 150–450 K) to Mol Lous et al. 2022's 153 model rogues,
   // whose H₂ collision-induced absorption depends on P²/g (Pierrehumbert & Gaidos 2011). See rogue-planets.md.
   hydrogen: { tau0: 6.38, n: 1.161, gravity: 0.5 },
-};
+} as const;
 
 /** Cloud and haze albedos that replace the surface's under a thick atmosphere. */
 const CLOUD_ALBEDO = {
-  /** Venus's sulphuric-acid cloud deck (Bond 0.77, NASA), above this pressure of CO₂. */
-  carbonDioxide: { albedo: 0.77, minPressure: 10 },
+  /**
+   * Venus's sulphuric-acid cloud deck (Bond 0.77, NASA). Its cover grows on
+   * a log scale from none at 3 bar of CO₂ (the Mars models of Ramirez et al.
+   * 2014 and Forget et al. 2013 run without it up to there) to whole at 30
+   * bar. The literature sets the deck by its SO₂ and water, not the
+   * pressure, so the decade is a gameplay choice: it replaces a cliff at
+   * 10 bar (9 bar was 100 K hotter). See terraforming.md.
+   */
+  carbonDioxide: { albedo: 0.77, minPressure: 3, fullPressure: 30 },
   /** Titan's orange haze (Bond 0.265, Li et al. 2011), above this pressure of N₂. */
-  nitrogen: { albedo: 0.265, minPressure: 0.5 },
+  nitrogen: { albedo: 0.265, minPressure: 0.5, fullPressure: 0.5 },
 } as const;
+
+/**
+ * Breathable air (habitability T3), see docs/research/terraforming.md:
+ * - minOxygen: La Rinconada, the highest town lived in for good (5100 m,
+ *   405 mmHg, West 2002 and Sci Rep 2024): 405 × 0.2095 mmHg = 0.113 bar of O₂.
+ * - maxOxygen: half an atmosphere of O₂ (380 mmHg) can be breathed for good
+ *   (NASA-STD-3001 Vol. 2); pulmonary toxicity starts above 0.5 ATA.
+ * - maxOxygenFraction: NASA's exploration atmosphere, 34% O₂ (fire risk
+ *   grows with the fraction; 30% is the flammability test level).
+ * - maxCarbonDioxide: OSHA's and NIOSH's 8-hour limit, 5000 ppm at 1 atm.
+ */
+export const BREATHABLE = {
+  minOxygen: (405 * 0.2095) / 750.06,
+  maxOxygen: 0.5066,
+  maxOxygenFraction: 0.34,
+  maxCarbonDioxide: 0.005066,
+} as const;
+
+/** O₂'s share of Earth's dry air by volume (NASA; argon is counted with the nitrogen). */
+export const EARTH_OXYGEN_FRACTION = 0.2095;
 
 /**
  * Water's boiling point against pressure, [bar, K], from the NIST Webbook
@@ -282,25 +352,184 @@ export function tidalHeatFlow(
   );
 }
 
+// --- Atmospheres: gases and what they make ---
+
+export const NO_GASES: Readonly<Gases> = { n2: 0, o2: 0, co2: 0, h2: 0 };
+
+/** Total surface pressure, bar. */
+export function totalPressure(gases: Gases): number {
+  return gases.n2 + gases.o2 + gases.co2 + gases.h2;
+}
+
+/**
+ * The gases of an atmosphere described the old way, by total pressure and
+ * composition. N₂–O₂ air gets Earth's share of oxygen, kept within the
+ * breathable range when there is enough air for it (living worlds are
+ * breathable at any of their pressures, as their composition always said).
+ */
+export function gasesOf(pressure: number, composition: Composition): Gases {
+  const p = Math.max(0, pressure);
+  if (composition === 'none' || p <= 0) return { ...NO_GASES };
+  switch (composition) {
+    case 'oxygenNitrogen': {
+      const o2 = Math.min(p, clamp(EARTH_OXYGEN_FRACTION * p, BREATHABLE.minOxygen, BREATHABLE.maxOxygen));
+      return { ...NO_GASES, n2: p - o2, o2 };
+    }
+    case 'nitrogen':
+      return { ...NO_GASES, n2: p };
+    case 'carbonDioxide':
+      return { ...NO_GASES, co2: p };
+    case 'hydrogen':
+      return { ...NO_GASES, h2: p };
+  }
+}
+
+/** Breathable: enough oxygen, not too much (by pressure or share), and not too much CO₂ (BREATHABLE). */
+export function isBreathable(gases: Gases): boolean {
+  const { o2, co2 } = gases;
+  return (
+    o2 >= BREATHABLE.minOxygen &&
+    o2 <= BREATHABLE.maxOxygen &&
+    o2 <= BREATHABLE.maxOxygenFraction * totalPressure(gases) &&
+    co2 <= BREATHABLE.maxCarbonDioxide
+  );
+}
+
+/**
+ * The atmosphere's character: the dominant of nitrogen-and-oxygen, CO₂ and
+ * hydrogen, with nitrogen-and-oxygen air 'oxygenNitrogen' when it's
+ * breathable and 'nitrogen' otherwise.
+ */
+export function compositionOf(gases: Gases): Composition {
+  if (totalPressure(gases) <= 0) return 'none';
+  const air = gases.n2 + gases.o2;
+  if (air >= gases.co2 && air >= gases.h2) return isBreathable(gases) ? 'oxygenNitrogen' : 'nitrogen';
+  return gases.co2 >= gases.h2 ? 'carbonDioxide' : 'hydrogen';
+}
+
+/**
+ * Titan's greenhouse (τ₀ P^4/3, its methane and collision-induced absorption)
+ * as the trace gas abundance that gives the same optical depth at pressure
+ * `pressure`: how a generated N₂ atmosphere's greenhouse becomes `greenhouse`.
+ */
+export function titanGreenhouse(pressure: number, greenhouse = 1): number {
+  if (pressure <= 0) return 0;
+  return (greenhouse * GREENHOUSE.nitrogen.tau0 * pressure ** GREENHOUSE.nitrogen.n) / (GREENHOUSE.trace.tau0 * pressure);
+}
+
+/**
+ * The trace greenhouse (in Earth's units) of an atmosphere whose greenhouse
+ * was given relative to its composition's reference body, the way generation
+ * draws it: Earth's trace gases for N₂–O₂, Titan's for N₂; a CO₂ or hydrogen
+ * atmosphere at 1 is its own greenhouse gas and nothing more; no air has none.
+ */
+export function traceGreenhouse(composition: Composition, pressure: number, greenhouse: number, gravity = 1): number {
+  switch (composition) {
+    case 'none':
+      // No air, no trace gases in it.
+      return 0;
+    case 'oxygenNitrogen':
+      return greenhouse;
+    case 'nitrogen':
+      return titanGreenhouse(pressure, greenhouse);
+    case 'carbonDioxide':
+    case 'hydrogen': {
+      // Anything above 1 adds trace gas giving the same extra optical depth (only the lab sets it).
+      if (greenhouse <= 1 || pressure <= 0) return 0;
+      const own = opticalDepth({ gases: gasesOf(pressure, composition), greenhouse: 0 }, gravity);
+      return ((greenhouse - 1) * own) / (GREENHOUSE.trace.tau0 * pressure);
+    }
+  }
+}
+
+/** The untouched levers: no mirrors, haze or magic heat. */
+const UNTOUCHED = { starlight: 1, aerosol: 0, magicHeat: 0 } as const;
+
+/**
+ * A full state from a partial one. Given `pressure` and `composition`
+ * instead of `gases`, the air is made with gasesOf, and `greenhouse` is then
+ * read relative to the composition's reference body (traceGreenhouse), as
+ * generation draws it. The rest defaults to an untouched, airless, dry body
+ * (with Earth's trace greenhouse gases if it has air).
+ */
+export function climateStateOf(spec: StateSpec, gravity = 1): ClimateState {
+  const legacy = !spec.gases && (spec.pressure !== undefined || spec.composition !== undefined);
+  const composition = spec.composition ?? 'none';
+  const gases = spec.gases ? { ...spec.gases } : gasesOf(spec.pressure ?? 0, composition);
+  // Unless given: Earth's trace gases in any air, none without.
+  const greenhouse = spec.greenhouse ?? (legacy || totalPressure(gases) > 0 ? 1 : 0);
+  return {
+    gases,
+    greenhouse: legacy ? traceGreenhouse(composition, spec.pressure ?? 0, greenhouse, gravity) : greenhouse,
+    water: spec.water ?? 0,
+    surfaceAlbedo: spec.surfaceAlbedo ?? 0.3,
+    starlight: spec.starlight ?? UNTOUCHED.starlight,
+    aerosol: spec.aerosol ?? UNTOUCHED.aerosol,
+    magicHeat: spec.magicHeat ?? UNTOUCHED.magicHeat,
+  };
+}
+
 // --- Evaluation: state + setting → derived ---
 
-/** A Venus-like cloud deck or Titan-like haze hides the surface. */
-export function cloudCovered(state: Pick<ClimateState, 'composition' | 'pressure'>): boolean {
-  if (state.composition !== 'carbonDioxide' && state.composition !== 'nitrogen') return false;
-  return state.pressure >= CLOUD_ALBEDO[state.composition].minPressure;
+/** How much of the planet a Venus-like cloud deck or Titan-like haze hides, 0–1. */
+export function cloudCover(state: Pick<ClimateData, 'composition' | 'pressure'>): number {
+  if (state.composition !== 'carbonDioxide' && state.composition !== 'nitrogen') return 0;
+  const { minPressure, fullPressure } = CLOUD_ALBEDO[state.composition];
+  if (state.pressure >= fullPressure) return 1;
+  if (state.pressure < minPressure) return 0;
+  return Math.log(state.pressure / minPressure) / Math.log(fullPressure / minPressure);
 }
 
-/** Bond albedo of the planet: the surface's, unless a thick atmosphere hides it under cloud or haze. */
-export function planetAlbedo(state: Pick<ClimateState, 'composition' | 'pressure' | 'surfaceAlbedo'>): number {
-  if (cloudCovered(state)) return CLOUD_ALBEDO[state.composition as keyof typeof CLOUD_ALBEDO].albedo;
-  return state.surfaceAlbedo;
+/** The cloud deck or haze hides most of the surface (its looks and weather follow). */
+export function cloudCovered(state: Pick<ClimateData, 'composition' | 'pressure'>): boolean {
+  return cloudCover(state) >= 0.5;
 }
 
-/** The atmosphere's grey optical depth; `gravity` (in g) matters only for hydrogen. */
-export function opticalDepth(state: Pick<ClimateState, 'composition' | 'pressure' | 'greenhouse'>, gravity = 1): number {
-  if (state.composition === 'none' || state.pressure <= 0) return 0;
-  const { tau0, n, gravity: k = 0 } = GREENHOUSE[state.composition];
-  return tau0 * state.greenhouse * (state.pressure / gravity ** k) ** n;
+/**
+ * Bond albedo of the planet: the surface's, where cloud or haze doesn't hide
+ * it, and the clouds' where it does, with any aerosol haze on top.
+ */
+export function planetAlbedo(state: Pick<ClimateData, 'composition' | 'pressure' | 'surfaceAlbedo'> & Partial<Pick<ClimateState, 'aerosol'>>): number {
+  const cover = cloudCover(state);
+  let below = state.surfaceAlbedo;
+  if (cover >= 1) below = CLOUD_ALBEDO[state.composition as keyof typeof CLOUD_ALBEDO].albedo;
+  else if (cover > 0) below += (CLOUD_ALBEDO[state.composition as keyof typeof CLOUD_ALBEDO].albedo - below) * cover;
+  return hazeAlbedo(below, state.aerosol ?? 0);
+}
+
+/**
+ * Albedo of a non-absorbing reflecting layer (reflectance r) over a surface
+ * of albedo a, all its multiple reflections added: (r + a − 2ra) / (1 − ra).
+ * See docs/research/terraforming.md.
+ */
+export function hazeAlbedo(below: number, reflectance: number): number {
+  if (reflectance <= 0) return below;
+  const r = Math.min(reflectance, 1);
+  return (r + below - 2 * r * below) / (1 - r * below);
+}
+
+/**
+ * The atmosphere's grey optical depth; `gravity` (in g) matters only for
+ * hydrogen. The sum of the trace gases' (τ₀ · greenhouse · P), CO₂'s (its
+ * saturating bands, a p_CO₂^m, and its column broadened by the total
+ * pressure, τ₀ p_CO₂ P) and hydrogen's (its column broadened by the total,
+ * over the gravity).
+ */
+export function opticalDepth(state: Pick<ClimateState, 'gases' | 'greenhouse'>, gravity = 1): number {
+  const { gases } = state;
+  const p = totalPressure(gases);
+  if (p <= 0) return 0;
+  let tau = GREENHOUSE.trace.tau0 * state.greenhouse * p;
+  if (gases.co2 > 0) {
+    const { low, tau0, n } = GREENHOUSE.carbonDioxide;
+    tau += low.tau0 * gases.co2 ** low.n + tau0 * gases.co2 * p ** (n - 1);
+  }
+  if (gases.h2 > 0) {
+    const { tau0, n, gravity: k } = GREENHOUSE.hydrogen;
+    const scale = gravity ** k;
+    tau += tau0 * (gases.h2 / scale) * (p / scale) ** (n - 1);
+  }
+  return tau;
 }
 
 export function waterStateOf(water: number, temperature: number, pressure: number): WaterState {
@@ -330,52 +559,90 @@ export function habitabilityOf(c: Pick<ClimateData, 'temperature' | 'pressure' |
   return c.composition === 'oxygenNitrogen' && c.waterState === 'liquid' ? 3 : 2;
 }
 
-/** Recomputes everything derived from a body's setting and its (possibly terraformed) state. */
-export function evaluateClimate(setting: ClimateSetting, state: ClimateState): ClimateData {
-  const pressure = state.composition === 'none' ? 0 : Math.max(0, state.pressure);
-  const s: ClimateState = { ...state, pressure, composition: pressure > 0 ? state.composition : 'none' };
-  const albedo = planetAlbedo(s);
-  const equilibriumTemperature = blackBody(SOLAR_CONSTANT * setting.insolation, albedo, setting.heatFlow);
+/** The surface temperature the state settles at (K): the equilibrium temperature warmed by the greenhouse. */
+export function settledTemperature(equilibriumTemperature: number, tau: number): number {
+  return equilibriumTemperature * greenhouseFactor(tau);
+}
+
+/**
+ * Recomputes everything derived from a body's setting and its (possibly
+ * terraformed) state. `temperature`, when given, is the surface temperature
+ * now (a world still warming or cooling towards the one its state settles
+ * at, see gen/terraform.ts): the water and habitability follow it.
+ */
+export function evaluateClimate(setting: ClimateSetting, state: ClimateState, temperature?: number): ClimateData {
+  const gases = { ...state.gases };
+  for (const gas of GASES) gases[gas] = Math.max(0, gases[gas]);
+  const pressure = totalPressure(gases);
+  const composition = compositionOf(gases);
+  const s: ClimateState = { ...state, gases };
+  const albedo = planetAlbedo({ composition, pressure, surfaceAlbedo: s.surfaceAlbedo, aerosol: s.aerosol });
+  const equilibriumTemperature = blackBody(SOLAR_CONSTANT * setting.insolation * s.starlight, albedo, setting.heatFlow + s.magicHeat);
   const tau = opticalDepth(s, setting.gravity);
-  const temperature = equilibriumTemperature * greenhouseFactor(tau);
+  const surface = temperature ?? settledTemperature(equilibriumTemperature, tau);
+  // Escape follows the star's own light (its X-rays and UV), which mirrors don't add: insolation, not starlight.
   const retention = atmosphereRetention(setting.escapeVelocity, setting.insolation);
-  const waterState = waterStateOf(s.water, temperature, pressure);
-  const derived = {
-    albedo,
-    equilibriumTemperature,
-    opticalDepth: tau,
-    temperature,
-    retention,
-    retentionClass: retentionClass(retention),
-    leaking: pressure > maxStablePressure(retention),
-    waterState,
-    geothermal: geothermalIndex(setting.heatFlow),
-  };
+  const waterState = waterStateOf(s.water, surface, pressure);
   return {
     insolation: setting.insolation,
     gravity: setting.gravity,
     escapeVelocity: setting.escapeVelocity,
     heatFlow: setting.heatFlow,
     ...s,
-    ...derived,
-    habitability: habitabilityOf({ temperature, pressure, composition: s.composition, waterState }),
+    pressure,
+    composition,
+    albedo,
+    equilibriumTemperature,
+    opticalDepth: tau,
+    temperature: surface,
+    retention,
+    retentionClass: retentionClass(retention),
+    leaking: pressure > maxStablePressure(retention),
+    waterState,
+    geothermal: geothermalIndex(setting.heatFlow),
+    habitability: habitabilityOf({ temperature: surface, pressure, composition, waterState }),
   };
+}
+
+/** The setting of a climate. */
+export function climateSettingOf(c: ClimateSetting): ClimateSetting {
+  return { insolation: c.insolation, gravity: c.gravity, escapeVelocity: c.escapeVelocity, heatFlow: c.heatFlow };
 }
 
 /** The terraformable state of a climate. */
 export function climateState(c: ClimateState): ClimateState {
   return {
-    pressure: c.pressure,
-    composition: c.composition,
+    gases: { ...c.gases },
     greenhouse: c.greenhouse,
     water: c.water,
     surfaceAlbedo: c.surfaceAlbedo,
+    starlight: c.starlight,
+    aerosol: c.aerosol,
+    magicHeat: c.magicHeat,
   };
 }
 
+/**
+ * A state after `change`. Given `pressure` and `composition` (or either),
+ * the air is replaced as climateStateOf makes it, and a `greenhouse` given
+ * with them is read relative to the composition (traceGreenhouse); otherwise
+ * the greenhouse is kept.
+ */
+export function changeState(state: ClimateState, change: StateSpec, gravity = 1): ClimateState {
+  const { pressure, composition, ...rest } = change;
+  const next: ClimateState = { ...climateState(state), ...rest };
+  if (!change.gases && (pressure !== undefined || composition !== undefined)) {
+    const c = composition ?? compositionOf(state.gases);
+    const p = pressure ?? totalPressure(state.gases);
+    next.gases = gasesOf(p, c);
+    if (change.greenhouse !== undefined) next.greenhouse = traceGreenhouse(c, p, change.greenhouse, gravity);
+  }
+  return next;
+}
+
 /** A body's climate after changing some of its state, e.g. terraform(c, { pressure: 1, composition: 'oxygenNitrogen' }). */
-export function terraform(climate: ClimateData, change: Partial<ClimateState>): ClimateData {
-  return evaluateClimate(climate, { ...climateState(climate), ...change });
+export function terraform(climate: ClimateData, change: StateSpec): ClimateData {
+  return evaluateClimate(climate, changeState(climateState(climate), change, climate.gravity));
 }
 
 // --- Generation ---
@@ -443,8 +710,10 @@ export function climateSetting(body: ClimateBody, rng?: Rng): ClimateSetting {
   return { insolation: body.insolation, gravity, escapeVelocity, heatFlow };
 }
 
-/** The atmosphere a body of this type would have if it could keep one. */
-function draftAtmosphere(rng: Rng, body: ClimateBody): Pick<ClimateState, 'pressure' | 'composition' | 'greenhouse'> {
+type DraftAtmosphere = { pressure: number; composition: Composition; greenhouse: number };
+
+/** The atmosphere a body of this type would have if it could keep one (greenhouse relative to its composition's reference body). */
+function draftAtmosphere(rng: Rng, body: ClimateBody): DraftAtmosphere {
   const none = { pressure: 0, composition: 'none' as const, greenhouse: 1 };
   switch (body.type) {
     case 'terran':
@@ -494,7 +763,7 @@ export function generateClimate(rng: Rng, body: ClimateBody): ClimateData {
     atmosphere = stable > 0 ? { ...atmosphere, pressure: stable } : { pressure: 0, composition: 'none', greenhouse: 1 };
   }
 
-  const state: ClimateState = { ...atmosphere, water, surfaceAlbedo };
+  const state = climateStateOf({ ...atmosphere, water, surfaceAlbedo }, setting.gravity);
   if (living) state.greenhouse = thermostat(rng, setting, state);
   return evaluateClimate(setting, state);
 }
@@ -511,7 +780,7 @@ function thermostat(rng: Rng, setting: ClimateSetting, state: ClimateState): num
  * The atmosphere's glow colour, from its composition and thickness, or null
  * when there's too little air to see (below 5 mbar; Mars's 6 mbar shows).
  */
-export function atmosphereTint(rng: Rng, c: Pick<ClimateState, 'pressure' | 'composition'>): string | null {
+export function atmosphereTint(rng: Rng, c: Pick<ClimateData, 'pressure' | 'composition'>): string | null {
   if (c.composition === 'none' || c.pressure < 0.005) return null;
   switch (c.composition) {
     case 'oxygenNitrogen':
@@ -550,7 +819,7 @@ function formatPressure(bar: number): string {
 }
 
 /** e.g. "thin N₂ atmosphere", "N₂–O₂ atmosphere", "crushing CO₂ atmosphere", "no atmosphere". */
-export function describeAtmosphere(c: Pick<ClimateState, 'pressure' | 'composition'>): string {
+export function describeAtmosphere(c: Pick<ClimateData, 'pressure' | 'composition'>): string {
   if (c.composition === 'none' || c.pressure <= 0) return 'no atmosphere';
   const gas = GAS_LABEL[c.composition];
   if (c.pressure < 0.001) return `trace of ${gas}`;

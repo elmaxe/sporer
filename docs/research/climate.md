@@ -111,6 +111,8 @@ T_s = T_eq (1 + ¾τ)^¼, τ = τ₀ Pⁿ:
 
 Mars is the independent check, since nothing is calibrated on it. CO₂ at 6.36 mbar gives 210.2 K with n = 1 and 209.8 K with n = 2. The measured value is 208 K (fact table) or 214 K (fact sheet). Venus's n = 2 makes the CO₂ greenhouse vanish at Mars's pressure, which is right.
 
+**Superseded for CO₂ (step 40):** n = 2 alone also made CO₂ do almost nothing at a few bar (Mars +0.6 K at 1 bar), which published Mars models contradict. CO₂ is now τ = a p^m + b p P, fitted to Ramirez et al. 2014 below 3 bar and still exact on Venus; see `terraforming.md`.
+
 ### Water's boiling point
 
 A two-point Clausius–Clapeyron fit (triple point and 1 atm, L = 43.3 kJ/mol) against NIST:
@@ -149,7 +151,7 @@ The formulas as implemented:
 - **Insolation** = (habitableRadius / orbit radius)², the same zone `choosePlanetType` uses, so a type and its temperature can't disagree. Moons use their planet's orbit. Physically T ∝ L^¼ d^-½ and the habitable radius ∝ √L, so this is the real scaling. The habitable radius is clamped to 60–600 in `generateSystem`, and the climate follows the clamp. That is deliberate: types and climate stay consistent.
 - **T_eq** = ((S⊕ · insolation · (1 − A)/4 + F_internal)/σ)^¼, **T** = T_eq (1 + ¾τ)^¼. An Earth analogue at the habitable radius is exactly 288.15 K (tested).
 - **τ** = τ₀ · greenhouse · Pⁿ, with τ₀ and n from the table above, computed in code from the cited reference values.
-- **Albedo**: the surface's by type (barren 0.07–0.15 after Mercury and the Moon, lava 0.06–0.12, desert 0.2–0.3 after Mars, terran/ocean 0.25–0.35 after Earth, ice 0.55–0.75 after Pluto). A thick atmosphere replaces it: CO₂ ≥ 10 bar gets Venus's cloud deck (0.77), N₂ ≥ 0.5 bar gets Titan's haze (0.265). The pressure thresholds are gameplay choices.
+- **Albedo**: the surface's by type (barren 0.07–0.15 after Mercury and the Moon, lava 0.06–0.12, desert 0.2–0.3 after Mars, terran/ocean 0.25–0.35 after Earth, ice 0.55–0.75 after Pluto). A thick atmosphere replaces it: CO₂ gets Venus's cloud deck (0.77), N₂ ≥ 0.5 bar gets Titan's haze (0.265). The pressure thresholds are gameplay choices. (Step 40 turned the deck's cliff at 10 bar into a ramp from 3 to 30 bar; see `terraforming.md`.)
 - **Gravity and escape velocity** from the real radius (r/8)² R⊕ (the inverse of `gameRadius`): ice moons and icy dwarf/small worlds use ρ = 1.9; everything else uses Chen & Kipping. Gas giants (as tidal hosts) use ρ = 1000, the mean of Jupiter and Saturn.
 - **Atmospheres by type** (drawn, then capped by retention). Terran/ocean: 0.5–2 bar N₂–O₂, super-Earths up to 2.5× that. Desert: 75% have one, 5–800 mbar, CO₂ (70%) or N₂. Ice: 25% Titan-like 0.5–3 bar N₂, 35% Pluto-like 10 µbar–1 mbar, else none. Lava: 40% Venus-like 10–100 bar CO₂. Barren: 20% a 0.1–10 mbar CO₂ remnant. The shares are gameplay choices. **Retention cap**: s < −0.3 airless, |s| < 0.3 at most 10 mbar. Living worlds (terran, ocean) keep their air even when marginal, because their type says they have it, and are flagged `leaking`: a deliberate hook for terraforming.
 - **Thermostat**: living worlds get the greenhouse abundance that brings them to a drawn 275–300 K, clamped to 0.25–6× Earth's. This is the carbonate–silicate feedback in spirit, not its rate law (a gameplay stand-in). Without it, the game's temperate zone (0.5–1.6 habitable radii, wider than the real habitable zone) would give "terran" worlds from −45 °C to +115 °C.
