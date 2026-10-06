@@ -71,8 +71,10 @@ import { DEBRIS_REACH, debrisLookFor } from '../gen/debris';
 import { DEBRIS_NEAR, DebrisField } from '../world/DebrisField';
 import type { ClimateData } from '../gen/climate';
 import { leakRate } from '../gen/terraform';
-import { isRayTool } from '../combat/items';
+import { isLightTool, isRayTool } from '../combat/items';
 import { MagicRay } from '../terraform/MagicRay';
+import { LightTools } from '../terraform/LightTools';
+import { describeInstallations, forecastLight, lightBrightness } from '../terraform/light';
 import { ClimateChart, CHART_REFRESH } from '../terraform/ClimateChart';
 import { forecastClimate, type RayId } from '../terraform/rays';
 import type { TerraformBody, Terraforming } from '../terraform/Terraforming';
@@ -196,6 +198,10 @@ export class PlanetLevel extends Level implements ItemUser {
   private readonly cameraParams: OrbitParams;
   /** The magic terraforming rays (solid bodies with a climate, not once busted). */
   rays: MagicRay | null = null;
+  /** The heat-and-light tools and the mirrors and sunshade over the body (as the rays). */
+  light: LightTools | null = null;
+  /** How bright the star's light is drawn: mirrors and a sunshade change it (terraform/light.ts lightBrightness). */
+  private readonly brightness = { value: 1 };
   /** The body as terraforming knows it (null for giants and small bodies without a climate). */
   readonly terraformBody: TerraformBody | null;
   /** The climate chart, while the Terraform tab is on show or a ray is selected. */
@@ -300,6 +306,7 @@ export class PlanetLevel extends Level implements ItemUser {
         globe.sunLight,
         globe.ambientLight,
         system.world.galacticCentre,
+        this.brightness,
       ),
     );
 
@@ -398,6 +405,14 @@ export class PlanetLevel extends Level implements ItemUser {
     this.rays =
       this.terraformBody && terraforming && !busted
         ? this.add(new MagicRay(this.scene, camera, input, globe, this.ship, terraforming, this.terraformBody, sfx, () => this.rayBlock(), debug))
+        : null;
+    // The mirrors and the sunshade show whatever is selected; their tools take presses as the rays do.
+    const terraformBody = this.terraformBody;
+    this.light =
+      terraformBody && terraforming && !busted
+        ? this.add(
+            new LightTools(this.scene, camera, input, globe, this.ship, this, terraforming, terraformBody, sfx, () => this.rayBlock(), () => this.liveClimate ?? terraformBody.climate, debug),
+          )
         : null;
     // Before the picker: a press the beam takes isn't a click that flies the ship. What lands meets the climate as it is now.
     const level = this;
@@ -539,7 +554,13 @@ export class PlanetLevel extends Level implements ItemUser {
 
   /** The item bar's view of this level: the planet buster, the volcano bomb and the laser can be fired from here, and the beam used. */
   get selected(): ItemId | null {
-    return this.buster.armed ? 'planetBuster' : this.volcanoBomb.armed ? 'volcanoBomb' : this.laser.armed ? 'laser' : (this.rays?.armed ?? this.cargo?.selected ?? null);
+    return this.buster.armed
+      ? 'planetBuster'
+      : this.volcanoBomb.armed
+        ? 'volcanoBomb'
+        : this.laser.armed
+          ? 'laser'
+          : (this.rays?.armed ?? this.light?.armed ?? this.cargo?.selected ?? null);
   }
 
   status(item: ItemId): ItemStatus {
@@ -548,6 +569,7 @@ export class PlanetLevel extends Level implements ItemUser {
     if (item === 'volcanoBomb') return this.volcanoBomb.status();
     if (item === 'laser') return this.laser.status();
     if (isRayTool(item)) return this.rays ? this.rays.status(item) : { available: false, hint: '', reason: this.rayBlock() ?? 'Nothing here to terraform' };
+    if (isLightTool(item)) return this.light ? this.light.status(item) : { available: false, hint: '', reason: this.rayBlock() ?? 'Nothing here to terraform' };
     if (this.cargo) return this.cargo.status(item);
     return { available: false, hint: '', reason: item === 'abduct' ? 'Nothing left here to beam up' : 'Nothing here to set it down on' };
   }
@@ -558,12 +580,15 @@ export class PlanetLevel extends Level implements ItemUser {
     if (item !== 'volcanoBomb') this.volcanoBomb.arm(false);
     if (item !== 'laser') this.laser.arm(false);
     const ray = item !== null && isRayTool(item) ? item : null;
+    const light = item !== null && isLightTool(item) ? item : null;
     if (ray === null) this.rays?.arm(null);
+    if (light === null) this.light?.arm(null);
     if (item === 'planetBuster') this.buster.arm(true);
     if (item === 'volcanoBomb') this.volcanoBomb.arm(true);
     if (item === 'laser') this.laser.arm(true);
     if (ray) this.rays?.arm(ray);
-    this.cargo?.arm(item === 'planetBuster' || item === 'volcanoBomb' || item === 'laser' || ray ? null : item);
+    if (light) this.light?.arm(light);
+    this.cargo?.arm(item === 'planetBuster' || item === 'volcanoBomb' || item === 'laser' || ray || light ? null : item);
   }
 
   /** The radar's line above the item bar while it's on (a switch: always available). */
@@ -608,6 +633,7 @@ export class PlanetLevel extends Level implements ItemUser {
     if (!t || !tb || this.busted || !t.touched(tb.key)) return;
     const climate = t.snapshot(tb)!.climate;
     this.liveClimate = climate;
+    this.brightness.value = lightBrightness(climate.starlight);
     const rebuilt = this.globe.setLive(climate);
     if (rebuilt && !first) this.rebuildWeather();
     if (!first) this.hud.setClimate(this.climateDetail());
@@ -632,7 +658,8 @@ export class PlanetLevel extends Level implements ItemUser {
     if (!chart || !t || !tb) return;
     const tab = document.getElementById('item-bar')?.dataset.tab;
     const ray = this.rays?.armed ?? null;
-    const want = this.active && !this.busted && !this.zoomLocked && (tab === 'terraform' || ray !== null);
+    const tool = this.light?.armed ?? null;
+    const want = this.active && !this.busted && !this.zoomLocked && (tab === 'terraform' || ray !== null || tool !== null);
     if (!want) {
       if (chart.visible) chart.hide();
       return;
@@ -645,10 +672,15 @@ export class PlanetLevel extends Level implements ItemUser {
       name: this.body.name,
       snapshot,
       mode: t.mode,
-      forecast: ray ? forecastClimate(snapshot.target, ray as RayId, t.choice, FORECAST_SECONDS) : null,
+      forecast: ray
+        ? forecastClimate(snapshot.target, ray as RayId, t.choice, FORECAST_SECONDS)
+        : tool
+          ? forecastLight(snapshot.target, t.logs.actions(tb.key), t.time, t.mode, tool, t.choice, FORECAST_SECONDS)
+          : null,
       leak: leakRate(snapshot.climate, t.mode),
       milestones: t.milestones.log(tb.key),
-      picker: ray === 'airRay' || ray === 'vacuumRay' ? 'gas' : ray === 'waterRay' ? 'water' : null,
+      picker: ray === 'airRay' || ray === 'vacuumRay' ? 'gas' : ray === 'waterRay' ? 'water' : tool === 'mirror' ? 'mirror' : tool === 'sunshade' ? 'shade' : null,
+      projects: this.light ? describeInstallations(this.light.installations, snapshot.climate, t.mode) : '',
     });
   }
 
@@ -699,8 +731,10 @@ export class PlanetLevel extends Level implements ItemUser {
     this.globe.bust(this.radius * DEBRIS_REACH);
     this.cargo?.clear(false);
     this.laser.clear();
-    for (const entity of [this.eruptions, this.geysers, this.ventSounds, this.weather, this.comet, this.plants, this.rocks, this.wake, this.animals, this.radar, this.cargo, this.plantings, this.volcanoes, this.volcanoSounds, this.meteors])
+    for (const entity of [this.eruptions, this.geysers, this.ventSounds, this.weather, this.comet, this.plants, this.rocks, this.wake, this.animals, this.radar, this.cargo, this.plantings, this.volcanoes, this.volcanoSounds, this.meteors, this.light])
       if (entity) this.remove(entity);
+    this.light = null;
+    this.brightness.value = 1;
     this.eruptions = this.geysers = this.ventSounds = this.weather = this.comet = this.plants = this.rocks = this.wake = this.animals = this.radar = this.cargo = this.plantings = this.meteors = null;
     this.volcanoes = null;
     this.volcanoSounds = null;
@@ -765,7 +799,7 @@ export class PlanetLevel extends Level implements ItemUser {
 
   override update(frameDt: number, alpha: number): void {
     // Round a rogue planet only the galaxy's dim glow lights the air.
-    if (this.system.starless) this.globe.sunStrength.value = galacticLightParams.air;
+    this.globe.sunStrength.value = (this.system.starless ? galacticLightParams.air : 1) * this.brightness.value;
     if (this.comet && this.cometOrbit) {
       // The dust tail lags behind the comet: opposite its motion, in the body frame.
       const time = this.frame.renderTime;

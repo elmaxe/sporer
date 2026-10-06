@@ -56,7 +56,18 @@ export interface TerraformAction {
   amount: number;
   /** Where on the body it was aimed (a unit vector in the body's frame), for the looks. */
   site?: [number, number, number];
+  /**
+   * A tool that stays (terraform/light.ts): an orbital mirror deployed
+   * or recalled, or the sunshade set. Their `starlight` change is worked out
+   * when they're used; what stays up is read back from the log.
+   */
+  tool?: TerraformTool;
+  /** What the tool is at once the action is over: how many mirrors are up, or how much the shade blocks (0–1). */
+  level?: number;
 }
+
+/** Tools that stay over a body, recorded in its log (terraform/light.ts `installationsAt`). */
+export type TerraformTool = 'mirror' | 'shade';
 
 /** The game's terraforming mode from `time` on (switched in the menu at any time). */
 export interface ModeChange {

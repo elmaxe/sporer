@@ -3054,7 +3054,7 @@ await section('cargo', async () => {
       await mouse('mouseMoved', target);
       await mouse('mousePressed', target);
       await drawFrames(3);
-      const on = await evaluate(`({ on: planet.laser.on, beam: planet.laser.look.core.visible, ship: planet.ship.enRoute })`);
+      const on = await evaluate(`({ on: planet.laser.on, beam: planet.laser.beamCount > 0, ship: planet.ship.enRoute })`);
       await until(`planet.laser.killed > ${killed}`, 20000).catch(() => {});
       await mouse('mouseReleased', target);
       await drawFrames(3);
@@ -3341,7 +3341,7 @@ await section('terraform', async () => {
     await send('Input.dispatchMouseEvent', { type: 'mousePressed', ...target, button: 'left', clickCount: 1 });
     const t0 = await evaluate(`levels.terraforming.time`);
     await until(`levels.terraforming.time > ${t0} + ${seconds}`, 60000);
-    const during = await evaluate(`({ on: planet.rays.on, draining: levels.energy.draining, hint: document.getElementById('item-hint').textContent })`);
+    const during = await evaluate(`({ on: planet.rays.on || !!planet.light?.on, draining: levels.energy.draining, hint: document.getElementById('item-hint').textContent })`);
     await send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...target, button: 'left', clickCount: 1 });
     await drawFrames(3);
     return during;
@@ -3374,11 +3374,44 @@ await section('terraform', async () => {
   await drawFrames(30);
   const lowShot = join(outDir, 'terraform-low-orbit.png');
   writeFileSync(lowShot, await page.screenshot());
-  const heard = (await evaluate(`__cues`)).filter((c) => c === 'magicRay' || c === 'milestone');
+  // Heat and light (6–9): a mirror deployed with a real click, the shade closed two steps (starlight back to ×1.00 so the world stays T3),
+  // the aerosol held, and once the mirror has unfolded, the mirror lance held on the ground.
+  const click = async () => {
+    await send('Input.dispatchMouseEvent', { type: 'mousePressed', ...target, button: 'left', clickCount: 1 });
+    await drawFrames(2);
+    await send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...target, button: 'left', clickCount: 1 });
+    await drawFrames(3);
+  };
+  await press('Digit6', '6');
+  const mirrorArmed = await evaluate(`({ selected: planet.selected, chart: !document.getElementById('climate-chart').hidden, picker: document.querySelector('#climate-chart .chart-pickers')?.textContent ?? '' })`);
+  await click();
+  const mirrorHint = await evaluate(`document.getElementById('item-hint').textContent`);
+  await press('Digit8', '8');
+  await click();
+  await click();
+  await press('Digit9', '9');
+  const spraying = await hold(2);
+  await evaluate(`levels.terraforming.advance(10)`);
+  await drawFrames(10);
+  await press('Digit7', '7');
+  const lancing = await (async () => {
+    await send('Input.dispatchMouseEvent', { type: 'mousePressed', ...target, button: 'left', clickCount: 1 });
+    await drawFrames(20);
+    const during = await evaluate(`({ on: planet.light.lance.on, beams: planet.light.lance.beamCount, hint: document.getElementById('item-hint').textContent })`);
+    await send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...target, button: 'left', clickCount: 1 });
+    await drawFrames(3);
+    return during;
+  })();
+  await press('Digit7', '7');
+  const light = await evaluate(`(() => { const s = levels.terraforming.snapshot(planet.terraformBody).climate; const inst = planet.light.installations;
+    const log = levels.terraforming.logs.actions('${key}');
+    return { mirrors: inst.mirrors, ready: inst.ready, shade: inst.shade, starlight: s.starlight, aerosol: s.aerosol, tools: log.filter((a) => a.tool).map((a) => a.tool),
+      sprays: log.filter((a) => a.lever === 'aerosol').length, haze: !!planet.globe.haze?.visible, projects: document.querySelector('#climate-chart .chart-projects')?.textContent ?? '' }; })()`);
+  const heard = (await evaluate(`__cues`)).filter((c) => ['magicRay', 'milestone', 'mirrorDeploy', 'sunshadeMove', 'aerosolSpray', 'mirrorLance'].includes(c));
   await evaluate(`levels.leavePlanet()`);
   await until(`levels.mode === 'system' && !levels.transitioning`, 60000);
   await drawFrames(5);
-  const system = await evaluate(`({ details: __terraformed.details, live: __terraformed.climate !== __terraformed.config.climate, tier: __terraformed.climate.habitability })`);
+  const system = await evaluate(`({ details: __terraformed.details, live: __terraformed.climate !== __terraformed.config.climate, tier: __terraformed.climate.habitability, rigs: levels.systemRigs?.count ?? 0 })`);
   await evaluate(`(() => { const o = levels.systemLevel.orbit; o.setFocus(__terraformed.renderPosition); o.setDistance(__terraformed.radius * 4); })()`);
   await drawFrames(20);
   const systemShot = join(outDir, 'terraform-system.png');
@@ -3392,10 +3425,10 @@ await section('terraform', async () => {
   const rebuilt = await evaluate(`(() => { const b = world.planets.find((p) => p.name === __terraformed.name); return { live: b.climate !== b.config.climate, tier: b.climate.habitability }; })()`);
   // Back to Relaxed for whatever comes next.
   await evaluate(`(() => { while (levels.terraforming.mode !== 'relaxed') document.getElementById('gameplay-terraform').click(); })()`);
-  terraform = { inSpace, armed, heating, heated, gas, airing, aired, modes, settled, live, heard, system, rebuilt, base, lowShot, systemShot };
+  terraform = { inSpace, armed, heating, heated, gas, airing, aired, modes, settled, live, mirrorArmed, mirrorHint, spraying, lancing, light, heard, system, rebuilt, base, lowShot, systemShot };
   terraform.ok =
     inSpace.tab === 'terraform' &&
-    inSpace.slots.join(',') === 'heatRay,coolRay,airRay,vacuumRay,waterRay' &&
+    inSpace.slots.join(',') === 'heatRay,coolRay,airRay,vacuumRay,waterRay,mirror,lance,sunshade,aerosol' &&
     /down to a planet or moon/.test(inSpace.hint) &&
     /∞/.test(inSpace.energy ?? '') &&
     armed.selected === 'heatRay' &&
@@ -3427,10 +3460,27 @@ await section('terraform', async () => {
     // The banners show one at a time: the first is up, the rest queued behind it.
     live.banners.length >= 1 &&
     ['firstAir', 'firstRain', 'seasThaw', 'breathable', 'tierUp'].every((id) => live.logged.includes(id)) &&
-    heard.includes('magicRay') &&
-    heard.includes('milestone') &&
+    mirrorArmed.selected === 'mirror' &&
+    mirrorArmed.chart &&
+    /Deploy/.test(mirrorArmed.picker) &&
+    /starlight ×1\.25/.test(mirrorHint) &&
+    spraying.on &&
+    /haze/i.test(spraying.hint) &&
+    lancing.on &&
+    lancing.beams >= 1 &&
+    light.mirrors === 1 &&
+    light.ready === 1 &&
+    Math.abs(light.shade - 0.2) < 1e-9 &&
+    Math.abs(light.starlight - 1) < 1e-9 &&
+    light.tools.join(',') === 'mirror,shade,shade' &&
+    light.sprays >= 1 &&
+    light.aerosol > 0 &&
+    light.haze &&
+    /Mirrors 1\/12/.test(light.projects) &&
+    ['magicRay', 'milestone', 'mirrorDeploy', 'sunshadeMove', 'aerosolSpray', 'mirrorLance'].every((c) => heard.includes(c)) &&
     system.live &&
     system.tier === 3 &&
+    system.rigs === 1 &&
     rebuilt.live &&
     rebuilt.tier === 3;
   return terraform.ok;

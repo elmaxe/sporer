@@ -4,14 +4,17 @@
  * orbit: the planet buster, combat/PlanetBuster.ts; the volcano bomb,
  * combat/VolcanoBomb.ts; the laser, combat/Laser.ts; the abduction beam and the cargo it brings up:
  * cargo/CargoBeam.ts; the radar, radar/Radar.ts; the magic terraforming
- * rays, terraform/MagicRay.ts).
+ * rays, terraform/MagicRay.ts; the heat-and-light terraforming tools,
+ * terraform/LightTools.ts).
  */
 
 export type ItemTab = 'weapons' | 'inventory' | 'terraform';
 /** The magic terraforming rays (terraform/rays.ts RayId). */
 export type RayToolId = 'heatRay' | 'coolRay' | 'airRay' | 'vacuumRay' | 'waterRay';
+/** The heat-and-light terraforming tools (terraform/light.ts LightToolId). */
+export type LightToolId = 'mirror' | 'lance' | 'sunshade' | 'aerosol';
 /** The tools: always in their tab's first slots. */
-export type ToolId = 'planetBuster' | 'volcanoBomb' | 'laser' | 'abduct' | 'radar' | RayToolId;
+export type ToolId = 'planetBuster' | 'volcanoBomb' | 'laser' | 'abduct' | 'radar' | RayToolId | LightToolId;
 /** What a slot holds: a tool, or a stack of cargo in the hold (`cargo:` and the stack's key, see cargo/inventory.ts). */
 export type ItemId = ToolId | `cargo:${string}`;
 
@@ -112,6 +115,30 @@ export const ITEMS: readonly ItemDef[] = [
     name: 'Water Ray',
     description: 'A magic ray that rains water onto the world while held, or (on the climate chart, or G) boils it away.',
   },
+  {
+    id: 'mirror',
+    tab: 'terraform',
+    name: 'Orbital Mirror',
+    description: 'Deploys a mirror that stays over the world, adding a quarter of its starlight; recall it to take it back (G, or the climate chart).',
+  },
+  {
+    id: 'lance',
+    tab: 'terraform',
+    name: 'Mirror Lance',
+    description: "Focuses the orbital mirrors' light on a spot while held: it burns what lives there, but doesn't warm the world.",
+  },
+  {
+    id: 'sunshade',
+    tab: 'terraform',
+    name: 'Sunshade',
+    description: 'A slatted shade between the star and the world: each click closes it a step, blocking more light (G, or the chart, opens it).',
+  },
+  {
+    id: 'aerosol',
+    tab: 'terraform',
+    name: 'Aerosol Spray',
+    description: 'Sprays a reflective haze into the air while held: it cools the world fast, then rains out. Needs air to hold it up.',
+  },
 ];
 
 /** The magic rays' item ids. */
@@ -119,6 +146,13 @@ export const RAY_TOOLS: readonly RayToolId[] = ['heatRay', 'coolRay', 'airRay', 
 
 export function isRayTool(id: ItemId): id is RayToolId {
   return (RAY_TOOLS as readonly string[]).includes(id);
+}
+
+/** The heat-and-light tools' item ids. */
+export const LIGHT_TOOL_ITEMS: readonly LightToolId[] = ['mirror', 'lance', 'sunshade', 'aerosol'];
+
+export function isLightTool(id: ItemId): id is LightToolId {
+  return (LIGHT_TOOL_ITEMS as readonly string[]).includes(id);
 }
 
 /** The item `id`'s definition. */

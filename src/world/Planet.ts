@@ -28,6 +28,7 @@ import { DEBRIS_FAR, DebrisField } from './DebrisField';
 import { realSurface } from '../gen/realSurface';
 import { NEW_SEA_COLOR, airKey, liveAtmosphereColor, quantile, seaCoverage, shareBelow, weatherKey } from '../terraform/liveLook';
 import { applyLiveSurface, createLiveSurfaceUniforms, setLiveIce, type LiveSurfaceUniforms } from './liveSurface';
+import { createHaze, setHaze } from './hazeShell';
 import type { GroundLook } from './groundLook';
 
 /** What the renderer needs; generated PlanetData and MoonData both satisfy it. */
@@ -156,6 +157,8 @@ export class Planet implements Entity, CelestialBody {
   /** Holds the surface and rings, leaning with the axis. */
   private readonly tilted = new THREE.Group();
   private atmosphere: THREE.Object3D | null = null;
+  /** An aerosol haze over the air (made with the first, thinned in place as it rains out). */
+  private haze: ReturnType<typeof createHaze> | null = null;
   /** Once busted by a planet buster: its debris and the system time of the blast. */
   private debris: DebrisField | null = null;
   private blastTime = 0;
@@ -313,6 +316,10 @@ export class Planet implements Entity, CelestialBody {
       }
       const look = body.atmosphere ? atmosphereLook(climate, config.radius) : null;
       if (look) this.object.add((this.atmosphere = createAtmosphere(config.radius, body.atmosphere!, look, this.sun)));
+    }
+    if (climate.aerosol > 0 || this.haze) {
+      if (!this.haze) this.object.add((this.haze = createHaze(config.radius, this.sun, 18)));
+      setHaze(this.haze, climate.aerosol);
     }
     const weather = weatherKey(config, climate);
     if (weather !== live.weatherKey) {

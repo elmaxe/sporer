@@ -23,6 +23,7 @@ import { CLEAR_SEA_RENDER_ORDER, createSeaWaves, addWaveDebug, seaClear, seaDept
 import type { ClimateData } from '../gen/climate';
 import { NEW_SEA_COLOR, airKey, fibonacciDirections, liveAtmosphereColor, quantile, seaCoverage, shareBelow, weatherKey } from '../terraform/liveLook';
 import { applyLiveSurface, createLiveSurfaceUniforms, setLiveIce, type LiveSurfaceUniforms } from '../world/liveSurface';
+import { createHaze, setHaze } from '../world/hazeShell';
 import type { GroundLook } from '../world/groundLook';
 
 // Mountains' exaggeration up close lives in frame.ts (the system view's clouds need it too); re-exported here.
@@ -93,6 +94,8 @@ export class PlanetGlobe implements Entity {
   /** The atmosphere shell and the cloud layer, replaced as a terraformed climate changes them. */
   private atmosphere: THREE.Mesh | null = null;
   private clouds: THREE.Group | null = null;
+  /** An aerosol haze over the air (made with the first, thinned in place as it rains out). */
+  private haze: ReturnType<typeof createHaze> | null = null;
   /** The surface as drawn: radius (and colour) in a direction. */
   private readonly sample: SurfaceSampler;
   /** Worlds with a sea as generated: the ground is never lower than its surface. */
@@ -285,6 +288,13 @@ export class PlanetGlobe implements Entity {
     if (air !== live.airKey) {
       live.airKey = air;
       this.setAtmosphere(body);
+    }
+    if (climate.aerosol > 0 || this.haze) {
+      if (!this.haze) {
+        this.ground ??= new GroundDepth();
+        this.object.add((this.haze = createHaze(this.radius, { vector: this.sun, point: false, strength: this.sunStrength }, ATMOSPHERE_SEGMENTS, this.ground)));
+      }
+      setHaze(this.haze, climate.aerosol);
     }
     const weather = weatherKey(config, climate);
     if (weather === live.weatherKey) return false;

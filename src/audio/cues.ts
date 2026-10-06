@@ -28,6 +28,10 @@ export type SoundCue =
   | 'laserBeam'
   | 'laserHit'
   | 'magicRay'
+  | 'mirrorDeploy'
+  | 'mirrorLance'
+  | 'sunshadeMove'
+  | 'aerosolSpray'
   | 'milestone'
   | 'ventBurst'
   | 'starNear'
@@ -59,6 +63,10 @@ export const SOUND_CUES: readonly SoundCue[] = [
   'laserBeam',
   'laserHit',
   'magicRay',
+  'mirrorDeploy',
+  'mirrorLance',
+  'sunshadeMove',
+  'aerosolSpray',
   'milestone',
   'ventBurst',
   'starNear',
@@ -71,7 +79,16 @@ export const SOUND_CUES: readonly SoundCue[] = [
 ];
 
 /** Cues that loop until stopped (`SoundEffects.start`); the rest play once (`SoundEffects.play`). */
-export type LoopCue = 'systemTravel' | 'interstellarTravel' | 'busterFlight' | 'abductBeam' | 'exportBeam' | 'laserBeam' | 'magicRay';
+export type LoopCue =
+  | 'systemTravel'
+  | 'interstellarTravel'
+  | 'busterFlight'
+  | 'abductBeam'
+  | 'exportBeam'
+  | 'laserBeam'
+  | 'magicRay'
+  | 'mirrorLance'
+  | 'aerosolSpray';
 
 /**
  * Background loops on the Ambience channel whose loudness the game sets as
@@ -178,6 +195,14 @@ export const cueParams: Record<SoundCue, CueSpec> = {
   laserHit: oneShot(),
   // A magic terraforming ray (heat, cool, air, vacuum, water) held on a world, from the press until it's let go.
   magicRay: { ...travel(), volume: 0.6, fadeIn: 0.1, fadeOut: 0.3, loopCrossfade: 0.3 },
+  // An orbital mirror unfolding into station, or folding away when it's recalled (the Terraform tab).
+  mirrorDeploy: oneShot(),
+  // The mirror lance: the mirrors' light focused on the ground, from the press until it's let go.
+  mirrorLance: { ...travel(), volume: 0.6, fadeIn: 0.1, fadeOut: 0.3, loopCrossfade: 0.3 },
+  // The sunshade's slats turning a step closed or open.
+  sunshadeMove: oneShot(),
+  // The aerosol spray held, from the press until it's let go.
+  aerosolSpray: { ...travel(), volume: 0.6, fadeIn: 0.1, fadeOut: 0.3, loopCrossfade: 0.3 },
   // A terraforming milestone reached (first air, first rain, the seas thawing, breathable air, a tier reached or lost).
   milestone: oneShot(),
   // A vent near the camera bursting into eruption (geysers, plumes, fumaroles; see VentSounds).

@@ -1,5 +1,7 @@
 import type { ClimateData } from '../gen/climate';
 import { liveAtmosphereColor } from '../terraform/liveLook';
+import { LightRig } from '../terraform/LightRig';
+import type { Installations } from '../terraform/light';
 import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
@@ -218,6 +220,42 @@ class LabBodies implements Entity {
   }
 }
 
+/**
+ * The orbital mirrors and the sunshade over the planet (the Terraform
+ * folder's light tools), drawn by the game's own LightRig: round the globe
+ * at the origin, or on the system view's body. Shown as they are at the
+ * terraforming time.
+ */
+class LabRig implements Entity {
+  private readonly rig: LightRig;
+  private static readonly AXIS = new THREE.Vector3(0, 1, 0);
+
+  constructor(
+    parent: THREE.Object3D,
+    radius: number,
+    private readonly sun: LabSun,
+    private readonly camera: THREE.Camera,
+    private inst: Installations,
+    private time: number,
+  ) {
+    this.rig = new LightRig(radius);
+    parent.add(this.rig.object);
+  }
+
+  set(inst: Installations, time: number): void {
+    this.inst = inst;
+    this.time = time;
+  }
+
+  update(): void {
+    this.rig.pose(this.sun.direction, LabRig.AXIS, this.inst, this.time, null, this.camera);
+  }
+
+  dispose(): void {
+    this.rig.dispose();
+  }
+}
+
 /** Where the camera was, to put the next level's camera in the same place (see LabLevel.carry). */
 export interface LabCarry {
   /** From the camera's centre to the camera. */
@@ -266,6 +304,7 @@ export class LabLevel extends Level {
   /** The view and camera it was built for (`view` is the lab's live options). */
   readonly mode: Pick<LabView, 'view' | 'camera'>;
   private readonly pivot = new THREE.Object3D();
+  private rig: LabRig | null = null;
   private readonly axes: THREE.AxesHelper;
   private readonly center = new THREE.Vector3();
 
@@ -393,6 +432,17 @@ export class LabLevel extends Level {
     this.weather = globe.weather
       ? this.add(new Weather(this.scene, this.clock, globe.weather, config, this.camera, globe.sun, globe.sunLight, globe.ambientLight, this.debug))
       : null;
+  }
+
+  /** Shows the mirrors and the shade (the Terraform folder's light tools) as they are at terraforming time `time`. */
+  setInstallations(inst: Installations, time: number): void {
+    if (this.rig) {
+      this.rig.set(inst, time);
+      return;
+    }
+    if (inst.slots.length === 0 && inst.shadeShown <= 0.001) return;
+    const parent = this.bodies?.planet.object ?? this.scene;
+    this.rig = this.add(new LabRig(parent, this.radius, this.sun, this.camera, inst, time));
   }
 
   /** Copies the view options that don't need a rebuild (the axes; the wireframe is read as it draws). */

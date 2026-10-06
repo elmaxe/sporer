@@ -27,6 +27,10 @@ rebuild; no code changes needed. Volumes and fades are in `cueParams` (`src/audi
 | `laserBeam/` | The laser (a weapon) firing: starts on the press, fades out when it's let go. The file there is a synthesised placeholder: replace it with your own | loop |
 | `laserHit/` | The laser killing an animal or a plant (once for each). The file there is a synthesised placeholder: replace it with your own | one-shot |
 | `magicRay/` | A magic terraforming ray (the Terraform tab: heat, cool, air, vacuum, water) held on a world: starts on the press, fades out when it's let go | loop |
+| `mirrorDeploy/` | An orbital mirror unfolding into station over a world, or folding away when it's recalled (the Terraform tab) | one-shot |
+| `mirrorLance/` | The mirror lance: the orbital mirrors' light focused on the ground while it's held: starts on the press, fades out when it's let go | loop |
+| `sunshadeMove/` | The sunshade's slats turning a step closed or open | one-shot |
+| `aerosolSpray/` | The aerosol spray held over a world, laying a haze into its air: starts on the press, fades out when it's let go | loop |
 | `milestone/` | A terraforming milestone reached: first breath of air, first rain, the seas thawing, breathable air, a tier reached or lost (with its banner) | one-shot |
 | `ventBurst/` | A geyser, plume or fumarole near the camera bursting into eruption (low orbit), louder the nearer it is | one-shot |
 | `starNear/` | A star close up: grows as the camera nears its surface, taking over from `starFar` | ambient |

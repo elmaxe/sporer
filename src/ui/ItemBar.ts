@@ -71,6 +71,21 @@ const ICONS: Record<ToolId, string> = {
   waterRay:
     '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
     '<path d="M12 2.5c3.6 4.6 6 7.8 6 11a6 6 0 0 1-12 0c0-3.2 2.4-6.4 6-11z" /><path d="M9 14.5a3 3 0 0 0 3 3" /></svg>',
+  mirror:
+    '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M12 2.5l5 2.9v5.8l-5 2.9-5-2.9V5.4z" /><path d="M12 2.5v11.6M7 5.4l10 5.8M17 5.4 7 11.2" stroke-width="1" />' +
+    '<path d="M9.5 15.5 7.5 21M14.5 15.5l2 5.5" stroke-dasharray="1.5 2" /><path d="M5 21.5h14" /></svg>',
+  lance:
+    '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M3 3l8 14.5M21 3l-8 14.5M12 2v15" stroke-dasharray="2 1.6" />' +
+    '<circle cx="12" cy="19" r="2" /><path d="M8.5 21.5h7" /></svg>',
+  sunshade:
+    '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<circle cx="12" cy="12" r="8.5" /><path d="M5 8.5h14M3.8 12h16.4M5 15.5h14" stroke-width="2" /><path d="M12 3.5v17" stroke-width="1" /></svg>',
+  aerosol:
+    '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M6.5 10h6v11h-6z" /><path d="M8 10V7.5h3V10M9.5 7.5V5.5h2.5" />' +
+    '<path d="M15 4.5h.01M17.5 3h.01M17.5 6h.01M20 4.5h.01M20 1.8h.01M20 7.2h.01M22 3h.01M22 6h.01" stroke-width="2.2" /></svg>',
 };
 
 /** What the bar needs to know about the game: where the player is, what can use items there, and what's in the hold. */

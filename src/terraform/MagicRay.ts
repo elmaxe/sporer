@@ -9,18 +9,17 @@ import type { Entity } from '../core/Entity';
 import type { Input } from '../core/Input';
 import { celsius, type ClimateData } from '../gen/climate';
 import { Rng, hashSeed } from '../gen/rng';
-import { TERRAFORM_TUNING, type Lever } from '../gen/terraform';
+import { TERRAFORM_TUNING } from '../gen/terraform';
 import { MarkerRing } from '../player/MarkerRing';
 import { pointerCamera } from '../world/thirdPerson';
 import { CLOUD_RENDER_ORDER } from '../world/weatherLook';
 import { formatEnergy } from './energy';
+import { HeldLog } from './heldLog';
 import { GAS_COLOR, GAS_NAME, nextGas, rayBlocked, rayCost, rayEffect, rayParams, type RayId } from './rays';
 import type { TerraformBody, Terraforming } from './Terraforming';
 
 /** The beam leaves from this far below the ship's centre: its underside. */
 const MUZZLE_DROP = 0.75;
-/** A held ray is written to the log as one action a second, each at the rate the world has then (the gas rays compound). */
-const SEGMENT = 1;
 const RENDER_ORDER = CLOUD_RENDER_ORDER + 1;
 
 /** Each ray's beam (core, glow) and what it throws where it meets the ground. */
@@ -31,15 +30,6 @@ const LOOK: Record<RayId, { core: string; glow: string; verb: string }> = {
   vacuumRay: { core: '#f7edff', glow: '#a070ff', verb: 'Sucking up' },
   waterRay: { core: '#eaf6ff', glow: '#3a86ff', verb: 'Raining' },
 };
-
-
-/** What a held ray is writing to the log now. */
-interface Segment {
-  index: number;
-  start: number;
-  lever: Lever;
-  rate: number;
-}
 
 /**
  * The magic terraforming rays in low orbit (a planet-level entity;
@@ -56,7 +46,8 @@ interface Segment {
 export class MagicRay implements Entity {
   private _armed: RayId | null = null;
   private firing = false;
-  private segment: Segment | null = null;
+  /** Writes the held ray into the body's log, one action a second. */
+  private readonly held: HeldLog;
   private lastTime = 0;
   private sound: SoundHandle | null = null;
   private readonly looks = new Map<RayId, LaserLook>();
@@ -105,6 +96,7 @@ export class MagicRay implements Entity {
     debug: Debug,
   ) {
     this.rng = new Rng(hashSeed('magic-ray', body.key));
+    this.held = new HeldLog(terraforming, body.key);
     this.reticle = new MarkerRing(scene, '#7dffa8', 0.1, 0.16);
     this.glow = new ParticlePool(scene, true, RENDER_ORDER + 1);
     this.puffs = new ParticlePool(scene, false, RENDER_ORDER);
@@ -212,7 +204,7 @@ export class MagicRay implements Entity {
         this.say(choice.water === 'add' ? 'Water ray: rain' : 'Water ray: steam (takes water away)');
       }
       // A held ray carries on with the new choice from its next second.
-      this.segment = null;
+      this.held.reset();
     }
     this.gWasDown = down;
   }
@@ -235,7 +227,7 @@ export class MagicRay implements Entity {
     }
     if (!this.looks.has(ray)) this.looks.set(ray, new LaserLook(this.scene, new THREE.Color(LOOK[ray].core), new THREE.Color(LOOK[ray].glow)));
     this.firing = true;
-    this.segment = null;
+    this.held.reset();
     this.lastTime = this.terraforming.time;
     this.sound = this.sfx.start('magicRay');
   }
@@ -243,7 +235,7 @@ export class MagicRay implements Entity {
   private stop(): void {
     if (this.firing) this.grow(true);
     this.firing = false;
-    this.segment = null;
+    this.held.reset();
     this.terraforming.energy.draining = 0;
     this.sound?.stop();
     this.sound = null;
@@ -259,7 +251,6 @@ export class MagicRay implements Entity {
     const ray = this._armed;
     if (!ray) return;
     const now = t.time;
-    const key = this.body.key;
     const cost = rayCost(ray, this.body.climate, t.mode);
     const spent = now - this.lastTime;
     this.lastTime = now;
@@ -270,25 +261,15 @@ export class MagicRay implements Entity {
       return;
     }
     t.energy.draining = last ? 0 : cost;
-    let next = now;
-    const seg = this.segment;
-    if (seg) {
-      const end = Math.min(now, seg.start + SEGMENT);
-      t.logs.update(key, seg.index, { lever: seg.lever, start: seg.start, duration: end - seg.start, amount: seg.rate * (end - seg.start), site: this.site() });
-      if (last || now < seg.start + SEGMENT) return;
-      next = seg.start + SEGMENT;
-    }
-    if (last) return;
-    // A new second, at the rate the world has now (the air as it will be once what's let go has spread).
-    const anchor = this.anchor(ray, next);
-    if (rayBlocked(ray, anchor, t.choice)) {
-      this.segment = null;
-      return;
-    }
-    const effect = rayEffect(ray, anchor, t.choice);
-    const duration = Math.min(now - next, SEGMENT);
-    const index = t.logs.record(key, { lever: effect.lever, start: next, duration, amount: effect.rate * duration, site: this.site() });
-    this.segment = { index, start: next, lever: effect.lever, rate: effect.rate };
+    // Each new second at the rate the world has then (the air as it will be once what's let go has spread).
+    this.held.write(
+      last,
+      (time) => {
+        const anchor = this.anchor(ray, time);
+        return rayBlocked(ray, anchor, t.choice) ? null : rayEffect(ray, anchor, t.choice);
+      },
+      this.site(),
+    );
   }
 
   /** The climate a ray's rate is worked out from at game time `time`. */

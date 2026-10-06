@@ -506,7 +506,7 @@ export class LabPanel {
    */
   private buildTerraform(): void {
     const lab = this.lab;
-    const f = this.folder('Terraform (magic rays)', true);
+    const f = this.folder('Terraform (rays, mirrors, shade)', true);
     const gasName: Record<Gas, string> = { n2: 'N₂', o2: 'O₂', co2: 'CO₂', h2: 'H₂' };
     f.add(lab, 'raySeconds', 1, 30, 1).name('hold each ray (s)');
     f.add(lab.rayChoice, 'gas', Object.fromEntries(GASES.map((g) => [gasName[g], g]))).name('air / vacuum gas').onChange(() => lab.showChartNow());
@@ -524,6 +524,23 @@ export class LabPanel {
     f.add(rays, 'air').name('Air ray');
     f.add(rays, 'vacuum').name('Vacuum ray');
     f.add(rays, 'water').name('Water ray');
+    // Heat and light (terraform/light.ts): the mirrors and the shade stay; the spray is held like a ray.
+    const light = {
+      deploy: () => void lab.mirror('deploy'),
+      recall: () => void lab.mirror('recall'),
+      close: () => void lab.shade('close'),
+      open: () => void lab.shade('open'),
+      spray: () => void lab.aerosol(),
+      get note(): string {
+        return lab.lightNote;
+      },
+    };
+    f.add(light, 'deploy').name('Deploy a mirror');
+    f.add(light, 'recall').name('Recall a mirror');
+    f.add(light, 'close').name('Close the sunshade a step');
+    f.add(light, 'open').name('Open the sunshade a step');
+    f.add(light, 'spray').name('Spray aerosol');
+    f.add(light, 'note').name('light tools').disable().listen();
     const time = {
       get mode(): TerraformMode {
         return lab.terraformState?.mode ?? 'relaxed';
