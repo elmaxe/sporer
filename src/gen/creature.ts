@@ -60,12 +60,15 @@ export interface CreaturePart {
   /** A pair, mirrored across the middle (parts on the middle line are single anyway). */
   mirror: boolean;
   /**
-   * An arm's elbow and hand, as offsets from its shoulder: [out from the
-   * body's middle, up, forward] in units, so the mirrored arm mirrors them.
-   * Unset, the arm hangs as its size, lean and sprawl say (`defaultArmNodes`).
+   * A limb's middle joint (a leg's knee, an arm's elbow) and its end (the
+   * foot, the hand), as offsets from where it leaves the body: [out from
+   * the body's middle, up, forward] in units, so the mirrored limb mirrors
+   * them. A foot always stands on the ground (its `up` is ignored). Unset,
+   * the limb stands or hangs as its size, reach and sprawl say
+   * (`defaultLimbNodes`).
    */
-  elbow?: Vec3;
-  hand?: Vec3;
+  joint?: Vec3;
+  end?: Vec3;
 }
 
 export interface CreaturePaint {
@@ -305,7 +308,7 @@ export interface CreatureLimb {
   paw: number;
   /** Which way the knee (or elbow) bends, and where it is at rest. */
   pole: Vec3;
-  elbow: Vec3;
+  joint: Vec3;
 }
 
 export interface GrownCreature {
@@ -355,31 +358,34 @@ function limbRadius(part: CreaturePart, bodyR: number): number {
   return Math.max(0.03, bodyR * (part.kind === 'arm' ? 0.16 : 0.24) * part.size);
 }
 
-/** An arm's elbow and hand offsets from its shoulder (out, up, forward) when they haven't been placed: hanging down and forward. */
-export function defaultArmNodes(part: CreaturePart, bodyR: number, shoulderHeight: number): { elbow: Vec3; hand: Vec3 } {
-  const len = Math.max(0.2, bodyR * 2.2 * part.size);
+/**
+ * A limb's knee or elbow and its foot or hand, as offsets from its root
+ * `hip` (out, up, forward), when they haven't been placed: a leg standing
+ * with its foot below the hip (out by its sprawl, ahead or behind by its
+ * reach) and its knee bent towards `pole`; an arm hanging down and forward.
+ */
+export function defaultLimbNodes(part: CreaturePart, bodyR: number, hip: Vec3, pole: Vec3): { joint: Vec3; end: Vec3 } {
   const radius = limbRadius(part, bodyR);
-  const hand: Vec3 = [(0.15 + part.spread * 0.6) * len, -0.6 * len, (0.4 + part.tilt * 0.4) * len];
+  if (part.kind === 'leg') {
+    const paw = radius * 0.9;
+    const h = Math.max(paw * 2, hip[1]);
+    const end: Vec3 = [radius * 0.4 + part.spread * h * 0.8, paw - hip[1], part.tilt * h * 0.5];
+    // A little longer than the reach, so the knee is bent standing.
+    const len = Math.hypot(...end) * 1.12;
+    const { knee } = solveTwoBone([0, 0, 0], end, len / 2, len / 2, [Math.abs(pole[0]), pole[1], pole[2]]);
+    return { joint: knee, end };
+  }
+  const len = Math.max(0.2, bodyR * 2.2 * part.size);
+  const end: Vec3 = [(0.15 + part.spread * 0.6) * len, -0.6 * len, (0.4 + part.tilt * 0.4) * len];
   // Never through the floor.
-  hand[1] = Math.max(radius * 1.15 - shoulderHeight, hand[1]);
-  const reach = Math.hypot(...hand);
-  const l = Math.max(reach * 1.1, len * 0.9);
-  const { knee } = solveTwoBone([0, 0, 0], hand, l / 2, l / 2, normalize([0.5, 0, -1]));
-  return { elbow: knee, hand };
+  end[1] = Math.max(radius * 1.15 - hip[1], end[1]);
+  const l = Math.max(Math.hypot(...end) * 1.1, len * 0.9);
+  const { knee } = solveTwoBone([0, 0, 0], end, l / 2, l / 2, normalize([0.5, 0, -1]));
+  return { joint: knee, end };
 }
 
-/** Where an arm's elbow and hand are (rest pose), from its shoulder `hip`. */
-export function armNodes(part: CreaturePart, hip: Vec3, bodyR: number): { elbow: Vec3; hand: Vec3 } {
-  const out = hip[0] >= 0 ? 1 : -1;
-  const d = part.elbow && part.hand ? { elbow: part.elbow, hand: part.hand } : defaultArmNodes(part, bodyR, hip[1]);
-  const at = (o: Vec3): Vec3 => [hip[0] + out * o[0], hip[1] + o[1], hip[2] + o[2]];
-  const hand = at(d.hand);
-  hand[1] = Math.max(limbRadius(part, bodyR) * 1.15, hand[1]);
-  return { elbow: at(d.elbow), hand };
-}
-
-/** The offset of a rest-pose point from an arm's shoulder, as `elbow` and `hand` keep it. */
-export function armOffset(hip: Vec3, point: Vec3): Vec3 {
+/** The offset of a rest-pose point from a limb's root, as `joint` and `end` keep it. */
+export function limbOffset(hip: Vec3, point: Vec3): Vec3 {
   const out = hip[0] >= 0 ? 1 : -1;
   return [(point[0] - hip[0]) * out, point[1] - hip[1], point[2] - hip[2]];
 }
@@ -392,29 +398,35 @@ function growLimbs(design: CreatureDesign, rest: readonly SpineFrame[]): Creatur
     if (part.kind !== 'leg' && part.kind !== 'arm') continue;
     const { hip, r: bodyR } = limbRoot(rest, part, mirrored);
     const radius = limbRadius(part, bodyR);
-    const paw = radius * (part.kind === 'arm' ? 0.75 : 0.9);
+    const paw = radius * (part.kind === 'arm' ? 1.15 : 0.9);
     const out = hip[0] >= 0 ? 1 : -1;
     const outward: Vec3 = [out, 0, 0];
-    if (part.kind === 'leg') {
-      const h = Math.max(paw * 2, hip[1]);
-      const foot: Vec3 = [hip[0] + out * (radius * 0.4 + part.spread * h * 0.8), paw, hip[2] + part.tilt * h * 0.5];
-      const reach = Math.hypot(...sub(foot, hip));
-      // A little longer than the reach, so the knee is bent standing.
-      const len = reach * 1.12;
-      const rank = legRanks.indexOf(part.s);
-      const front = legRanks.length > 1 && rank === legRanks.length - 1;
-      const pole = normalize(add(add(add([0, 0, 0], outward, 0.15 + part.spread * 1.2), [0, 0, 1], front ? -0.8 : 0.8), [0, 1, 0], part.spread * 0.6));
-      limbs.push({ part: index, mirrored, arm: false, rank, ranks: legRanks.length, hip, rest: foot, upper: len * 0.5, lower: len * 0.5, radius, paw, pole, elbow: solveTwoBone(hip, foot, len * 0.5, len * 0.5, pole).knee });
-    } else {
-      const nodes = armNodes(part, hip, bodyR);
-      const upper = Math.max(0.02, Math.hypot(...sub(nodes.elbow, hip)));
-      const lower = Math.max(0.02, Math.hypot(...sub(nodes.hand, nodes.elbow)));
-      // The elbow bends the way it sticks out of the shoulder-to-hand line.
-      const line = normalize(sub(nodes.hand, hip));
-      const offLine = sub(sub(nodes.elbow, hip), [line[0] * dot(sub(nodes.elbow, hip), line), line[1] * dot(sub(nodes.elbow, hip), line), line[2] * dot(sub(nodes.elbow, hip), line)]);
-      const pole = Math.hypot(...offLine) > 1e-4 ? normalize(offLine) : normalize(add(add([0, 0, 0], outward, 0.5), [0, 0, -1], 1));
-      limbs.push({ part: index, mirrored, arm: true, rank: 0, ranks: 0, hip, rest: nodes.hand, upper, lower, radius, paw: radius * 1.15, pole, elbow: nodes.elbow });
+    const leg = part.kind === 'leg';
+    const rank = leg ? legRanks.indexOf(part.s) : 0;
+    const front = legRanks.length > 1 && rank === legRanks.length - 1;
+    // Unposed, a hind knee bends forward, a front one back (an elbow), both out as the leg sprawls; an arm's elbow back.
+    const defaultPole = leg ? normalize(add(add(add([0, 0, 0], outward, 0.15 + part.spread * 1.2), [0, 0, 1], front ? -0.8 : 0.8), [0, 1, 0], part.spread * 0.6)) : normalize(add(add([0, 0, 0], outward, 0.5), [0, 0, -1], 1));
+    const o = part.joint && part.end ? { joint: part.joint, end: part.end } : defaultLimbNodes(part, bodyR, hip, defaultPole);
+    const at = (v: Vec3): Vec3 => [hip[0] + out * v[0], hip[1] + v[1], hip[2] + v[2]];
+    const joint = at(o.joint);
+    const end = at(o.end);
+    // A foot stands on the ground; a hand stays above it.
+    end[1] = leg ? paw : Math.max(paw, end[1]);
+    let upper = Math.max(0.02, Math.hypot(...sub(joint, hip)));
+    let lower = Math.max(0.02, Math.hypot(...sub(end, joint)));
+    // A leg too short to reach its foot (the body raised since it was posed) grows to reach it.
+    const reach = Math.hypot(...sub(end, hip));
+    if (leg && upper + lower < reach * 1.01) {
+      const k = (reach * 1.01) / (upper + lower);
+      upper *= k;
+      lower *= k;
     }
+    // The joint bends the way it sticks out of the root-to-end line.
+    const line = normalize(sub(end, hip));
+    const rel = sub(joint, hip);
+    const offLine = add(rel, line, -dot(rel, line));
+    const pole = Math.hypot(...offLine) > 1e-4 ? normalize(offLine) : defaultPole;
+    limbs.push({ part: index, mirrored, arm: !leg, rank, ranks: leg ? legRanks.length : 0, hip, rest: end, upper, lower, radius, paw, pole, joint });
   }
   return limbs;
 }
@@ -846,6 +858,16 @@ export function decodeDesign(text: string): CreatureDesign | null {
     const bin = atob(b64);
     const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
     const d = JSON.parse(new TextDecoder().decode(bytes)) as CreatureDesign;
+    // Earlier links kept an arm's nodes as elbow and hand.
+    for (const p of d.parts ?? []) {
+      const old = p as CreaturePart & { elbow?: Vec3; hand?: Vec3 };
+      if (old.elbow && old.hand && !p.joint) {
+        p.joint = old.elbow;
+        p.end = old.hand;
+        delete old.elbow;
+        delete old.hand;
+      }
+    }
     if (!Array.isArray(d.spine) || d.spine.length < MIN_VERTEBRAE || !Array.isArray(d.parts) || !d.paint) return null;
     d.splats ??= [];
     d.name ??= 'Creature';

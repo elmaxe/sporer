@@ -120,7 +120,7 @@ describe('creature design', () => {
 
   it("poses an arm by its three nodes: shoulder, elbow and hand, mirrored on the other side", () => {
     const d = defaultCreature();
-    d.parts.push({ kind: 'arm', s: 0.7, theta: 1.6, size: 1, tilt: 0, spread: 0, mirror: true, elbow: [0.3, -0.1, 0.25], hand: [0.35, 0.4, 0.6] });
+    d.parts.push({ kind: 'arm', s: 0.7, theta: 1.6, size: 1, tilt: 0, spread: 0, mirror: true, joint: [0.3, -0.1, 0.25], end: [0.35, 0.4, 0.6] });
     const g = growCreature(d);
     const arms = g.skeleton.legs.filter((l) => l.arm);
     expect(arms.length).toBe(2);
@@ -131,6 +131,28 @@ describe('creature design', () => {
     expect(dist(hand!, [shoulder![0] + 0.35, shoulder![1] + 0.4, shoulder![2] + 0.6])).toBeLessThan(1e-3);
     // The other arm's elbow sticks out the other way.
     expect(right.points[1]![0]).toBeLessThan(right.points[0]![0]);
+  });
+
+  it('poses a leg by its knee and foot, the foot kept on the ground, and walks it from there', () => {
+    const d = defaultCreature();
+    d.parts[0] = { ...d.parts[0]!, joint: [0.5, -0.3, 0.3], end: [0.9, 5, -0.4] };
+    const g = growCreature(d);
+    const left = g.skeleton.legs.find((l) => !l.arm && l.points[0]![0] > 0 && Math.abs(l.points[0]![2] - g.limbs[0]!.hip[2]) < 1e-6)!;
+    const [hip, knee, foot] = left.points;
+    expect(dist(knee!, [hip![0] + 0.5, hip![1] - 0.3, hip![2] + 0.3])).toBeLessThan(1e-3);
+    // The foot's height is ignored: it stands on the ground, out and behind as placed.
+    expect(foot![1]).toBeCloseTo(left.radii[2]!, 3);
+    expect(foot![0] - hip![0]).toBeCloseTo(0.9, 3);
+    expect(foot![2] - hip![2]).toBeCloseTo(-0.4, 3);
+    const walking = growCreature(d, { time: 1, cycle: 0.3, run: 0, moving: 1 });
+    expect(walking.skeleton.legs.flatMap((l) => l.points.flat()).every(Number.isFinite)).toBe(true);
+  });
+
+  it('reads links that kept arm nodes as elbow and hand', () => {
+    const d = defaultCreature();
+    d.parts.push({ kind: 'arm', s: 0.7, theta: 1.6, size: 1, tilt: 0, spread: 0, mirror: true, elbow: [0.3, -0.1, 0.25], hand: [0.35, 0.4, 0.6] } as never);
+    const back = decodeDesign(encodeDesign(d))!;
+    expect(back.parts[back.parts.length - 1]!.joint).toEqual([0.3, -0.1, 0.25]);
   });
 
   it('grows random creatures without NaNs', () => {
