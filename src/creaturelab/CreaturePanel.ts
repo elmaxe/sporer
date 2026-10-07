@@ -15,6 +15,7 @@ const PART_LABELS: Record<PartKind, { icon: string; name: string; tip: string }>
   leg: { icon: '🦵', name: 'Leg', tip: 'Legs carry the body; the gait is worked out from how many and where' },
   arm: { icon: '💪', name: 'Arm', tip: 'Arms swing as it walks but never touch the ground' },
   eye: { icon: '👁', name: 'Eye', tip: 'Anywhere: one on the middle line, or a pair' },
+  mouth: { icon: '👄', name: 'Mouth', tip: 'Lips round an opening, with teeth; it yawns now and then' },
   horn: { icon: '🦏', name: 'Horn', tip: 'Tilt curls it back or forward' },
   ear: { icon: '👂', name: 'Ear', tip: 'Flat lobes' },
   spike: { icon: '🔺', name: 'Spike', tip: 'Plates and spines, often along the back' },
@@ -161,16 +162,16 @@ export class CreaturePanel {
     this.redoBtn.disabled = !lab.canRedo;
     if (document.activeElement !== this.nameInput) this.nameInput.value = lab.design.name;
     const sel = lab.selection;
-    const key = `${lab.mode}:${sel ? `${sel.kind}${sel.index}` : '-'}:${lab.design.parts.length}:${lab.design.spine.length}:${lab.placing ?? ''}`;
+    const key = `${lab.mode}:${sel ? `${sel.kind}${sel.index}` : '-'}:${lab.design.parts.length}:${lab.design.spine.length}:${lab.placing ?? ''}:${lab.wireframe}:${lab.walking}`;
     if (key !== this.inspectorKey || lab.mode === 'build') this.buildInspector(key);
     this.hint.textContent =
       lab.mode === 'build'
         ? lab.placing
           ? `Move over the body to place the ${PART_LABELS[lab.placing].name.toLowerCase()}; click to stick it on (Shift: keep placing), Esc to cancel.`
-          : 'Drag the green dots (spine) to shape the body, wheel over one to fatten it (Shift: widen). Pull an end dot out to grow the spine. Drag a yellow dot to move a part, wheel to resize; drag the pink elbow and hand dots to pose an arm. Drag empty space to turn the view.'
+          : 'Drag the green dots (spine) to shape the body, wheel over one to fatten it (Shift: widen). Pull an end dot out to grow the spine. Drag a yellow dot to move a part, wheel to resize; drag the pink dots to pose knees and feet, elbows and hands. Drag empty space to turn the view.'
         : lab.mode === 'paint'
           ? 'Paint on the body with the brush; it paints both sides when mirrored. Pick the coat on the right.'
-          : 'Space: walk or stand. The legs step in a wave from back to front, the two sides half a stride apart; faster, the wave closes up into a trot.';
+          : 'WASD or the arrows: steer it (Shift trots). Space: walk on or stand. The legs step in a wave from back to front, the two sides half a stride apart; faster, the wave closes up into a trot.';
   }
 
   /** The inspector, rebuilt (cheap) while a slider isn't being dragged. */
@@ -232,15 +233,14 @@ export class CreaturePanel {
     parent.append(row);
   }
 
-  private check(parent: HTMLElement, label: string, get: () => boolean, set: (v: boolean) => void): void {
+  private check(parent: HTMLElement, label: string, get: () => boolean, set: (v: boolean) => void, after: () => void = () => (this.lab.changed(), this.lab.commit())): void {
     const row = el('label', 'cr-row cr-check');
     const input = el('input');
     input.type = 'checkbox';
     input.checked = get();
     input.addEventListener('change', () => {
       set(input.checked);
-      this.lab.changed();
-      this.lab.commit();
+      after();
     });
     row.append(input, el('span', 'cr-label', label));
     parent.append(row);
@@ -264,14 +264,18 @@ export class CreaturePanel {
       const info = PART_LABELS[p.kind];
       const s = this.section(`${info.icon} ${info.name}`);
       this.slider(s, 'Size', 0.25, 3, 0.01, () => p.size, (x) => (p.size = x));
-      if (p.kind !== 'eye' && p.kind !== 'arm') this.slider(s, p.kind === 'leg' ? 'Reach fore/aft' : 'Lean', -1, 1, 0.01, () => p.tilt, (x) => (p.tilt = x));
-      if (p.kind === 'leg') this.slider(s, 'Sprawl', 0, 1, 0.01, () => p.spread, (x) => (p.spread = x));
-      if (p.kind === 'arm') {
-        s.append(el('div', 'cr-note', 'Three nodes: the yellow dot where it sits on the body, the pink elbow and the pink hand. Drag them to pose the arm; the wheel over one thickens it.'));
+      if (p.kind === 'mouth') {
+        this.slider(s, 'Frown ↔ smile', -1, 1, 0.01, () => p.tilt, (x) => (p.tilt = x));
+        this.slider(s, 'Open', 0, 1, 0.01, () => p.spread, (x) => (p.spread = x));
+        this.check(s, 'Teeth', () => p.teeth !== false, (x) => (p.teeth = x));
+      } else if (p.kind !== 'eye' && p.kind !== 'arm' && p.kind !== 'leg') this.slider(s, 'Lean', -1, 1, 0.01, () => p.tilt, (x) => (p.tilt = x));
+      if (p.kind === 'arm' || p.kind === 'leg') {
+        const [joint, end] = p.kind === 'arm' ? ['elbow', 'hand'] : ['knee', 'foot'];
+        s.append(el('div', 'cr-note', `Three nodes: the yellow dot where it sits on the body, the pink ${joint} and the pink ${end}. Drag them to pose it${p.kind === 'leg' ? ' (the foot slides over the ground)' : ''}; the wheel over one thickens it.`));
         const r = el('div', 'cr-buttons');
-        this.button(r, 'Reset arm pose', () => {
-          delete p.elbow;
-          delete p.hand;
+        this.button(r, `Reset ${p.kind} pose`, () => {
+          delete p.joint;
+          delete p.end;
           lab.changed();
           lab.commit();
         });
@@ -299,10 +303,19 @@ export class CreaturePanel {
       this.button(row, '+ Vertebra at the snout', () => lab.addVertebra());
       s.append(row);
     }
-    const views = this.section('View');
-    const row = el('div', 'cr-buttons');
-    for (const v of ['side', 'front', 'top', 'three-quarter'] as const) this.button(row, v, () => lab.look(v));
-    views.append(row);
+    this.buildViewSection(true);
+  }
+
+  /** The camera's named views (in Build) and the wireframe switch (in every mode). */
+  private buildViewSection(views: boolean): void {
+    const lab = this.lab;
+    const s = this.section('View');
+    if (views) {
+      const row = el('div', 'cr-buttons');
+      for (const v of ['side', 'front', 'top', 'three-quarter'] as const) this.button(row, v, () => lab.look(v));
+      s.append(row);
+    }
+    this.check(s, 'Wireframe (X)', () => lab.wireframe, (on) => (lab.wireframe = on), () => {});
   }
 
   private buildInspectorPaint(): void {
@@ -366,6 +379,7 @@ export class CreaturePanel {
       lab.commit();
     });
     brush.append(cb);
+    this.buildViewSection(false);
   }
 
   private buildInspectorPlay(): void {
@@ -387,6 +401,7 @@ export class CreaturePanel {
     this.footfall.height = 120;
     f.append(this.footfall);
     f.append(el('div', 'cr-note', 'One row per leg, front to back (L/R, 1 the front pair): dark while its foot is on the ground, over two strides. The line is now.'));
+    this.buildViewSection(false);
   }
 
   private drawFootfall(): void {

@@ -25,6 +25,8 @@ export interface CreatureLook {
   readonly mesh: THREE.InstancedMesh;
   /** The same geometry as a plain mesh, for picking (layer 1: never drawn). */
   readonly picker: THREE.Mesh;
+  /** The mesh's edges drawn over it (the View's Wireframe switch), hidden until switched on. */
+  readonly wire: THREE.Mesh;
   readonly uniforms: AnimalUniforms;
   /** Writes this frame's posed mesh; `rest` (the rest pose's positions, same topology) when the design changed. */
   update(posed: AnimalMeshData, rest: AnimalMeshData | null): void;
@@ -73,6 +75,9 @@ export function createCreatureLook(design: CreatureDesign, length: number): Crea
   mesh.frustumCulled = false;
   const picker = new THREE.Mesh(geometry);
   picker.layers.set(1);
+  const wire = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color: 0x0b1a24, wireframe: true, transparent: true, opacity: 0.55, depthWrite: false }));
+  wire.frustumCulled = false;
+  wire.visible = false;
   let vertices = -1;
 
   function attr(name: string, data: Float32Array, size: number): void {
@@ -90,6 +95,7 @@ export function createCreatureLook(design: CreatureDesign, length: number): Crea
   return {
     mesh,
     picker,
+    wire,
     uniforms,
     update(posed, rest) {
       const n = posed.positions.length / 3;
@@ -99,6 +105,7 @@ export function createCreatureLook(design: CreatureDesign, length: number): Crea
         geometry = new THREE.BufferGeometry();
         mesh.geometry = geometry;
         picker.geometry = geometry;
+        wire.geometry = geometry;
         addAnimationAttributes(mesh, 1);
         vertices = n;
       }
@@ -135,6 +142,7 @@ export function createCreatureLook(design: CreatureDesign, length: number): Crea
     dispose() {
       geometry.dispose();
       material.dispose();
+      (wire.material as THREE.Material).dispose();
       splats.dispose();
     },
   };
