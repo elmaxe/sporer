@@ -5,6 +5,7 @@ import {
   MAX_SPLATS,
   SPINE_SUBDIVISIONS,
   anchorOf,
+  armOffset,
   cloneDesign,
   creatureForm,
   decodeDesign,
@@ -61,13 +62,18 @@ export interface FootfallRow {
 }
 
 interface HandleInfo {
-  kind: 'vertebra' | 'part';
+  /** A vertebra, a part's place on the skin, or an arm's elbow or hand. */
+  kind: 'vertebra' | 'part' | 'elbow' | 'hand';
+  /** The vertebra's or part's index. */
   index: number;
   mirrored: boolean;
+  /** An elbow's or hand's limb (index in `grown.limbs`). */
+  limb?: number;
 }
 
 const HANDLE_COLOR = new THREE.Color('#66ffcc');
 const PART_HANDLE_COLOR = new THREE.Color('#ffcc66');
+const ARM_HANDLE_COLOR = new THREE.Color('#ff7ad9');
 const SELECTED_COLOR = new THREE.Color('#ffffff');
 /** Floor tile (units): the floor slides back by whole tiles as the creature walks. */
 const TILE = 2;
@@ -108,7 +114,13 @@ export class CreatureLab {
   private readonly raycaster = new THREE.Raycaster();
   private readonly ndc = new THREE.Vector2();
   private hovered: HandleInfo | null = null;
-  private drag: { kind: 'vertebra'; index: number } | { kind: 'part'; index: number; mirrored: boolean } | { kind: 'paint'; last: THREE.Vector3 | null } | null = null;
+  private drag:
+    | { kind: 'vertebra'; index: number }
+    | { kind: 'part'; index: number; mirrored: boolean }
+    | { kind: 'node'; node: 'elbow' | 'hand'; index: number; limb: number; plane: THREE.Plane }
+    | { kind: 'paint'; last: THREE.Vector3 | null }
+    | null = null;
+  private readonly armLines: THREE.LineSegments;
   private ghost: number | null = null;
   private placingByDrag = false;
   private wheelTimer: ReturnType<typeof setTimeout> | null = null;
@@ -173,6 +185,9 @@ export class CreatureLab {
     this.spineLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: HANDLE_COLOR, depthTest: false, transparent: true, opacity: 0.6 }));
     this.spineLine.renderOrder = 10;
     this.handles.add(this.spineLine);
+    this.armLines = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: ARM_HANDLE_COLOR, depthTest: false, transparent: true, opacity: 0.7 }));
+    this.armLines.renderOrder = 10;
+    this.handles.add(this.armLines);
     this.scene.add(this.handles);
     this.raycaster.layers.set(1);
 
@@ -423,6 +438,16 @@ export class CreatureLab {
         points.push([k.p[0] + k.n[0] * 0.04, k.p[1] + k.n[1] * 0.04, k.p[2] + k.n[2] * 0.04]);
       }
     });
+    // Each arm's elbow and hand, where the posed arm has them, joined to its shoulder by lines.
+    const armLine: number[] = [];
+    this.grown.limbs.forEach((l, li) => {
+      if (!l.arm) return;
+      const pts = this.grown.skeleton.legs[li]!.points;
+      infos.push({ kind: 'elbow', index: l.part, mirrored: l.mirrored, limb: li }, { kind: 'hand', index: l.part, mirrored: l.mirrored, limb: li });
+      points.push(pts[1]!, pts[2]!);
+      armLine.push(...pts[0]!, ...pts[1]!, ...pts[1]!, ...pts[2]!);
+    });
+    this.armLines.geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(armLine), 3));
     while (this.handleMeshes.length < infos.length) {
       const m = new THREE.Mesh(handleGeometry, new THREE.MeshBasicMaterial({ depthTest: false, transparent: true, opacity: 0.9 }));
       m.renderOrder = 11;
@@ -437,11 +462,13 @@ export class CreatureLab {
       m.userData = info;
       m.position.set(...points[i]!);
       const sel = this.selection;
-      const selected = sel !== null && sel.kind === info.kind && sel.index === info.index;
-      const hover = this.hovered !== null && this.hovered.kind === info.kind && this.hovered.index === info.index;
+      const node = info.kind === 'elbow' || info.kind === 'hand';
+      const selected = sel !== null && sel.kind === (node ? 'part' : info.kind) && sel.index === info.index && !node;
+      const h = this.hovered;
+      const hover = h !== null && h.kind === info.kind && h.index === info.index && h.mirrored === info.mirrored;
       const mat = m.material as THREE.MeshBasicMaterial;
-      mat.color.copy(selected ? SELECTED_COLOR : info.kind === 'vertebra' ? HANDLE_COLOR : PART_HANDLE_COLOR);
-      m.scale.setScalar(r * (info.kind === 'vertebra' ? 1 : 0.8) * (hover || selected ? 1.4 : 1));
+      mat.color.copy(selected ? SELECTED_COLOR : info.kind === 'vertebra' ? HANDLE_COLOR : node ? ARM_HANDLE_COLOR : PART_HANDLE_COLOR);
+      m.scale.setScalar(r * (info.kind === 'vertebra' ? 1 : node ? 0.75 : 0.8) * (hover || selected ? 1.4 : 1));
     });
     const line = new Float32Array(this.design.spine.length * 3);
     points.slice(0, this.design.spine.length).forEach((p, i) => line.set(p, i * 3));
@@ -502,8 +529,14 @@ export class CreatureLab {
       }
       const h = this.pickHandle();
       if (h) {
-        this.selection = { kind: h.kind, index: h.index };
-        this.drag = h.kind === 'vertebra' ? { kind: 'vertebra', index: h.index } : { kind: 'part', index: h.index, mirrored: h.mirrored };
+        this.selection = { kind: h.kind === 'vertebra' ? 'vertebra' : 'part', index: h.index };
+        if (h.kind === 'elbow' || h.kind === 'hand') {
+          // Elbows and hands move in the view's plane through where they are.
+          const at = new THREE.Vector3(...this.grown.skeleton.legs[h.limb!]!.points[h.kind === 'elbow' ? 1 : 2]!);
+          const normal = new THREE.Vector3();
+          this.camera.getWorldDirection(normal);
+          this.drag = { kind: 'node', node: h.kind, index: h.index, limb: h.limb!, plane: new THREE.Plane().setFromNormalAndCoplanarPoint(normal.negate(), at) };
+        } else this.drag = h.kind === 'vertebra' ? { kind: 'vertebra', index: h.index } : { kind: 'part', index: h.index, mirrored: h.mirrored };
         if (h.kind === 'part') this.updateSkinPicker();
         this.onChange?.();
         e.stopImmediatePropagation();
@@ -568,11 +601,12 @@ export class CreatureLab {
     }
     if (!drag) {
       const h = this.mode === 'build' && this.overCanvas(e) ? this.pickHandle() : null;
-      if (h?.kind !== this.hovered?.kind || h?.index !== this.hovered?.index) this.hovered = h;
+      this.hovered = h;
       this.renderer.domElement.style.cursor = h ? 'grab' : this.mode === 'paint' ? 'crosshair' : '';
       return;
     }
     if (drag.kind === 'vertebra') this.dragVertebra(drag);
+    else if (drag.kind === 'node') this.dragArmNode(drag);
     else if (drag.kind === 'part') {
       const hit = this.hitSkin();
       if (hit) {
@@ -620,6 +654,23 @@ export class CreatureLab {
     this.changed();
   }
 
+  /** Moves an arm's elbow or hand to where the pointer is in the plane it's dragged in (kept as offsets from the shoulder). */
+  private dragArmNode(drag: { node: 'elbow' | 'hand'; index: number; limb: number; plane: THREE.Plane }): void {
+    const hit = this.raycaster.ray.intersectPlane(drag.plane, new THREE.Vector3());
+    const limb = this.grown.limbs[drag.limb];
+    const part = this.design.parts[drag.index];
+    if (!hit || !limb || !part) return;
+    // The first time an arm is posed, its hanging pose becomes its nodes.
+    if (!part.elbow || !part.hand) {
+      part.elbow = armOffset(limb.hip, limb.elbow);
+      part.hand = armOffset(limb.hip, limb.rest);
+    }
+    const o = armOffset(limb.hip, hit.toArray() as Vec3);
+    if (drag.node === 'elbow') part.elbow = o;
+    else part.hand = o;
+    this.changed();
+  }
+
   private dab(p: THREE.Vector3): void {
     if (this.drag?.kind === 'paint') this.drag.last = p.clone();
     if (this.design.splats.length >= MAX_SPLATS) return;
@@ -660,7 +711,7 @@ export class CreatureLab {
       const p = this.design.parts[h.index]!;
       p.size = Math.min(3, Math.max(0.25, p.size * f));
     }
-    this.selection = { kind: h.kind, index: h.index };
+    this.selection = { kind: h.kind === 'vertebra' ? 'vertebra' : 'part', index: h.index };
     this.changed();
     if (this.wheelTimer) clearTimeout(this.wheelTimer);
     this.wheelTimer = setTimeout(() => this.commit(), 400);

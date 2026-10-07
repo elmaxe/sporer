@@ -167,7 +167,7 @@ export class CreaturePanel {
       lab.mode === 'build'
         ? lab.placing
           ? `Move over the body to place the ${PART_LABELS[lab.placing].name.toLowerCase()}; click to stick it on (Shift: keep placing), Esc to cancel.`
-          : 'Drag the green dots (spine) to shape the body, wheel over one to fatten it (Shift: widen). Pull an end dot out to grow the spine. Drag a yellow dot to move a part, wheel to resize. Drag empty space to turn the view.'
+          : 'Drag the green dots (spine) to shape the body, wheel over one to fatten it (Shift: widen). Pull an end dot out to grow the spine. Drag a yellow dot to move a part, wheel to resize; drag the pink elbow and hand dots to pose an arm. Drag empty space to turn the view.'
         : lab.mode === 'paint'
           ? 'Paint on the body with the brush; it paints both sides when mirrored. Pick the coat on the right.'
           : 'Space: walk or stand. The legs step in a wave from back to front, the two sides half a stride apart; faster, the wave closes up into a trot.';
@@ -264,8 +264,19 @@ export class CreaturePanel {
       const info = PART_LABELS[p.kind];
       const s = this.section(`${info.icon} ${info.name}`);
       this.slider(s, 'Size', 0.25, 3, 0.01, () => p.size, (x) => (p.size = x));
-      if (p.kind !== 'eye') this.slider(s, p.kind === 'leg' || p.kind === 'arm' ? 'Reach fore/aft' : 'Lean', -1, 1, 0.01, () => p.tilt, (x) => (p.tilt = x));
-      if (p.kind === 'leg' || p.kind === 'arm') this.slider(s, 'Sprawl', 0, 1, 0.01, () => p.spread, (x) => (p.spread = x));
+      if (p.kind !== 'eye' && p.kind !== 'arm') this.slider(s, p.kind === 'leg' ? 'Reach fore/aft' : 'Lean', -1, 1, 0.01, () => p.tilt, (x) => (p.tilt = x));
+      if (p.kind === 'leg') this.slider(s, 'Sprawl', 0, 1, 0.01, () => p.spread, (x) => (p.spread = x));
+      if (p.kind === 'arm') {
+        s.append(el('div', 'cr-note', 'Three nodes: the yellow dot where it sits on the body, the pink elbow and the pink hand. Drag them to pose the arm; the wheel over one thickens it.'));
+        const r = el('div', 'cr-buttons');
+        this.button(r, 'Reset arm pose', () => {
+          delete p.elbow;
+          delete p.hand;
+          lab.changed();
+          lab.commit();
+        });
+        s.append(r);
+      }
       this.slider(s, 'Along body', -0.06, 1.06, 0.001, () => p.s, (x) => (p.s = x));
       this.slider(s, 'Round body', -Math.PI, Math.PI, 0.01, () => p.theta, (x) => (p.theta = x));
       this.check(s, 'Mirrored pair', () => p.mirror, (x) => (p.mirror = x));

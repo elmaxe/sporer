@@ -118,6 +118,21 @@ describe('creature design', () => {
     expect(dist(skinPoint(back.rest, part.s, part.theta).p, at)).toBeLessThan(0.12);
   });
 
+  it("poses an arm by its three nodes: shoulder, elbow and hand, mirrored on the other side", () => {
+    const d = defaultCreature();
+    d.parts.push({ kind: 'arm', s: 0.7, theta: 1.6, size: 1, tilt: 0, spread: 0, mirror: true, elbow: [0.3, -0.1, 0.25], hand: [0.35, 0.4, 0.6] });
+    const g = growCreature(d);
+    const arms = g.skeleton.legs.filter((l) => l.arm);
+    expect(arms.length).toBe(2);
+    const left = arms.find((a) => a.points[0]![0] > 0)!;
+    const right = arms.find((a) => a.points[0]![0] < 0)!;
+    const [shoulder, elbow, hand] = left.points;
+    expect(dist(elbow!, [shoulder![0] + 0.3, shoulder![1] - 0.1, shoulder![2] + 0.25])).toBeLessThan(1e-3);
+    expect(dist(hand!, [shoulder![0] + 0.35, shoulder![1] + 0.4, shoulder![2] + 0.6])).toBeLessThan(1e-3);
+    // The other arm's elbow sticks out the other way.
+    expect(right.points[1]![0]).toBeLessThan(right.points[0]![0]);
+  });
+
   it('grows random creatures without NaNs', () => {
     for (let seed = 1; seed <= 40; seed++) {
       const d = randomCreature(seed);
