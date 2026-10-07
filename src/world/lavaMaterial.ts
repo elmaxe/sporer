@@ -98,8 +98,8 @@ const CELL_JITTER = glf(0.75);
 const WALL_WARP = glf(0.22);
 
 /**
- * GLSL shared by the lava sea (per pixel) and the system view's lava bodies
- * (per vertex): the slow heat field of the flow, the glow around erupting
+ * GLSL shared by the lava sea and the planet map (per pixel) and the system
+ * view's lava bodies (per vertex): the slow heat field of the flow, the glow around erupting
  * vents, the melt's black-body glow, and its cracks averaged.
  */
 const LAVA_GLSL = /* glsl */ `
@@ -379,13 +379,10 @@ export const LAVA_SEA_GLSL = /* glsl */ `
 `;
 
 const seaVertex = /* glsl */ `
-  ${LAVA_GLSL}
   varying vec3 vDir;
   varying vec3 vView;
-  varying float vFlow;
   void main() {
     vDir = normalize(position);
-    vFlow = lavaFlow(vDir);
     // Towards the eye, in the body frame.
     vView = (inverse(modelMatrix) * vec4(cameraPosition, 1.0)).xyz - position;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
@@ -396,10 +393,12 @@ const seaFragment = /* glsl */ `
   ${LAVA_SEA_GLSL}
   varying vec3 vDir;
   varying vec3 vView;
-  varying float vFlow;
 
   void main() {
-    gl_FragColor = vec4(lavaSea(normalize(vDir), vFlow, normalize(vView)), 1.0);
+    // The broad flow per pixel, not per vertex: the sea is a LodSurface, whose triangles change as its chunks split
+    // and merge, and a flow blended across them would change with them.
+    vec3 dir = normalize(vDir);
+    gl_FragColor = vec4(lavaSea(dir, lavaFlow(dir), normalize(vView)), 1.0);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
   }

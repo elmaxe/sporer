@@ -240,6 +240,11 @@ export class LabInfo implements Entity {
     const lod = level?.globe?.lodStats();
     const sea = level?.globe?.waterStats();
     if (lod) rows.push(['Detail', `${lod.chunks} chunks drawn · depth ${lod.minDepth}–${lod.maxDepth}${sea ? ` · sea ${sea.chunks}${sea.chunks ? ` · depth ${sea.minDepth}–${sea.maxDepth}` : ''}` : ''}`]);
+    const shells = level?.globe?.shellStats();
+    const share = (s: [number, number]) => `${Math.round(s[0] / 1000)}k of ${Math.round(s[1] / 1000)}k triangles`;
+    if (shells?.air || shells?.clouds) {
+      rows.push(['Shells', [shells.air && `air ${share(shells.air)}`, shells.clouds && `cloud sheet ${share(shells.clouds)}`].filter(Boolean).join(' · ')]);
+    }
     const clock = this.lab.clock;
     rows.push(['Time', `${clock.time.toFixed(1)} s${clock.paused ? ' · paused' : clock.speed !== 1 ? ` · ×${clock.speed}` : ''}`]);
 

@@ -3,11 +3,11 @@ import type { Entity } from '../core/Entity';
 import { surfaceNoise } from '../gen/craters';
 import { isGas, type PlanetConfig } from '../world/Planet';
 import { atmosphereLook } from '../gen/atmosphere';
-import { createAtmosphere } from '../world/atmosphereShell';
+import { createAtmosphereShell } from '../world/atmosphereShell';
 import { SEA_RENDER_ORDER, createLavaLook, type LavaLook } from '../world/lavaMaterial';
 import { createRings, floorRadius, gasSampler, peakRadius, terrainSampler, type SurfaceSampler } from '../world/planetGeometry';
-import { createCubeSphere } from '../world/cubeSphere';
-import { GROUND_LAYER, GroundDepth } from '../world/groundDepth';
+import type { SpherePatches } from '../world/spherePatches';
+import { GroundDepth } from '../world/groundDepth';
 import { createWeatherLook, type WeatherLook } from '../world/weatherLook';
 import { createGasLook, type GasLook } from '../world/gasLook';
 import { addIceDebug, createIceLook, type IceLook } from '../world/iceLook';
@@ -26,12 +26,17 @@ export { RELIEF_SCALE };
 
 /** The shortest step (units) the seabed's slope is measured over under the sea. */
 const MIN_SLOPE_STEP = 0.25;
-/** Cube sphere segments of the lava sea, whose shader works out its flow per vertex (so it can't change detail; water is a LodSurface). */
-const LAVA_SEA_SEGMENTS = 37;
 /** Cube sphere segments of the atmosphere shell. */
 const ATMOSPHERE_SEGMENTS = 37;
 /** Cube sphere segments of the cloud layer (12·48² ≈ 28k triangles; the noise is per pixel, the drift per vertex). */
 const CLOUD_SEGMENTS = 48;
+/**
+ * The atmosphere shell and the cloud sheet are cut into this many patches a
+ * side on each cube face (world/spherePatches.ts), at the same density, so the
+ * ones off screen or facing away aren't drawn. Their shaders work per vertex,
+ * so they keep their fixed triangles rather than change detail.
+ */
+const SHELL_PATCHES = 4;
 /** A vent's glow on the lava sea, radians. */
 const VENT_RADIUS = 0.05;
 
@@ -75,8 +80,10 @@ export class PlanetGlobe implements Entity {
   readonly waves: SeaWaveLook | null = null;
 
   private readonly surface: LodSurface;
-  /** A water (or ice) sea, refined and culled like the ground. */
+  /** The sea (water, ice or lava), refined and culled like the ground. */
   private readonly water: LodSurface | null = null;
+  /** Bodies with an atmosphere: its shell, in patches. */
+  private readonly air: SpherePatches | null = null;
   /** The surface as drawn: radius (and colour) in a direction. */
   private readonly sample: SurfaceSampler;
   /** Worlds with a sea: the ground is never lower than its surface. */
@@ -132,7 +139,8 @@ export class PlanetGlobe implements Entity {
     addLodDebug(debug);
     addCraterDebug(debug);
     if (seaFloor && this.lava) {
-      this.object.add(createLavaSea(R, this.lava.createSeaMaterial(this.sun, this.sunLight, this.ambientLight, R)));
+      this.water = createLavaSea(R, this.lava.createSeaMaterial(this.sun, this.sunLight, this.ambientLight, R));
+      this.object.add(this.water.object);
     } else if (seaFloor) {
       // Ice sheets are still; water has waves (calm where there's no air to blow over it).
       this.waves = createSeaWaves(config, this.sun, this.sunLight);
@@ -151,9 +159,12 @@ export class PlanetGlobe implements Entity {
     // The same look as in the system view (in planet radii), so the two match across the zoom.
     const look = config.atmosphere && config.climate ? atmosphereLook(config.climate, config.radius) : null;
     this.ground = look ? new GroundDepth() : null;
-    if (look) this.object.add(createAtmosphere(R, config.atmosphere!, look, { vector: this.sun, point: false, strength: this.sunStrength }, ATMOSPHERE_SEGMENTS, this.ground));
+    if (look) {
+      this.air = createAtmosphereShell(R, config.atmosphere!, look, { vector: this.sun, point: false, strength: this.sunStrength }, ATMOSPHERE_SEGMENTS, SHELL_PATCHES, this.ground);
+      this.object.add(this.air.object);
+    }
     this.weather = gas ? null : createWeatherLook(config, this.lava?.activity ?? null);
-    if (this.weather) this.object.add(this.weather.createCloudLayer(1, CLOUD_SEGMENTS, { vector: this.sun, point: false, strength: this.sunStrength }));
+    if (this.weather) this.object.add(this.weather.createCloudLayer(1, CLOUD_SEGMENTS, { vector: this.sun, point: false, strength: this.sunStrength }, undefined, SHELL_PATCHES));
     scene.add(this.object);
     this.update(0);
   }
@@ -221,9 +232,18 @@ export class PlanetGlobe implements Entity {
     return this.surface.stats();
   }
 
-  /** The same for the water's chunks (null without a water sea). */
+  /** The same for the sea's chunks (null without a sea). */
   waterStats(): { chunks: number; minDepth: number; maxDepth: number } | null {
     return this.water?.stats() ?? null;
+  }
+
+  /** Triangles in the atmosphere's and the cloud sheet's patches shown now, of all of them (the lab's readout; null without). */
+  shellStats(): { air: [number, number] | null; clouds: [number, number] | null } {
+    const sheet = this.weather?.patchedSheet ?? null;
+    return {
+      air: this.air && [this.air.triangles, this.air.allTriangles],
+      clouds: sheet && [sheet.object.visible ? sheet.triangles : 0, sheet.allTriangles],
+    };
   }
 
   /** True once a planet buster has blown it apart. */
@@ -255,6 +275,9 @@ export class PlanetGlobe implements Entity {
     this.weather?.animate(this.frame.renderTime);
     this.rings?.animate(this.frame.renderTime);
     const camera = this.object.worldToLocal(this.camera.getWorldPosition(this.cameraPosition));
+    // The haze from outside is only the shell's near side (see createAtmosphere); the clouds' likewise.
+    this.air?.cullBehind(camera);
+    this.weather?.cullSheet(camera);
     this.waves?.animate(this.frame.renderTime, camera, this.weather?.shown ?? null);
     this.surface.update(camera, frameDt);
     this.water?.update(camera, frameDt);
@@ -328,12 +351,11 @@ function createWater(
   });
 }
 
-/** The lava sea: a fixed smooth sphere at sea level with the animated lava (see world/lavaMaterial.ts). */
-function createLavaSea(radius: number, material: THREE.Material): THREE.Mesh {
-  // The lava shader works out its flow per vertex, so a fixed sphere (with fewer segments: still smooth at the horizon).
-  const sea = new THREE.Mesh(createCubeSphere(radius, LAVA_SEA_SEGMENTS), material);
-  sea.name = 'Sea';
-  sea.renderOrder = SEA_RENDER_ORDER;
-  sea.layers.enable(GROUND_LAYER);
-  return sea;
+/**
+ * The lava sea: a smooth sphere at sea level with the animated lava (see
+ * world/lavaMaterial.ts), refined and culled like the water. Its shader works
+ * the lava out per pixel, so nothing changes as its chunks split and merge.
+ */
+function createLavaSea(radius: number, material: THREE.Material): LodSurface {
+  return new LodSurface(radius, radius, () => radius, material, { smooth: 'coast', renderOrder: SEA_RENDER_ORDER, name: 'Sea' });
 }

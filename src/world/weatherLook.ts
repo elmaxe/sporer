@@ -21,6 +21,7 @@ import { surfaceNoise } from '../gen/craters';
 import { RELIEF_SCALE, globeRadius } from '../planet/frame';
 import type { AtmosphereSun } from './atmosphereShell';
 import { createCubeSphere } from './cubeSphere';
+import { SpherePatches, type SpherePatch } from './spherePatches';
 import { CumulusClouds, cumulusParams } from './cumulusLook';
 import { cloudNoiseTexture } from './noiseTexture';
 import { terrainSampler } from './planetGeometry';
@@ -73,6 +74,8 @@ export const BOLT_RENDER_ORDER = 2.6;
 export const MAX_FLASHES = 8;
 /** A flash lights the cloud this far round (radians, the glow's 1/e width). */
 const FLASH_WIDTH = 0.03;
+/** How far round a flash the sheet shader looks for its glow (radians; its vNearFlash, less the margin). */
+const FLASH_REACH = FLASH_WIDTH * 5;
 
 const scratchCentre = new THREE.Vector3();
 const scratchScale = new THREE.Vector3();
@@ -143,7 +146,7 @@ const vertexShader = /* glsl */ `
     vNearFlash = 0.0;
     for (int i = 0; i < ${MAX_FLASHES}; i++) {
       if (i >= uFlashCount || vNearFlash <= 0.0) break;
-      if (dot(dir, uFlashes[i].xyz) > cos(${(FLASH_WIDTH * 5).toFixed(4)} + uNearMargin)) vNearFlash = 1.0;
+      if (dot(dir, uFlashes[i].xyz) > cos(${FLASH_REACH.toFixed(4)} + uNearMargin)) vNearFlash = 1.0;
     }
     vec4 world = modelMatrix * vec4(position, 1.0);
     vWorld = world.xyz;
@@ -312,8 +315,18 @@ export class WeatherLook {
   readonly cumulus: CumulusField | null;
   /** The puffy clouds of each layer made (one per view of the body). */
   readonly puffs: CumulusClouds[] = [];
+  /** Low orbit's sheet, in patches (see createCloudLayer's `perFace`), culled by `cullSheet`. */
+  patchedSheet: SpherePatches | null = null;
   private readonly layers: THREE.Object3D[] = [];
-  private readonly sheets: THREE.Mesh[] = [];
+  private readonly sheets: THREE.Object3D[] = [];
+  /**
+   * Puffy worlds: where the sheet has anything to draw, the sheet storms and
+   * lit flashes under way: unit direction (body frame) and how far round it
+   * reaches (radians, before the sheet's own margin).
+   */
+  private readonly reach: THREE.Vector4[] = Array.from({ length: MAX_STORMS + MAX_FLASHES }, () => new THREE.Vector4());
+  private reachCount = 0;
+  private reachMargin = 0;
   private readonly centre: Vec3Tuple = [0, 0, 0];
   private time = 0;
 
@@ -396,7 +409,7 @@ export class WeatherLook {
       // Thunderstorms are towers among the puffs, where there are puffs.
       const sheet = !(this.cumulus && e.kind === 'cell');
       info[i]!.set(sheet ? stormStrength(e, time) : 0, STORM_SHAPE[e.kind], e.spin, Math.cos(e.size));
-      if (sheet) sheetStorms++;
+      if (sheet && info[i]!.x > 0) this.reach[sheetStorms++]!.set(this.centre[0], this.centre[1], this.centre[2], e.size);
     }
     u.uStormCount!.value = Math.min(shown.length, MAX_STORMS);
 
@@ -406,7 +419,9 @@ export class WeatherLook {
       const f = i < this.flashCount ? this.flashes[i]! : null;
       if (f) slots[i]!.set(f.dir[0], f.dir[1], f.dir[2], flashBrightness(f, time));
       else slots[i]!.w = 0;
+      if (f) this.reach[sheetStorms + i]!.set(f.dir[0], f.dir[1], f.dir[2], FLASH_REACH);
     }
+    this.reachCount = sheetStorms + this.flashCount;
     u.uFlashCount!.value = this.flashCount;
 
     for (const p of this.puffs) p.animate(time, this.schedule.events, weatherParams.coverage);
@@ -422,10 +437,17 @@ export class WeatherLook {
    * `segments` cells per cube edge at the layer's height. `sun` is the star
    * (a point in world space, or a direction), `sunColor` its light.
    */
-  createCloudLayer(scale: number, segments: number, sun: AtmosphereSun, sunColor?: THREE.Color): THREE.Group {
+  createCloudLayer(
+    scale: number,
+    segments: number,
+    sun: AtmosphereSun,
+    sunColor?: THREE.Color,
+    /** Cut the sheet into this many patches a side per cube face (low orbit's; see cullSheet). */
+    perFace = 1,
+  ): THREE.Group {
     const group = new THREE.Group();
     group.name = 'Clouds';
-    group.add(this.createSheet(scale, segments, sun, sunColor));
+    group.add(this.createSheet(scale, segments, sun, sunColor, perFace));
     if (this.cumulus) {
       const puffs = new CumulusClouds(this.cumulus, this.ground, this.uniforms, scale, sun, sunColor);
       // Drawn just before the sheet: under a cyclone's canopy.
@@ -439,7 +461,31 @@ export class WeatherLook {
     return group;
   }
 
-  private createSheet(scale: number, segments: number, sun: AtmosphereSun, sunColor?: THREE.Color): THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial> {
+  /**
+   * Low orbit's sheet: hides its patches off on the far side from a camera at
+   * `camera` (in the cloud layer's frame) above the clouds (from under them
+   * the whole sheet overhead stays), and on puffy worlds all but those within
+   * reach of a sheet storm or flash under way (the rest of their sheet has
+   * nothing on it). Call after `animate`.
+   */
+  cullSheet(camera: THREE.Vector3): void {
+    const sheet = this.patchedSheet;
+    if (!sheet || !sheet.object.visible) return;
+    sheet.cullBehind(camera, this.cumulus ? this.nearWeather : undefined);
+  }
+
+  /** A patch within reach of a sheet storm or a lit flash (see reach). */
+  private readonly nearWeather = (patch: SpherePatch): boolean => {
+    const c = patch.centre;
+    for (let i = 0; i < this.reachCount; i++) {
+      const r = this.reach[i]!;
+      const angle = Math.acos(THREE.MathUtils.clamp(c.x * r.x + c.y * r.y + c.z * r.z, -1, 1));
+      if (angle - patch.angle < r.w + this.reachMargin) return true;
+    }
+    return false;
+  };
+
+  private createSheet(scale: number, segments: number, sun: AtmosphereSun, sunColor: THREE.Color | undefined, perFace: number): THREE.Object3D {
     const material = new THREE.ShaderMaterial({
       vertexShader,
       fragmentShader,
@@ -456,19 +502,35 @@ export class WeatherLook {
       depthWrite: false,
     });
     const radius = this.data.cloudRadius * scale;
-    const mesh = new THREE.Mesh(createCubeSphere(radius, segments), material);
     // Only the near side from outside (the far side would show past the planet's edge), the whole sheet overhead from inside.
-    mesh.onBeforeRender = (_renderer, _scene, camera) => {
+    const pickSide = (mesh: THREE.Mesh) => (_renderer: THREE.WebGLRenderer, _scene: THREE.Scene, camera: THREE.Camera) => {
       mesh.getWorldPosition(scratchCentre);
       mesh.getWorldScale(scratchScale);
       const inside = camera.getWorldPosition(scratchCamera).distanceTo(scratchCentre) < radius * scratchScale.x;
       material.side = inside ? THREE.BackSide : THREE.FrontSide;
     };
-    mesh.name = 'Cloud sheet';
-    mesh.renderOrder = CLOUD_RENDER_ORDER;
-    mesh.visible = !this.cumulus;
-    this.sheets.push(mesh);
-    return mesh;
+    let sheet: THREE.Object3D;
+    if (perFace > 1) {
+      // The same triangles in patches, so the ones out of view can be skipped (the per-vertex drift and the storms'
+      // margin stay as they are).
+      const patched = new SpherePatches(radius, segments, perFace, material, 'Cloud sheet');
+      for (const { mesh } of patched.patches) {
+        mesh.onBeforeRender = pickSide(mesh);
+        mesh.renderOrder = CLOUD_RENDER_ORDER;
+      }
+      this.patchedSheet = patched;
+      this.reachMargin = material.uniforms.uNearMargin!.value as number;
+      sheet = patched.object;
+    } else {
+      const mesh = new THREE.Mesh(createCubeSphere(radius, segments), material);
+      mesh.onBeforeRender = pickSide(mesh);
+      mesh.name = 'Cloud sheet';
+      mesh.renderOrder = CLOUD_RENDER_ORDER;
+      sheet = mesh;
+    }
+    sheet.visible = !this.cumulus;
+    this.sheets.push(sheet);
+    return sheet;
   }
 }
 
