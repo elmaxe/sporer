@@ -665,7 +665,8 @@ export function collectFlashes(weather: WeatherData, storms: readonly StormEvent
   return n;
 }
 
-function fillFlash(f: Flash, seed: number, j: number, t0: number): void {
+/** Fills `f` with the flash of slot `j` (starting in the slot from `t0`) of the storm seeded `seed`. */
+export function fillFlash(f: Flash, seed: number, j: number, t0: number): void {
   f.start = t0 + hash01(seed, j, 1) * FLASH_SLOT;
   f.strokes = STROKES[0] + Math.floor(hash01(seed, j, 2) * (STROKES[1] - STROKES[0] + 1));
   f.interval = STROKE_INTERVAL[0] + (STROKE_INTERVAL[1] - STROKE_INTERVAL[0]) * hash01(seed, j, 3);

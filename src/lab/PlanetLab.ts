@@ -1,3 +1,4 @@
+import { gasStormCentre } from '../gen/gasWeather';
 import { Vector3 } from 'three';
 import type { Debug } from '../core/Debug';
 import type { Game } from '../core/Game';
@@ -293,22 +294,35 @@ export class PlanetLab {
 
   /**
    * The camera over the biggest storm under way (of `kind` if given, e.g.
-   * 'cyclone', 'cell', 'ash'), at `zoom` radii, or, with the fly camera, the
-   * UFO parked beside it. Globe view only (the system view's surface spins
-   * under the camera). Resolves false if there is none.
+   * 'cyclone', 'cell', 'ash', or on a giant 'plume', 'great', 'outburst',
+   * 'spot'), at `zoom` radii, or, with the fly camera, the UFO parked beside
+   * it. Globe view only (the system view's surface spins under the camera).
+   * Resolves false if there is none.
    */
   lookAtStorm(kind?: string, zoom = 1.6): Promise<boolean> {
     const level = this._level;
     const weather = level?.globe?.weather;
-    if (!level || !weather) return Promise.resolve(false);
-    const storms = weather.shown.filter((e) => !kind || e.kind === kind).sort((a, b) => b.size - a.size);
-    const storm = storms[0];
-    if (!storm) return Promise.resolve(false);
+    const gas = level?.globe?.gas;
     const c: [number, number, number] = [0, 0, 0];
-    stormCentre(storm, this.clock.renderTime, c);
+    let size = 0;
+    if (weather) {
+      const storm = weather.shown.filter((e) => !kind || e.kind === kind).sort((a, b) => b.size - a.size)[0];
+      if (storm) {
+        stormCentre(storm, this.clock.renderTime, c);
+        size = storm.size;
+      }
+    } else if (gas) {
+      // A giant's passing storms ('plume', 'great', 'outburst', 'spot'; gen/gasWeather.ts).
+      const storm = gas.shown.filter((e) => !kind || e.kind === kind).sort((a, b) => b.size - a.size)[0];
+      if (storm) {
+        gasStormCentre(storm, gas.renderTime, gas.driftRate, c);
+        size = storm.size;
+      }
+    }
+    if (!level || size === 0) return Promise.resolve(false);
     if (this.view.camera === 'fly' && level.ship) {
       // Beside the storm, looking in under it.
-      const side = offsetDirection(c, 0, storm.size * 1.2, [0, 0, 0]);
+      const side = offsetDirection(c, 0, size * 1.2, [0, 0, 0]);
       level.ship.placeAt(new Vector3(side[0], side[1], side[2]));
       return this.whenReady().then(() => true);
     }

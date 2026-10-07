@@ -43,7 +43,9 @@
 // tooltip, the menu's Plants button turns them off and on, and a removed plant stays in the change list.
 // Weather: every body in the planet loop has the weather its climate says (or none), as clouds in the system view and
 // low orbit (water and methane worlds' as puffy clusters, some in view), with storms and flashes coming and going over time; the loop also visits an acid-deck (Venus-like, with
-// volcanic lightning), a methane (Titan-like) and a dusty (Mars-like) world. The menu's Weather toggle switches it.
+// volcanic lightning), a methane (Titan-like) and a dusty (Mars-like) world. Giants have their passing storms (convective
+// plumes or methane outbursts, named on the HUD, alive as their schedule says) and lightning. The menu's Weather toggle
+// switches it all, the giants' storms too.
 // Seamless zooms: through the galaxy and planet loops, every frame of every level transition records the crossfade
 // weight and canvas brightness; each transition must crossfade and never go black (screenshots mid-handover).
 // Touch: on an emulated phone, hold/tap/drag/pinch and Boost work (no stick in space, the stick in low orbit), down to a planet and out;
@@ -339,6 +341,26 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null, during = n
         cloudRadius: +(look.data.cloudRadius / look.data.radius).toFixed(3) });
     })();
   })`);
+  // A giant's passing storms (gen/gasWeather.ts): named on the HUD, the same weather as the system view's globe, and
+  // over a stretch of the clock always the storms its schedule says are alive (a fresh schedule agrees), with lightning.
+  r.gasWeather = await evaluate(`planet.globe.gas && new Promise((resolve) => {
+    const gas = planet.globe.gas;
+    const start = planet.frame.renderTime, wall = performance.now();
+    let storms = 0, flashes = 0, agree = true;
+    (function f() {
+      const t = gas.renderTime;
+      const fresh = new gas.schedule.constructor(gas.weather, gas.layout);
+      fresh.advance(t);
+      const alive = fresh.events.filter((e) => e.start < t && t < e.end).length;
+      agree = agree && gas.shown.length === Math.min(alive, 6);
+      storms = Math.max(storms, gas.shown.length);
+      flashes = Math.max(flashes, gas.flashCount);
+      if (planet.frame.renderTime - start < 4 && performance.now() - wall < 20000) return requestAnimationFrame(f);
+      resolve({ ice: gas.layout.ice, kinds: gas.weather.specs.map((s) => s.kind), storms, flashes, agree,
+        systemView: !!__body.gas && JSON.stringify(__body.gas.weather) === JSON.stringify(gas.weather),
+        hud: document.getElementById('hud-climate').textContent });
+    })();
+  })`);
   // Plants: bodies of tier 1 and up (not gas giants) have them, standing around the ship; tier 0 has none. The menu's
   // Plants button turns them off (and back on), and what is left is gone for good once removed.
   r.expectedPlants = await evaluate(`!!__body.config.climate && __body.config.climate.habitability > 0 && !__body.config.bands`);
@@ -493,6 +515,12 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null, during = n
         r.weather.puffy === (r.weather.kind === 'water' || r.weather.kind === 'methane') &&
         (!r.weather.puffy || r.weather.puffs > 0) &&
         r.weather.cloudRadius > 1)) &&
+    !!r.gasWeather === (r.type === 'gas') &&
+    (!r.gasWeather ||
+      (r.gasWeather.agree &&
+        r.gasWeather.systemView &&
+        r.gasWeather.kinds.length > 0 &&
+        (r.gasWeather.ice ? /methane storms/ : /convective storms/).test(r.gasWeather.hud))) &&
     r.modeAfter === 'system' &&
     r.parkedAt === r.name &&
     Math.abs(r.standoffs - 1) < 0.2 &&
@@ -1562,8 +1590,10 @@ await section('audio', async () => {
     button.click();
     frames(3, () => {
       const offText = button.textContent, offHidden = clouds().every((c) => !c.visible);
+      // The giants' passing storms and lightning go too.
+      const giantsCalm = world.planets.filter((p) => p.gas).every((p) => p.gas.shown.length === 0 && p.gas.flashCount === 0);
       button.click();
-      frames(3, () => resolve({ on, offText, offHidden, back: button.getAttribute('aria-pressed') === 'true' && clouds().every((c) => c.visible), bodies: clouds().length }));
+      frames(3, () => resolve({ on, offText, offHidden, giantsCalm, back: button.getAttribute('aria-pressed') === 'true' && clouds().every((c) => c.visible), bodies: clouds().length }));
     });
   })`);
   // The debug dump from the menu: its dialog shows the screen; typing in the note doesn't reach the game (M would
@@ -1634,6 +1664,7 @@ await section('audio', async () => {
     audio.weatherToggle.on &&
     audio.weatherToggle.offText === 'Weather: off' &&
     audio.weatherToggle.offHidden &&
+    audio.weatherToggle.giantsCalm &&
     audio.weatherToggle.back &&
     audio.dump.note === 'm' &&
     !audio.dump.muted &&
