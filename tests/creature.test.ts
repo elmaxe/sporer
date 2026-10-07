@@ -13,6 +13,7 @@ import {
   skinPoint,
   splatAt,
   splatPosition,
+  tidySpine,
 } from '../src/gen/creature';
 import { dutyFactor, footPath, legPhase, solveTwoBone, type CreaturePose } from '../src/gen/creatureMotion';
 import { Rng } from '../src/gen/rng';
@@ -120,7 +121,7 @@ describe('creature design', () => {
 
   it("poses an arm by its three nodes: shoulder, elbow and hand, mirrored on the other side", () => {
     const d = defaultCreature();
-    d.parts.push({ kind: 'arm', s: 0.7, theta: 1.6, size: 1, tilt: 0, spread: 0, mirror: true, elbow: [0.3, -0.1, 0.25], hand: [0.35, 0.4, 0.6] });
+    d.parts.push({ kind: 'arm', s: 0.7, theta: 1.6, size: 1, tilt: 0, spread: 0, mirror: true, joint: [0.3, -0.1, 0.25], end: [0.35, 0.4, 0.6] });
     const g = growCreature(d);
     const arms = g.skeleton.legs.filter((l) => l.arm);
     expect(arms.length).toBe(2);
@@ -133,6 +134,66 @@ describe('creature design', () => {
     expect(right.points[1]![0]).toBeLessThan(right.points[0]![0]);
   });
 
+  it('poses a leg by its knee and foot, the foot kept on the ground, and walks it from there', () => {
+    const d = defaultCreature();
+    d.parts[0] = { ...d.parts[0]!, joint: [0.5, -0.3, 0.3], end: [0.9, 5, -0.4] };
+    const g = growCreature(d);
+    const left = g.skeleton.legs.find((l) => !l.arm && l.points[0]![0] > 0 && Math.abs(l.points[0]![2] - g.limbs[0]!.hip[2]) < 1e-6)!;
+    const [hip, knee, foot] = left.points;
+    expect(dist(knee!, [hip![0] + 0.5, hip![1] - 0.3, hip![2] + 0.3])).toBeLessThan(1e-3);
+    // The foot's height is ignored: it stands on the ground, out and behind as placed.
+    expect(foot![1]).toBeCloseTo(left.radii[2]!, 3);
+    expect(foot![0] - hip![0]).toBeCloseTo(0.9, 3);
+    expect(foot![2] - hip![2]).toBeCloseTo(-0.4, 3);
+    const walking = growCreature(d, { time: 1, cycle: 0.3, run: 0, moving: 1 });
+    expect(walking.skeleton.legs.flatMap((l) => l.points.flat()).every(Number.isFinite)).toBe(true);
+  });
+
+  it('grows a mouth on the snout whose mesh keeps its topology as it yawns', () => {
+    const d = defaultCreature();
+    const form = creatureForm(d);
+    const rest = growCreature(d);
+    expect(rest.skeleton.mouths?.length).toBe(1);
+    const m = rest.skeleton.mouths![0]!;
+    expect(m.width).toBeGreaterThan(0);
+    for (const t of [0.5, 1.7, 4.1]) {
+      const posed = growCreature(d, { time: t, cycle: t * 0.3, run: 0, moving: 1 });
+      expect(buildAnimalMesh(posed.skeleton, form, 4, 0).triangles).toBe(buildAnimalMesh(rest.skeleton, form, 4, 0).triangles);
+    }
+    d.parts.find((p) => p.kind === 'mouth')!.teeth = false;
+    expect(growCreature(d).skeleton.mouths![0]!.teeth).toBe(false);
+  });
+
+  it('lets the spine rise straight up and curl back over the body, its skin unpinched', () => {
+    const d = defaultCreature();
+    // The tail (the first vertebrae) climbs straight up from the hips, then reaches forward over the back.
+    d.spine.splice(0, 3, { y: 3.6, z: 0.4, r: 0.1, w: 1 }, { y: 3.7, z: -0.4, r: 0.14, w: 1 }, { y: 3, z: -1.2, r: 0.2, w: 1 }, { y: 2, z: -1.25, r: 0.3, w: 1 });
+    tidySpine(d.spine);
+    // Kept as drawn: going backwards is allowed now.
+    expect(d.spine[0]!.z).toBeCloseTo(0.4);
+    const g = growCreature(d, { time: 1, cycle: 0.4, run: 0, moving: 1 });
+    for (let i = 1; i < g.frames.length; i++) {
+      const a = g.frames[i - 1]!;
+      const b = g.frames[i]!;
+      // The rings turn smoothly: no flipped side axis (the pinch where the spine pointed straight up).
+      expect(a.side[0] * b.side[0] + a.side[1] * b.side[1] + a.side[2] * b.side[2]).toBeGreaterThan(0.9);
+    }
+    // Over the back, heading forward again from the tip, the tail's top faces down onto the body: it's upside down, as a curled tail is.
+    expect(g.frames[0]!.up[1]).toBeLessThan(0);
+    const mesh = buildAnimalMesh(g.skeleton, creatureForm(d), 4, 0);
+    expect(Array.from(mesh.positions).every(Number.isFinite)).toBe(true);
+    const p = skinPoint(g.rest, 0.05, 0.4).p;
+    const back = anchorOf(g.rest, p);
+    expect(dist(skinPoint(g.rest, back.s, back.theta).p, p)).toBeLessThan(0.05);
+  });
+
+  it('reads links that kept arm nodes as elbow and hand', () => {
+    const d = defaultCreature();
+    d.parts.push({ kind: 'arm', s: 0.7, theta: 1.6, size: 1, tilt: 0, spread: 0, mirror: true, elbow: [0.3, -0.1, 0.25], hand: [0.35, 0.4, 0.6] } as never);
+    const back = decodeDesign(encodeDesign(d))!;
+    expect(back.parts[back.parts.length - 1]!.joint).toEqual([0.3, -0.1, 0.25]);
+  });
+
   it('grows random creatures without NaNs', () => {
     for (let seed = 1; seed <= 40; seed++) {
       const d = randomCreature(seed);
@@ -140,6 +201,18 @@ describe('creature design', () => {
       const nums = [...g.skeleton.spine.flatMap((n) => [...n.p, n.rx, n.ry]), ...g.skeleton.legs.flatMap((l) => l.points.flat()), ...g.skeleton.spikes.flatMap((s) => s.points.flat()), ...g.skeleton.eyes.flatMap((e) => e.centre)];
       expect(nums.every(Number.isFinite)).toBe(true);
     }
+  });
+
+  it('makes random creatures that stand tall as well as long and low', () => {
+    let tall = 0;
+    for (let seed = 1; seed <= 60; seed++) {
+      const sp = randomCreature(seed).spine;
+      // Somewhere along it the spine climbs steeply (an upright torso, a tall neck, a centaur's front).
+      const steep = sp.slice(1).some((v, i) => Math.atan2(v.y - sp[i]!.y, Math.abs(v.z - sp[i]!.z)) > (50 * Math.PI) / 180);
+      if (steep) tall++;
+    }
+    expect(tall).toBeGreaterThan(12);
+    expect(tall).toBeLessThan(50);
   });
 
   it('makes a design from a game animal', () => {

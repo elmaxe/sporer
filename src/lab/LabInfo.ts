@@ -1,3 +1,4 @@
+import { describeGasWeather } from '../gen/gasWeather';
 import type { Entity } from '../core/Entity';
 import type { Input } from '../core/Input';
 import { celsius, describeAtmosphere } from '../gen/climate';
@@ -209,6 +210,11 @@ export class LabInfo implements Entity {
       rows.push(['Weather', parts.join(' · ')]);
     } else if (planet.type !== 'gas' && !planet.shape) {
       rows.push(['Weather', 'none']);
+    }
+    const gas = level?.globe?.gas ?? level?.bodies?.planet.gas;
+    if (gas) {
+      const kinds = gas.shown.map((e) => e.kind).join(', ');
+      rows.push(['Weather', `${describeGasWeather(gas.weather)} · ${gas.shown.length} storms${kinds ? ` (${kinds})` : ''} · ${gas.flashCount} flashes`]);
     }
     const plants = level?.plants;
     if (plants) {

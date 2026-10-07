@@ -1,4 +1,4 @@
-import { COAT_PATTERNS, growAnimal, type AnimalForm, type AnimalSkeleton, type CoatPattern, type Eye, type Leg, type SpineNode, type Spike, type Vec3 } from './animalForm';
+import { COAT_PATTERNS, growAnimal, type AnimalForm, type AnimalSkeleton, type CoatPattern, type Eye, type Leg, type Mouth, type SpineNode, type Spike, type Vec3 } from './animalForm';
 import { animalGait } from './animals';
 import { hslToHex } from './color';
 import { REST_POSE, bodyBob, breath, dutyFactor, footPath, legPhase, solveTwoBone, spineSway, type CreaturePose } from './creatureMotion';
@@ -41,8 +41,8 @@ export interface Vertebra {
   w: number;
 }
 
-export type PartKind = 'leg' | 'arm' | 'eye' | 'horn' | 'ear' | 'spike' | 'antenna';
-export const PART_KINDS: readonly PartKind[] = ['leg', 'arm', 'eye', 'horn', 'ear', 'spike', 'antenna'];
+export type PartKind = 'leg' | 'arm' | 'eye' | 'mouth' | 'horn' | 'ear' | 'spike' | 'antenna';
+export const PART_KINDS: readonly PartKind[] = ['leg', 'arm', 'eye', 'mouth', 'horn', 'ear', 'spike', 'antenna'];
 
 /** A part on the skin. */
 export interface CreaturePart {
@@ -53,19 +53,24 @@ export interface CreaturePart {
   theta: number;
   /** Scale, 1 the usual size for its place on the body. */
   size: number;
-  /** −1 to 1: a horn's or spike's lean back or forward, a foot's or hand's place behind or ahead of its hip. */
+  /** −1 to 1: a horn's or spike's lean back or forward, a mouth's frown or smile. */
   tilt: number;
-  /** 0 to 1: how far out to the side a foot or hand stands (a sprawl). */
+  /** 0 to 1: how far out to the side a foot or hand stands (a sprawl); how wide a mouth hangs open. */
   spread: number;
   /** A pair, mirrored across the middle (parts on the middle line are single anyway). */
   mirror: boolean;
   /**
-   * An arm's elbow and hand, as offsets from its shoulder: [out from the
-   * body's middle, up, forward] in units, so the mirrored arm mirrors them.
-   * Unset, the arm hangs as its size, lean and sprawl say (`defaultArmNodes`).
+   * A limb's middle joint (a leg's knee, an arm's elbow) and its end (the
+   * foot, the hand), as offsets from where it leaves the body: [out from
+   * the body's middle, up, forward] in units, so the mirrored limb mirrors
+   * them. A foot always stands on the ground (its `up` is ignored). Unset,
+   * the limb stands or hangs as its size, reach and sprawl say
+   * (`defaultLimbNodes`).
    */
-  elbow?: Vec3;
-  hand?: Vec3;
+  joint?: Vec3;
+  end?: Vec3;
+  /** A mouth's teeth (on unless false). */
+  teeth?: boolean;
 }
 
 export interface CreaturePaint {
@@ -178,12 +183,17 @@ export interface SpineFrame extends SpineSample {
 
 /** Frames along a spine, built exactly as surface/animalMesh.ts lays its rings, so points on them lie on the skin. */
 export function spineFrames(samples: readonly SpineSample[]): SpineFrame[] {
+  // The sideways axis is carried along the spine (parallel transport) from the body's left at the
+  // tail, not taken from the world's up, so the spine can rise straight up or curl back over itself.
+  let carried: Vec3 = [1, 0, 0];
   return samples.map((q, i) => {
     const prev = samples[Math.max(0, i - 1)]!.p;
     const next = samples[Math.min(samples.length - 1, i + 1)]!.p;
-    const t = normalize(sub(next, prev));
-    let side = normalize(cross([0, 1, 0], t));
-    if (!Number.isFinite(side[0]) || Math.hypot(...cross([0, 1, 0], t)) < 1e-9) side = [1, 0, 0];
+    let t = normalize(sub(next, prev));
+    if (!Number.isFinite(t[0])) t = [0, 0, 1];
+    let side = normalize(add(carried, t, -dot(carried, t)));
+    if (!Number.isFinite(side[0])) side = [1, 0, 0];
+    carried = side;
     const up = normalize(cross(t, side));
     return { ...q, t, side, up };
   });
@@ -305,7 +315,7 @@ export interface CreatureLimb {
   paw: number;
   /** Which way the knee (or elbow) bends, and where it is at rest. */
   pole: Vec3;
-  elbow: Vec3;
+  joint: Vec3;
 }
 
 export interface GrownCreature {
@@ -355,31 +365,34 @@ function limbRadius(part: CreaturePart, bodyR: number): number {
   return Math.max(0.03, bodyR * (part.kind === 'arm' ? 0.16 : 0.24) * part.size);
 }
 
-/** An arm's elbow and hand offsets from its shoulder (out, up, forward) when they haven't been placed: hanging down and forward. */
-export function defaultArmNodes(part: CreaturePart, bodyR: number, shoulderHeight: number): { elbow: Vec3; hand: Vec3 } {
-  const len = Math.max(0.2, bodyR * 2.2 * part.size);
+/**
+ * A limb's knee or elbow and its foot or hand, as offsets from its root
+ * `hip` (out, up, forward), when they haven't been placed: a leg standing
+ * with its foot below the hip (out by its sprawl, ahead or behind by its
+ * reach) and its knee bent towards `pole`; an arm hanging down and forward.
+ */
+export function defaultLimbNodes(part: CreaturePart, bodyR: number, hip: Vec3, pole: Vec3): { joint: Vec3; end: Vec3 } {
   const radius = limbRadius(part, bodyR);
-  const hand: Vec3 = [(0.15 + part.spread * 0.6) * len, -0.6 * len, (0.4 + part.tilt * 0.4) * len];
+  if (part.kind === 'leg') {
+    const paw = radius * 0.9;
+    const h = Math.max(paw * 2, hip[1]);
+    const end: Vec3 = [radius * 0.4 + part.spread * h * 0.8, paw - hip[1], part.tilt * h * 0.5];
+    // A little longer than the reach, so the knee is bent standing.
+    const len = Math.hypot(...end) * 1.12;
+    const { knee } = solveTwoBone([0, 0, 0], end, len / 2, len / 2, [Math.abs(pole[0]), pole[1], pole[2]]);
+    return { joint: knee, end };
+  }
+  const len = Math.max(0.2, bodyR * 2.2 * part.size);
+  const end: Vec3 = [(0.15 + part.spread * 0.6) * len, -0.6 * len, (0.4 + part.tilt * 0.4) * len];
   // Never through the floor.
-  hand[1] = Math.max(radius * 1.15 - shoulderHeight, hand[1]);
-  const reach = Math.hypot(...hand);
-  const l = Math.max(reach * 1.1, len * 0.9);
-  const { knee } = solveTwoBone([0, 0, 0], hand, l / 2, l / 2, normalize([0.5, 0, -1]));
-  return { elbow: knee, hand };
+  end[1] = Math.max(radius * 1.15 - hip[1], end[1]);
+  const l = Math.max(Math.hypot(...end) * 1.1, len * 0.9);
+  const { knee } = solveTwoBone([0, 0, 0], end, l / 2, l / 2, normalize([0.5, 0, -1]));
+  return { joint: knee, end };
 }
 
-/** Where an arm's elbow and hand are (rest pose), from its shoulder `hip`. */
-export function armNodes(part: CreaturePart, hip: Vec3, bodyR: number): { elbow: Vec3; hand: Vec3 } {
-  const out = hip[0] >= 0 ? 1 : -1;
-  const d = part.elbow && part.hand ? { elbow: part.elbow, hand: part.hand } : defaultArmNodes(part, bodyR, hip[1]);
-  const at = (o: Vec3): Vec3 => [hip[0] + out * o[0], hip[1] + o[1], hip[2] + o[2]];
-  const hand = at(d.hand);
-  hand[1] = Math.max(limbRadius(part, bodyR) * 1.15, hand[1]);
-  return { elbow: at(d.elbow), hand };
-}
-
-/** The offset of a rest-pose point from an arm's shoulder, as `elbow` and `hand` keep it. */
-export function armOffset(hip: Vec3, point: Vec3): Vec3 {
+/** The offset of a rest-pose point from a limb's root, as `joint` and `end` keep it. */
+export function limbOffset(hip: Vec3, point: Vec3): Vec3 {
   const out = hip[0] >= 0 ? 1 : -1;
   return [(point[0] - hip[0]) * out, point[1] - hip[1], point[2] - hip[2]];
 }
@@ -392,29 +405,35 @@ function growLimbs(design: CreatureDesign, rest: readonly SpineFrame[]): Creatur
     if (part.kind !== 'leg' && part.kind !== 'arm') continue;
     const { hip, r: bodyR } = limbRoot(rest, part, mirrored);
     const radius = limbRadius(part, bodyR);
-    const paw = radius * (part.kind === 'arm' ? 0.75 : 0.9);
+    const paw = radius * (part.kind === 'arm' ? 1.15 : 0.9);
     const out = hip[0] >= 0 ? 1 : -1;
     const outward: Vec3 = [out, 0, 0];
-    if (part.kind === 'leg') {
-      const h = Math.max(paw * 2, hip[1]);
-      const foot: Vec3 = [hip[0] + out * (radius * 0.4 + part.spread * h * 0.8), paw, hip[2] + part.tilt * h * 0.5];
-      const reach = Math.hypot(...sub(foot, hip));
-      // A little longer than the reach, so the knee is bent standing.
-      const len = reach * 1.12;
-      const rank = legRanks.indexOf(part.s);
-      const front = legRanks.length > 1 && rank === legRanks.length - 1;
-      const pole = normalize(add(add(add([0, 0, 0], outward, 0.15 + part.spread * 1.2), [0, 0, 1], front ? -0.8 : 0.8), [0, 1, 0], part.spread * 0.6));
-      limbs.push({ part: index, mirrored, arm: false, rank, ranks: legRanks.length, hip, rest: foot, upper: len * 0.5, lower: len * 0.5, radius, paw, pole, elbow: solveTwoBone(hip, foot, len * 0.5, len * 0.5, pole).knee });
-    } else {
-      const nodes = armNodes(part, hip, bodyR);
-      const upper = Math.max(0.02, Math.hypot(...sub(nodes.elbow, hip)));
-      const lower = Math.max(0.02, Math.hypot(...sub(nodes.hand, nodes.elbow)));
-      // The elbow bends the way it sticks out of the shoulder-to-hand line.
-      const line = normalize(sub(nodes.hand, hip));
-      const offLine = sub(sub(nodes.elbow, hip), [line[0] * dot(sub(nodes.elbow, hip), line), line[1] * dot(sub(nodes.elbow, hip), line), line[2] * dot(sub(nodes.elbow, hip), line)]);
-      const pole = Math.hypot(...offLine) > 1e-4 ? normalize(offLine) : normalize(add(add([0, 0, 0], outward, 0.5), [0, 0, -1], 1));
-      limbs.push({ part: index, mirrored, arm: true, rank: 0, ranks: 0, hip, rest: nodes.hand, upper, lower, radius, paw: radius * 1.15, pole, elbow: nodes.elbow });
+    const leg = part.kind === 'leg';
+    const rank = leg ? legRanks.indexOf(part.s) : 0;
+    const front = legRanks.length > 1 && rank === legRanks.length - 1;
+    // Unposed, a hind knee bends forward, a front one back (an elbow), both out as the leg sprawls; an arm's elbow back.
+    const defaultPole = leg ? normalize(add(add(add([0, 0, 0], outward, 0.15 + part.spread * 1.2), [0, 0, 1], front ? -0.8 : 0.8), [0, 1, 0], part.spread * 0.6)) : normalize(add(add([0, 0, 0], outward, 0.5), [0, 0, -1], 1));
+    const o = part.joint && part.end ? { joint: part.joint, end: part.end } : defaultLimbNodes(part, bodyR, hip, defaultPole);
+    const at = (v: Vec3): Vec3 => [hip[0] + out * v[0], hip[1] + v[1], hip[2] + v[2]];
+    const joint = at(o.joint);
+    const end = at(o.end);
+    // A foot stands on the ground; a hand stays above it.
+    end[1] = leg ? paw : Math.max(paw, end[1]);
+    let upper = Math.max(0.02, Math.hypot(...sub(joint, hip)));
+    let lower = Math.max(0.02, Math.hypot(...sub(end, joint)));
+    // A leg too short to reach its foot (the body raised since it was posed) grows to reach it.
+    const reach = Math.hypot(...sub(end, hip));
+    if (leg && upper + lower < reach * 1.01) {
+      const k = (reach * 1.01) / (upper + lower);
+      upper *= k;
+      lower *= k;
     }
+    // The joint bends the way it sticks out of the root-to-end line.
+    const line = normalize(sub(end, hip));
+    const rel = sub(joint, hip);
+    const offLine = add(rel, line, -dot(rel, line));
+    const pole = Math.hypot(...offLine) > 1e-4 ? normalize(offLine) : defaultPole;
+    limbs.push({ part: index, mirrored, arm: !leg, rank, ranks: leg ? legRanks.length : 0, hip, rest: end, upper, lower, radius, paw, pole, joint });
   }
   return limbs;
 }
@@ -447,15 +466,18 @@ export function growCreature(design: CreatureDesign, pose: CreaturePose = REST_P
   }));
   const frames = spineFrames(posedS);
 
-  const spine: SpineNode[] = frames.map((f) => ({ p: f.p, rx: f.rx, ry: f.ry, part: 'body', w: 0 }));
+  const spine: SpineNode[] = frames.map((f) => ({ p: f.p, rx: f.rx, ry: f.ry, part: 'body', w: 0, side: f.side }));
   const spikes: Spike[] = [];
   const eyes: Eye[] = [];
+  const mouths: Mouth[] = [];
   for (const { part, mirrored } of instances(design)) {
     const theta = mirrored ? -part.theta : part.theta;
     if (part.kind === 'eye') {
       const k = skinPoint(frames, part.s, theta);
       const er = Math.max(0.025, k.r * 0.3 * part.size);
       eyes.push({ centre: add(k.p, k.n, -er * 0.35), radius: er, look: normalize(add(k.n, k.t, 0.35)) });
+    } else if (part.kind === 'mouth') {
+      mouths.push(growMouth(frames, part, theta, pose));
     } else if (part.kind === 'horn' || part.kind === 'ear' || part.kind === 'spike' || part.kind === 'antenna') {
       spikes.push(growSpike(frames, part, theta));
     }
@@ -508,6 +530,7 @@ export function growCreature(design: CreatureDesign, pose: CreaturePose = REST_P
     legs: legsOut,
     spikes,
     eyes,
+    mouths,
     neckBase: head.p,
     tailBase: tail.p,
     hipHeight,
@@ -518,6 +541,24 @@ export function growCreature(design: CreatureDesign, pose: CreaturePose = REST_P
     width,
   };
   return { skeleton, rest, frames, limbs, length, hipHeight };
+}
+
+/**
+ * A mouth lying on the skin at its anchor: across the body where it can be
+ * (a snout's mouth runs side to side), along it on a flank; open by its
+ * sprawl, plus now and then a wide yawn of a moment.
+ */
+function growMouth(frames: readonly SpineFrame[], part: CreaturePart, theta: number, pose: CreaturePose): Mouth {
+  const k = skinPoint(frames, part.s, theta);
+  const f = frameAt(frames, part.s);
+  const n = k.n;
+  let across = add(f.side, n, -dot(f.side, n));
+  if (Math.hypot(...across) < 0.3) across = add(f.t, n, -dot(f.t, n));
+  across = normalize(across);
+  let up = normalize(cross(n, across));
+  if (dot(up, f.up) < 0) up = [-up[0], -up[1], -up[2]];
+  const yawn = Math.max(0, Math.sin(pose.time * 0.9 + part.s * 7)) ** 14;
+  return { centre: k.p, across, up, out: n, width: Math.max(0.05, k.r * 0.9 * part.size), smile: clamp(part.tilt, -1, 1), open: clamp(part.spread + 0.45 * yawn, 0, 1), teeth: part.teeth !== false };
 }
 
 /** A horn, ear, spike or antenna standing out of the skin at its anchor, leaning with its tilt. */
@@ -596,13 +637,26 @@ export function creatureForm(design: CreatureDesign): AnimalForm {
 // --- Editing helpers ---
 
 /** The spine kept in order (z rising by at least a little) and above the ground. */
+/** The closest two neighbouring vertebrae may come. */
+const MIN_GAP = 0.08;
+
 export function tidySpine(spine: Vertebra[]): void {
   for (let i = 0; i < spine.length; i++) {
     const v = spine[i]!;
     v.r = clamp(v.r, 0.04, 2.5);
     v.w = clamp(v.w, 0.4, 2.5);
     v.y = clamp(v.y, v.r * 0.35, 12);
-    if (i > 0) v.z = Math.max(v.z, spine[i - 1]!.z + 0.08);
+    v.z = clamp(v.z, -20, 20);
+    // The spine may go any way in its plane (up, back over itself), but its vertebrae keep apart.
+    if (i > 0) {
+      const a = spine[i - 1]!;
+      const d = Math.hypot(v.y - a.y, v.z - a.z);
+      if (d < MIN_GAP) {
+        const [dy, dz] = d > 1e-6 ? [(v.y - a.y) / d, (v.z - a.z) / d] : [0, 1];
+        v.y = a.y + dy * MIN_GAP;
+        v.z = a.z + dz * MIN_GAP;
+      }
+    }
   }
 }
 
@@ -616,7 +670,9 @@ export function insertVertebra(design: CreatureDesign, i: number): number {
   if (i >= n - 1) {
     const a = sp[n - 1]!;
     const b = sp[n - 2]!;
-    sp.push({ y: a.y + (a.y - b.y) * 0.8, z: a.z + Math.max(0.1, a.z - b.z) * 0.8, r: a.r * 0.9, w: a.w });
+    const gap = Math.max(0.1, Math.hypot(a.y - b.y, a.z - b.z));
+    const [dy, dz] = [(a.y - b.y) / gap, (a.z - b.z) / gap];
+    sp.push({ y: a.y + dy * gap * 0.8, z: a.z + dz * gap * 0.8, r: a.r * 0.9, w: a.w });
     index = n;
     map = (s) => (s * (n - 1)) / n;
   } else {
@@ -666,6 +722,7 @@ export function cloneDesign(d: CreatureDesign): CreatureDesign {
 
 /** A part of kind `kind` at (s, θ) with its usual settings. */
 export function newPart(kind: PartKind, s: number, theta: number): CreaturePart {
+  if (kind === 'mouth') return { kind, s, theta, size: 1, tilt: 0.4, spread: 0.12, mirror: false };
   return { kind, s, theta, size: 1, tilt: kind === 'horn' ? -0.4 : 0, spread: kind === 'leg' ? 0.15 : 0.2, mirror: true };
 }
 
@@ -683,6 +740,7 @@ export function defaultCreature(): CreatureDesign {
       { kind: 'leg', s: 0.3, theta: 2.15, size: 1.05, tilt: 0, spread: 0.12, mirror: true },
       { kind: 'leg', s: 0.53, theta: 2.15, size: 1, tilt: 0.05, spread: 0.12, mirror: true },
       { kind: 'eye', s: 0.97, theta: 0.8, size: 1.15, tilt: 0, spread: 0, mirror: true },
+      { kind: 'mouth', s: 1 + CAP * 0.75, theta: Math.PI * 0.62, size: 0.75, tilt: 0.5, spread: 0.1, mirror: false },
       { kind: 'ear', s: 0.88, theta: 0.55, size: 0.9, tilt: -0.3, spread: 0, mirror: true },
       { kind: 'horn', s: 0.92, theta: 0.12, size: 0.6, tilt: -0.6, spread: 0, mirror: true },
       { kind: 'spike', s: 0.36, theta: 0, size: 0.7, tilt: 0, spread: 0, mirror: false },
@@ -702,51 +760,102 @@ export function defaultCreature(): CreatureDesign {
  */
 export function randomCreature(seed: number): CreatureDesign {
   const rng = new Rng(seed).fork('creature');
-  const n = rng.int(6, 12);
-  const torso = rng.range(0.45, 0.8);
-  const neckRise = rng.range(-0.1, 1.1);
-  const tailShare = rng.range(0.2, 0.4);
-  const neckShare = rng.range(0.12, 0.3);
-  const legPairs = rng.weighted<number>([
-    [0, 0.6],
-    [1, 2],
-    [2, 4],
-    [3, 2],
-    [4, 0.8],
+  // How the body is carried: long and low, upright on its hind legs (or a rearing snake), a tall neck,
+  // or a centaur's horizontal back half with an upright front.
+  const posture = rng.weighted<Posture>([
+    ['low', 3],
+    ['upright', 2],
+    ['tall neck', 1.3],
+    ['centaur', 1],
   ]);
+  const n = posture === 'low' ? rng.int(6, 12) : rng.int(9, 14);
+  const torso = rng.range(0.45, 0.8);
+  const tailShare = posture === 'centaur' ? rng.range(0.12, 0.22) : rng.range(0.2, 0.4);
+  const neckShare = posture === 'tall neck' ? rng.range(0.3, 0.45) : rng.range(0.12, 0.3);
+  const legPairs = rng.weighted<number>(
+    posture === 'upright'
+      ? [
+          [0, 0.8],
+          [1, 3],
+        ]
+      : posture === 'centaur'
+        ? [
+            [1, 1],
+            [2, 3],
+          ]
+        : [
+            [0, posture === 'low' ? 0.6 : 0],
+            [1, posture === 'low' ? 2 : 0.5],
+            [2, 4],
+            [3, 2],
+            [4, posture === 'low' ? 0.8 : 0.2],
+          ],
+  );
   const height = legPairs === 0 ? torso : rng.range(0.9, 1.6) * (legPairs === 1 ? 1.4 : 1);
+  const length = rng.range(3.5, 6) * (posture === 'low' ? 1 : 1.1);
+  // A scorpion's tail, curling up over the back.
+  const curl = posture !== 'upright' && rng.chance(0.22);
+  // The spine's heading (degrees up from forward) at a few points from the tail's tip to the snout, walked in even steps.
+  // (Curled, the tip points forward over the back: from it the spine runs back, turns down and comes forward into the hips.)
+  const tail0 = curl ? rng.range(-170, -145) : rng.range(-25, 15);
+  const tail1 = curl ? rng.range(-25, -5) : 0;
+  const head = rng.range(-10, 20);
+  const bodyU = (tailShare + 1 - neckShare) / 2;
+  let keys: [number, number][];
+  if (posture === 'upright') {
+    // A biped's torso tilted up from its hips (a penguin's nearly straight, a theropod's at 50°), its tail
+    // trailing down behind; legless, a snake rearing up from a tail lying on the ground.
+    const lean = rng.range(50, 85);
+    keys =
+      legPairs === 0
+        ? [[0, 0], [0.45, 0], [0.62, rng.range(70, 90)], [0.9, rng.range(60, 90)], [1, head]]
+        : [[0, rng.range(-10, 25)], [tailShare, rng.range(20, 45)], [tailShare + 0.08, lean], [1 - neckShare, lean], [1 - neckShare * 0.4, rng.range(lean - 20, 95)], [1, head]];
+  } else if (posture === 'centaur') {
+    const lean = rng.range(70, 95);
+    keys = [[0, tail0], [tailShare, tail1], [bodyU - 0.05, rng.range(-5, 5)], [bodyU + 0.08, lean], [1 - neckShare, lean], [1 - neckShare * 0.4, rng.range(60, 95)], [1, head]];
+  } else {
+    const neck = posture === 'tall neck' ? rng.range(55, 85) : rng.range(-10, 50);
+    keys = [[0, tail0], [tailShare, tail1], [1 - neckShare, rng.range(-5, 8)], [1 - neckShare * 0.6, neck], [1 - neckShare * 0.15, neck * 0.8], [1, head]];
+  }
+  const step = length / (n - 1);
+  const path: [number, number][] = [[0, 0]];
+  for (let i = 1; i < n; i++) {
+    const a = (headingAt(keys, (i - 0.5) / (n - 1)) * Math.PI) / 180;
+    const [z, y] = path[i - 1]!;
+    path.push([z + Math.cos(a) * step, y + Math.sin(a) * step]);
+  }
+  // Hips at the leg height, the body centred over the origin.
+  const hip = path[Math.round(tailShare * (n - 1))]!;
+  const zs = path.map((q) => q[0]);
+  const mid = (Math.min(...zs) + Math.max(...zs)) / 2;
   const spine: Vertebra[] = [];
-  const length = rng.range(3.5, 6);
   for (let i = 0; i < n; i++) {
     const u = i / (n - 1);
-    const z = (u - 0.5) * length;
     let r: number;
-    let y: number;
-    if (u < tailShare) {
-      const t = u / tailShare;
-      r = torso * (0.15 + 0.75 * t ** 1.3);
-      y = height - torso * 0.3 * (1 - t) * rng.range(0.5, 1.5);
-    } else if (u > 1 - neckShare) {
+    if (u < tailShare) r = torso * (0.15 + 0.75 * (u / tailShare) ** 1.3);
+    else if (u > 1 - neckShare) {
       const t = (u - (1 - neckShare)) / neckShare;
-      const head = t > 0.7;
-      r = head ? torso * rng.range(0.6, 0.85) : torso * rng.range(0.4, 0.6);
-      y = height + neckRise * t * torso * 2;
+      r = t > 0.7 ? torso * rng.range(0.6, 0.85) : torso * rng.range(0.4, 0.6) * (posture === 'tall neck' ? 0.75 : 1);
     } else {
       const t = (u - tailShare) / (1 - tailShare - neckShare);
       r = torso * (0.85 + 0.25 * Math.sin(Math.PI * t)) * rng.range(0.9, 1.1);
-      y = height + rng.range(-0.08, 0.08);
     }
-    spine.push({ y: Math.max(r * 0.4, y), z, r, w: rng.range(0.9, 1.25) });
+    const [z, y] = path[i]!;
+    spine.push({ y: Math.max(r * 0.4, height + y - hip[1]), z: z - mid, r, w: rng.range(0.9, 1.25) });
   }
   tidySpine(spine);
   const parts: CreaturePart[] = [];
   const bodyStart = tailShare + 0.05;
-  const bodyEnd = 1 - neckShare - 0.02;
+  // Legs go along the back, but on a centaur's horizontal back half only, and at the hips of an upright body.
+  const back = 1 - neckShare - 0.02;
+  const bodyEnd = posture === 'centaur' ? bodyU - 0.02 : posture === 'upright' ? bodyStart : back;
   for (let k = 0; k < legPairs; k++) {
     const s = legPairs === 1 ? (bodyStart + bodyEnd) / 2 : bodyStart + ((bodyEnd - bodyStart) * k) / (legPairs - 1);
-    parts.push({ kind: 'leg', s, theta: rng.range(1.9, 2.4), size: rng.range(0.85, 1.25), tilt: rng.range(-0.15, 0.15), spread: legPairs >= 3 ? rng.range(0.4, 0.9) : rng.range(0.05, 0.3), mirror: true });
+    parts.push({ kind: 'leg', s, theta: posture === 'upright' ? rng.range(1.6, 1.9) : rng.range(1.9, 2.4), size: rng.range(0.85, 1.25), tilt: rng.range(-0.15, 0.15), spread: legPairs >= 3 ? rng.range(0.4, 0.9) : rng.range(0.05, 0.3), mirror: true });
   }
-  if (rng.chance(legPairs <= 1 ? 0.6 : 0.2)) parts.push({ kind: 'arm', s: bodyEnd - 0.03, theta: rng.range(1.5, 1.9), size: rng.range(0.8, 1.2), tilt: 0, spread: rng.range(0.1, 0.4), mirror: true });
+  // Upright fronts mostly have arms.
+  if ((posture === 'upright' || posture === 'centaur') && rng.chance(0.85)) parts.push({ kind: 'arm', s: back - 0.03, theta: rng.range(1.4, 1.8), size: rng.range(0.8, 1.2), tilt: 0, spread: rng.range(0.1, 0.4), mirror: true });
+  else   if (rng.chance(legPairs <= 1 ? 0.6 : 0.2)) parts.push({ kind: 'arm', s: bodyEnd - 0.03, theta: rng.range(1.5, 1.9), size: rng.range(0.8, 1.2), tilt: 0, spread: rng.range(0.1, 0.4), mirror: true });
   const eyePairs = rng.weighted<number>([
     [0, 0.6],
     [1, 5],
@@ -755,15 +864,32 @@ export function randomCreature(seed: number): CreatureDesign {
   ]);
   if (eyePairs === 0) parts.push({ kind: 'eye', s: 1 + CAP * 0.5, theta: 0.5, size: rng.range(1.6, 2.2), tilt: 0, spread: 0, mirror: false });
   for (let k = 0; k < eyePairs; k++) parts.push({ kind: 'eye', s: 0.97 - k * 0.04, theta: rng.range(0.6, 1.0) - k * 0.15, size: rng.range(0.8, 1.4) * (1 - k * 0.2), tilt: 0, spread: 0, mirror: true });
+  parts.push({ kind: 'mouth', s: 1 + CAP * rng.range(0.5, 0.9), theta: rng.range(0.55, 0.7) * Math.PI, size: rng.range(0.6, 1.1), tilt: rng.range(-0.3, 0.8), spread: rng.range(0, 0.35), mirror: false, teeth: rng.chance(0.6) });
   if (rng.chance(0.5)) parts.push({ kind: 'ear', s: rng.range(0.85, 0.93), theta: rng.range(0.35, 0.8), size: rng.range(0.6, 1.3), tilt: rng.range(-0.5, 0.3), spread: 0, mirror: true });
   if (rng.chance(0.4)) parts.push({ kind: 'horn', s: rng.range(0.9, 0.98), theta: rng.range(0.1, 0.5), size: rng.range(0.4, 1.1), tilt: rng.range(-0.8, 0.6), spread: 0, mirror: true });
   if (rng.chance(0.2)) parts.push({ kind: 'antenna', s: 0.97, theta: rng.range(0.2, 0.5), size: rng.range(0.6, 1.1), tilt: rng.range(-0.3, 0.5), spread: 0, mirror: true });
   if (rng.chance(0.45)) {
     const count = rng.int(2, 6);
     const size = rng.range(0.5, 1);
-    for (let k = 0; k < count; k++) parts.push({ kind: 'spike', s: bodyStart - 0.1 + ((bodyEnd - bodyStart + 0.1) * (k + 0.5)) / count, theta: 0, size: size * (0.8 + 0.4 * Math.sin((Math.PI * (k + 0.5)) / count)), tilt: -0.2, spread: 0, mirror: false });
+    for (let k = 0; k < count; k++) parts.push({ kind: 'spike', s: bodyStart - 0.1 + ((back - bodyStart + 0.1) * (k + 0.5)) / count, theta: 0, size: size * (0.8 + 0.4 * Math.sin((Math.PI * (k + 0.5)) / count)), tilt: -0.2, spread: 0, mirror: false });
   }
   return { name: 'Creature', seed: rng.int(0, 0xffffff), spine, parts, paint: randomPaint(rng), splats: [] };
+}
+
+type Posture = 'low' | 'upright' | 'tall neck' | 'centaur';
+
+/** The heading at `u` between keyframes `[u, degrees]`, eased. */
+function headingAt(keys: readonly [number, number][], u: number): number {
+  if (u <= keys[0]![0]) return keys[0]![1];
+  for (let i = 1; i < keys.length; i++) {
+    const [u1, a1] = keys[i]!;
+    if (u <= u1) {
+      const [u0, a0] = keys[i - 1]!;
+      const t = (u - u0) / Math.max(1e-6, u1 - u0);
+      return a0 + (a1 - a0) * t * t * (3 - 2 * t);
+    }
+  }
+  return keys[keys.length - 1]![1];
 }
 
 /** A random coat: bright and countershaded, like the generated animals' (gen/animalForm.ts). */
@@ -822,6 +948,7 @@ export function designFromAnimal(form: AnimalForm, length: number, name = 'Creat
     const a = at(base);
     parts.push({ kind, s: a.s, theta: Math.abs(a.theta), size: 0.8, tilt: kind === 'horn' ? -0.4 : 0, spread: 0, mirror: Math.abs(base[0]) > 1e-6 });
   }
+  parts.push({ kind: 'mouth', s: 1 + CAP * 0.8, theta: Math.PI * 0.6, size: 0.7, tilt: 0.4, spread: 0.08, mirror: false });
   return {
     name,
     seed: form.seed,
@@ -846,6 +973,16 @@ export function decodeDesign(text: string): CreatureDesign | null {
     const bin = atob(b64);
     const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
     const d = JSON.parse(new TextDecoder().decode(bytes)) as CreatureDesign;
+    // Earlier links kept an arm's nodes as elbow and hand.
+    for (const p of d.parts ?? []) {
+      const old = p as CreaturePart & { elbow?: Vec3; hand?: Vec3 };
+      if (old.elbow && old.hand && !p.joint) {
+        p.joint = old.elbow;
+        p.end = old.hand;
+        delete old.elbow;
+        delete old.hand;
+      }
+    }
     if (!Array.isArray(d.spine) || d.spine.length < MIN_VERTEBRAE || !Array.isArray(d.parts) || !d.paint) return null;
     d.splats ??= [];
     d.name ??= 'Creature';

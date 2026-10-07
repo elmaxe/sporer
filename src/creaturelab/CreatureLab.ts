@@ -5,7 +5,7 @@ import {
   MAX_SPLATS,
   SPINE_SUBDIVISIONS,
   anchorOf,
-  armOffset,
+  limbOffset,
   cloneDesign,
   creatureForm,
   decodeDesign,
@@ -36,9 +36,10 @@ import { createCreatureLook, type CreatureLook } from './creatureLook';
  *    over the body, the wheel over it to resize it.
  *  - Paint: the coat (colours, pattern) and a brush that paints soft dabs on
  *    the body, mirrored across it.
- *  - Play: the creature walks or trots on a moving floor, its legs stepping
+ *  - Play: the creature walks or trots over the floor, its legs stepping
  *    in the gait worked out for its body (gen/creatureMotion.ts), with a
- *    footfall diagram.
+ *    footfall diagram. WASD (or the arrows) steer it, relative to the
+ *    camera, which follows it; Shift trots.
  * Everything is posed on the CPU each frame (one creature: a few thousand
  * triangles) and drawn with the game's animal material (creatureLook.ts).
  * `window.creatureLab` is this object (automation: npm run shot -- --creatures).
@@ -62,21 +63,23 @@ export interface FootfallRow {
 }
 
 interface HandleInfo {
-  /** A vertebra, a part's place on the skin, or an arm's elbow or hand. */
-  kind: 'vertebra' | 'part' | 'elbow' | 'hand';
+  /** A vertebra, a part's place on the skin, or a limb's knee or elbow (`joint`) or foot or hand (`end`). */
+  kind: 'vertebra' | 'part' | 'joint' | 'end';
   /** The vertebra's or part's index. */
   index: number;
   mirrored: boolean;
-  /** An elbow's or hand's limb (index in `grown.limbs`). */
+  /** A joint's or end's limb (index in `grown.limbs`). */
   limb?: number;
 }
 
 const HANDLE_COLOR = new THREE.Color('#66ffcc');
 const PART_HANDLE_COLOR = new THREE.Color('#ffcc66');
-const ARM_HANDLE_COLOR = new THREE.Color('#ff7ad9');
+const LIMB_HANDLE_COLOR = new THREE.Color('#ff7ad9');
 const SELECTED_COLOR = new THREE.Color('#ffffff');
 /** Floor tile (units): the floor slides back by whole tiles as the creature walks. */
 const TILE = 2;
+const UP = new THREE.Vector3(0, 1, 0);
+const STEER_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
 
 export class CreatureLab {
   design: CreatureDesign;
@@ -84,6 +87,13 @@ export class CreatureLab {
   selection: Selection = null;
   placing: PartKind | null = null;
   walking = true;
+  /** Whether the mesh's edges are drawn over the creature (a view setting, not part of the design). */
+  get wireframe(): boolean {
+    return this.view.wire.visible;
+  }
+  set wireframe(on: boolean) {
+    this.view.wire.visible = on;
+  }
   run = 0;
   readonly brush: Brush = { color: '#ffd23f', size: 0.035, hardness: 0.5, mirror: true };
   /** Called when the design, the selection or the mode changes (the panel redraws). */
@@ -100,7 +110,13 @@ export class CreatureLab {
   private time = 0;
   private cycle = 0;
   private moving = 0;
-  private travelled = 0;
+  /** Where the creature has walked to in Play (it's back at the origin in Build and Paint). */
+  private readonly body = new THREE.Group();
+  private heading = 0;
+  /** WASD and arrow keys held down. */
+  private readonly held = new Set<string>();
+  /** Shift held: eases up to 1, a trot. */
+  private sprint = 0;
   private framesDrawn = 0;
   private committed: string;
   private readonly undoStack: string[] = [];
@@ -117,10 +133,10 @@ export class CreatureLab {
   private drag:
     | { kind: 'vertebra'; index: number }
     | { kind: 'part'; index: number; mirrored: boolean }
-    | { kind: 'node'; node: 'elbow' | 'hand'; index: number; limb: number; plane: THREE.Plane }
+    | { kind: 'node'; node: 'joint' | 'end'; index: number; limb: number; plane: THREE.Plane }
     | { kind: 'paint'; last: THREE.Vector3 | null }
     | null = null;
-  private readonly armLines: THREE.LineSegments;
+  private readonly limbLines: THREE.LineSegments;
   private ghost: number | null = null;
   private placingByDrag = false;
   private wheelTimer: ReturnType<typeof setTimeout> | null = null;
@@ -146,6 +162,11 @@ export class CreatureLab {
     window.addEventListener('pointermove', (e) => this.pointerMove(e));
     window.addEventListener('pointerup', (e) => this.pointerUp(e));
     window.addEventListener('keydown', (e) => this.key(e));
+    window.addEventListener('keyup', (e) => {
+      this.held.delete(e.code);
+      if (e.key === 'Shift') this.held.delete('Shift');
+    });
+    window.addEventListener('blur', () => this.held.clear());
     window.addEventListener('resize', () => this.resize());
 
     this.controls = new OrbitControls(this.camera, canvas);
@@ -178,17 +199,18 @@ export class CreatureLab {
 
     this.grown = growCreature(design);
     this.view = createCreatureLook(design, this.grown.length);
-    this.scene.add(this.view.mesh, this.view.picker);
+    this.scene.add(this.body);
+    this.body.add(this.view.mesh, this.view.picker, this.view.wire);
     this.skinPicker = new THREE.Mesh(new THREE.BufferGeometry());
     this.skinPicker.layers.set(1);
-    this.scene.add(this.skinPicker);
+    this.body.add(this.skinPicker);
     this.spineLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: HANDLE_COLOR, depthTest: false, transparent: true, opacity: 0.6 }));
     this.spineLine.renderOrder = 10;
     this.handles.add(this.spineLine);
-    this.armLines = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: ARM_HANDLE_COLOR, depthTest: false, transparent: true, opacity: 0.7 }));
-    this.armLines.renderOrder = 10;
-    this.handles.add(this.armLines);
-    this.scene.add(this.handles);
+    this.limbLines = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: LIMB_HANDLE_COLOR, depthTest: false, transparent: true, opacity: 0.7 }));
+    this.limbLines.renderOrder = 10;
+    this.handles.add(this.limbLines);
+    this.body.add(this.handles);
     this.raycaster.layers.set(1);
 
     this.resize();
@@ -207,7 +229,7 @@ export class CreatureLab {
   footfalls(): FootfallRow[] {
     const legs = this.grown.limbs.filter((l) => !l.arm);
     return legs
-      .map((l) => ({ label: `${l.mirrored ? 'R' : 'L'}${l.ranks - l.rank}`, phase: legPhase(l.rank, l.ranks, l.mirrored, this.run), order: -l.rank * 2 + (l.mirrored ? 1 : 0) }))
+      .map((l) => ({ label: `${l.mirrored ? 'R' : 'L'}${l.ranks - l.rank}`, phase: legPhase(l.rank, l.ranks, l.mirrored, this.pace), order: -l.rank * 2 + (l.mirrored ? 1 : 0) }))
       .sort((a, b) => a.order - b.order)
       .map(({ label, phase }) => ({ label, phase }));
   }
@@ -215,7 +237,7 @@ export class CreatureLab {
   /** The gait now: stride (units), speed (units/s), duty factor, and strides walked. */
   gait(): { stride: number; speed: number; duty: number; cycle: number; hip: number } {
     const g = animalGait({ hipHeight: this.grown.hipHeight }, 1);
-    const r = this.run;
+    const r = this.pace;
     return { stride: g.walkStride + (g.trotStride - g.walkStride) * r, speed: g.walkSpeed + (g.trotSpeed - g.walkSpeed) * r, duty: dutyFactor(r), cycle: this.cycle, hip: this.grown.hipHeight };
   }
 
@@ -290,8 +312,14 @@ export class CreatureLab {
     return h ? decodeDesign(h) : null;
   }
 
+  /** Walk ↔ trot as it is now: the slider, or a trot while Shift is held. */
+  get pace(): number {
+    return Math.max(this.run, this.sprint);
+  }
+
   setMode(mode: EditorMode): void {
     this.cancelPlacing();
+    if (mode !== 'play') this.comeHome();
     this.mode = mode;
     if (mode !== 'build') this.selection = null;
     this.onChange?.();
@@ -339,8 +367,63 @@ export class CreatureLab {
     this.commit();
   }
 
+  /** Back to the origin facing ahead, where the editor's handles and picking expect it; the camera comes along. */
+  private comeHome(): void {
+    this.held.clear();
+    this.sprint = 0;
+    if (this.body.position.lengthSq() === 0 && this.heading === 0) return;
+    const centre = this.controls.target.clone().sub(this.body.position).applyAxisAngle(UP, -this.heading);
+    const offset = this.camera.position.clone().sub(this.controls.target).applyAxisAngle(UP, -this.heading);
+    this.controls.target.copy(centre);
+    this.camera.position.copy(centre).add(offset);
+    this.body.position.set(0, 0, 0);
+    this.heading = 0;
+    this.body.rotation.y = 0;
+    this.placeStage();
+    this.controls.update();
+  }
+
+  /** The floor and the sun's shadow box kept round the creature (the floor by whole texture repeats, so it doesn't jump). */
+  private placeStage(): void {
+    const p = this.body.position;
+    const step = TILE * 2;
+    this.ground.position.set(Math.round(p.x / step) * step, 0, Math.round(p.z / step) * step);
+    this.sun.position.set(p.x + 5, 9, p.z + 4);
+    this.sun.target.position.set(p.x, 0, p.z);
+  }
+
+  /** Steers by the keys held (relative to the camera) and walks the creature on; the camera follows. */
+  private steer(dt: number, speed: number): void {
+    const k = this.held;
+    const fwd = (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) - (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0);
+    const right = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
+    if (fwd !== 0 || right !== 0) {
+      const ahead = this.controls.target.clone().sub(this.camera.position).setY(0);
+      if (ahead.lengthSq() < 1e-6) ahead.set(0, 0, 1);
+      ahead.normalize();
+      const side = new THREE.Vector3().crossVectors(ahead, UP);
+      const want = ahead.multiplyScalar(fwd).addScaledVector(side, right);
+      const goal = Math.atan2(want.x, want.z);
+      let turn = goal - this.heading;
+      turn = Math.atan2(Math.sin(turn), Math.cos(turn));
+      // Turns quicker when slow and small, as an animal does; never overshoots.
+      const rate = 3.2 / Math.max(1, this.grown.length * 0.35);
+      this.heading += Math.sign(turn) * Math.min(Math.abs(turn), rate * dt);
+    }
+    const before = this.body.position.clone();
+    const d = speed * this.moving * dt;
+    this.body.position.x += Math.sin(this.heading) * d;
+    this.body.position.z += Math.cos(this.heading) * d;
+    this.body.rotation.y = this.heading;
+    const moved = this.body.position.clone().sub(before);
+    this.controls.target.add(moved);
+    this.camera.position.add(moved);
+    this.placeStage();
+  }
+
   /** Aims the camera at the whole creature from three-quarters ahead. */
   frameCreature(): void {
+    this.comeHome();
     const k = this.grown.skeleton;
     const size = Math.max(k.front - k.back, k.top, k.width * 2);
     const centre = new THREE.Vector3(0, k.top * 0.45, (k.front + k.back) / 2);
@@ -373,15 +456,17 @@ export class CreatureLab {
 
   private tick(dt: number): void {
     this.time += dt;
-    const target = this.mode === 'play' && this.walking ? 1 : 0;
+    const play = this.mode === 'play';
+    const keyed = play && [...STEER_KEYS].some((c) => this.held.has(c));
+    this.sprint += ((play && this.held.has('Shift') ? 1 : 0) - this.sprint) * Math.min(1, dt * 3);
+    const target = play && (this.walking || keyed) ? 1 : 0;
     this.moving += (target - this.moving) * Math.min(1, dt * 2.5);
     if (this.moving < 1e-3 && target === 0) this.moving = 0;
     const g = this.gait();
     this.cycle += (dt * g.speed * this.moving) / Math.max(1e-3, g.stride);
-    this.travelled = (this.travelled + g.speed * this.moving * dt) % (TILE * 2);
-    this.ground.position.z = -this.travelled;
+    if (play) this.steer(dt, g.speed);
 
-    const pose: CreaturePose = { time: this.time, cycle: this.cycle, run: this.run, moving: this.moving };
+    const pose: CreaturePose = { time: this.time, cycle: this.cycle, run: this.pace, moving: this.moving };
     this.grown = growCreature(this.design, pose);
     const form = creatureForm(this.design);
     const posed = buildAnimalMesh(this.grown.skeleton, form, this.grown.length, 0);
@@ -438,16 +523,15 @@ export class CreatureLab {
         points.push([k.p[0] + k.n[0] * 0.04, k.p[1] + k.n[1] * 0.04, k.p[2] + k.n[2] * 0.04]);
       }
     });
-    // Each arm's elbow and hand, where the posed arm has them, joined to its shoulder by lines.
-    const armLine: number[] = [];
+    // Each limb's knee or elbow and its foot or hand, where the posed limb has them, joined to its root by lines.
+    const limbLine: number[] = [];
     this.grown.limbs.forEach((l, li) => {
-      if (!l.arm) return;
       const pts = this.grown.skeleton.legs[li]!.points;
-      infos.push({ kind: 'elbow', index: l.part, mirrored: l.mirrored, limb: li }, { kind: 'hand', index: l.part, mirrored: l.mirrored, limb: li });
+      infos.push({ kind: 'joint', index: l.part, mirrored: l.mirrored, limb: li }, { kind: 'end', index: l.part, mirrored: l.mirrored, limb: li });
       points.push(pts[1]!, pts[2]!);
-      armLine.push(...pts[0]!, ...pts[1]!, ...pts[1]!, ...pts[2]!);
+      limbLine.push(...pts[0]!, ...pts[1]!, ...pts[1]!, ...pts[2]!);
     });
-    this.armLines.geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(armLine), 3));
+    this.limbLines.geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(limbLine), 3));
     while (this.handleMeshes.length < infos.length) {
       const m = new THREE.Mesh(handleGeometry, new THREE.MeshBasicMaterial({ depthTest: false, transparent: true, opacity: 0.9 }));
       m.renderOrder = 11;
@@ -462,12 +546,12 @@ export class CreatureLab {
       m.userData = info;
       m.position.set(...points[i]!);
       const sel = this.selection;
-      const node = info.kind === 'elbow' || info.kind === 'hand';
+      const node = info.kind === 'joint' || info.kind === 'end';
       const selected = sel !== null && sel.kind === (node ? 'part' : info.kind) && sel.index === info.index && !node;
       const h = this.hovered;
       const hover = h !== null && h.kind === info.kind && h.index === info.index && h.mirrored === info.mirrored;
       const mat = m.material as THREE.MeshBasicMaterial;
-      mat.color.copy(selected ? SELECTED_COLOR : info.kind === 'vertebra' ? HANDLE_COLOR : node ? ARM_HANDLE_COLOR : PART_HANDLE_COLOR);
+      mat.color.copy(selected ? SELECTED_COLOR : info.kind === 'vertebra' ? HANDLE_COLOR : node ? LIMB_HANDLE_COLOR : PART_HANDLE_COLOR);
       m.scale.setScalar(r * (info.kind === 'vertebra' ? 1 : node ? 0.75 : 0.8) * (hover || selected ? 1.4 : 1));
     });
     const line = new Float32Array(this.design.spine.length * 3);
@@ -530,12 +614,14 @@ export class CreatureLab {
       const h = this.pickHandle();
       if (h) {
         this.selection = { kind: h.kind === 'vertebra' ? 'vertebra' : 'part', index: h.index };
-        if (h.kind === 'elbow' || h.kind === 'hand') {
-          // Elbows and hands move in the view's plane through where they are.
-          const at = new THREE.Vector3(...this.grown.skeleton.legs[h.limb!]!.points[h.kind === 'elbow' ? 1 : 2]!);
+        if (h.kind === 'joint' || h.kind === 'end') {
+          // Knees, elbows and hands move in the view's plane through where they are; feet slide over the ground.
+          const limb = this.grown.limbs[h.limb!]!;
+          const at = new THREE.Vector3(...this.grown.skeleton.legs[h.limb!]!.points[h.kind === 'joint' ? 1 : 2]!);
           const normal = new THREE.Vector3();
           this.camera.getWorldDirection(normal);
-          this.drag = { kind: 'node', node: h.kind, index: h.index, limb: h.limb!, plane: new THREE.Plane().setFromNormalAndCoplanarPoint(normal.negate(), at) };
+          const plane = h.kind === 'end' && !limb.arm ? new THREE.Plane(new THREE.Vector3(0, 1, 0), -limb.paw) : new THREE.Plane().setFromNormalAndCoplanarPoint(normal.negate(), at);
+          this.drag = { kind: 'node', node: h.kind, index: h.index, limb: h.limb!, plane };
         } else this.drag = h.kind === 'vertebra' ? { kind: 'vertebra', index: h.index } : { kind: 'part', index: h.index, mirrored: h.mirrored };
         if (h.kind === 'part') this.updateSkinPicker();
         this.onChange?.();
@@ -606,7 +692,7 @@ export class CreatureLab {
       return;
     }
     if (drag.kind === 'vertebra') this.dragVertebra(drag);
-    else if (drag.kind === 'node') this.dragArmNode(drag);
+    else if (drag.kind === 'node') this.dragLimbNode(drag);
     else if (drag.kind === 'part') {
       const hit = this.hitSkin();
       if (hit) {
@@ -637,9 +723,6 @@ export class CreatureLab {
     if (!hit) return;
     v.y = hit.y + lift;
     v.z = hit.z;
-    // Keep it between its neighbours.
-    if (drag.index > 0) v.z = Math.max(v.z, sp[drag.index - 1]!.z + 0.08);
-    if (drag.index < sp.length - 1) v.z = Math.min(v.z, sp[drag.index + 1]!.z - 0.08);
     tidySpine(sp);
     // Pulling an end vertebra out grows the spine.
     const gaps = sp.slice(1).map((q, i) => Math.hypot(q.y - sp[i]!.y, q.z - sp[i]!.z));
@@ -654,20 +737,20 @@ export class CreatureLab {
     this.changed();
   }
 
-  /** Moves an arm's elbow or hand to where the pointer is in the plane it's dragged in (kept as offsets from the shoulder). */
-  private dragArmNode(drag: { node: 'elbow' | 'hand'; index: number; limb: number; plane: THREE.Plane }): void {
+  /** Moves a limb's knee or elbow, or its foot or hand, to where the pointer is in the plane it's dragged in (kept as offsets from its root). */
+  private dragLimbNode(drag: { node: 'joint' | 'end'; index: number; limb: number; plane: THREE.Plane }): void {
     const hit = this.raycaster.ray.intersectPlane(drag.plane, new THREE.Vector3());
     const limb = this.grown.limbs[drag.limb];
     const part = this.design.parts[drag.index];
     if (!hit || !limb || !part) return;
-    // The first time an arm is posed, its hanging pose becomes its nodes.
-    if (!part.elbow || !part.hand) {
-      part.elbow = armOffset(limb.hip, limb.elbow);
-      part.hand = armOffset(limb.hip, limb.rest);
+    // The first time a limb is posed, the pose it had becomes its nodes.
+    if (!part.joint || !part.end) {
+      part.joint = limbOffset(limb.hip, limb.joint);
+      part.end = limbOffset(limb.hip, limb.rest);
     }
-    const o = armOffset(limb.hip, hit.toArray() as Vec3);
-    if (drag.node === 'elbow') part.elbow = o;
-    else part.hand = o;
+    const o = limbOffset(limb.hip, hit.toArray() as Vec3);
+    if (drag.node === 'joint') part.joint = o;
+    else part.end = o;
     this.changed();
   }
 
@@ -720,6 +803,17 @@ export class CreatureLab {
   private key(e: KeyboardEvent): void {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
     const mod = e.ctrlKey || e.metaKey;
+    if (e.key === 'Shift') this.held.add('Shift');
+    if (this.mode === 'play' && !mod && STEER_KEYS.has(e.code)) {
+      // Steering takes over from walking on its own: it stops when the keys are let go.
+      e.preventDefault();
+      if (this.walking) {
+        this.walking = false;
+        this.onChange?.();
+      }
+      this.held.add(e.code);
+      return;
+    }
     if (mod && e.code === 'KeyZ') {
       e.preventDefault();
       if (e.shiftKey) this.redo();
@@ -735,6 +829,9 @@ export class CreatureLab {
     else if (e.code === 'Space' && this.mode === 'play') {
       e.preventDefault();
       this.walking = !this.walking;
+      this.onChange?.();
+    } else if (e.code === 'KeyX' && !mod) {
+      this.wireframe = !this.wireframe;
       this.onChange?.();
     } else if (e.code === 'Digit1') this.setMode('build');
     else if (e.code === 'Digit2') this.setMode('paint');
