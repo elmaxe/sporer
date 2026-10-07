@@ -195,13 +195,13 @@ export class ShipPanel {
     this.meter.classList.toggle('full', c >= MAX_COMPLEXITY);
     this.meter.dataset.label = `${c} / ${MAX_COMPLEXITY}`;
     const sel = lab.selection;
-    const key = `${lab.mode}:${sel ?? '-'}:${lab.design.parts.length}:${lab.placing ?? ''}:${lab.design.parts.filter((p) => p.paint).length}`;
+    const key = `${lab.mode}:${sel ?? '-'}:${lab.design.parts.length}:${lab.placing ?? ''}:${lab.design.parts.filter((p) => p.paint).length}:${lab.wireframe}`;
     this.buildInspector(key);
     this.hint.textContent =
       lab.mode === 'build'
         ? lab.placing
           ? `Move over the ship to place the ${PART_LABELS[lab.placing].name.toLowerCase()}; click to stick it on (Shift: keep placing), Esc to cancel.`
-          : 'Pick a part on the left and stick it anywhere on the ship. Drag a part to move it, wheel over it to resize (Shift: stretch), Q/E spin, R/F tilt, T/G lean, Alt-drag clones, Delete removes. M mirrors new parts, [ ] copies them round the ship. Drag empty space to turn the view.'
+          : 'Pick a part on the left and stick it anywhere on the ship. Drag a part to move it, wheel over it to resize (Shift: stretch), Q/E spin, R/F tilt, T/G lean, Alt-drag clones, X wireframe, Delete removes. M mirrors new parts, [ ] copies them round the ship. Drag empty space to turn the view.'
         : lab.mode === 'paint'
           ? 'Click a part to paint it with the bucket (Shift: every part of that kind). The ship colours and hull pattern are on the right.'
           : 'WASD or the arrows steer and bank, Shift boosts. Drag to look around.';
@@ -364,6 +364,12 @@ export class ShipPanel {
     const row = el('div', 'cr-buttons');
     for (const v of ['three-quarter', 'side', 'front', 'back', 'top', 'below'] as const) this.button(row, v, () => lab.look(v));
     views.append(row);
+    this.wireframeCheck(views);
+  }
+
+  /** The wireframe switch (X in Build and Paint). */
+  private wireframeCheck(parent: HTMLElement): void {
+    this.check(parent, 'Wireframe (X)', () => this.lab.wireframe, (on) => (this.lab.wireframe = on), () => {});
   }
 
   private buildInspectorPaint(): void {
@@ -424,6 +430,7 @@ export class ShipPanel {
       lab.commit();
     });
     bucket.append(cb);
+    this.wireframeCheck(bucket);
   }
 
   private buildInspectorFly(): void {
@@ -437,6 +444,7 @@ export class ShipPanel {
     const views = el('div', 'cr-buttons');
     for (const v of ['chase', 'side', 'front', 'below'] as const) this.button(views, v, () => lab.look(v));
     s.append(views);
+    this.wireframeCheck(s);
 
     const game = this.section('In the game');
     const kept = keptShip();

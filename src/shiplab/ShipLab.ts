@@ -75,6 +75,8 @@ export class ShipLab {
   readonly bucket: Bucket = { slot: 'base', color: '#e8505b' };
   /** Fly mode's throttle, 0 to 1. */
   throttle = 0.6;
+  /** Draw the ship as its triangles' edges (X), to see how parts are built and where they meet. */
+  private _wireframe = false;
   /** Called when the design, the selection or the mode changes (the panel redraws). */
   onChange: (() => void) | null = null;
 
@@ -408,11 +410,29 @@ export class ShipLab {
 
   // --- Drawing ---
 
+  get wireframe(): boolean {
+    return this._wireframe;
+  }
+
+  set wireframe(on: boolean) {
+    this._wireframe = on;
+    this.applyWireframe();
+    this.onChange?.();
+  }
+
+  /** Every ship material (not the selection outlines) drawn as wires or not. */
+  private applyWireframe(): void {
+    const m = this.model;
+    if (!m) return;
+    for (const mesh of [...m.meshes, ...m.exhausts]) (mesh.material as THREE.MeshBasicMaterial).wireframe = this._wireframe;
+  }
+
   private rebuild(): void {
     if (this.model) this.rig.remove(this.model.group);
     this.model = buildShipModel(this.design, this.materials);
     this.rig.add(this.model.group);
     this.addOutlines();
+    this.applyWireframe();
     // Stand the ship on its pad, a little clear of it.
     const box = this.shipBox();
     this.floor.position.y = box.min.y - 1.2;
@@ -707,6 +727,7 @@ export class ShipLab {
       this.cancelPlacing();
       this.select(null);
     } else if (e.code === 'Delete' || e.code === 'Backspace') this.deleteSelection();
+    else if (this.mode !== 'fly' && e.code === 'KeyX') this.wireframe = !this.wireframe;
     else if (this.mode === 'build' && e.code === 'KeyQ') this.turnSelection(-1, 0);
     else if (this.mode === 'build' && e.code === 'KeyE') this.turnSelection(1, 0);
     else if (this.mode === 'build' && e.code === 'KeyR') this.turnSelection(0, 1);
