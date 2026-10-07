@@ -203,6 +203,18 @@ describe('creature design', () => {
     }
   });
 
+  it('makes random creatures that stand tall as well as long and low', () => {
+    let tall = 0;
+    for (let seed = 1; seed <= 60; seed++) {
+      const sp = randomCreature(seed).spine;
+      // Somewhere along it the spine climbs steeply (an upright torso, a tall neck, a centaur's front).
+      const steep = sp.slice(1).some((v, i) => Math.atan2(v.y - sp[i]!.y, Math.abs(v.z - sp[i]!.z)) > (50 * Math.PI) / 180);
+      if (steep) tall++;
+    }
+    expect(tall).toBeGreaterThan(12);
+    expect(tall).toBeLessThan(50);
+  });
+
   it('makes a design from a game animal', () => {
     for (const plan of ['quadruped', 'hexapod', 'biped'] as const) {
       const form = generateAnimalForm(new Rng(5), plan, 'herbivore', 120);

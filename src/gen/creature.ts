@@ -760,51 +760,102 @@ export function defaultCreature(): CreatureDesign {
  */
 export function randomCreature(seed: number): CreatureDesign {
   const rng = new Rng(seed).fork('creature');
-  const n = rng.int(6, 12);
-  const torso = rng.range(0.45, 0.8);
-  const neckRise = rng.range(-0.1, 1.1);
-  const tailShare = rng.range(0.2, 0.4);
-  const neckShare = rng.range(0.12, 0.3);
-  const legPairs = rng.weighted<number>([
-    [0, 0.6],
-    [1, 2],
-    [2, 4],
-    [3, 2],
-    [4, 0.8],
+  // How the body is carried: long and low, upright on its hind legs (or a rearing snake), a tall neck,
+  // or a centaur's horizontal back half with an upright front.
+  const posture = rng.weighted<Posture>([
+    ['low', 3],
+    ['upright', 2],
+    ['tall neck', 1.3],
+    ['centaur', 1],
   ]);
+  const n = posture === 'low' ? rng.int(6, 12) : rng.int(9, 14);
+  const torso = rng.range(0.45, 0.8);
+  const tailShare = posture === 'centaur' ? rng.range(0.12, 0.22) : rng.range(0.2, 0.4);
+  const neckShare = posture === 'tall neck' ? rng.range(0.3, 0.45) : rng.range(0.12, 0.3);
+  const legPairs = rng.weighted<number>(
+    posture === 'upright'
+      ? [
+          [0, 0.8],
+          [1, 3],
+        ]
+      : posture === 'centaur'
+        ? [
+            [1, 1],
+            [2, 3],
+          ]
+        : [
+            [0, posture === 'low' ? 0.6 : 0],
+            [1, posture === 'low' ? 2 : 0.5],
+            [2, 4],
+            [3, 2],
+            [4, posture === 'low' ? 0.8 : 0.2],
+          ],
+  );
   const height = legPairs === 0 ? torso : rng.range(0.9, 1.6) * (legPairs === 1 ? 1.4 : 1);
+  const length = rng.range(3.5, 6) * (posture === 'low' ? 1 : 1.1);
+  // A scorpion's tail, curling up over the back.
+  const curl = posture !== 'upright' && rng.chance(0.22);
+  // The spine's heading (degrees up from forward) at a few points from the tail's tip to the snout, walked in even steps.
+  // (Curled, the tip points forward over the back: from it the spine runs back, turns down and comes forward into the hips.)
+  const tail0 = curl ? rng.range(-170, -145) : rng.range(-25, 15);
+  const tail1 = curl ? rng.range(-25, -5) : 0;
+  const head = rng.range(-10, 20);
+  const bodyU = (tailShare + 1 - neckShare) / 2;
+  let keys: [number, number][];
+  if (posture === 'upright') {
+    // A biped's torso tilted up from its hips (a penguin's nearly straight, a theropod's at 50°), its tail
+    // trailing down behind; legless, a snake rearing up from a tail lying on the ground.
+    const lean = rng.range(50, 85);
+    keys =
+      legPairs === 0
+        ? [[0, 0], [0.45, 0], [0.62, rng.range(70, 90)], [0.9, rng.range(60, 90)], [1, head]]
+        : [[0, rng.range(-10, 25)], [tailShare, rng.range(20, 45)], [tailShare + 0.08, lean], [1 - neckShare, lean], [1 - neckShare * 0.4, rng.range(lean - 20, 95)], [1, head]];
+  } else if (posture === 'centaur') {
+    const lean = rng.range(70, 95);
+    keys = [[0, tail0], [tailShare, tail1], [bodyU - 0.05, rng.range(-5, 5)], [bodyU + 0.08, lean], [1 - neckShare, lean], [1 - neckShare * 0.4, rng.range(60, 95)], [1, head]];
+  } else {
+    const neck = posture === 'tall neck' ? rng.range(55, 85) : rng.range(-10, 50);
+    keys = [[0, tail0], [tailShare, tail1], [1 - neckShare, rng.range(-5, 8)], [1 - neckShare * 0.6, neck], [1 - neckShare * 0.15, neck * 0.8], [1, head]];
+  }
+  const step = length / (n - 1);
+  const path: [number, number][] = [[0, 0]];
+  for (let i = 1; i < n; i++) {
+    const a = (headingAt(keys, (i - 0.5) / (n - 1)) * Math.PI) / 180;
+    const [z, y] = path[i - 1]!;
+    path.push([z + Math.cos(a) * step, y + Math.sin(a) * step]);
+  }
+  // Hips at the leg height, the body centred over the origin.
+  const hip = path[Math.round(tailShare * (n - 1))]!;
+  const zs = path.map((q) => q[0]);
+  const mid = (Math.min(...zs) + Math.max(...zs)) / 2;
   const spine: Vertebra[] = [];
-  const length = rng.range(3.5, 6);
   for (let i = 0; i < n; i++) {
     const u = i / (n - 1);
-    const z = (u - 0.5) * length;
     let r: number;
-    let y: number;
-    if (u < tailShare) {
-      const t = u / tailShare;
-      r = torso * (0.15 + 0.75 * t ** 1.3);
-      y = height - torso * 0.3 * (1 - t) * rng.range(0.5, 1.5);
-    } else if (u > 1 - neckShare) {
+    if (u < tailShare) r = torso * (0.15 + 0.75 * (u / tailShare) ** 1.3);
+    else if (u > 1 - neckShare) {
       const t = (u - (1 - neckShare)) / neckShare;
-      const head = t > 0.7;
-      r = head ? torso * rng.range(0.6, 0.85) : torso * rng.range(0.4, 0.6);
-      y = height + neckRise * t * torso * 2;
+      r = t > 0.7 ? torso * rng.range(0.6, 0.85) : torso * rng.range(0.4, 0.6) * (posture === 'tall neck' ? 0.75 : 1);
     } else {
       const t = (u - tailShare) / (1 - tailShare - neckShare);
       r = torso * (0.85 + 0.25 * Math.sin(Math.PI * t)) * rng.range(0.9, 1.1);
-      y = height + rng.range(-0.08, 0.08);
     }
-    spine.push({ y: Math.max(r * 0.4, y), z, r, w: rng.range(0.9, 1.25) });
+    const [z, y] = path[i]!;
+    spine.push({ y: Math.max(r * 0.4, height + y - hip[1]), z: z - mid, r, w: rng.range(0.9, 1.25) });
   }
   tidySpine(spine);
   const parts: CreaturePart[] = [];
   const bodyStart = tailShare + 0.05;
-  const bodyEnd = 1 - neckShare - 0.02;
+  // Legs go along the back, but on a centaur's horizontal back half only, and at the hips of an upright body.
+  const back = 1 - neckShare - 0.02;
+  const bodyEnd = posture === 'centaur' ? bodyU - 0.02 : posture === 'upright' ? bodyStart : back;
   for (let k = 0; k < legPairs; k++) {
     const s = legPairs === 1 ? (bodyStart + bodyEnd) / 2 : bodyStart + ((bodyEnd - bodyStart) * k) / (legPairs - 1);
-    parts.push({ kind: 'leg', s, theta: rng.range(1.9, 2.4), size: rng.range(0.85, 1.25), tilt: rng.range(-0.15, 0.15), spread: legPairs >= 3 ? rng.range(0.4, 0.9) : rng.range(0.05, 0.3), mirror: true });
+    parts.push({ kind: 'leg', s, theta: posture === 'upright' ? rng.range(1.6, 1.9) : rng.range(1.9, 2.4), size: rng.range(0.85, 1.25), tilt: rng.range(-0.15, 0.15), spread: legPairs >= 3 ? rng.range(0.4, 0.9) : rng.range(0.05, 0.3), mirror: true });
   }
-  if (rng.chance(legPairs <= 1 ? 0.6 : 0.2)) parts.push({ kind: 'arm', s: bodyEnd - 0.03, theta: rng.range(1.5, 1.9), size: rng.range(0.8, 1.2), tilt: 0, spread: rng.range(0.1, 0.4), mirror: true });
+  // Upright fronts mostly have arms.
+  if ((posture === 'upright' || posture === 'centaur') && rng.chance(0.85)) parts.push({ kind: 'arm', s: back - 0.03, theta: rng.range(1.4, 1.8), size: rng.range(0.8, 1.2), tilt: 0, spread: rng.range(0.1, 0.4), mirror: true });
+  else   if (rng.chance(legPairs <= 1 ? 0.6 : 0.2)) parts.push({ kind: 'arm', s: bodyEnd - 0.03, theta: rng.range(1.5, 1.9), size: rng.range(0.8, 1.2), tilt: 0, spread: rng.range(0.1, 0.4), mirror: true });
   const eyePairs = rng.weighted<number>([
     [0, 0.6],
     [1, 5],
@@ -820,9 +871,25 @@ export function randomCreature(seed: number): CreatureDesign {
   if (rng.chance(0.45)) {
     const count = rng.int(2, 6);
     const size = rng.range(0.5, 1);
-    for (let k = 0; k < count; k++) parts.push({ kind: 'spike', s: bodyStart - 0.1 + ((bodyEnd - bodyStart + 0.1) * (k + 0.5)) / count, theta: 0, size: size * (0.8 + 0.4 * Math.sin((Math.PI * (k + 0.5)) / count)), tilt: -0.2, spread: 0, mirror: false });
+    for (let k = 0; k < count; k++) parts.push({ kind: 'spike', s: bodyStart - 0.1 + ((back - bodyStart + 0.1) * (k + 0.5)) / count, theta: 0, size: size * (0.8 + 0.4 * Math.sin((Math.PI * (k + 0.5)) / count)), tilt: -0.2, spread: 0, mirror: false });
   }
   return { name: 'Creature', seed: rng.int(0, 0xffffff), spine, parts, paint: randomPaint(rng), splats: [] };
+}
+
+type Posture = 'low' | 'upright' | 'tall neck' | 'centaur';
+
+/** The heading at `u` between keyframes `[u, degrees]`, eased. */
+function headingAt(keys: readonly [number, number][], u: number): number {
+  if (u <= keys[0]![0]) return keys[0]![1];
+  for (let i = 1; i < keys.length; i++) {
+    const [u1, a1] = keys[i]!;
+    if (u <= u1) {
+      const [u0, a0] = keys[i - 1]!;
+      const t = (u - u0) / Math.max(1e-6, u1 - u0);
+      return a0 + (a1 - a0) * t * t * (3 - 2 * t);
+    }
+  }
+  return keys[keys.length - 1]![1];
 }
 
 /** A random coat: bright and countershaded, like the generated animals' (gen/animalForm.ts). */

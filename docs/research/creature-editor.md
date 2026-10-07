@@ -42,7 +42,7 @@ All of this runs on the CPU every frame and rebuilds the mesh in place (topology
 - **Paint**: the coat's colours and pattern, a random coat, and a brush (colour, size, hardness, mirror) that paints on the body.
 - **Play**: the creature walks or trots, steered with WASD or the arrows relative to the camera (Shift trots), the camera following it, with a live footfall diagram (a row per leg, filled while its foot is down).
 - **Wireframe** (the View panel's switch, or X, in every mode) draws the mesh's edges over the creature, posed as it is, to see how the rings, limbs and parts are built.
-- New creatures: the starting blob, a random creature (`randomCreature`: 0 to 4 pairs of legs, arms, 0 to 3 pairs of eyes or a cyclops, a mouth, horns, ears, antennae, spikes), or one of the game's own generated animals turned into a design (`designFromAnimal`). The page's `#hash` holds the design, so a link shares it.
+- New creatures: the starting blob, a random creature (`randomCreature`: long and low, upright on two legs (or a snake rearing up), tall-necked, or a centaur with an upright front and arms, sometimes with a tail curled up over the back, its spine walked from the tail at a few headings; 0 to 4 pairs of legs, arms, 0 to 3 pairs of eyes or a cyclops, a mouth, horns, ears, antennae, spikes), or one of the game's own generated animals turned into a design (`designFromAnimal`). The page's `#hash` holds the design, so a link shares it.
 
 ## Next steps
 
