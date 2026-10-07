@@ -162,7 +162,7 @@ export class CreaturePanel {
     this.redoBtn.disabled = !lab.canRedo;
     if (document.activeElement !== this.nameInput) this.nameInput.value = lab.design.name;
     const sel = lab.selection;
-    const key = `${lab.mode}:${sel ? `${sel.kind}${sel.index}` : '-'}:${lab.design.parts.length}:${lab.design.spine.length}:${lab.placing ?? ''}:${lab.wireframe}`;
+    const key = `${lab.mode}:${sel ? `${sel.kind}${sel.index}` : '-'}:${lab.design.parts.length}:${lab.design.spine.length}:${lab.placing ?? ''}:${lab.wireframe}:${lab.walking}`;
     if (key !== this.inspectorKey || lab.mode === 'build') this.buildInspector(key);
     this.hint.textContent =
       lab.mode === 'build'
@@ -171,7 +171,7 @@ export class CreaturePanel {
           : 'Drag the green dots (spine) to shape the body, wheel over one to fatten it (Shift: widen). Pull an end dot out to grow the spine. Drag a yellow dot to move a part, wheel to resize; drag the pink dots to pose knees and feet, elbows and hands. Drag empty space to turn the view.'
         : lab.mode === 'paint'
           ? 'Paint on the body with the brush; it paints both sides when mirrored. Pick the coat on the right.'
-          : 'Space: walk or stand. The legs step in a wave from back to front, the two sides half a stride apart; faster, the wave closes up into a trot.';
+          : 'WASD or the arrows: steer it (Shift trots). Space: walk on or stand. The legs step in a wave from back to front, the two sides half a stride apart; faster, the wave closes up into a trot.';
   }
 
   /** The inspector, rebuilt (cheap) while a slider isn't being dragged. */
@@ -315,7 +315,7 @@ export class CreaturePanel {
       for (const v of ['side', 'front', 'top', 'three-quarter'] as const) this.button(row, v, () => lab.look(v));
       s.append(row);
     }
-    this.check(s, 'Wireframe (W)', () => lab.wireframe, (on) => (lab.wireframe = on), () => {});
+    this.check(s, 'Wireframe (X)', () => lab.wireframe, (on) => (lab.wireframe = on), () => {});
   }
 
   private buildInspectorPaint(): void {
