@@ -124,6 +124,24 @@ export interface Spike {
   readonly w: number;
 }
 
+/**
+ * A mouth (the creature editor's; generated animals have none): lips round
+ * a dark opening on the skin, `across` its width and `up` in the skin's
+ * plane, `out` away from the body.
+ */
+export interface Mouth {
+  readonly centre: Vec3;
+  readonly across: Vec3;
+  readonly up: Vec3;
+  readonly out: Vec3;
+  readonly width: number;
+  /** −1 a frown to 1 a smile (the corners' rise). */
+  readonly smile: number;
+  /** 0 shut to 1 wide open. */
+  readonly open: number;
+  readonly teeth: boolean;
+}
+
 export interface Eye {
   readonly centre: Vec3;
   readonly radius: number;
@@ -141,6 +159,8 @@ export interface AnimalSkeleton {
   readonly legs: Leg[];
   readonly spikes: Spike[];
   readonly eyes: Eye[];
+  /** Mouths, if any (only the creature editor's creatures have them). */
+  readonly mouths?: Mouth[];
   /** Where the neck leaves the torso (the head bends down about it to graze) and the tail's root (it sways about it). */
   readonly neckBase: Vec3;
   readonly tailBase: Vec3;

@@ -15,6 +15,7 @@ const PART_LABELS: Record<PartKind, { icon: string; name: string; tip: string }>
   leg: { icon: '🦵', name: 'Leg', tip: 'Legs carry the body; the gait is worked out from how many and where' },
   arm: { icon: '💪', name: 'Arm', tip: 'Arms swing as it walks but never touch the ground' },
   eye: { icon: '👁', name: 'Eye', tip: 'Anywhere: one on the middle line, or a pair' },
+  mouth: { icon: '👄', name: 'Mouth', tip: 'Lips round an opening, with teeth; it yawns now and then' },
   horn: { icon: '🦏', name: 'Horn', tip: 'Tilt curls it back or forward' },
   ear: { icon: '👂', name: 'Ear', tip: 'Flat lobes' },
   spike: { icon: '🔺', name: 'Spike', tip: 'Plates and spines, often along the back' },
@@ -264,7 +265,11 @@ export class CreaturePanel {
       const info = PART_LABELS[p.kind];
       const s = this.section(`${info.icon} ${info.name}`);
       this.slider(s, 'Size', 0.25, 3, 0.01, () => p.size, (x) => (p.size = x));
-      if (p.kind !== 'eye' && p.kind !== 'arm' && p.kind !== 'leg') this.slider(s, 'Lean', -1, 1, 0.01, () => p.tilt, (x) => (p.tilt = x));
+      if (p.kind === 'mouth') {
+        this.slider(s, 'Frown ↔ smile', -1, 1, 0.01, () => p.tilt, (x) => (p.tilt = x));
+        this.slider(s, 'Open', 0, 1, 0.01, () => p.spread, (x) => (p.spread = x));
+        this.check(s, 'Teeth', () => p.teeth !== false, (x) => (p.teeth = x));
+      } else if (p.kind !== 'eye' && p.kind !== 'arm' && p.kind !== 'leg') this.slider(s, 'Lean', -1, 1, 0.01, () => p.tilt, (x) => (p.tilt = x));
       if (p.kind === 'arm' || p.kind === 'leg') {
         const [joint, end] = p.kind === 'arm' ? ['elbow', 'hand'] : ['knee', 'foot'];
         s.append(el('div', 'cr-note', `Three nodes: the yellow dot where it sits on the body, the pink ${joint} and the pink ${end}. Drag them to pose it${p.kind === 'leg' ? ' (the foot slides over the ground)' : ''}; the wheel over one thickens it.`));

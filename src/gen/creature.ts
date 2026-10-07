@@ -1,4 +1,4 @@
-import { COAT_PATTERNS, growAnimal, type AnimalForm, type AnimalSkeleton, type CoatPattern, type Eye, type Leg, type SpineNode, type Spike, type Vec3 } from './animalForm';
+import { COAT_PATTERNS, growAnimal, type AnimalForm, type AnimalSkeleton, type CoatPattern, type Eye, type Leg, type Mouth, type SpineNode, type Spike, type Vec3 } from './animalForm';
 import { animalGait } from './animals';
 import { hslToHex } from './color';
 import { REST_POSE, bodyBob, breath, dutyFactor, footPath, legPhase, solveTwoBone, spineSway, type CreaturePose } from './creatureMotion';
@@ -41,8 +41,8 @@ export interface Vertebra {
   w: number;
 }
 
-export type PartKind = 'leg' | 'arm' | 'eye' | 'horn' | 'ear' | 'spike' | 'antenna';
-export const PART_KINDS: readonly PartKind[] = ['leg', 'arm', 'eye', 'horn', 'ear', 'spike', 'antenna'];
+export type PartKind = 'leg' | 'arm' | 'eye' | 'mouth' | 'horn' | 'ear' | 'spike' | 'antenna';
+export const PART_KINDS: readonly PartKind[] = ['leg', 'arm', 'eye', 'mouth', 'horn', 'ear', 'spike', 'antenna'];
 
 /** A part on the skin. */
 export interface CreaturePart {
@@ -53,9 +53,9 @@ export interface CreaturePart {
   theta: number;
   /** Scale, 1 the usual size for its place on the body. */
   size: number;
-  /** −1 to 1: a horn's or spike's lean back or forward, a foot's or hand's place behind or ahead of its hip. */
+  /** −1 to 1: a horn's or spike's lean back or forward, a mouth's frown or smile. */
   tilt: number;
-  /** 0 to 1: how far out to the side a foot or hand stands (a sprawl). */
+  /** 0 to 1: how far out to the side a foot or hand stands (a sprawl); how wide a mouth hangs open. */
   spread: number;
   /** A pair, mirrored across the middle (parts on the middle line are single anyway). */
   mirror: boolean;
@@ -69,6 +69,8 @@ export interface CreaturePart {
    */
   joint?: Vec3;
   end?: Vec3;
+  /** A mouth's teeth (on unless false). */
+  teeth?: boolean;
 }
 
 export interface CreaturePaint {
@@ -462,12 +464,15 @@ export function growCreature(design: CreatureDesign, pose: CreaturePose = REST_P
   const spine: SpineNode[] = frames.map((f) => ({ p: f.p, rx: f.rx, ry: f.ry, part: 'body', w: 0 }));
   const spikes: Spike[] = [];
   const eyes: Eye[] = [];
+  const mouths: Mouth[] = [];
   for (const { part, mirrored } of instances(design)) {
     const theta = mirrored ? -part.theta : part.theta;
     if (part.kind === 'eye') {
       const k = skinPoint(frames, part.s, theta);
       const er = Math.max(0.025, k.r * 0.3 * part.size);
       eyes.push({ centre: add(k.p, k.n, -er * 0.35), radius: er, look: normalize(add(k.n, k.t, 0.35)) });
+    } else if (part.kind === 'mouth') {
+      mouths.push(growMouth(frames, part, theta, pose));
     } else if (part.kind === 'horn' || part.kind === 'ear' || part.kind === 'spike' || part.kind === 'antenna') {
       spikes.push(growSpike(frames, part, theta));
     }
@@ -520,6 +525,7 @@ export function growCreature(design: CreatureDesign, pose: CreaturePose = REST_P
     legs: legsOut,
     spikes,
     eyes,
+    mouths,
     neckBase: head.p,
     tailBase: tail.p,
     hipHeight,
@@ -530,6 +536,24 @@ export function growCreature(design: CreatureDesign, pose: CreaturePose = REST_P
     width,
   };
   return { skeleton, rest, frames, limbs, length, hipHeight };
+}
+
+/**
+ * A mouth lying on the skin at its anchor: across the body where it can be
+ * (a snout's mouth runs side to side), along it on a flank; open by its
+ * sprawl, plus now and then a wide yawn of a moment.
+ */
+function growMouth(frames: readonly SpineFrame[], part: CreaturePart, theta: number, pose: CreaturePose): Mouth {
+  const k = skinPoint(frames, part.s, theta);
+  const f = frameAt(frames, part.s);
+  const n = k.n;
+  let across = add(f.side, n, -dot(f.side, n));
+  if (Math.hypot(...across) < 0.3) across = add(f.t, n, -dot(f.t, n));
+  across = normalize(across);
+  let up = normalize(cross(n, across));
+  if (dot(up, f.up) < 0) up = [-up[0], -up[1], -up[2]];
+  const yawn = Math.max(0, Math.sin(pose.time * 0.9 + part.s * 7)) ** 14;
+  return { centre: k.p, across, up, out: n, width: Math.max(0.05, k.r * 0.9 * part.size), smile: clamp(part.tilt, -1, 1), open: clamp(part.spread + 0.45 * yawn, 0, 1), teeth: part.teeth !== false };
 }
 
 /** A horn, ear, spike or antenna standing out of the skin at its anchor, leaning with its tilt. */
@@ -678,6 +702,7 @@ export function cloneDesign(d: CreatureDesign): CreatureDesign {
 
 /** A part of kind `kind` at (s, θ) with its usual settings. */
 export function newPart(kind: PartKind, s: number, theta: number): CreaturePart {
+  if (kind === 'mouth') return { kind, s, theta, size: 1, tilt: 0.4, spread: 0.12, mirror: false };
   return { kind, s, theta, size: 1, tilt: kind === 'horn' ? -0.4 : 0, spread: kind === 'leg' ? 0.15 : 0.2, mirror: true };
 }
 
@@ -695,6 +720,7 @@ export function defaultCreature(): CreatureDesign {
       { kind: 'leg', s: 0.3, theta: 2.15, size: 1.05, tilt: 0, spread: 0.12, mirror: true },
       { kind: 'leg', s: 0.53, theta: 2.15, size: 1, tilt: 0.05, spread: 0.12, mirror: true },
       { kind: 'eye', s: 0.97, theta: 0.8, size: 1.15, tilt: 0, spread: 0, mirror: true },
+      { kind: 'mouth', s: 1 + CAP * 0.75, theta: Math.PI * 0.62, size: 0.75, tilt: 0.5, spread: 0.1, mirror: false },
       { kind: 'ear', s: 0.88, theta: 0.55, size: 0.9, tilt: -0.3, spread: 0, mirror: true },
       { kind: 'horn', s: 0.92, theta: 0.12, size: 0.6, tilt: -0.6, spread: 0, mirror: true },
       { kind: 'spike', s: 0.36, theta: 0, size: 0.7, tilt: 0, spread: 0, mirror: false },
@@ -767,6 +793,7 @@ export function randomCreature(seed: number): CreatureDesign {
   ]);
   if (eyePairs === 0) parts.push({ kind: 'eye', s: 1 + CAP * 0.5, theta: 0.5, size: rng.range(1.6, 2.2), tilt: 0, spread: 0, mirror: false });
   for (let k = 0; k < eyePairs; k++) parts.push({ kind: 'eye', s: 0.97 - k * 0.04, theta: rng.range(0.6, 1.0) - k * 0.15, size: rng.range(0.8, 1.4) * (1 - k * 0.2), tilt: 0, spread: 0, mirror: true });
+  parts.push({ kind: 'mouth', s: 1 + CAP * rng.range(0.5, 0.9), theta: rng.range(0.55, 0.7) * Math.PI, size: rng.range(0.6, 1.1), tilt: rng.range(-0.3, 0.8), spread: rng.range(0, 0.35), mirror: false, teeth: rng.chance(0.6) });
   if (rng.chance(0.5)) parts.push({ kind: 'ear', s: rng.range(0.85, 0.93), theta: rng.range(0.35, 0.8), size: rng.range(0.6, 1.3), tilt: rng.range(-0.5, 0.3), spread: 0, mirror: true });
   if (rng.chance(0.4)) parts.push({ kind: 'horn', s: rng.range(0.9, 0.98), theta: rng.range(0.1, 0.5), size: rng.range(0.4, 1.1), tilt: rng.range(-0.8, 0.6), spread: 0, mirror: true });
   if (rng.chance(0.2)) parts.push({ kind: 'antenna', s: 0.97, theta: rng.range(0.2, 0.5), size: rng.range(0.6, 1.1), tilt: rng.range(-0.3, 0.5), spread: 0, mirror: true });
@@ -834,6 +861,7 @@ export function designFromAnimal(form: AnimalForm, length: number, name = 'Creat
     const a = at(base);
     parts.push({ kind, s: a.s, theta: Math.abs(a.theta), size: 0.8, tilt: kind === 'horn' ? -0.4 : 0, spread: 0, mirror: Math.abs(base[0]) > 1e-6 });
   }
+  parts.push({ kind: 'mouth', s: 1 + CAP * 0.8, theta: Math.PI * 0.6, size: 0.7, tilt: 0.4, spread: 0.08, mirror: false });
   return {
     name,
     seed: form.seed,

@@ -1,5 +1,5 @@
 import { hexToRgb } from '../gen/color';
-import type { AnimalForm, AnimalSkeleton, BodyPart, Eye, Leg, SpineNode, Spike, Vec3 } from '../gen/animalForm';
+import type { AnimalForm, AnimalSkeleton, BodyPart, Eye, Leg, Mouth, SpineNode, Spike, Vec3 } from '../gen/animalForm';
 
 /*
  * An animal's mesh at each level of detail, from its skeleton
@@ -261,6 +261,22 @@ class Builder {
     }
   }
 
+  /** An ellipsoid: the unit sphere stretched to `radii` along the three unit axes. */
+  ellipsoid(centre: Vec3, axes: readonly [Vec3, Vec3, Vec3], radii: readonly [number, number, number], detail: number, color: Rgb, rig: readonly number[], pivot: Vec3): void {
+    for (const [a, b, c] of icosphere(detail)) {
+      const vert = (d: Vec3): Vertex => {
+        let p = centre;
+        let n: Vec3 = [0, 0, 0];
+        for (let i = 0; i < 3; i++) {
+          p = add(p, axes[i]!, d[i]! * radii[i]!);
+          n = add(n, axes[i]!, d[i]! / radii[i]!);
+        }
+        return { p, n: normalize(n), c: color, rig, pivot, coat: 0 };
+      };
+      this.tri(vert(a), vert(b), vert(c));
+    }
+  }
+
   build(): AnimalMeshData {
     const n = this.positions.length / 3;
     return {
@@ -291,6 +307,7 @@ export function buildAnimalMesh(skeleton: AnimalSkeleton, form: AnimalForm, leng
     spikeTube(b, spike, spec, pivotOf(spike.part));
   }
   if (spec.eyes !== 'none') for (const e of skeleton.eyes) eye(b, e, spec.eyes === 'full', skeleton.neckBase);
+  for (const m of skeleton.mouths ?? []) mouth(b, m, spec, skeleton.neckBase);
   return b.build();
 }
 
@@ -420,6 +437,60 @@ function eye(b: Builder, e: Eye, full: boolean, neckBase: Vec3): void {
   // A highlight up and to the side of the pupil.
   const up = normalize(sub([0, 1, 0], [out[0] * out[1], out[1] * out[1], out[2] * out[1]]));
   b.sphere(add(add(e.centre, out, r * 1.04), up, r * 0.24), r * 0.13, 0, [1, 1, 1], rig, neckBase);
+}
+
+/**
+ * A mouth: a dark opening (an ellipsoid sunk into the skin) between two
+ * lips (tubes along the mouth's curve, in the coat's colour, a little
+ * darker), the lower lip dropping as it opens, and a row of small teeth
+ * along each lip. Further out, just the opening and the lips, thinner.
+ */
+function mouth(b: Builder, m: Mouth, spec: AnimalLodSpec, pivot: Vec3): void {
+  const rig = rigOf('head', 1);
+  const w = m.width;
+  const half = w / 2;
+  const curve = (u: number) => m.smile * w * 0.2 * u * u;
+  const gap = m.open * w * 0.45;
+  const lipR = w * 0.07;
+  const steps = spec.ringSides >= 14 ? 8 : 4;
+  const lip = (upper: boolean): Vec3[] => {
+    const pts: Vec3[] = [];
+    for (let i = 0; i <= steps; i++) {
+      const u = (i / steps) * 2 - 1;
+      // The lips part in the middle and meet at the corners.
+      const y = curve(u) + (upper ? gap * 0.15 : -gap * 0.85) * (1 - u * u);
+      pts.push(add(add(add(m.centre, m.across, u * half), m.up, y), m.out, lipR * 0.4));
+    }
+    return pts;
+  };
+  // The opening: dark, as deep as the mouth is open, a sliver when shut.
+  const mid = add(add(m.centre, m.up, -gap * 0.35), m.out, -w * 0.17);
+  b.ellipsoid(mid, [m.across, m.up, m.out], [half * 0.92, Math.max(lipR * 0.8, gap * 0.55 + lipR * 0.5), w * 0.2], spec.domeSteps > 1 ? 1 : 0, [0.09, 0.015, 0.025], rig, pivot);
+  const coat = b.coat;
+  for (const upper of [true, false]) {
+    const pts = lip(upper);
+    const radii = pts.map((_, i) => lipR * (0.55 + 0.45 * Math.sin((Math.PI * i) / steps)));
+    const info = pts.map(() => ({ rig, pivot, coat: 0 }));
+    b.surface(tubeRings(pts, radii, Math.max(4, spec.spikeSides)), info, [lipR * 0.5, lipR * 0.5], spec.domeSteps, (_p, n) => {
+      const c = countershade(coat, n);
+      return [c[0] * 0.78, c[1] * 0.72, c[2] * 0.75];
+    });
+    // (Teeth whatever the opening, so the mesh's topology stays the same as the mouth opens and shuts.)
+    if (m.teeth && spec.spikes !== 'none') {
+      // Small pointed teeth along the lip, pointing into the mouth.
+      const n = Math.max(2, Math.round(steps * 0.75));
+      for (let k = 0; k < n; k++) {
+        const u = ((k + 0.5) / n) * 1.4 - 0.7;
+        const at = Math.min(steps, Math.max(0, Math.round(((u + 1) / 2) * steps)));
+        // From the lip's inner edge, so they show below it.
+        const base = add(add(pts[at]!, m.up, upper ? -lipR * 0.6 : lipR * 0.6), m.out, lipR * 0.85);
+        const len = Math.max(w * 0.06, Math.min(gap * 0.5, w * 0.15)) * (1 - 0.35 * Math.abs(u));
+        const tip = add(base, m.up, upper ? -len : len);
+        const tr = w * 0.045;
+        b.surface(tubeRings([base, tip], [tr, tr * 0.15], 4), [{ rig, pivot, coat: 0 }, { rig, pivot, coat: 0 }], [0, tr * 0.15], 1, () => [0.93, 0.9, 0.8]);
+      }
+    }
+  }
 }
 
 // --- Icospheres ---

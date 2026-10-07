@@ -148,6 +148,21 @@ describe('creature design', () => {
     expect(walking.skeleton.legs.flatMap((l) => l.points.flat()).every(Number.isFinite)).toBe(true);
   });
 
+  it('grows a mouth on the snout whose mesh keeps its topology as it yawns', () => {
+    const d = defaultCreature();
+    const form = creatureForm(d);
+    const rest = growCreature(d);
+    expect(rest.skeleton.mouths?.length).toBe(1);
+    const m = rest.skeleton.mouths![0]!;
+    expect(m.width).toBeGreaterThan(0);
+    for (const t of [0.5, 1.7, 4.1]) {
+      const posed = growCreature(d, { time: t, cycle: t * 0.3, run: 0, moving: 1 });
+      expect(buildAnimalMesh(posed.skeleton, form, 4, 0).triangles).toBe(buildAnimalMesh(rest.skeleton, form, 4, 0).triangles);
+    }
+    d.parts.find((p) => p.kind === 'mouth')!.teeth = false;
+    expect(growCreature(d).skeleton.mouths![0]!.teeth).toBe(false);
+  });
+
   it('reads links that kept arm nodes as elbow and hand', () => {
     const d = defaultCreature();
     d.parts.push({ kind: 'arm', s: 0.7, theta: 1.6, size: 1, tilt: 0, spread: 0, mirror: true, elbow: [0.3, -0.1, 0.25], hand: [0.35, 0.4, 0.6] } as never);
