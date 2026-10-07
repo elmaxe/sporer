@@ -84,6 +84,13 @@ export class CreatureLab {
   selection: Selection = null;
   placing: PartKind | null = null;
   walking = true;
+  /** Whether the mesh's edges are drawn over the creature (a view setting, not part of the design). */
+  get wireframe(): boolean {
+    return this.view.wire.visible;
+  }
+  set wireframe(on: boolean) {
+    this.view.wire.visible = on;
+  }
   run = 0;
   readonly brush: Brush = { color: '#ffd23f', size: 0.035, hardness: 0.5, mirror: true };
   /** Called when the design, the selection or the mode changes (the panel redraws). */
@@ -178,7 +185,7 @@ export class CreatureLab {
 
     this.grown = growCreature(design);
     this.view = createCreatureLook(design, this.grown.length);
-    this.scene.add(this.view.mesh, this.view.picker);
+    this.scene.add(this.view.mesh, this.view.picker, this.view.wire);
     this.skinPicker = new THREE.Mesh(new THREE.BufferGeometry());
     this.skinPicker.layers.set(1);
     this.scene.add(this.skinPicker);
@@ -736,6 +743,9 @@ export class CreatureLab {
     else if (e.code === 'Space' && this.mode === 'play') {
       e.preventDefault();
       this.walking = !this.walking;
+      this.onChange?.();
+    } else if (e.code === 'KeyW' && !mod) {
+      this.wireframe = !this.wireframe;
       this.onChange?.();
     } else if (e.code === 'Digit1') this.setMode('build');
     else if (e.code === 'Digit2') this.setMode('paint');

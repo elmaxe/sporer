@@ -162,7 +162,7 @@ export class CreaturePanel {
     this.redoBtn.disabled = !lab.canRedo;
     if (document.activeElement !== this.nameInput) this.nameInput.value = lab.design.name;
     const sel = lab.selection;
-    const key = `${lab.mode}:${sel ? `${sel.kind}${sel.index}` : '-'}:${lab.design.parts.length}:${lab.design.spine.length}:${lab.placing ?? ''}`;
+    const key = `${lab.mode}:${sel ? `${sel.kind}${sel.index}` : '-'}:${lab.design.parts.length}:${lab.design.spine.length}:${lab.placing ?? ''}:${lab.wireframe}`;
     if (key !== this.inspectorKey || lab.mode === 'build') this.buildInspector(key);
     this.hint.textContent =
       lab.mode === 'build'
@@ -233,15 +233,14 @@ export class CreaturePanel {
     parent.append(row);
   }
 
-  private check(parent: HTMLElement, label: string, get: () => boolean, set: (v: boolean) => void): void {
+  private check(parent: HTMLElement, label: string, get: () => boolean, set: (v: boolean) => void, after: () => void = () => (this.lab.changed(), this.lab.commit())): void {
     const row = el('label', 'cr-row cr-check');
     const input = el('input');
     input.type = 'checkbox';
     input.checked = get();
     input.addEventListener('change', () => {
       set(input.checked);
-      this.lab.changed();
-      this.lab.commit();
+      after();
     });
     row.append(input, el('span', 'cr-label', label));
     parent.append(row);
@@ -304,10 +303,19 @@ export class CreaturePanel {
       this.button(row, '+ Vertebra at the snout', () => lab.addVertebra());
       s.append(row);
     }
-    const views = this.section('View');
-    const row = el('div', 'cr-buttons');
-    for (const v of ['side', 'front', 'top', 'three-quarter'] as const) this.button(row, v, () => lab.look(v));
-    views.append(row);
+    this.buildViewSection(true);
+  }
+
+  /** The camera's named views (in Build) and the wireframe switch (in every mode). */
+  private buildViewSection(views: boolean): void {
+    const lab = this.lab;
+    const s = this.section('View');
+    if (views) {
+      const row = el('div', 'cr-buttons');
+      for (const v of ['side', 'front', 'top', 'three-quarter'] as const) this.button(row, v, () => lab.look(v));
+      s.append(row);
+    }
+    this.check(s, 'Wireframe (W)', () => lab.wireframe, (on) => (lab.wireframe = on), () => {});
   }
 
   private buildInspectorPaint(): void {
@@ -371,6 +379,7 @@ export class CreaturePanel {
       lab.commit();
     });
     brush.append(cb);
+    this.buildViewSection(false);
   }
 
   private buildInspectorPlay(): void {
@@ -392,6 +401,7 @@ export class CreaturePanel {
     this.footfall.height = 120;
     f.append(this.footfall);
     f.append(el('div', 'cr-note', 'One row per leg, front to back (L/R, 1 the front pair): dark while its foot is on the ground, over two strides. The line is now.'));
+    this.buildViewSection(false);
   }
 
   private drawFootfall(): void {
