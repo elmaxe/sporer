@@ -326,8 +326,9 @@ function skin(b: Builder, spine: readonly SpineNode[], spec: AnimalLodSpec, pivo
     const prev = spine[Math.max(0, i - 1)]!.p;
     const next = spine[Math.min(spine.length - 1, i + 1)]!.p;
     const t = normalize(sub(next, prev));
-    // The ring's up is the world's up made square to the spine (the spine never points straight up).
-    let side = normalize(cross([0, 1, 0], t));
+    // The ring's up is the world's up made square to the spine (a generated spine never points straight up);
+    // a spine that may curl over itself carries its own sideways axis instead.
+    let side = s.side ? normalize(add(s.side, t, -dot(s.side, t))) : normalize(cross([0, 1, 0], t));
     if (!Number.isFinite(side[0])) side = [1, 0, 0];
     const up = normalize(cross(t, side));
     const ring: Vec3[] = [];

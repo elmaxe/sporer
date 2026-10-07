@@ -183,12 +183,17 @@ export interface SpineFrame extends SpineSample {
 
 /** Frames along a spine, built exactly as surface/animalMesh.ts lays its rings, so points on them lie on the skin. */
 export function spineFrames(samples: readonly SpineSample[]): SpineFrame[] {
+  // The sideways axis is carried along the spine (parallel transport) from the body's left at the
+  // tail, not taken from the world's up, so the spine can rise straight up or curl back over itself.
+  let carried: Vec3 = [1, 0, 0];
   return samples.map((q, i) => {
     const prev = samples[Math.max(0, i - 1)]!.p;
     const next = samples[Math.min(samples.length - 1, i + 1)]!.p;
-    const t = normalize(sub(next, prev));
-    let side = normalize(cross([0, 1, 0], t));
-    if (!Number.isFinite(side[0]) || Math.hypot(...cross([0, 1, 0], t)) < 1e-9) side = [1, 0, 0];
+    let t = normalize(sub(next, prev));
+    if (!Number.isFinite(t[0])) t = [0, 0, 1];
+    let side = normalize(add(carried, t, -dot(carried, t)));
+    if (!Number.isFinite(side[0])) side = [1, 0, 0];
+    carried = side;
     const up = normalize(cross(t, side));
     return { ...q, t, side, up };
   });
@@ -461,7 +466,7 @@ export function growCreature(design: CreatureDesign, pose: CreaturePose = REST_P
   }));
   const frames = spineFrames(posedS);
 
-  const spine: SpineNode[] = frames.map((f) => ({ p: f.p, rx: f.rx, ry: f.ry, part: 'body', w: 0 }));
+  const spine: SpineNode[] = frames.map((f) => ({ p: f.p, rx: f.rx, ry: f.ry, part: 'body', w: 0, side: f.side }));
   const spikes: Spike[] = [];
   const eyes: Eye[] = [];
   const mouths: Mouth[] = [];
@@ -632,13 +637,26 @@ export function creatureForm(design: CreatureDesign): AnimalForm {
 // --- Editing helpers ---
 
 /** The spine kept in order (z rising by at least a little) and above the ground. */
+/** The closest two neighbouring vertebrae may come. */
+const MIN_GAP = 0.08;
+
 export function tidySpine(spine: Vertebra[]): void {
   for (let i = 0; i < spine.length; i++) {
     const v = spine[i]!;
     v.r = clamp(v.r, 0.04, 2.5);
     v.w = clamp(v.w, 0.4, 2.5);
     v.y = clamp(v.y, v.r * 0.35, 12);
-    if (i > 0) v.z = Math.max(v.z, spine[i - 1]!.z + 0.08);
+    v.z = clamp(v.z, -20, 20);
+    // The spine may go any way in its plane (up, back over itself), but its vertebrae keep apart.
+    if (i > 0) {
+      const a = spine[i - 1]!;
+      const d = Math.hypot(v.y - a.y, v.z - a.z);
+      if (d < MIN_GAP) {
+        const [dy, dz] = d > 1e-6 ? [(v.y - a.y) / d, (v.z - a.z) / d] : [0, 1];
+        v.y = a.y + dy * MIN_GAP;
+        v.z = a.z + dz * MIN_GAP;
+      }
+    }
   }
 }
 
@@ -652,7 +670,9 @@ export function insertVertebra(design: CreatureDesign, i: number): number {
   if (i >= n - 1) {
     const a = sp[n - 1]!;
     const b = sp[n - 2]!;
-    sp.push({ y: a.y + (a.y - b.y) * 0.8, z: a.z + Math.max(0.1, a.z - b.z) * 0.8, r: a.r * 0.9, w: a.w });
+    const gap = Math.max(0.1, Math.hypot(a.y - b.y, a.z - b.z));
+    const [dy, dz] = [(a.y - b.y) / gap, (a.z - b.z) / gap];
+    sp.push({ y: a.y + dy * gap * 0.8, z: a.z + dz * gap * 0.8, r: a.r * 0.9, w: a.w });
     index = n;
     map = (s) => (s * (n - 1)) / n;
   } else {

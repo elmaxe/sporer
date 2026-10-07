@@ -99,6 +99,8 @@ export interface SpineNode {
   readonly part: BodyPart;
   /** 0 to 1 along its part from where it joins the torso (the tail's sway and the neck's bend grow with it). */
   readonly w: number;
+  /** The ring's sideways axis, when the spine may turn back on itself (the creature editor's); else it's worked out from the world's up. */
+  readonly side?: Vec3;
 }
 
 /** A leg: a polyline from the hip to the toe, with a radius at each point, and where it is in the gait cycle. */

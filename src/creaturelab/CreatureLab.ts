@@ -723,9 +723,6 @@ export class CreatureLab {
     if (!hit) return;
     v.y = hit.y + lift;
     v.z = hit.z;
-    // Keep it between its neighbours.
-    if (drag.index > 0) v.z = Math.max(v.z, sp[drag.index - 1]!.z + 0.08);
-    if (drag.index < sp.length - 1) v.z = Math.min(v.z, sp[drag.index + 1]!.z - 0.08);
     tidySpine(sp);
     // Pulling an end vertebra out grows the spine.
     const gaps = sp.slice(1).map((q, i) => Math.hypot(q.y - sp[i]!.y, q.z - sp[i]!.z));

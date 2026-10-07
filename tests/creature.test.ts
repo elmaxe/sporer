@@ -13,6 +13,7 @@ import {
   skinPoint,
   splatAt,
   splatPosition,
+  tidySpine,
 } from '../src/gen/creature';
 import { dutyFactor, footPath, legPhase, solveTwoBone, type CreaturePose } from '../src/gen/creatureMotion';
 import { Rng } from '../src/gen/rng';
@@ -161,6 +162,29 @@ describe('creature design', () => {
     }
     d.parts.find((p) => p.kind === 'mouth')!.teeth = false;
     expect(growCreature(d).skeleton.mouths![0]!.teeth).toBe(false);
+  });
+
+  it('lets the spine rise straight up and curl back over the body, its skin unpinched', () => {
+    const d = defaultCreature();
+    // The tail (the first vertebrae) climbs straight up from the hips, then reaches forward over the back.
+    d.spine.splice(0, 3, { y: 3.6, z: 0.4, r: 0.1, w: 1 }, { y: 3.7, z: -0.4, r: 0.14, w: 1 }, { y: 3, z: -1.2, r: 0.2, w: 1 }, { y: 2, z: -1.25, r: 0.3, w: 1 });
+    tidySpine(d.spine);
+    // Kept as drawn: going backwards is allowed now.
+    expect(d.spine[0]!.z).toBeCloseTo(0.4);
+    const g = growCreature(d, { time: 1, cycle: 0.4, run: 0, moving: 1 });
+    for (let i = 1; i < g.frames.length; i++) {
+      const a = g.frames[i - 1]!;
+      const b = g.frames[i]!;
+      // The rings turn smoothly: no flipped side axis (the pinch where the spine pointed straight up).
+      expect(a.side[0] * b.side[0] + a.side[1] * b.side[1] + a.side[2] * b.side[2]).toBeGreaterThan(0.9);
+    }
+    // Over the back, heading forward again from the tip, the tail's top faces down onto the body: it's upside down, as a curled tail is.
+    expect(g.frames[0]!.up[1]).toBeLessThan(0);
+    const mesh = buildAnimalMesh(g.skeleton, creatureForm(d), 4, 0);
+    expect(Array.from(mesh.positions).every(Number.isFinite)).toBe(true);
+    const p = skinPoint(g.rest, 0.05, 0.4).p;
+    const back = anchorOf(g.rest, p);
+    expect(dist(skinPoint(g.rest, back.s, back.theta).p, p)).toBeLessThan(0.05);
   });
 
   it('reads links that kept arm nodes as elbow and hand', () => {
