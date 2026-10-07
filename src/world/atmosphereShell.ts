@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
 import { groundDensity, PATH_SAMPLES, type AtmosphereLook } from '../gen/atmosphere';
 import { createCubeSphere } from './cubeSphere';
+import { SpherePatches } from './spherePatches';
 import type { GroundDepth } from './groundDepth';
 
 /**
@@ -79,9 +80,59 @@ export function createAtmosphere(
   segments = 18,
   ground: GroundDepth | null = null,
 ): THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial> {
-  // The polygons sit inside the sphere they approximate; push them out so the shell's true top is covered.
-  const meshRadius = radius * look.top * MESH_MARGIN;
-  const material = new THREE.ShaderMaterial({
+  const meshRadius = shellRadius(radius, look);
+  const mesh = new THREE.Mesh(createCubeSphere(meshRadius, segments), atmosphereMaterial(radius, color, look, sun, ground));
+  mesh.name = 'Atmosphere';
+  mesh.renderOrder = ATMOSPHERE_RENDER_ORDER;
+  mesh.onBeforeRender = depthTestOutside(mesh, mesh.material, meshRadius);
+  return mesh;
+}
+
+/**
+ * The same shell cut into `perFace` × `perFace` patches per cube face (see
+ * SpherePatches), so three.js skips the ones off screen; call its
+ * `cullBehind` with the camera each frame to skip the far side from outside
+ * too, which this shader never draws from there. The low-orbit globe's,
+ * where the shell is big on screen and often mostly out of view.
+ */
+export function createAtmosphereShell(
+  radius: number,
+  color: string,
+  look: AtmosphereLook,
+  sun: AtmosphereSun,
+  segments: number,
+  perFace: number,
+  ground: GroundDepth | null = null,
+): SpherePatches {
+  const meshRadius = shellRadius(radius, look);
+  const material = atmosphereMaterial(radius, color, look, sun, ground);
+  const shell = new SpherePatches(meshRadius, segments, perFace, material, 'Atmosphere');
+  for (const { mesh } of shell.patches) {
+    mesh.renderOrder = ATMOSPHERE_RENDER_ORDER;
+    mesh.onBeforeRender = depthTestOutside(mesh, material, meshRadius);
+  }
+  return shell;
+}
+
+/** The polygons sit inside the sphere they approximate; pushed out so the shell's true top is covered. */
+function shellRadius(radius: number, look: AtmosphereLook): number {
+  return radius * look.top * MESH_MARGIN;
+}
+
+/** From inside, the haze is drawn over the ground, which is nearer than the shell's far side: depth-tested only from outside. */
+function depthTestOutside(mesh: THREE.Mesh, material: THREE.Material, meshRadius: number): THREE.Object3D['onBeforeRender'] {
+  const centre = new THREE.Vector3();
+  return (_renderer, _scene, camera) => {
+    // The shell's centre: the mesh's parent's origin (a patch's own position is the same).
+    centre.setFromMatrixPosition(mesh.matrixWorld);
+    const scale = mesh.matrixWorld.getMaxScaleOnAxis();
+    material.depthTest = camera.position.distanceToSquared(centre) > (meshRadius * scale) ** 2;
+  };
+}
+
+function atmosphereMaterial(radius: number, color: string, look: AtmosphereLook, sun: AtmosphereSun, ground: GroundDepth | null): THREE.ShaderMaterial {
+  const meshRadius = shellRadius(radius, look);
+  return new THREE.ShaderMaterial({
     uniforms: {
       color: { value: new THREE.Color(color) },
       duskColor: { value: new THREE.Color('#ff7a3d') },
@@ -213,16 +264,5 @@ export function createAtmosphere(
     blendDstAlpha: THREE.OneFactor,
     depthWrite: false,
   });
-  const mesh = new THREE.Mesh(createCubeSphere(meshRadius, segments), material);
-  mesh.name = 'Atmosphere';
-  mesh.renderOrder = ATMOSPHERE_RENDER_ORDER;
-  const centre = new THREE.Vector3();
-  mesh.onBeforeRender = (_renderer, _scene, camera) => {
-    // From inside the haze is drawn over the ground, which is nearer than the shell's far side.
-    mesh.getWorldPosition(centre);
-    const scale = mesh.matrixWorld.getMaxScaleOnAxis();
-    material.depthTest = camera.position.distanceToSquared(centre) > (meshRadius * scale) ** 2;
-  };
-  return mesh;
 }
 
