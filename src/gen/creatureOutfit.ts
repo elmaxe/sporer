@@ -54,7 +54,8 @@ export function randomOutfitColors(rng: Rng): Pick<CreatureOutfit, 'color' | 'tr
 
 /**
  * The design dressed for space: the whole outfit, and a jetpack on the
- * middle of its back and a badge on its flank where it has none yet.
+ * middle of its back, shoulder pads and a badge on its flank where it has
+ * none yet.
  */
 export function suitUp(design: CreatureDesign): CreatureDesign {
   const d = cloneDesign(design);
@@ -62,6 +63,10 @@ export function suitUp(design: CreatureDesign): CreatureDesign {
   d.outfit = { ...o, suit: true, helmet: true, boots: true, gloves: true };
   const mid = (o.suitFrom + o.suitTo) / 2;
   if (!d.parts.some((p) => p.kind === 'jetpack')) d.parts.push({ kind: 'jetpack', s: mid, theta: 0, size: 1, tilt: 0, spread: 0, mirror: false });
+  // Shoulder pads over the frontmost limbs (the arms, else the front legs).
+  const arms = d.parts.filter((p) => p.kind === 'arm');
+  const shoulder = (arms.length > 0 ? arms : d.parts.filter((p) => p.kind === 'leg')).reduce<CreaturePart | null>((best, p) => (!best || p.s > best.s ? p : best), null);
+  if (shoulder && !d.parts.some((p) => p.kind === 'pad')) d.parts.push({ kind: 'pad', s: shoulder.s, theta: Math.max(0.9, Math.abs(shoulder.theta) * 0.78), size: 0.9, tilt: 0, spread: 0, mirror: true });
   if (!d.parts.some((p) => p.kind === 'badge')) d.parts.push({ kind: 'badge', s: o.suitFrom + (o.suitTo - o.suitFrom) * 0.7, theta: 1.25, size: 0.8, tilt: 0, spread: 0, mirror: false });
   return d;
 }

@@ -26,6 +26,7 @@ const PART_LABELS: Record<PartKind, { icon: string; name: string; tip: string }>
   beacon: { icon: '🚨', name: 'Beacon', tip: 'A mast with a blinking light' },
   badge: { icon: '⭐', name: 'Badge', tip: 'A glowing star for the crew' },
   pad: { icon: '🛡', name: 'Shoulder pad', tip: 'Armour for shoulders and hips' },
+  hat: { icon: '🎩', name: 'Top hat', tip: 'For formal occasions on other worlds; on a helmet it sits on top of the glass' },
 };
 
 const MODES: { mode: EditorMode; label: string }[] = [
@@ -367,7 +368,7 @@ export class CreaturePanel {
     const gear = d.parts.filter((p) => isGear(p.kind)).length;
     all.append(el('div', 'cr-note', `${gear} piece${gear === 1 ? '' : 's'} of gear. Pick gear on the left and stick it anywhere on the body.`));
     const r2 = el('div', 'cr-buttons');
-    this.button(r2, '🧑‍🚀 Suit up', () => lab.setDesign(suitUp(d), false), 'The whole outfit, a jetpack on the back and a badge');
+    this.button(r2, '🧑‍🚀 Suit up', () => lab.setDesign(suitUp(d), false), 'The whole outfit, a jetpack on the back, shoulder pads and a badge');
     this.button(r2, 'Take it all off', () => lab.setDesign(undress(d), false));
     all.append(r2);
     this.buildViewSection(true);

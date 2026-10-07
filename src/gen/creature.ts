@@ -42,13 +42,13 @@ export interface Vertebra {
 }
 
 export type BodyPartKind = 'leg' | 'arm' | 'eye' | 'mouth' | 'horn' | 'ear' | 'spike' | 'antenna';
-/** Space gear stuck on the skin like a part (Outfit mode; drawn by creaturelab/outfitLook.ts, not the body's mesh). */
-export type GearKind = 'jetpack' | 'beacon' | 'badge' | 'pad';
+/** Space gear (and a top hat) stuck on the skin like a part (Outfit mode; drawn by creaturelab/outfitLook.ts, not the body's mesh). */
+export type GearKind = 'jetpack' | 'beacon' | 'badge' | 'pad' | 'hat';
 export type PartKind = BodyPartKind | GearKind;
 /** The Build palette. */
 export const PART_KINDS: readonly BodyPartKind[] = ['leg', 'arm', 'eye', 'mouth', 'horn', 'ear', 'spike', 'antenna'];
 /** The Outfit palette. */
-export const GEAR_KINDS: readonly GearKind[] = ['jetpack', 'beacon', 'badge', 'pad'];
+export const GEAR_KINDS: readonly GearKind[] = ['jetpack', 'beacon', 'badge', 'pad', 'hat'];
 
 export function isGear(kind: PartKind): kind is GearKind {
   return (GEAR_KINDS as readonly PartKind[]).includes(kind);

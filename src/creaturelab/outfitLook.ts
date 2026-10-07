@@ -15,7 +15,7 @@ import { defaultOutfit, gearFrame, helmetFit, suitRing, SUIT_PUFF } from '../gen
  *    on reflects more) on a collar; boots and gloves sit on the feet and
  *    hands.
  *  - Gear stuck on the skin like a part (jetpack, beacon, badge, shoulder
- *    pad) is built of primitives in the frame gen/creatureOutfit.ts gives
+ *    pad, top hat) is built of primitives in the frame gen/creatureOutfit.ts gives
  *    it; a jetpack's flames grow as the creature walks and a beacon blinks.
  */
 
@@ -115,6 +115,7 @@ export function createOutfitLook(): OutfitLook {
   const main = new THREE.MeshStandardMaterial({ roughness: 0.42, metalness: 0.15, side: THREE.DoubleSide });
   const trim = new THREE.MeshStandardMaterial({ roughness: 0.32, metalness: 0.45 });
   const metal = new THREE.MeshStandardMaterial({ color: '#3b424c', roughness: 0.3, metalness: 0.85 });
+  const felt = new THREE.MeshStandardMaterial({ color: '#1d1c22', roughness: 0.75 });
   const sole = new THREE.MeshStandardMaterial({ color: '#25282d', roughness: 0.8 });
   const suit = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.08 });
   const glow = new THREE.MeshBasicMaterial({ toneMapped: false });
@@ -133,7 +134,7 @@ export function createOutfitLook(): OutfitLook {
     );
   };
   glass.customProgramCacheKey = () => 'helmet-glass';
-  const materials = [main, trim, metal, sole, suit, glow, blink, core, flame, glass];
+  const materials = [felt, main, trim, metal, sole, suit, glow, blink, core, flame, glass];
 
   const mesh = (geometry: THREE.BufferGeometry, material: THREE.Material, at: Vec3 = [0, 0, 0], scale: Vec3 = [1, 1, 1], rotX = 0): THREE.Mesh => {
     const m = new THREE.Mesh(geometry, material);
@@ -186,6 +187,13 @@ export function createOutfitLook(): OutfitLook {
       const rimR = Math.sin(Math.PI * 0.42);
       g.add(mesh(torus, trim, [0, rimY, 0], [0.62 * rimR, 0.74 * rimR, 0.5], Math.PI / 2));
       g.add(mesh(box, glow, [0, 0.24, 0], [0.5, 0.02, 0.06]));
+      return g;
+    },
+    hat: () => {
+      const g = new THREE.Group();
+      g.add(mesh(cylinder, felt, [0, 0.03, 0], [0.95, 0.06, 0.95]));
+      g.add(mesh(cylinder, felt, [0, 0.55, 0], [0.52, 1.0, 0.52]));
+      g.add(mesh(cylinder, trim, [0, 0.17, 0], [0.535, 0.18, 0.535]));
       return g;
     },
     helmet: () => {
@@ -293,8 +301,9 @@ export function createOutfitLook(): OutfitLook {
       }
       for (let i = sl; i < sleeves.length; i++) sleeves[i]!.mesh.visible = false;
 
-      if (outfit.helmet) {
-        const f = helmetFit(frames, outfit.helmetSize);
+      const helmet = outfit.helmet ? helmetFit(frames, outfit.helmetSize) : null;
+      if (helmet) {
+        const f = helmet;
         const head = frames[frames.length - 1]!;
         place(take('helmet'), f.centre, head.side, head.up, head.t, f.radius);
       }
@@ -317,6 +326,10 @@ export function createOutfitLook(): OutfitLook {
         if (!isGear(part.kind)) return;
         for (const mirrored of part.mirror && Math.abs(Math.sin(part.theta)) > 0.06 ? [false, true] : [false]) {
           const g = gearFrame(frames, part, mirrored, outfit.suit && part.s >= outfit.suitFrom && part.s <= outfit.suitTo);
+          // A hat on a helmeted head sits on top of the bubble.
+          if (part.kind === 'hat' && helmet && Math.hypot(g.p[0] - helmet.centre[0], g.p[1] - helmet.centre[1], g.p[2] - helmet.centre[2]) < helmet.radius) {
+            g.p = [helmet.centre[0] + g.y[0] * helmet.radius * 0.97, helmet.centre[1] + g.y[1] * helmet.radius * 0.97, helmet.centre[2] + g.y[2] * helmet.radius * 0.97];
+          }
           const o = take(part.kind);
           place(o, g.p, g.x, g.y, g.z, g.scale * (part.kind === 'beacon' ? 0.9 : part.kind === 'badge' ? 0.8 : 1));
           if (part.kind === 'jetpack') {

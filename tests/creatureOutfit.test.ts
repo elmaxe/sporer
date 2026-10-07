@@ -60,7 +60,7 @@ describe('creature outfits', () => {
     const d = defaultCreature();
     const dressed = suitUp(d);
     expect(dressed.outfit?.helmet).toBe(true);
-    expect(dressed.parts.filter((p) => isGear(p.kind)).map((p) => p.kind).sort()).toEqual(['badge', 'jetpack']);
+    expect(dressed.parts.filter((p) => isGear(p.kind)).map((p) => p.kind).sort()).toEqual(['badge', 'jetpack', 'pad']);
     // Gear is drawn apart from the body: the body's mesh is the same.
     const a = buildAnimalMesh(growCreature(d).skeleton, creatureForm(d), 4, 0);
     const b = buildAnimalMesh(growCreature(dressed).skeleton, creatureForm(dressed), 4, 0);
