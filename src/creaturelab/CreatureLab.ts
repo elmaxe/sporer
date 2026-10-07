@@ -12,6 +12,7 @@ import {
   encodeDesign,
   growCreature,
   insertVertebra,
+  isGear,
   newPart,
   removeVertebra,
   skinPoint,
@@ -25,10 +26,11 @@ import { dutyFactor, legPhase, type CreaturePose } from '../gen/creatureMotion';
 import type { Vec3 } from '../gen/animalForm';
 import { buildAnimalMesh } from '../surface/animalMesh';
 import { createCreatureLook, type CreatureLook } from './creatureLook';
+import { createOutfitLook, type OutfitLook } from './outfitLook';
 
 /*
  * The creature editor (creature.html): Spore's creature creator on the
- * game's animal body. Three modes:
+ * game's animal body. Four modes:
  *  - Build: drag the spine's vertebrae (in the body's middle plane) to
  *    shape it, the wheel over one to fatten it (Shift: widen it); dragging
  *    an end vertebra away grows the spine. Parts come from the palette and
@@ -36,6 +38,10 @@ import { createCreatureLook, type CreatureLook } from './creatureLook';
  *    over the body, the wheel over it to resize it.
  *  - Paint: the coat (colours, pattern) and a brush that paints soft dabs on
  *    the body, mirrored across it.
+ *  - Outfit: space clothes (gen/creatureOutfit.ts, drawn by outfitLook.ts):
+ *    a suit, a bubble helmet, boots and gloves worn over the whole body,
+ *    and gear (jetpack, beacon, badge, shoulder pads) stuck on the skin
+ *    from its own palette and moved and resized like Build's parts.
  *  - Play: the creature walks or trots over the floor, its legs stepping
  *    in the gait worked out for its body (gen/creatureMotion.ts), with a
  *    footfall diagram. WASD (or the arrows) steer it, relative to the
@@ -45,7 +51,7 @@ import { createCreatureLook, type CreatureLook } from './creatureLook';
  * `window.creatureLab` is this object (automation: npm run shot -- --creatures).
  */
 
-export type EditorMode = 'build' | 'paint' | 'play';
+export type EditorMode = 'build' | 'paint' | 'outfit' | 'play';
 export type Selection = { kind: 'vertebra'; index: number } | { kind: 'part'; index: number } | null;
 
 export interface Brush {
@@ -104,6 +110,7 @@ export class CreatureLab {
   readonly camera = new THREE.PerspectiveCamera(38, 1, 0.05, 500);
   readonly controls: OrbitControls;
   private readonly view: CreatureLook;
+  private readonly outfit: OutfitLook;
   grown: GrownCreature;
   private restDirty = true;
   private paintDirty = true;
@@ -201,6 +208,8 @@ export class CreatureLab {
     this.view = createCreatureLook(design, this.grown.length);
     this.scene.add(this.body);
     this.body.add(this.view.mesh, this.view.picker, this.view.wire);
+    this.outfit = createOutfitLook();
+    this.body.add(this.outfit.group);
     this.skinPicker = new THREE.Mesh(new THREE.BufferGeometry());
     this.skinPicker.layers.set(1);
     this.body.add(this.skinPicker);
@@ -295,15 +304,15 @@ export class CreatureLab {
     this.changed();
   }
 
-  /** A whole new creature (undoable), the camera framing it. */
-  setDesign(d: CreatureDesign): void {
+  /** A whole new creature (undoable), the camera framing it (unless `frame` is false: the same creature, dressed or undressed). */
+  setDesign(d: CreatureDesign, frame = true): void {
     this.cancelPlacing();
     this.design = cloneDesign(d);
     this.selection = null;
     this.changed();
     this.commit();
     this.grown = growCreature(this.design);
-    this.frameCreature();
+    if (frame) this.frameCreature();
   }
 
   /** The design from the page's #hash, if it holds one. */
@@ -320,15 +329,21 @@ export class CreatureLab {
   setMode(mode: EditorMode): void {
     this.cancelPlacing();
     if (mode !== 'play') this.comeHome();
+    if (mode !== this.mode) this.selection = null;
     this.mode = mode;
-    if (mode !== 'build') this.selection = null;
     this.onChange?.();
+  }
+
+  /** Build and Outfit: parts (or gear) are placed, picked and dragged over the body. */
+  get editing(): boolean {
+    return this.mode === 'build' || this.mode === 'outfit';
   }
 
   /** Picks a part from the palette: it follows the pointer over the body until a click places it. */
   startPlacing(kind: PartKind, byDrag = false): void {
     this.cancelPlacing();
-    if (this.mode !== 'build') this.setMode('build');
+    const mode = isGear(kind) ? 'outfit' : 'build';
+    if (this.mode !== mode) this.setMode(mode);
     this.placing = kind;
     this.placingByDrag = byDrag;
     this.updateSkinPicker();
@@ -473,10 +488,11 @@ export class CreatureLab {
     const rest = this.restDirty ? buildAnimalMesh(growCreature(this.design).skeleton, form, this.grown.length, 0) : null;
     this.view.update(posed, rest);
     if (this.paintDirty || this.restDirty) this.view.repaint(this.design, this.grown.rest, this.grown.length);
+    this.outfit.update(this.design, this.grown, this.time, play ? this.moving : 0);
     this.restDirty = false;
     this.paintDirty = false;
     // Parts are placed and dragged over the skin alone: only needed while that happens.
-    if (this.mode === 'build' && (this.placing !== null || this.drag?.kind === 'part')) this.updateSkinPicker();
+    if (this.editing && (this.placing !== null || this.drag?.kind === 'part')) this.updateSkinPicker();
     this.updateHandles();
 
     this.controls.update();
@@ -504,19 +520,25 @@ export class CreatureLab {
     g.computeBoundingSphere();
   }
 
-  /** The vertebrae's and parts' dots, where they are this frame (shown in Build mode). */
+  /** The vertebrae's and parts' dots, where they are this frame (Build), or the gear's (Outfit). */
   private updateHandles(): void {
-    const show = this.mode === 'build' && this.placing === null;
+    const show = this.editing && this.placing === null;
     this.handles.visible = show;
     if (!show) return;
+    const build = this.mode === 'build';
+    this.spineLine.visible = build;
+    this.limbLines.visible = build;
     const infos: HandleInfo[] = [];
     const points: Vec3[] = [];
     const frames = this.grown.frames;
-    this.design.spine.forEach((_, i) => {
-      infos.push({ kind: 'vertebra', index: i, mirrored: false });
-      points.push(frames[Math.min(frames.length - 1, i * SPINE_SUBDIVISIONS)]!.p);
-    });
+    const spinePoints = this.design.spine.map((_, i) => frames[Math.min(frames.length - 1, i * SPINE_SUBDIVISIONS)]!.p);
+    if (build)
+      spinePoints.forEach((p, i) => {
+        infos.push({ kind: 'vertebra', index: i, mirrored: false });
+        points.push(p);
+      });
     this.design.parts.forEach((p, i) => {
+      if (isGear(p.kind) === build) return;
       for (const mirrored of p.mirror && Math.abs(Math.sin(p.theta)) > 0.06 ? [false, true] : [false]) {
         infos.push({ kind: 'part', index: i, mirrored });
         const k = skinPoint(frames, p.s, mirrored ? -p.theta : p.theta);
@@ -525,7 +547,7 @@ export class CreatureLab {
     });
     // Each limb's knee or elbow and its foot or hand, where the posed limb has them, joined to its root by lines.
     const limbLine: number[] = [];
-    this.grown.limbs.forEach((l, li) => {
+    if (build) this.grown.limbs.forEach((l, li) => {
       const pts = this.grown.skeleton.legs[li]!.points;
       infos.push({ kind: 'joint', index: l.part, mirrored: l.mirrored, limb: li }, { kind: 'end', index: l.part, mirrored: l.mirrored, limb: li });
       points.push(pts[1]!, pts[2]!);
@@ -554,8 +576,8 @@ export class CreatureLab {
       mat.color.copy(selected ? SELECTED_COLOR : info.kind === 'vertebra' ? HANDLE_COLOR : node ? LIMB_HANDLE_COLOR : PART_HANDLE_COLOR);
       m.scale.setScalar(r * (info.kind === 'vertebra' ? 1 : node ? 0.75 : 0.8) * (hover || selected ? 1.4 : 1));
     });
-    const line = new Float32Array(this.design.spine.length * 3);
-    points.slice(0, this.design.spine.length).forEach((p, i) => line.set(p, i * 3));
+    const line = new Float32Array(spinePoints.length * 3);
+    spinePoints.forEach((p, i) => line.set(p, i * 3));
     this.spineLine.geometry.setAttribute('position', new THREE.BufferAttribute(line, 3));
   }
 
@@ -604,7 +626,7 @@ export class CreatureLab {
   private pointerDown(e: PointerEvent): void {
     if (e.button !== 0) return;
     this.setRay(e);
-    if (this.mode === 'build') {
+    if (this.editing) {
       if (this.placing) {
         if (this.ghost !== null) this.place(e.shiftKey);
         else this.cancelPlacing();
@@ -686,7 +708,7 @@ export class CreatureLab {
       return;
     }
     if (!drag) {
-      const h = this.mode === 'build' && this.overCanvas(e) ? this.pickHandle() : null;
+      const h = this.editing && this.overCanvas(e) ? this.pickHandle() : null;
       this.hovered = h;
       this.renderer.domElement.style.cursor = h ? 'grab' : this.mode === 'paint' ? 'crosshair' : '';
       return;
@@ -778,7 +800,7 @@ export class CreatureLab {
   }
 
   private wheel(e: WheelEvent): void {
-    if (this.mode !== 'build') return;
+    if (!this.editing) return;
     this.setRay(e);
     const h = this.pickHandle();
     if (!h) return;
@@ -835,7 +857,8 @@ export class CreatureLab {
       this.onChange?.();
     } else if (e.code === 'Digit1') this.setMode('build');
     else if (e.code === 'Digit2') this.setMode('paint');
-    else if (e.code === 'Digit3') this.setMode('play');
+    else if (e.code === 'Digit3') this.setMode('outfit');
+    else if (e.code === 'Digit4') this.setMode('play');
   }
 }
 
