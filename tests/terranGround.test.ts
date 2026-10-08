@@ -64,13 +64,13 @@ describe('land elevation', () => {
     expect(lower).toBeGreaterThan(0.98 * land);
   });
 
-  it('gives green worlds plains, lower relief than barren rock, and terran worlds the flattest land', () => {
+  it('gives green worlds plains and lower relief than barren rock', () => {
     for (let i = 0; i < 50; i++) {
       for (const type of ['terran', 'ocean'] as const) {
         const style = planetStyle(new Rng(i), type);
         expect(style.plains).toBe(1);
-        expect(style.relief).toBeGreaterThanOrEqual(type === 'terran' ? 0.012 : 0.02);
-        expect(style.relief).toBeLessThanOrEqual(type === 'terran' ? 0.02 : 0.035);
+        expect(style.relief).toBeGreaterThanOrEqual(0.012);
+        expect(style.relief).toBeLessThanOrEqual(0.02);
       }
       for (const type of ['barren', 'desert', 'lava', 'ice'] as const) expect(planetStyle(new Rng(i), type).plains ?? 0).toBe(0);
     }
@@ -88,15 +88,18 @@ describe('land elevation', () => {
       return wet / n;
     };
     const terran: number[] = [];
+    const ocean: number[] = [];
     for (let i = 0; i < 60; i++) {
       const seed = 1000 + i * 7919;
       terran.push(seaShare(planetStyle(new Rng(i), 'terran'), seed));
-      expect(seaShare(planetStyle(new Rng(i), 'ocean'), seed)).toBeGreaterThan(0.5);
+      ocean.push(seaShare(planetStyle(new Rng(i), 'ocean'), seed));
     }
-    const mean = terran.reduce((a, b) => a + b, 0) / terran.length;
-    expect(mean).toBeGreaterThan(0.15);
-    expect(mean).toBeLessThan(0.3);
+    const mean = (shares: number[]) => shares.reduce((a, b) => a + b, 0) / shares.length;
+    expect(mean(terran)).toBeGreaterThan(0.15);
+    expect(mean(terran)).toBeLessThan(0.3);
     expect(Math.max(...terran)).toBeLessThan(0.5);
+    expect(mean(ocean)).toBeGreaterThan(0.7);
+    expect(Math.min(...ocean)).toBeGreaterThan(0.5);
   });
 });
 

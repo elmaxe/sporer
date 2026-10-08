@@ -46,7 +46,7 @@ The snow line with `groundTemperature` (the plants' latitude model, `LATITUDE_SW
 
 ## Game mapping
 
-- **Sea** (`gen/planets.ts`, issue #152): a terran world's `seaLevel` is −0.4 to −0.15 (was −0.15 to 0.15), so its seas cover 15–33% of the globe, about 23% on most (was 33–66%, about half). **Stylised**: Earth's ocean is 71%, but the player wants green worlds mostly land, as Spore's are. Ocean worlds keep 0.25–0.4 (75–90% sea). The same draw, so nothing else moves.
+- **Sea** (`gen/planets.ts`, issue #152): a terran world's `seaLevel` is −0.4 to −0.15 (was −0.15 to 0.15), so its seas cover 15–33% of the globe, about 23% on most (was 33–66%, about half). **Stylised**: Earth's ocean is 71%, but the player wants green worlds mostly land, as Spore's are. Ocean worlds keep 0.25–0.4 (75–85% sea). The same draw, so nothing else moves.
   - The share of the globe below a `terrainNoise` threshold (300 random seeds × 2000 random directions; `tests/terranGround.test.ts` checks the terran mean):
 
     | sea level | −0.6 | −0.5 | −0.4 | −0.3 | −0.25 | −0.2 | −0.15 | 0 | 0.15 |
@@ -55,7 +55,7 @@ The snow line with `groundTemperature` (the plants' latitude model, `LATITUDE_SW
 
     One world differs from the next by about ±0.07 at the same level (10th–90th percentile 0.26–0.44 at −0.15).
 - **Relief** (`gen/planets.ts`):
-  - Terran worlds' relief is 0.012–0.02 of the radius (0.02–0.035 before issue #152, 0.03–0.05 before that): rolling country under low ranges, the highest peaks of an Earth-sized globe (radius 400, relief ×1.6 up close) 8–13 units up, against the 4-unit UFO (were 13–22). Ocean worlds' islands keep 0.02–0.035. The same draw, so nothing else moves.
+  - Terran and ocean worlds' relief is 0.012–0.02 of the radius (0.02–0.035 before issue #152, 0.03–0.05 before that): rolling country under low ranges, the highest peaks of an Earth-sized globe (radius 400, relief ×1.6 up close) 8–13 units up, against the 4-unit UFO (were 13–22). The same draw, so nothing else moves.
   - `plains: 1` (not a draw) flattens their lowlands with `landElevation`: gentle plains along the coasts, mountains rising steeply above them. **Stylised**: a third of the peaks on average, not Earth's tenth, so the land still has shape from orbit.
   - The coasts and the sea floor don't move: only the height above sea level is reshaped. The sampler (`terrainSampler`), the geysers' `groundRadius` and the map's hillshade all read it; the peaks stay at `peakRadius`.
   - The plains also take most of the crumpling out of the low ground, since the hills' detail is scaled by the curve's slope there (0.5 at the shore).
