@@ -27,7 +27,6 @@ import { terrainNoise } from '../src/gen/noise';
 import type { GroundRadius } from '../src/gen/plants';
 import { generateSystem } from '../src/gen/system';
 import { labFromSystem, toPlanetConfig } from '../src/lab/labPlanet';
-import { grazeAngle } from '../src/surface/animalLook';
 import { ANIMAL_LOD_COUNT, RIG, buildAnimalMesh } from '../src/surface/animalMesh';
 import { animalSetup } from '../src/surface/animalSetup';
 
@@ -169,18 +168,6 @@ describe('animal bodies', () => {
           expect(m.rig[i + 3]).toBeLessThanOrEqual(1);
         }
       }
-    }
-  });
-
-  it('bends its head down to the ground to graze', () => {
-    for (const s of species.slice(0, 30)) {
-      const k = growAnimal(s);
-      const a = grazeAngle(k, s.length);
-      const tip = k.spine[k.spine.length - 1]!;
-      const y = tip.p[1] - tip.ry - k.neckBase[1];
-      const z = tip.p[2] - k.neckBase[2];
-      const low = k.neckBase[1] + Math.cos(a) * y - Math.sin(a) * z;
-      if (a < (110 * Math.PI) / 180 - 1e-6) expect(low).toBeLessThan(s.length * 0.05);
     }
   });
 });

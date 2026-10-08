@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { AnimalSpecies } from '../gen/animals';
 import { GROUND_DETAIL_LAYER } from '../world/groundDepth';
-import { addAnimationAttributes, animalMotion, createAnimalGeometry, createAnimalMaterial, type AnimalUniforms } from './animalLook';
+import { addAnimationAttributes, animCycle, animalMotion, createAnimalGeometry, createAnimalMaterial, type AnimalUniforms } from './animalLook';
 
 /**
  * One animal drawn on its own, out of the herds' batches: lifted by the cargo
@@ -38,7 +38,7 @@ export function createAnimalObject(species: AnimalSpecies, gravity: number): Ani
     tint: uniforms,
     move(cycle, stride, trot, graze, idleTime) {
       const a = anim.array as Float32Array;
-      a[0] = cycle - Math.floor(cycle);
+      a[0] = animCycle(cycle);
       a[1] = stride;
       a[2] = trot;
       a[3] = graze;

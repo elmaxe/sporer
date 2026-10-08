@@ -11,7 +11,7 @@ import { DEFAULT_VIEW, type LabView } from '../lab/labPlanet';
 import { Level } from '../levels/Level';
 import { OrbitCamera, type OrbitParams } from '../player/OrbitCamera';
 import { GroveCamera, type GroveCameraState } from '../plantlab/GroveCamera';
-import { ANIMAL_LODS, addAnimationAttributes, animalMotion, animalSkeleton, createAnimalGeometry, createAnimalMaterial, setAnimalTint, type AnimalMotion, type AnimalUniforms } from '../surface/animalLook';
+import { ANIMAL_LODS, addAnimationAttributes, animCycle, animalMotion, animalSkeleton, createAnimalGeometry, createAnimalMaterial, setAnimalTint, type AnimalMotion, type AnimalUniforms } from '../surface/animalLook';
 import { ANIMAL_LOD_COUNT } from '../surface/animalMesh';
 import { animalParams } from '../surface/animalParams';
 import { SurfaceChanges } from '../surface/changes';
@@ -428,7 +428,7 @@ export class AnimalLabLevel extends Level {
         p.mesh.instanceMatrix.needsUpdate = true;
       }
       const a = p.anim.array as Float32Array;
-      a[0] = cycle - Math.floor(cycle);
+      a[0] = animCycle(cycle);
       a[1] = specimen ? this.stride : 0;
       a[2] = this.trot;
       a[3] = specimen ? this.graze : 0;

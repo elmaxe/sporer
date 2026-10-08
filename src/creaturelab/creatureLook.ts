@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { AnimalSpecies } from '../gen/animals';
 import { MAX_SPLATS, creatureForm, splatPosition, type CreatureDesign, type SpineFrame } from '../gen/creature';
-import { addAnimationAttributes, createAnimalMaterial, type AnimalUniforms } from '../surface/animalLook';
+import { STILL_MOTION, addAnimationAttributes, createAnimalMaterial, type AnimalUniforms } from '../surface/animalLook';
 import { linearRgb, type AnimalMeshData } from '../surface/animalMesh';
 
 /*
@@ -37,8 +37,7 @@ export interface CreatureLook {
 
 export function createCreatureLook(design: CreatureDesign, length: number): CreatureLook {
   const species: AnimalSpecies = { index: 0, name: design.name, diet: 'herbivore', length, minTemperature: 0, maxTemperature: 1000, weight: 1, herdMin: 1, herdMax: 1, form: creatureForm(design) };
-  const still = { swing: 0, swingTrot: 0, lift: 0, bob: 0, graze: 0 };
-  const { material, uniforms } = createAnimalMaterial(0, species, still, false);
+  const { material, uniforms } = createAnimalMaterial(0, species, STILL_MOTION, false);
 
   const splatData = new Float32Array(SPLAT_SLOTS * 2 * 4);
   const splats = new THREE.DataTexture(splatData, SPLAT_SLOTS, 2, THREE.RGBAFormat, THREE.FloatType);
@@ -114,10 +113,7 @@ export function createCreatureLook(design: CreatureDesign, length: number): Crea
       attr('color', posed.colors, 3);
       attr('aCoat', posed.coat, 1);
       // The game's walk in the shader stays still (the pose is in the vertices): zeros, set once per topology.
-      if (!geometry.getAttribute('aRig')) {
-        attr('aRig', new Float32Array(n * 4), 4);
-        attr('aPivot', new Float32Array(n * 3), 3);
-      }
+      if (!geometry.getAttribute('aRig')) attr('aRig', new Float32Array(n * 4), 4);
       if (rest || !geometry.getAttribute('aRestPos')) attr('aRestPos', (rest ?? posed).positions, 3);
       // Worked out again only when something asks (the picker's raycast): not every frame in Play.
       geometry.boundingSphere = null;
