@@ -19,6 +19,7 @@ import { FpsCounter } from './ui/FpsCounter';
 import { ViewFreezeControl } from './ui/ViewFreezeControl';
 import { ThirdPersonControl } from './ui/ThirdPersonControl';
 import { ItemBar } from './ui/ItemBar';
+import { RepositoryDialog } from './ui/RepositoryDialog';
 import { GraphicsSettingsControl, loadGraphicsSettings } from './ui/GraphicsSettings';
 import { installConsoleLog } from './debug/consoleLog';
 import { DebugDumpControl } from './debug/DebugDump';
@@ -57,6 +58,7 @@ async function main(): Promise<void> {
   const thirdPerson = game.add(new ThirdPersonControl(game));
   game.add(new TouchControls(game));
   game.add(new ItemBar(levels, game.input, levels.tooltip, levels.icons));
+  const repository = game.add(new RepositoryDialog(game, levels, () => menu.isOpen));
   const debugDump = game.add(new DebugDumpControl(game, gameDumpSource(game, levels), consoleLog, debug));
 
   document.getElementById('loading')?.remove();
@@ -65,7 +67,7 @@ async function main(): Promise<void> {
   // Handles for poking at the game from the browser console / automation.
   // ship / world / system follow the current system level, planet the planet level (or null).
   if (import.meta.env.DEV) {
-    Object.assign(window, { game, galaxy, levels, audio, menu, debugDump, freeze, thirdPerson, generateSystem, geyserKind, weatherKind, volcanicLightning, meteorShowers, nextShowerPeak, waveParams });
+    Object.assign(window, { game, galaxy, levels, audio, menu, repository, debugDump, freeze, thirdPerson, generateSystem, geyserKind, weatherKind, volcanicLightning, meteorShowers, nextShowerPeak, waveParams });
     Object.defineProperties(window, {
       ship: { get: () => levels.systemLevel.ship, configurable: true },
       world: { get: () => levels.systemLevel.world, configurable: true },

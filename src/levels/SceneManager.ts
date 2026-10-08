@@ -12,6 +12,7 @@ import { arrivalParams, clampElevation, descentParams, leaveParams } from './arr
 import { SurfaceChangeStore } from '../surface/changes';
 import { BustedBodies, bodyKey } from '../combat/busted';
 import { Inventory } from '../cargo/inventory';
+import { SpeciesRepository, loadRepository, saveRepository, type RepositoryEntry } from '../scan/repository';
 import type { SpeciesIcons } from '../planet/SpeciesTab';
 import { AnimalIcons } from '../ui/animalIcons';
 import { PlantIcons } from '../ui/plantIcons';
@@ -122,8 +123,12 @@ export class SceneManager implements Entity {
   readonly inventory = new Inventory();
   /** Which switch items are on (the radar), for the whole game. */
   readonly switches = new ItemSwitches();
-  /** Pictures of plant and animal species (the item bar's cargo, the planet map's Species tab), drawn once each. */
+  /** Pictures of plant and animal species (the item bar's cargo, the planet map's Species tab, the repository menu), drawn once each. */
   readonly icons: SpeciesIcons;
+  /** The species the scanner has read (scan/repository.ts), saved on the device for this galaxy. */
+  readonly repository: SpeciesRepository;
+  /** Told when a scan completes, with the species' entry and whether it's new (the repository menu shows a notice). */
+  onScanned: (entry: RepositoryEntry, added: boolean) => void = () => {};
   private seamless: SeamlessTransition | null = null;
   // Scratch for the seamless zoom (live: the cameras read them every frame).
   private readonly view = new THREE.Quaternion();
@@ -146,6 +151,8 @@ export class SceneManager implements Entity {
   ) {
     const { camera, input, renderer } = game;
     this.icons = { plants: new PlantIcons(renderer), animals: new AnimalIcons(renderer) };
+    this.repository = new SpeciesRepository((r) => saveRepository(galaxy.seed, r));
+    this.repository.load(loadRepository(galaxy.seed));
     this.nebulas = galaxy.nebulas;
     this.stars = galaxy.stars;
     this.galaxyLevel = new GalaxyLevel(galaxy, start, camera, input, renderer.domElement, this.tooltip, debug, sfx, () =>
@@ -574,6 +581,8 @@ export class SceneManager implements Entity {
       this.inventory,
       this.switches,
       this.icons,
+      this.repository,
+      (entry, added) => this.onScanned(entry, added),
     );
     return this._planetLevel;
   }

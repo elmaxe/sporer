@@ -142,9 +142,9 @@ describe('species tab', () => {
 describe('the radar item', () => {
   it('is a switch in the Inventory, right after the beam, and the other tools are not', () => {
     const inventory = ITEMS.filter((i) => i.tab === 'inventory').map((i) => i.id);
-    expect(inventory).toEqual(['abduct', 'radar']);
+    expect(inventory).toEqual(['abduct', 'radar', 'scan']);
     expect(itemDef('radar').switch).toBe(true);
-    for (const id of ['planetBuster', 'volcanoBomb', 'abduct'] as const) expect(itemDef(id).switch).toBeFalsy();
+    for (const id of ['planetBuster', 'volcanoBomb', 'abduct', 'scan'] as const) expect(itemDef(id).switch).toBeFalsy();
   });
 
   it('starts on and flips off and on', () => {

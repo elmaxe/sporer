@@ -188,6 +188,12 @@ export function captureGameState(game: Game, levels: SceneManager): GameState {
       inFlight: planet?.cargo?.inFlight ?? [],
       laser: planet ? { firing: planet.laser.on, killed: planet.laser.killed, burning: planet.laser.burning } : undefined,
     },
+    scan: {
+      repository: levels.repository.toJSON(),
+      scanner: planet
+        ? { on: planet.scanner.on, reading: planet.scanner.reading, progress: planet.scanner.progress, completed: planet.scanner.completed }
+        : null,
+    },
     radar: {
       on: levels.switches.isOn('radar'),
       tracking: planet?.radar?.tracking ?? null,
@@ -281,6 +287,10 @@ export async function restoreGameState(game: Game, levels: SceneManager, state: 
       changes.addVolcano(site);
       body.addVolcano(site, null);
     }
+  }
+  if (state.scan) {
+    levels.repository.load(state.scan.repository);
+    if (state.scan.scanner?.on) notes.push(`the scanner was reading ${state.scan.scanner.reading ?? 'nothing'}: left off`);
   }
   if (state.cargo) {
     levels.inventory.load(state.cargo.inventory);

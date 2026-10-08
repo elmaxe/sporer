@@ -380,7 +380,8 @@ html.touch #third-person-note {
 }
 
 #menu-toggle,
-#fullscreen-toggle {
+#fullscreen-toggle,
+#repository-toggle {
   display: grid;
   place-items: center;
   width: 40px;
@@ -395,7 +396,9 @@ html.touch #third-person-note {
 
 #menu-toggle:hover,
 #menu-toggle[aria-expanded='true'],
-#fullscreen-toggle:hover {
+#fullscreen-toggle:hover,
+#repository-toggle:hover,
+#repository-toggle[aria-expanded='true'] {
   border-color: rgba(102, 255, 204, 0.8);
   color: #66ffcc;
 }
@@ -406,6 +409,38 @@ html.touch #third-person-note {
   right: max(16px, env(safe-area-inset-right));
   bottom: max(16px, env(safe-area-inset-bottom));
   z-index: 1002;
+}
+
+/* The species repository's button (ui/RepositoryDialog.ts), left of the full-screen button (or in its place when there's none), with the count of species on it. */
+#repository-toggle {
+  position: fixed;
+  right: calc(max(16px, env(safe-area-inset-right)) + 96px);
+  bottom: max(16px, env(safe-area-inset-bottom));
+  z-index: 1002;
+}
+
+#fullscreen-toggle[hidden] + #repository-toggle {
+  right: calc(max(16px, env(safe-area-inset-right)) + 48px);
+}
+
+#repository-toggle .repository-count {
+  position: absolute;
+  right: -6px;
+  top: -6px;
+  min-width: 18px;
+  height: 18px;
+  box-sizing: border-box;
+  padding: 0 4px;
+  border-radius: 9px;
+  border: 2px solid #08101c;
+  background: #66ffcc;
+  color: #08101c;
+  font: 700 10px/14px system-ui, sans-serif;
+  text-align: center;
+}
+
+#repository-toggle .repository-count[hidden] {
+  display: none;
 }
 
 /* A small crossed speaker on the menu button while muted (M). */
@@ -743,6 +778,23 @@ html.touch .species-list {
 .species-line {
   font-size: 11px;
   opacity: 0.65;
+}
+
+/* In the species repository (read by the scanner). */
+.species-scanned {
+  display: none;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 7px;
+  background: rgba(102, 255, 204, 0.16);
+  color: #66ffcc;
+  font-size: 10px;
+  font-weight: 600;
+  vertical-align: 1px;
+}
+
+.species-row.scanned .species-scanned {
+  display: inline;
 }
 
 .species-status {
@@ -1183,6 +1235,378 @@ html.touch #menu .menu-keys {
 
 #notes-notice-close:hover {
   color: #66ffcc;
+}
+
+/* The species repository (R, its button or the menu, ui/RepositoryDialog.ts): over the menu. */
+#repository {
+  position: fixed;
+  inset: 0;
+  z-index: 1020;
+  display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  place-items: center;
+  padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom))
+    max(12px, env(safe-area-inset-left));
+  background: rgba(0, 4, 12, 0.6);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+
+#repository[hidden] {
+  display: none;
+}
+
+#repository-panel {
+  width: min(900px, 100%);
+  height: min(640px, 100%);
+  box-sizing: border-box;
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  gap: 8px;
+  padding: 12px 14px 0;
+  border-radius: 10px;
+  background: rgba(8, 14, 28, 0.97);
+  border: 1px solid rgba(102, 255, 204, 0.35);
+  font-size: 13px;
+}
+
+#repository h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+#repository-close {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: #cfe3ff;
+  cursor: pointer;
+}
+
+#repository-close:hover {
+  color: #66ffcc;
+}
+
+#repository-tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.repository-tab {
+  padding: 4px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(102, 255, 204, 0.3);
+  background: transparent;
+  color: #cfe3ff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.repository-tab:hover {
+  border-color: rgba(102, 255, 204, 0.8);
+}
+
+.repository-tab.active {
+  border-color: rgba(102, 255, 204, 0.9);
+  background: rgba(102, 255, 204, 0.18);
+  color: #fff;
+}
+
+#repository-summary {
+  margin: 0;
+  opacity: 0.7;
+}
+
+#repository-summary:empty {
+  display: none;
+}
+
+/* The cards on the left, the chosen one's details on the right; each scrolls on its own. */
+#repository-body {
+  display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr) 300px;
+  grid-template-areas: 'list detail';
+  gap: 12px;
+  min-height: 0;
+}
+
+#repository-list,
+#repository-detail {
+  scrollbar-color: rgba(102, 255, 204, 0.35) transparent;
+  scrollbar-width: thin;
+}
+
+#repository-list {
+  grid-area: list;
+  overflow: auto;
+  overscroll-behavior: contain;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  align-content: start;
+  gap: 8px;
+  padding-bottom: 12px;
+}
+
+#repository-detail {
+  grid-area: detail;
+  overflow: auto;
+  overscroll-behavior: contain;
+  display: grid;
+  align-content: start;
+  justify-items: center;
+  gap: 10px;
+  padding: 0 4px 12px;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+#repository-detail[hidden] {
+  display: none;
+}
+
+/* Nothing scanned (yet): the list takes the whole width. */
+#repository-detail[hidden] + #repository-list {
+  grid-column: 1 / -1;
+}
+
+.repository-empty {
+  grid-column: 1 / -1;
+  margin: 24px auto;
+  max-width: 420px;
+  line-height: 1.5;
+  text-align: center;
+  opacity: 0.8;
+}
+
+.repository-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px 6px 6px;
+  border-radius: 8px;
+  border: 1px solid rgba(102, 255, 204, 0.18);
+  background: rgba(102, 255, 204, 0.04);
+  color: #cfe3ff;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.repository-card:hover {
+  border-color: rgba(102, 255, 204, 0.6);
+}
+
+.repository-card.selected {
+  border-color: rgba(102, 255, 204, 0.95);
+  background: rgba(102, 255, 204, 0.14);
+}
+
+.repository-picture {
+  flex: none;
+  width: 64px;
+  height: 64px;
+  border-radius: 6px;
+  background: radial-gradient(circle at 50% 40%, rgba(102, 255, 204, 0.16), rgba(102, 255, 204, 0.02) 70%);
+}
+
+.repository-label {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.repository-number {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #66ffcc;
+}
+
+.repository-name {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.repository-line {
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.repository-portrait {
+  width: 192px;
+  height: 192px;
+  border-radius: 10px;
+  background: radial-gradient(circle at 50% 40%, rgba(102, 255, 204, 0.2), rgba(102, 255, 204, 0.02) 70%);
+}
+
+.repository-detail-head {
+  display: grid;
+  gap: 2px;
+  justify-items: center;
+  text-align: center;
+}
+
+#repository-detail h3.repository-name {
+  font-size: 18px;
+  white-space: normal;
+}
+
+.repository-facts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 5px 12px;
+  width: 100%;
+  margin: 0;
+}
+
+.repository-facts dt {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #66ffcc;
+  padding-top: 1px;
+}
+
+.repository-facts dd {
+  margin: 0;
+  line-height: 1.35;
+}
+
+.repository-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 4px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  vertical-align: -2px;
+}
+
+.repository-swatch:last-of-type {
+  margin-right: 8px;
+}
+
+.repository-lab {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* Narrow screens: the details above the cards, a share of the height each. */
+@media (max-width: 640px) {
+  #repository-body {
+    grid-template: minmax(0, 1.1fr) minmax(0, 1fr) / minmax(0, 1fr);
+    grid-template-areas: 'detail' 'list';
+  }
+
+  #repository-detail[hidden] + #repository-list {
+    grid-row: 1 / -1;
+  }
+
+  .repository-portrait {
+    width: 128px;
+    height: 128px;
+  }
+
+  #repository-list {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  }
+}
+
+/* A scan done (scan/Scanner.ts): the species' picture, whether it's new and its number, at the top for a few seconds. */
+#scan-notice {
+  position: fixed;
+  top: max(10px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1003;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100vw - 32px);
+  box-sizing: border-box;
+  padding: 4px 8px 4px 4px;
+  border-radius: 30px;
+  border: 1px solid rgba(207, 227, 255, 0.35);
+  background: rgba(8, 14, 28, 0.9);
+  font-size: 13px;
+  animation: scan-notice-in 0.25s ease-out;
+}
+
+#scan-notice.new {
+  border-color: rgba(102, 255, 204, 0.8);
+  box-shadow: 0 0 18px rgba(102, 255, 204, 0.25);
+}
+
+#scan-notice[hidden] {
+  display: none;
+}
+
+@keyframes scan-notice-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -8px);
+  }
+}
+
+#scan-notice-picture {
+  flex: none;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: rgba(102, 255, 204, 0.1);
+}
+
+#scan-notice-text {
+  display: grid;
+  min-width: 0;
+}
+
+#scan-notice-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  opacity: 0.75;
+}
+
+#scan-notice.new #scan-notice-title {
+  color: #66ffcc;
+  opacity: 1;
+}
+
+#scan-notice-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#scan-notice-open {
+  padding: 5px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(102, 255, 204, 0.5);
+  background: rgba(102, 255, 204, 0.18);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+#scan-notice-open:hover {
+  border-color: rgba(102, 255, 204, 0.9);
 }
 
 /* The debug dump's dialog (menu → Save debug dump, F8): over the menu. */
@@ -1656,8 +2080,9 @@ html.touch #item-hint {
   z-index: 20;
 }
 
-/* Aiming the planet buster. */
+/* Aiming a weapon, the beam or the scanner. */
 body.aiming #app canvas,
-body.beaming #app canvas {
+body.beaming #app canvas,
+body.scanning #app canvas {
   cursor: crosshair;
 }
