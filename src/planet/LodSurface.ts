@@ -81,6 +81,9 @@ export function addLodDebug(debug: Debug): void {
 
 const SIDE = CHUNK_CELLS + 1;
 const VERTICES = SIDE * SIDE;
+const INDICES = CHUNK_CELLS * CHUNK_CELLS * 6;
+/** Chunks a surface's batch has room for at first (it doubles when full). */
+const FIRST_SLOTS = 128;
 /** A chunk's grid with a ring of points one cell outside it. */
 const RING_SIDE = SIDE + 2;
 
@@ -102,8 +105,13 @@ interface LodNode {
   children: LodNode[] | null;
   /** The children are drawn instead of this node. */
   split: boolean;
-  mesh: THREE.Mesh<THREE.BufferGeometry, THREE.Material> | null;
-  /** Drawn as part of the surface (else covered by its children or its parent's mesh). */
+  /** Its vertices as last written (on the CPU: the surface's batch draws a copy, see LodSurface.slots). */
+  geometry: THREE.BufferGeometry | null;
+  /** Its geometry's and instance's place in the surface's batch, or -1 before it's built. */
+  slot: number;
+  /** Drawn: shown and not hidden behind the horizon or under the sea. */
+  visible: boolean;
+  /** Drawn as part of the surface (else covered by its children or its parent's chunk). */
   shown: boolean;
   /** How far it has blended from its parent's shape (0) to its own (1). */
   morph: number;
@@ -192,6 +200,15 @@ export interface LodSurfaceOptions {
  */
 export class LodSurface {
   readonly object = new THREE.Group();
+  /**
+   * Every chunk is one geometry and instance of this one batch, so the whole surface is a single draw (a multi-draw)
+   * instead of one per chunk. Chunks all have the same vertex and index counts, so a disposed chunk's place is
+   * given to the next one built (`freeSlots`) rather than left as a gap in the batch's buffers.
+   */
+  private readonly batch: THREE.BatchedMesh;
+  /** Per place in the batch: its geometry id and instance id. */
+  private readonly slots: { geometry: number; instance: number }[] = [];
+  private readonly freeSlots: number[] = [];
   private readonly roots: LodNode[] = [];
   private readonly queue: LodNode[] = [];
   private readonly camera = new THREE.Vector3();
@@ -209,7 +226,6 @@ export class LodSurface {
   private readonly edgeMorph = new Float32Array(4);
   private readonly cornerMorph = new Float32Array(4);
   private readonly smooth: 'outlineError' | 'coastError' | null;
-  private readonly renderOrder: number;
   private readonly hiddenBelow: number;
   private readonly shallow: number;
 
@@ -222,16 +238,24 @@ export class LodSurface {
     { smooth = null, renderOrder = 0, hiddenBelow = -Infinity, shallow = -Infinity, name = 'Surface' }: LodSurfaceOptions = {},
   ) {
     this.smooth = smooth && `${smooth}Error`;
-    this.renderOrder = renderOrder;
     this.hiddenBelow = hiddenBelow;
     this.shallow = shallow;
     this.object.name = name;
+    this.batch = new THREE.BatchedMesh(FIRST_SLOTS, FIRST_SLOTS * VERTICES, FIRST_SLOTS * INDICES, material);
+    // Chunks behind the horizon are hidden by `select`; those off screen are culled one by one by the batch.
+    this.batch.frustumCulled = false;
+    this.batch.sortObjects = material.transparent;
+    this.batch.matrixAutoUpdate = false;
+    this.batch.renderOrder = renderOrder;
+    this.batch.layers.enable(GROUND_LAYER);
+    this.batch.name = name;
+    this.object.add(this.batch);
     for (let face = 0; face < 6; face++) {
       const root = this.createNode(null, face, 0, 0, 0);
       this.build(root);
       root.morph = 1;
       root.shown = true;
-      root.mesh!.visible = !root.submerged;
+      this.setVisible(root, !root.submerged);
       this.roots.push(root);
     }
     this.shownChanged = true;
@@ -246,7 +270,7 @@ export class LodSurface {
   stats(): { chunks: number; minDepth: number; maxDepth: number } {
     const s = { chunks: 0, minDepth: Infinity, maxDepth: 0 };
     const walk = (node: LodNode) => {
-      if (node.shown && node.mesh!.visible) {
+      if (node.shown && node.visible) {
         s.chunks++;
         s.minDepth = Math.min(s.minDepth, node.depth);
         s.maxDepth = Math.max(s.maxDepth, node.depth);
@@ -284,9 +308,46 @@ export class LodSurface {
     }
   }
 
+  /** The geometries drawn now (for tests: the batch draws copies of them). */
+  drawnGeometries(): THREE.BufferGeometry[] {
+    const out: THREE.BufferGeometry[] = [];
+    const walk = (node: LodNode) => {
+      if (node.shown && node.visible) out.push(node.geometry!);
+      if (node.children) for (const k of node.children) walk(k);
+    };
+    for (const root of this.roots) walk(root);
+    return out;
+  }
+
   dispose(): void {
     for (const root of this.roots) this.disposeNode(root);
+    this.batch.dispose();
     this.material.dispose();
+  }
+
+  private setVisible(node: LodNode, visible: boolean): void {
+    if (node.visible === visible) return;
+    node.visible = visible;
+    this.batch.setVisibleAt(this.slots[node.slot]!.instance, visible);
+  }
+
+  /** A place in the batch for a chunk's geometry: a disposed chunk's, else a new one (growing the batch if full). */
+  private place(geometry: THREE.BufferGeometry): number {
+    const free = this.freeSlots.pop();
+    if (free !== undefined) {
+      this.batch.setGeometryAt(this.slots[free]!.geometry, geometry);
+      return free;
+    }
+    const n = this.slots.length;
+    if (n === this.batch.maxInstanceCount) {
+      this.batch.setInstanceCount(n * 2);
+      this.batch.setGeometrySize(n * 2 * VERTICES, n * 2 * INDICES);
+    }
+    const id = this.batch.addGeometry(geometry, VERTICES, INDICES);
+    const instance = this.batch.addInstance(id);
+    this.batch.setVisibleAt(instance, false);
+    this.slots.push({ geometry: id, instance });
+    return n;
   }
 
   private select(node: LodNode): void {
@@ -329,7 +390,7 @@ export class LodSurface {
         return;
       }
       for (const k of kids) {
-        if (k.mesh !== null) continue;
+        if (k.geometry !== null) continue;
         k.priority = cells;
         this.queue.push(k);
       }
@@ -376,7 +437,7 @@ export class LodSurface {
       node.shown = shown;
       this.shownChanged = true;
     }
-    node.mesh!.visible = shown && !hidden && !node.submerged;
+    this.setVisible(node, shown && !hidden && !node.submerged);
   }
 
   private createNode(parent: LodNode | null, face: number, depth: number, x: number, y: number): LodNode {
@@ -405,7 +466,9 @@ export class LodSurface {
       shallow: false,
       children: null,
       split: false,
-      mesh: null,
+      geometry: null,
+      slot: -1,
+      visible: false,
       shown: false,
       morph: 0,
       priority: 0,
@@ -503,14 +566,8 @@ export class LodSurface {
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     // Where each vertex is on the cube sphere, as the tests (and a debugger) can find it.
     geometry.userData.directions = node.dirs;
-    geometry.computeBoundingSphere();
-    const mesh = new THREE.Mesh(geometry, this.material);
-    mesh.visible = false;
-    mesh.matrixAutoUpdate = false;
-    mesh.renderOrder = this.renderOrder;
-    mesh.layers.enable(GROUND_LAYER);
-    node.mesh = mesh;
-    this.object.add(mesh);
+    node.geometry = geometry;
+    node.slot = this.place(geometry);
   }
 
   private disposeNode(node: LodNode): void {
@@ -519,10 +576,11 @@ export class LodSurface {
     node.split = false;
     if (node.shown) this.shownChanged = true;
     node.shown = false;
-    if (node.mesh) {
-      this.object.remove(node.mesh);
-      node.mesh.geometry.dispose();
-      node.mesh = null;
+    if (node.geometry) {
+      this.setVisible(node, false);
+      this.freeSlots.push(node.slot);
+      node.geometry = null;
+      node.slot = -1;
     }
   }
 
@@ -607,7 +665,7 @@ export class LodSurface {
     }
     if (!changed) return;
 
-    const geometry = node.mesh!.geometry;
+    const geometry = node.geometry!;
     const position = geometry.getAttribute('position') as THREE.BufferAttribute;
     const colour = geometry.getAttribute('color') as THREE.BufferAttribute;
     const normal = geometry.getAttribute('normal') as THREE.BufferAttribute;
@@ -707,9 +765,7 @@ export class LodSurface {
         }
       }
     }
-    position.needsUpdate = true;
-    colour.needsUpdate = true;
-    if (baseNormals) normal.needsUpdate = true;
+    this.batch.setGeometryAt(this.slots[node.slot]!.geometry, geometry);
   }
 }
 
@@ -816,7 +872,7 @@ function sharedVertex(node: LodNode, v: number, other: LodNode): number {
 }
 
 function allBuilt(nodes: readonly LodNode[]): boolean {
-  for (const node of nodes) if (node.mesh === null) return false;
+  for (const node of nodes) if (node.geometry === null) return false;
   return true;
 }
 

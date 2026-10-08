@@ -2,16 +2,21 @@ import * as THREE from 'three';
 import { beyondHorizon } from '../planet/quadtree';
 import { CUBE_FACES, spherify } from './cubeSphereMath';
 
-/** One patch of a SpherePatches: its mesh, and the unit direction of its middle with how far (radians) its vertices reach from it. */
+/**
+ * One patch of a SpherePatches: its geometry (the batch draws a copy), whether it's drawn, its instance in the batch,
+ * and the unit direction of its middle with how far (radians) its vertices reach from it.
+ */
 export interface SpherePatch {
-  readonly mesh: THREE.Mesh<THREE.BufferGeometry, THREE.Material>;
+  readonly geometry: THREE.BufferGeometry;
+  visible: boolean;
+  readonly instance: number;
   readonly centre: THREE.Vector3;
   readonly angle: number;
 }
 
 /**
  * A cube sphere (see cubeSphere.ts) cut into `perFace` × `perFace` patches on
- * each of the cube's six faces, each its own mesh sharing one material: the
+ * each of the cube's six faces, all in one batch (`mesh`, a single draw): the
  * same vertices and triangles as `createCubeSphere(radius, segments)`, so a
  * shader that works per vertex looks exactly the same, but three.js skips the
  * patches outside the camera's view, and `cullBehind` the ones facing away
@@ -22,6 +27,8 @@ export interface SpherePatch {
 export class SpherePatches {
   readonly object = new THREE.Group();
   readonly patches: SpherePatch[] = [];
+  /** Every patch, each a geometry and instance of it; set its render order here, and callbacks with `beforeRender`. */
+  readonly mesh: THREE.BatchedMesh;
   /** The radius of the plane of the triangle farthest inside the sphere: a camera beyond it sees the triangle's front face. */
   private readonly inner: number;
 
@@ -37,17 +44,30 @@ export class SpherePatches {
     // A triangle's corners are at most about a cell's quarter turn over n apart from its middle.
     this.inner = radius * Math.cos(Math.PI / 2 / n);
     this.object.name = name;
+    const made: ReturnType<typeof createPatch>[] = [];
     for (let face = 0; face < 6; face++) {
       for (let py = 0; py < k; py++) {
         for (let px = 0; px < k; px++) {
-          const patch = createPatch(radius, n, face, Math.floor((px * n) / k), Math.floor(((px + 1) * n) / k), Math.floor((py * n) / k), Math.floor(((py + 1) * n) / k));
-          const mesh = new THREE.Mesh(patch.geometry, material);
-          mesh.name = name;
-          this.patches.push({ mesh, centre: patch.centre, angle: patch.angle });
-          this.object.add(mesh);
+          made.push(createPatch(radius, n, face, Math.floor((px * n) / k), Math.floor(((px + 1) * n) / k), Math.floor((py * n) / k), Math.floor(((py + 1) * n) / k)));
         }
       }
     }
+    let vertices = 0;
+    let indices = 0;
+    for (const { geometry } of made) {
+      vertices += geometry.getAttribute('position').count;
+      indices += geometry.index!.count;
+    }
+    this.mesh = new THREE.BatchedMesh(made.length, vertices, indices, material);
+    // Each patch is culled by the batch on its own (the batch as a whole is the sphere).
+    this.mesh.frustumCulled = false;
+    this.mesh.sortObjects = false;
+    this.mesh.name = name;
+    for (const { geometry, centre, angle } of made) {
+      const instance = this.mesh.addInstance(this.mesh.addGeometry(geometry));
+      this.patches.push({ geometry, visible: true, instance, centre, angle });
+    }
+    this.object.add(this.mesh);
   }
 
   /**
@@ -63,31 +83,49 @@ export class SpherePatches {
     const outside = d > this.radius;
     for (const p of this.patches) {
       const behind = outside && beyondHorizon(p.centre.angleTo(camera), p.angle, d, this.inner, this.inner);
-      p.mesh.visible = !behind && (keep?.(p) ?? true);
+      this.show(p, !behind && (keep?.(p) ?? true));
     }
+  }
+
+  /**
+   * Runs `callback` before the batch is drawn, ahead of the batch's own (which picks the patches in view, so it
+   * mustn't be replaced).
+   */
+  beforeRender(callback: THREE.Object3D['onBeforeRender']): void {
+    const own = this.mesh.onBeforeRender.bind(this.mesh);
+    this.mesh.onBeforeRender = (...args) => {
+      callback.apply(this.mesh, args);
+      own(...args);
+    };
+  }
+
+  private show(p: SpherePatch, visible: boolean): void {
+    if (p.visible === visible) return;
+    p.visible = visible;
+    this.mesh.setVisibleAt(p.instance, visible);
   }
 
   /** Shows every patch (`keep` decides, if given). */
   showAll(keep?: (patch: SpherePatch) => boolean): void {
-    for (const p of this.patches) p.mesh.visible = keep?.(p) ?? true;
+    for (const p of this.patches) this.show(p, keep?.(p) ?? true);
   }
 
   /** How many triangles there are in all. */
   get allTriangles(): number {
     let n = 0;
-    for (const p of this.patches) n += p.mesh.geometry.index!.count / 3;
+    for (const p of this.patches) n += p.geometry.index!.count / 3;
     return n;
   }
 
   /** How many triangles are in the patches shown now (before three.js's frustum culling). */
   get triangles(): number {
     let n = 0;
-    for (const p of this.patches) if (p.mesh.visible) n += p.mesh.geometry.index!.count / 3;
+    for (const p of this.patches) if (p.visible) n += p.geometry.index!.count / 3;
     return n;
   }
 
   dispose(): void {
-    for (const p of this.patches) p.mesh.geometry.dispose();
+    this.mesh.dispose();
   }
 }
 
