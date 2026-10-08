@@ -10,6 +10,8 @@ import { MarkerRing } from '../player/MarkerRing';
 import { HelpText } from '../ui/HelpText';
 import type { Tooltip } from '../ui/Tooltip';
 import { galaxyStarSize } from './appearance';
+import { CourseLine } from './CourseLine';
+import { describeDistance } from './distance';
 import type { GalaxyMap } from './GalaxyMap';
 import type { GalaxyPicker } from './GalaxyPicker';
 import type { GalaxyShip } from './GalaxyShip';
@@ -25,8 +27,9 @@ const TOUCH_HELP =
   'Tap a star, rogue planet or nebula: travel there · Pinch in at a star or rogue: enter it · Pinch: zoom · Drag: rotate view · Hold: identify';
 
 /**
- * The galaxy level's overlay: HUD text, star tooltip, and rings marking the
- * current star, the travel destination and the hovered star.
+ * The galaxy level's overlay: HUD text, star tooltip (with the distance from
+ * the ship), rings marking the current star, the travel destination and the
+ * hovered star, and lines from the ship to the destination and the hovered star.
  */
 export class GalaxyHud implements Entity {
   private readonly locationEl = document.getElementById('hud-location')!;
@@ -36,7 +39,12 @@ export class GalaxyHud implements Entity {
   private readonly currentRing: MarkerRing;
   private readonly destinationRing: MarkerRing;
   private readonly hoverRing: MarkerRing;
+  /** The course being flown, ship to destination. */
+  private readonly courseLine: CourseLine;
+  /** The course a click would set, ship to hovered star. */
+  private readonly hoverLine: CourseLine;
   private readonly at = new THREE.Vector3();
+  private readonly shipAt = new THREE.Vector3();
   private sinceRefresh = REFRESH_SECONDS;
   private readonly summaries = new Map<number, SystemSummary>();
   /** Rogue planets' tooltip lines, by id. */
@@ -60,7 +68,14 @@ export class GalaxyHud implements Entity {
     this.currentRing = new MarkerRing(scene, '#66ffcc', 0, 0.08);
     this.destinationRing = new MarkerRing(scene, '#66ffcc', 0.08, 0.08);
     this.hoverRing = new MarkerRing(scene, '#cfe3ff', 0, 0.08);
+    this.courseLine = new CourseLine(scene, { color: '#66ffcc', widthFrom: 5, widthTo: 1.5, flow: true });
+    this.hoverLine = new CourseLine(scene, { color: '#cfe3ff', widthFrom: 4, widthTo: 1, flow: false });
     this.help = new HelpText(input, HELP, TOUCH_HELP);
+  }
+
+  /** The course line to the destination is drawn (automation and tests). */
+  get courseShown(): boolean {
+    return this.courseLine.shown;
   }
 
   activate(): void {
@@ -81,7 +96,11 @@ export class GalaxyHud implements Entity {
     const show = !this.hideMarkers;
     this.mark(this.currentRing, show && !ship.travelling ? ship.current : null, 0.5, frameDt);
     this.mark(this.destinationRing, show ? ship.destination : null, 0.9, frameDt);
+    const hoverOther = hovered && hovered !== ship.destination && (ship.travelling || hovered !== ship.current);
     this.mark(this.hoverRing, show && hovered !== ship.current && hovered !== ship.destination ? hovered : null, 0.35, frameDt);
+    this.shipAt.copy(ship.object.position).applyMatrix4(this.root.matrixWorld);
+    this.line(this.courseLine, show ? ship.destination : null, 0.9, frameDt);
+    this.line(this.hoverLine, show && hoverOther ? hovered : null, 0.55, frameDt);
     // Still drawn while crossfading out, but the DOM belongs to the level taking over.
     if (!this.active) return;
     // The star you're at (or heading to) and the one under the pointer shine steadily.
@@ -90,7 +109,8 @@ export class GalaxyHud implements Entity {
     const nebula = this.picker.hoveredNebula;
     const { clientX, clientY } = this.input.pointer;
     if (hovered) {
-      const here = hovered === ship.current && !ship.travelling ? ' · you are here' : '';
+      const isHere = hovered === ship.current && !ship.travelling;
+      const here = isHere ? ' · you are here' : '';
       const inside = hovered.nebula ? ` · in the ${hovered.nebula.name}` : '';
       this.tooltip.show(
         hovered,
@@ -98,7 +118,7 @@ export class GalaxyHud implements Entity {
         this.describe(hovered) + inside + here,
         clientX,
         clientY,
-        undefined,
+        isHere ? undefined : `${describeDistance(ship.distanceTo(hovered))} away`,
         this.input.touchMode,
         (el) => renderSystemSummary(el, this.summary(hovered)),
       );
@@ -117,13 +137,17 @@ export class GalaxyHud implements Entity {
       : `Galaxy · ${this.galaxy.stars.length} stars · at ${ship.current.name}` +
         (isRogue(ship.current) ? ' (rogue planet)' : '') +
         (ship.current.nebula ? ` · in the ${ship.current.nebula.name}` : '');
-    this.targetEl.textContent = ship.destination ? `Travelling → ${ship.destination.name}` : '';
+    this.targetEl.textContent = ship.destination
+      ? `Travelling → ${ship.destination.name} · ${describeDistance(ship.distanceTo(ship.destination))} to go`
+      : '';
   }
 
   dispose(): void {
     this.currentRing.dispose();
     this.destinationRing.dispose();
     this.hoverRing.dispose();
+    this.courseLine.dispose();
+    this.hoverLine.dispose();
     this.tooltip.hide();
   }
 
@@ -148,6 +172,16 @@ export class GalaxyHud implements Entity {
       this.summaries.set(star.id, summary);
     }
     return summary;
+  }
+
+  /** Draws `line` from the ship to `star`, or hides it with no star. */
+  private line(line: CourseLine, star: StarRef | null, opacity: number, frameDt: number): void {
+    if (!star) {
+      line.hide();
+      return;
+    }
+    this.at.set(star.position.x, star.position.y, star.position.z).applyMatrix4(this.root.matrixWorld);
+    line.place(this.shipAt, this.at, opacity, frameDt);
   }
 
   private mark(ring: MarkerRing, star: StarRef | null, opacity: number, frameDt: number): void {

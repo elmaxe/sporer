@@ -64,7 +64,8 @@ export class GalaxyLevel extends Level {
   readonly nebulas: GalaxyNebulas;
   /** The arms' gas and haze. */
   readonly dust: GalaxyDust;
-  private readonly hud: GalaxyHud;
+  /** HUD text, tooltip, rings and course lines. */
+  readonly hud: GalaxyHud;
   private readonly light: THREE.HemisphereLight;
   private closeUp: StarCloseUp | null = null;
   private dive = 0;
