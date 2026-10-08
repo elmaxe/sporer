@@ -38,7 +38,7 @@
 // Geysers: every body in the planet loop has the geyser kind its climate says (or none), with vents, eruptions and
 // particles in the air while one erupts; the loop also visits a body with each kind (steam, cryo planet and moon, sulphur,
 // fumarole), and every body with geysers has their sound. Every solid body has rocks on its ground once the camera is down
-// near it, and over water, low, the ship's downwash stirs the sea.
+// near it (and green worlds with plants grass), and over water, low, the ship's downwash stirs the sea.
 // Plants: bodies of tier 1 and up have plants around the ship (none on tier 0 or gas giants), hovering one shows it in the
 // tooltip, the menu's Plants button turns them off and on, and a removed plant stays in the change list.
 // Weather: every body in the planet loop has the weather its climate says (or none), as clouds in the system view and
@@ -313,6 +313,13 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null, during = n
     check();
   })`);
   r.expectedRocks = await evaluate(`__body.config.type !== 'gas' && !(__body.config.bands && __body.config.bands.length)`);
+  // Grass on green worlds where plants grow, loaded round the camera too.
+  r.grass = await evaluate(`planet.grass && new Promise((resolve) => {
+    const wall = performance.now();
+    const check = () => (planet.grass.settled || performance.now() - wall > 8000 ? resolve(planet.grass.stats()) : requestAnimationFrame(check));
+    check();
+  })`);
+  r.expectedGrass = await evaluate(`!!planet.plants && ['terran', 'ocean'].includes(__body.config.type) && !__body.config.shape`);
   // Over water or lava, low, the ship's downwash stirs the sea under it.
   r.wake = await evaluate(`planet.wake && (() => {
     const w = planet.wake, g = planet.globe, dir = planet.ship.object.position.clone().normalize();
@@ -495,6 +502,7 @@ async function runPlanetLoop(bodyExpr, shotName, handoverShot = null, during = n
     (!r.geysers || (r.geysers.vents > 0 && r.geysers.events > 0 && (r.geysers.erupting === 0 || r.geysers.particles > 0))) &&
     r.ventSounds &&
     (r.expectedRocks ? r.rocks && r.rocks.cells > 0 : r.rocks === null) &&
+    (r.expectedGrass ? r.grass && r.grass.cells > 0 : r.grass === null) &&
     (!r.wake || !r.wake.over || r.wake.height > 4 || r.wake.strength > 0.9) &&
     (r.expectedPlants
       ? r.plants.tierOk &&

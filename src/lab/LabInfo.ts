@@ -231,6 +231,11 @@ export class LabInfo implements Entity {
       const st = rocks.stats();
       rows.push(['Rocks', st.cells ? `${st.rocks} in ${st.cells} cells · ${st.drawn} drawn` : 'none near (come closer to the ground)']);
     }
+    const grass = level?.grass;
+    if (grass) {
+      const st = grass.stats();
+      rows.push(['Grass', st.cells ? `${st.tufts} tufts in ${st.cells} cells · ${st.drawn} drawn` : 'none near (come closer to the ground)']);
+    }
     const animals = level?.animals;
     if (animals) {
       const st = animals.stats();

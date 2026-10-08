@@ -67,7 +67,9 @@ import type { Inventory } from '../cargo/inventory';
 import { weatherKind } from '../gen/weather';
 import { PlantBrush, createLeafTexture } from '../surface/PlantBrush';
 import { Plantings } from '../surface/Plantings';
+import { GroundGrass } from '../surface/GroundGrass';
 import { GroundRocks } from '../surface/GroundRocks';
+import { grassSetup } from '../surface/grassSetup';
 import { rockSetup } from '../surface/rockSetup';
 import { DEBRIS_REACH, debrisLookFor } from '../gen/debris';
 import { DEBRIS_NEAR, DebrisField } from '../world/DebrisField';
@@ -149,6 +151,8 @@ export class PlanetLevel extends Level implements ItemUser {
   plants: SurfaceEntities | null = null;
   /** Solid bodies (not once busted): the loose rocks on the ground, loaded as the camera comes near it (gen/rocks.ts). */
   rocks: GroundRocks | null = null;
+  /** Green worlds where plants grow (not once busted): grass, loaded as the camera comes near the ground (gen/grass.ts). */
+  grass: GroundGrass | null = null;
   /** The animals roaming it (gen/animals.ts), where plants grow. */
   animals: SurfaceAnimals | null = null;
   /** The radar, tracking a species of those animals picked on the map's Species tab (not once busted). */
@@ -338,6 +342,9 @@ export class PlanetLevel extends Level implements ItemUser {
     this.plants = plantsSetup ? this.add(new SurfaceEntities(this.scene, plantsSetup.plan, plantsSetup.ground, camera, changes, debug, this.jobs.defer)) : null;
     const rocks = busted ? null : rockSetup(config);
     this.rocks = rocks ? this.add(new GroundRocks(this.scene, rocks.plan, rocks.ground, camera, debug)) : null;
+    // After the ship: its downwash flattens the grass under where it's drawn this frame.
+    const grass = busted ? null : grassSetup(config);
+    this.grass = grass ? this.add(new GroundGrass(this.scene, grass.plan, grass.ground, camera, this.ship.object, debug)) : null;
     this.buryPlants();
     const animalsSetup = busted ? null : animalSetup(config, plantsSetup);
     this.animals = animalsSetup ? this.add(new SurfaceAnimals(this.scene, animalsSetup.plan, animalsSetup.ground, camera, this.frame, debug, changes, this.jobs.defer)) : null;
@@ -574,6 +581,7 @@ export class PlanetLevel extends Level implements ItemUser {
     if (!volcanoes || volcanoes.count === 0) return;
     this.plants?.setBuried((dir) => volcanoes.covers(dir));
     this.rocks?.setBuried((dir) => volcanoes.covers(dir));
+    this.grass?.setBuried((dir) => volcanoes.covers(dir));
   }
 
   /** The buster is away: hold the ship where it is and pull the camera back to watch. */
@@ -591,9 +599,9 @@ export class PlanetLevel extends Level implements ItemUser {
     this.globe.bust(this.radius * DEBRIS_REACH);
     this.cargo?.clear(false);
     this.laser.clear();
-    for (const entity of [this.eruptions, this.geysers, this.ventSounds, this.weather, this.comet, this.plants, this.rocks, this.wake, this.animals, this.radar, this.cargo, this.plantings, this.volcanoes, this.volcanoSounds, this.meteors])
+    for (const entity of [this.eruptions, this.geysers, this.ventSounds, this.weather, this.comet, this.plants, this.rocks, this.grass, this.wake, this.animals, this.radar, this.cargo, this.plantings, this.volcanoes, this.volcanoSounds, this.meteors])
       if (entity) this.remove(entity);
-    this.eruptions = this.geysers = this.ventSounds = this.weather = this.comet = this.plants = this.rocks = this.wake = this.animals = this.radar = this.cargo = this.plantings = this.meteors = null;
+    this.eruptions = this.geysers = this.ventSounds = this.weather = this.comet = this.plants = this.rocks = this.grass = this.wake = this.animals = this.radar = this.cargo = this.plantings = this.meteors = null;
     this.volcanoes = null;
     this.volcanoSounds = null;
     if (this.plantTooltip) {
