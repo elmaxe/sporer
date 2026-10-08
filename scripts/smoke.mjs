@@ -68,7 +68,7 @@
 // Cargo beam: the item bar's Inventory tab (grey; the bar and its tooltips take the tab's colour) holds the beam;
 // over a forest on the home planet a real 1 arms it, holding the mouse on a tree beams it up (the ship stays) into the
 // hold (a stack with the plant's picture and count), letting go halfway drops it again, holding on bare ground fires
-// the beam there too (and the ship stays), sweeping it over the forest catches several plants, a real 3 selects the stack and
+// the beam there too (and the ship stays), sweeping it over the forest catches several plants, a real 4 selects the stack and
 // holding on the ground sets it down to take root; one dropped with a click falls from the ship (which stays), one set
 // down in the sea drowns; what was taken
 // and planted is still so after leaving and coming back; the cues abductStart, abductBeam, abductSuccess, exportBeam
@@ -2981,13 +2981,18 @@ await section('cargo', async () => {
     await until(`planet.cargo.inFlight.length === 0`, 20000);
     sweep = { most, removed: (await removedCount()) - removed };
   }
-  // Select the stack (3, after the beam and the radar) and hold on the ground: it's set down and takes root.
-  await key('Digit3', '3');
+  // Every line the hint shows from here (a note lasts a few seconds, which a slow run can miss between reads).
+  const watchHints = () => evaluate(`(() => { const el = document.getElementById('item-hint'); window.__hintsSeen = [el.textContent]; window.__hintWatch?.disconnect();
+    window.__hintWatch = new MutationObserver(() => window.__hintsSeen.push(el.textContent)); window.__hintWatch.observe(el, { childList: true, characterData: true, subtree: true }); })()`);
+  const hintsSeen = () => evaluate(`window.__hintsSeen.join(' | ')`);
+  // Select the stack (4, after the beam, the radar and the scanner) and hold on the ground: it's set down and takes root.
+  await key('Digit4', '4');
   const exportArmed = await evaluate(`planet.selected`);
   const stackBefore = await evaluate(`levels.inventory.stacks[0].count`);
   const totalBefore = await evaluate(`levels.inventory.total`);
   const plantedBefore = await evaluate(`planet.plantings.count`);
   const land = await evaluate(`__ground('land', 8, 35)`);
+  await watchHints();
   await mouse('mouseMoved', land);
   await mouse('mousePressed', land);
   const lowering = await evaluate(`planet.cargo.beaming`);
@@ -2995,12 +3000,12 @@ await section('cargo', async () => {
   await mouse('mouseReleased', land);
   await until(`planet.cargo.inFlight.length === 0`, 20000);
   const setDown = { exportArmed, stackBefore, lowering, planted: (await evaluate(`planet.plantings.count`)) - plantedBefore, taken: totalBefore - (await evaluate(`levels.inventory.total`)),
-    selected: await evaluate(`planet.selected`), hint: await evaluate(`document.getElementById('item-hint').textContent`) };
+    selected: await evaluate(`planet.selected`), hint: await hintsSeen() };
   // Two more up. One dropped with a click (no hold): it falls from the ship and the ship stays put.
   await key('Digit1', '1');
   await beamUp();
   await beamUp();
-  await key('Digit3', '3');
+  await key('Digit4', '4');
   const spot = await evaluate(`__ground('land', 8, 35)`);
   await mouse('mouseMoved', spot);
   await mouse('mousePressed', spot);
@@ -3009,7 +3014,7 @@ await section('cargo', async () => {
   await until(`planet.cargo.inFlight.length === 0`, 20000);
   dropped.shipStayed = !(await evaluate(`planet.ship.enRoute`));
   // The other set down in the sea: it drowns.
-  if (!(await evaluate(`planet.selected`))) await key('Digit3', '3');
+  if (!(await evaluate(`planet.selected`))) await key('Digit4', '4');
   const sea = await evaluate(`__ground('sea', 8, 68)`);
   let drown = null;
   if (sea) {
@@ -3086,12 +3091,13 @@ await section('cargo', async () => {
     if (spot) {
       const before = await evaluate(`${animalChanges}.releasedCount`);
       await evaluate(`planet.select('cargo:' + ${JSON.stringify(up.key)})`);
+      await watchHints();
       await mouse('mouseMoved', spot);
       await mouse('mousePressed', spot);
       await until(`!planet.cargo.beaming`, 60000);
       await mouse('mouseReleased', spot);
       await until(`planet.cargo.inFlight.length === 0`, 20000);
-      release = { released: (await evaluate(`${animalChanges}.releasedCount`)) - before, hint: await evaluate(`document.getElementById('item-hint').textContent`) };
+      release = { released: (await evaluate(`${animalChanges}.releasedCount`)) - before, hint: await hintsSeen() };
     }
     // The laser: Tab to the Weapons, a real 1 arms it; held on an animal, then on a tree, it kills them.
     if (await evaluate(`document.getElementById('item-bar').dataset.tab !== 'weapons'`)) await key('Tab', 'Tab');
