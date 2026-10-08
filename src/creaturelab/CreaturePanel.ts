@@ -184,7 +184,7 @@ export class CreaturePanel {
       lab.mode === 'build'
         ? lab.placing
           ? `Move over the body to place the ${PART_LABELS[lab.placing].name.toLowerCase()}; click to stick it on (Shift: keep placing), Esc to cancel.`
-          : 'Drag the green dots (spine) to shape the body, wheel over one to fatten it (Shift: widen). Pull an end dot out to grow the spine. Drag a yellow dot to move a part, wheel to resize; drag the pink dots to pose knees and feet, elbows and hands. Drag empty space to turn the view.'
+          : 'Point at the creature to see its skeleton. Drag a vertebra of the spine to shape the body, wheel over one to fatten it (Shift: widen). Pull an end vertebra out to grow the spine. Drag a yellow dot to move a part, wheel to resize; drag the pink dots to pose knees and feet, elbows and hands. Drag empty space to turn the view.'
         : lab.mode === 'paint'
           ? 'Paint on the body with the brush; it paints both sides when mirrored. Pick the coat on the right.'
           : lab.mode === 'outfit'
@@ -319,7 +319,7 @@ export class CreaturePanel {
       const s = this.section('Body');
       const legs = d.parts.filter((p) => p.kind === 'leg').reduce((n, p) => n + (p.mirror && Math.abs(Math.sin(p.theta)) > 0.06 ? 2 : 1), 0);
       s.append(el('div', 'cr-note', `${d.spine.length} vertebrae, ${d.parts.length} parts, ${legs} legs.`));
-      s.append(el('div', 'cr-note', 'Select a green dot (vertebra) or a yellow one (part) to edit it.'));
+      s.append(el('div', 'cr-note', 'Point at the creature to see its skeleton; select a vertebra or a part\'s yellow dot to edit it.'));
       const row = el('div', 'cr-buttons');
       this.button(row, '+ Vertebra at the snout', () => lab.addVertebra());
       s.append(row);
