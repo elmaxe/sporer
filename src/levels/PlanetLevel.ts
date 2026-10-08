@@ -42,6 +42,7 @@ import { PlantTooltip } from '../surface/PlantTooltip';
 import { plantSetup } from '../surface/plantSetup';
 import { animalSetup } from '../surface/animalSetup';
 import { SurfaceAnimals } from '../surface/SurfaceAnimals';
+import { AnimalSounds } from '../surface/AnimalSounds';
 import { SurfaceEntities } from '../surface/SurfaceEntities';
 import type { Tooltip } from '../ui/Tooltip';
 import { cometParams } from '../world/Comet';
@@ -155,6 +156,8 @@ export class PlanetLevel extends Level implements ItemUser {
   grass: GroundGrass | null = null;
   /** The animals roaming it (gen/animals.ts), where plants grow. */
   animals: SurfaceAnimals | null = null;
+  /** Their calls: herds talking, grunting, giving the alarm, crying out. */
+  animalSounds: AnimalSounds | null = null;
   /** The radar, tracking a species of those animals picked on the map's Species tab (not once busted). */
   radar: Radar | null = null;
   /** Plants the player set down here that took root (not once busted). */
@@ -348,9 +351,15 @@ export class PlanetLevel extends Level implements ItemUser {
     this.buryPlants();
     const animalsSetup = busted ? null : animalSetup(config, plantsSetup);
     this.animals = animalsSetup ? this.add(new SurfaceAnimals(this.scene, animalsSetup.plan, animalsSetup.ground, camera, this.frame, debug, changes, this.jobs.defer)) : null;
+    // They run from the ship (issue #156).
+    this.animals?.setThreat(this.ship.object);
+    // After the animals (their events this frame) and the camera: heard from where it is.
+    this.animalSounds = this.animals ? this.add(new AnimalSounds(this.animals, camera, this.frame, sfx, debug)) : null;
     // After the ship and the camera: its waves spread round where the ship is drawn this frame.
     this.radar = animalsSetup
-      ? this.add(new Radar(this.scene, animalsSetup.plan, animalsSetup.ground, this.ship, camera, this.frame, sfx, () => switches.isOn('radar'), debug, changes))
+      ? this.add(
+          new Radar(this.scene, animalsSetup.plan, animalsSetup.ground, this.ship, camera, this.frame, sfx, () => switches.isOn('radar'), debug, changes, (id) => this.animals?.panicOf(id)),
+        )
       : null;
     this.plantings = busted ? null : this.add(new Plantings(this.scene, changes));
     // The plants the ship goes through shake and lose leaves: the planet's own and those set down (gone once it's busted).
@@ -599,9 +608,10 @@ export class PlanetLevel extends Level implements ItemUser {
     this.globe.bust(this.radius * DEBRIS_REACH);
     this.cargo?.clear(false);
     this.laser.clear();
-    for (const entity of [this.eruptions, this.geysers, this.ventSounds, this.weather, this.comet, this.plants, this.rocks, this.grass, this.wake, this.animals, this.radar, this.cargo, this.plantings, this.volcanoes, this.volcanoSounds, this.meteors])
+    for (const entity of [this.eruptions, this.geysers, this.ventSounds, this.weather, this.comet, this.plants, this.rocks, this.grass, this.wake, this.animals, this.animalSounds, this.radar, this.cargo, this.plantings, this.volcanoes, this.volcanoSounds, this.meteors])
       if (entity) this.remove(entity);
     this.eruptions = this.geysers = this.ventSounds = this.weather = this.comet = this.plants = this.rocks = this.grass = this.wake = this.animals = this.radar = this.cargo = this.plantings = this.meteors = null;
+    this.animalSounds = null;
     this.volcanoes = null;
     this.volcanoSounds = null;
     if (this.plantTooltip) {
@@ -762,6 +772,7 @@ export class PlanetLevel extends Level implements ItemUser {
     if (!this.busted) this.map.activate();
     this.plantTooltip?.activate();
     this.volcanoSounds?.mute(false);
+    this.animalSounds?.mute(false);
   }
 
   override exit(): void {
@@ -774,5 +785,6 @@ export class PlanetLevel extends Level implements ItemUser {
     this.map.deactivate();
     this.plantTooltip?.deactivate();
     this.volcanoSounds?.mute(true);
+    this.animalSounds?.mute(true);
   }
 }

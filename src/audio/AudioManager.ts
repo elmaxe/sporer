@@ -6,6 +6,7 @@ import { cueUrls } from './cueFiles';
 import { AMBIENT_CUES, cueParams, SOUND_CUES, type AmbientCue, type LoopCue, type SoundCue } from './cues';
 import { CuePlayer, fetchCueFiles, SILENT, type SoundHandle } from './CuePlayer';
 import { crossfadeLoop } from './loop';
+import type { SynthOutput } from './animalSynth';
 import { playbackRate, type AmbientSound, type OneShotCue, type PlayOptions, type SoundEffects } from './sfx';
 
 /** Seconds of the ambience loop's tail blended into its head. */
@@ -156,6 +157,12 @@ export class AudioManager implements SoundEffects {
     this.ambients.add(sound);
     if (this.mixer) sound.attach(this.mixer.cues);
     return sound;
+  }
+
+  /** The running context and the Effects channel, for sounds the game synthesises (null while locked or suspended). */
+  synth(): SynthOutput | null {
+    const mixer = this.running();
+    return mixer ? { ctx: mixer.ctx, out: mixer.gains.sfx } : null;
   }
 
   /** The ambient loops playing and the levels they're set to (for debugging and the smoke test). */

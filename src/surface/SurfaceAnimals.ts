@@ -4,6 +4,7 @@ import type { Entity } from '../core/Entity';
 import { now, type Defer } from '../core/jobs';
 import { HERD_CELL_SIZE, HOME_RANGE, PACK_RANGE_FACTOR, HerdPath, generateHerd, herdGridSize, type AnimalPlan, type AnimalPose, type AnimalSpecies, type HerdData } from '../gen/animals';
 import type { GroundRadius } from '../gen/plants';
+import { HerdPanic, panicParams, type PanicPhase } from '../gen/panic';
 import { hashSeed } from '../gen/rng';
 import type { RenderClock } from '../planet/PlanetFrame';
 import { faceGridPoint } from '../world/cubeSphereMath';
@@ -30,6 +31,12 @@ const RELEASED_RANGE = 0.5 * HOME_RANGE;
 const HERE = 0;
 const REMOVED = 1;
 const HELD = 2;
+
+/** In a cell's `panic`: what each animal drawn this frame is doing in its herd's panic. */
+const CALM = 0;
+const FLEEING = 1;
+const WATCHING = 2;
+const PANIC_CODES: Record<PanicPhase, number> = { none: CALM, startled: FLEEING, fleeing: FLEEING, watching: WATCHING, returning: WATCHING };
 
 /** The animal a ray hit. The same object every time: read it before the next `pick`. */
 export interface AnimalHit {
@@ -63,8 +70,38 @@ export interface LiveAnimal {
   restore(): void;
 }
 
+/** A loaded herd cell (or an animal set down here), as the animals' sounds read it: its herd (or none) and where its animals were last drawn. */
+export interface HerdView {
+  readonly key: string;
+  readonly herd: HerdData | null;
+  readonly species: AnimalSpecies | null;
+  /** Per animal: 0 there, else removed or held. */
+  readonly gone: Uint8Array;
+  readonly centre: THREE.Vector3;
+  readonly bound: number;
+  /** Each animal's last drawn position (body frame) or NaN, and its pose then. */
+  readonly drawn: Float32Array;
+  readonly poses: readonly AnimalPose[];
+  /** Per animal drawn: 0 calm, 1 fleeing, 2 watching the threat or walking back. */
+  readonly panic: Uint8Array;
+}
+
+/** Something that happened to the animals this frame (for their sounds): a herd startled into flight, a herd looking up at the threat, an animal grabbed or shot. */
+export interface AnimalEvent {
+  readonly kind: 'startle' | 'alert' | 'distress';
+  readonly cell: HerdView;
+  /** The animal (nearest the threat, or the one taken) and where it was (body frame). */
+  readonly member: number;
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  /** A startle's number in its herd's panic (`HerdPanic.startles`) and the clock then. */
+  readonly startle: number;
+  readonly time: number;
+}
+
 /** A loaded herd cell (or an animal set down here): its herd (or none) and where its animals were last drawn. */
-interface HerdCell {
+interface HerdCell extends HerdView {
   readonly key: string;
   readonly herd: HerdData | null;
   readonly path: HerdPath | null;
@@ -83,6 +120,9 @@ interface HerdCell {
   readonly drawn: Float32Array;
   readonly scales: Float32Array;
   readonly poses: AnimalPose[];
+  readonly panic: Uint8Array;
+  /** 0 to 1: its heads up at the threat, no grazing. */
+  alert: number;
 }
 
 /** The instances of one species at one level of detail: one draw call. */
@@ -106,9 +146,12 @@ export interface AnimalStats {
   lods: number[];
   drawCalls: number;
   triangles: number;
-  /** Of those drawn: walking now, and grazing. */
+  /** Of those drawn: walking now, grazing, and fleeing in a panic. */
   walking: number;
   grazing: number;
+  fleeing: number;
+  /** Herds in a panic now. */
+  panics: number;
 }
 
 /**
@@ -145,7 +188,15 @@ export class SurfaceAnimals implements Entity {
   private rescan = true;
   private pending = 0;
   private lastRange = 1;
-  private readonly counts = { walking: 0, grazing: 0, drawn: 0 };
+  private readonly counts = { walking: 0, grazing: 0, drawn: 0, fleeing: 0 };
+  /** Herds in a panic, by cell key (kept while their cell is dropped and made again, until it's over). */
+  private readonly panics = new Map<string, HerdPanic>();
+  /** What frightens them (the ship), if anything, and where it is in the body frame this frame. */
+  private threat: THREE.Object3D | null = null;
+  private readonly threatAt = new THREE.Vector3();
+  private lastTime = Number.NaN;
+  /** What happened to the animals this frame (cleared at the start of each `update`; the animals' sounds read it after). */
+  readonly events: AnimalEvent[] = [];
   /** Animals set down here, by their record's id (always loaded: there are few). */
   private readonly released = new Map<string, HerdCell>();
   /** The batches of species brought from elsewhere, by species key, with their geometries. */
@@ -261,6 +312,8 @@ export class SurfaceAnimals implements Entity {
       drawn: new Float32Array(3).fill(NaN),
       scales: new Float32Array([record.scale]),
       poses: [{ x: 0, y: 0, z: 0, hx: 0, hy: 0, hz: 1, cycle: 0, stride: 0, trot: 0, graze: 0, idle: 0 }],
+      panic: new Uint8Array(1),
+      alert: 0,
     });
   }
 
@@ -276,13 +329,57 @@ export class SurfaceAnimals implements Entity {
     return { mesh, anim, idle };
   }
 
+  /** What the animals run from: the ship (null: nothing, as in the labs). */
+  setThreat(object: THREE.Object3D | null): void {
+    this.threat = object;
+  }
+
+  /** Calls `visit` for every loaded herd (and animal set down here). */
+  forEachHerd(visit: (cell: HerdView) => void): void {
+    for (const cell of this.cells.values()) if (cell.herd) visit(cell);
+    for (const cell of this.released.values()) visit(cell);
+  }
+
+  /** The panic of the herd `herdId`, if it has one now (the radar finds the animals where they fled to). */
+  panicOf(herdId: string): HerdPanic | undefined {
+    return this.panics.get(herdId);
+  }
+
+  /** Where animal `k` of a herd is now (body frame, on the ground), drawn this frame or not (off screen: still heard); false if it isn't there. */
+  whereIs(view: HerdView, k: number, out: THREE.Vector3): boolean {
+    const cell = view as HerdCell;
+    if (!cell.path || !cell.herd || k < 0 || k >= cell.herd.count || cell.gone[k] !== HERE) return false;
+    const x = cell.drawn[k * 3]!;
+    if (!Number.isNaN(x)) {
+      out.set(x, cell.drawn[k * 3 + 1]!, cell.drawn[k * 3 + 2]!);
+      return true;
+    }
+    const pose = this.pose;
+    this.poseAnimal(cell, k, this.clock.renderTime, pose);
+    let r = this.ground(pose);
+    if (this.plan.sea && r < this.plan.radius) r = this.plan.radius;
+    out.set(pose.x, pose.y, pose.z).multiplyScalar(r);
+    return true;
+  }
+
   /** True when no herd cell the camera wants is still to be made (for automation). */
   get settled(): boolean {
     return !this.rescan && this.pending === 0;
   }
 
   stats(): AnimalStats {
-    const s: AnimalStats = { herds: 0, animals: 0, drawn: this.counts.drawn, lods: new Array<number>(ANIMAL_LOD_COUNT).fill(0), drawCalls: 0, triangles: 0, walking: this.counts.walking, grazing: this.counts.grazing };
+    const s: AnimalStats = {
+      herds: 0,
+      animals: 0,
+      drawn: this.counts.drawn,
+      lods: new Array<number>(ANIMAL_LOD_COUNT).fill(0),
+      drawCalls: 0,
+      triangles: 0,
+      walking: this.counts.walking,
+      grazing: this.counts.grazing,
+      fleeing: this.counts.fleeing,
+      panics: this.panics.size,
+    };
     for (const cell of this.cells.values()) {
       if (!cell.herd) continue;
       s.herds++;
@@ -301,6 +398,7 @@ export class SurfaceAnimals implements Entity {
   }
 
   update(): void {
+    this.events.length = 0;
     const enabled = animalParams.enabled;
     this.object.visible = enabled;
     if (!enabled) {
@@ -320,7 +418,108 @@ export class SurfaceAnimals implements Entity {
       this.rescan = true;
     }
     if (!viewFreeze.enabled && (this.rescan || this.camera.distanceTo(this.lastScan) > SCAN_DISTANCE)) this.scan();
+    this.threaten();
     this.draw();
+  }
+
+  /** Poses animal `k` of `cell` at `t` into `pose` (its herd's walk, its panic, its alertness); returns its panic phase. */
+  private poseAnimal(cell: HerdCell, k: number, t: number, pose: AnimalPose): PanicPhase {
+    cell.path!.pose(k, t, pose);
+    const panic = this.panics.get(cell.key);
+    const phase = panic ? panic.apply(cell.path!, k, t, pose) : 'none';
+    pose.graze *= 1 - cell.alert;
+    return phase;
+  }
+
+  /**
+   * The herds near the threat look up at it (out to the alert distance) and
+   * bolt from it (within the flight distance), away from it and scattering a
+   * little, then watch it until it has gone (gen/panic.ts). Panics that are
+   * over are forgotten.
+   */
+  private threaten(): void {
+    const t = this.clock.renderTime;
+    const step = t - this.lastTime;
+    const dt = step > 0 && step < 0.5 ? step : 0;
+    this.lastTime = t;
+    for (const [key, panic] of this.panics) if (panic.over(t)) this.panics.delete(key);
+    const threat = this.threat;
+    if (threat) this.object.worldToLocal(threat.getWorldPosition(this.threatAt));
+    const at = threat ? this.threatAt : null;
+    for (const cell of this.cells.values()) this.threatenCell(cell, at, t, dt);
+    for (const cell of this.released.values()) this.threatenCell(cell, at, t, dt);
+  }
+
+  private threatenCell(cell: HerdCell, at: THREE.Vector3 | null, t: number, dt: number): void {
+    const { herd, path, species: s } = cell;
+    if (!herd || !path || !s) return;
+    const p = panicParams;
+    const alertRadius = p.fleeRadius * p.alertFactor;
+    let nearest = Infinity;
+    let first = -1;
+    let cx = 0;
+    let cy = 0;
+    let cz = 0;
+    let n = 0;
+    if (at && at.distanceTo(cell.centre) < cell.bound + alertRadius + p.fleeRadius * p.fleeFactor + s.length * 2) {
+      const { pose, plan } = this;
+      for (let k = 0; k < herd.count; k++) {
+        if (cell.gone[k] !== HERE) continue;
+        this.poseAnimal(cell, k, t, pose);
+        let r = this.ground(pose);
+        if (plan.sea && r < plan.radius) r = plan.radius;
+        const x = pose.x * r;
+        const y = pose.y * r;
+        const z = pose.z * r;
+        // From the edge of its body, about.
+        const d = Math.hypot(x - at.x, y - at.y, z - at.z) - 0.5 * s.length * cell.scales[k]!;
+        cx += x;
+        cy += y;
+        cz += z;
+        n++;
+        if (d < nearest) {
+          nearest = d;
+          first = k;
+          this.entry.set(x, y, z);
+        }
+      }
+    }
+    const was = cell.alert;
+    cell.alert += ((nearest < alertRadius ? 1 : 0) - cell.alert) * Math.min(1, dt * 3);
+    if (n === 0 || !at) return;
+    let panic = this.panics.get(cell.key);
+    if (nearest < alertRadius) panic?.hold(t);
+    if (nearest < p.fleeRadius) {
+      // Away from the threat, from the herd's middle (or the nearest animal, if it's right under the threat), along the ground at home.
+      let vx = cx / n - at.x;
+      let vy = cy / n - at.y;
+      let vz = cz / n - at.z;
+      const { e1, e2 } = path;
+      let ax = vx * e1.x + vy * e1.y + vz * e1.z;
+      let ay = vx * e2.x + vy * e2.y + vz * e2.z;
+      if (Math.hypot(ax, ay) < 0.2 * s.length) {
+        vx = this.entry.x - at.x;
+        vy = this.entry.y - at.y;
+        vz = this.entry.z - at.z;
+        ax = vx * e1.x + vy * e1.y + vz * e1.z;
+        ay = vx * e2.x + vy * e2.y + vz * e2.z;
+      }
+      const l = Math.hypot(ax, ay);
+      if (l < 1e-6) {
+        ax = 1;
+        ay = 0;
+      } else {
+        ax /= l;
+        ay /= l;
+      }
+      if (!panic) this.panics.set(cell.key, (panic = new HerdPanic(herd.seed, herd.count, path.gait)));
+      if (panic.startle(t, ax, ay)) this.event('startle', cell, first, this.entry, panic.startles, t);
+    } else if (was < 0.5 && cell.alert >= 0.5 && !panic?.fleeing(t)) this.event('alert', cell, first, this.entry, 0, t);
+  }
+
+  private event(kind: AnimalEvent['kind'], cell: HerdCell, member: number, at: THREE.Vector3, startle: number, time: number): void {
+    // Kept for one frame; nothing reads them in the labs, so at most a frame's worth.
+    if (this.events.length < 64) this.events.push({ kind, cell, member, x: at.x, y: at.y, z: at.z, startle, time });
   }
 
   /** The herd cells in reach of the camera, made a few per frame; far ones dropped. */
@@ -391,6 +590,8 @@ export class SurfaceAnimals implements Entity {
       drawn: new Float32Array(count * 3).fill(NaN),
       scales,
       poses: Array.from({ length: count }, () => ({ x: 0, y: 0, z: 0, hx: 0, hy: 0, hz: 1, cycle: 0, stride: 0, trot: 0, graze: 0, idle: 0 })),
+      panic: new Uint8Array(count),
+      alert: 0,
     };
   }
 
@@ -400,7 +601,7 @@ export class SurfaceAnimals implements Entity {
     const R = plan.radius;
     for (const row of this.batches) for (const b of row) b.count = 0;
     for (const { row } of this.foreign.values()) for (const b of row) b.count = 0;
-    this.counts.walking = this.counts.grazing = this.counts.drawn = 0;
+    this.counts.walking = this.counts.grazing = this.counts.drawn = this.counts.fleeing = 0;
     // The view's frustum in the body frame (none while the view is frozen: everything in reach is posed, to see from outside).
     const cam = this.cameraSource;
     this.viewProjection.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse).multiply(this.object.matrixWorld);
@@ -431,7 +632,7 @@ export class SurfaceAnimals implements Entity {
     if (!viewFreeze.enabled && !this.frustum.intersectsSphere(this.sphere)) return;
     for (let k = 0; k < herd.count; k++) {
       if (cell.gone[k] !== HERE) continue;
-      path.pose(k, t, pose);
+      const phase = PANIC_CODES[this.poseAnimal(cell, k, t, pose)];
       if (pose.x * camera.x + pose.y * camera.y + pose.z * camera.z < cosHorizon) continue;
       let r = this.ground(pose);
       if (plan.sea && r < R) r = R;
@@ -442,6 +643,8 @@ export class SurfaceAnimals implements Entity {
       const dist = Math.hypot(px - camera.x, py - camera.y, pz - camera.z) / (s.length * scale * range);
       if (dist > ANIMAL_LODS[ANIMAL_LODS.length - 1]!) continue;
       Object.assign(cell.poses[k]!, pose);
+      cell.panic[k] = phase;
+      if (phase === FLEEING) this.counts.fleeing++;
       cell.drawn[k * 3] = px;
       cell.drawn[k * 3 + 1] = py;
       cell.drawn[k * 3 + 2] = pz;
@@ -545,10 +748,11 @@ export class SurfaceAnimals implements Entity {
   herdPositions(): THREE.Vector3[] {
     const out: { p: THREE.Vector3; d: number }[] = [];
     const t = this.clock.renderTime;
+    const pose = this.pose;
     for (const cell of this.cells.values()) {
       const k = cell.gone.indexOf(HERE);
       if (!cell.path || k < 0) continue;
-      const pose = cell.path.pose(k, t, this.pose);
+      this.poseAnimal(cell, k, t, pose);
       let r = this.ground(pose);
       if (this.plan.sea && r < this.plan.radius) r = this.plan.radius;
       const p = new THREE.Vector3(pose.x, pose.y, pose.z).multiplyScalar(r);
@@ -604,7 +808,21 @@ export class SurfaceAnimals implements Entity {
     hit.species = cell.species!;
     hit.scale = cell.scales[k]!;
     hit.distance = distance;
-    hit.doing = p.stride > 0.05 ? (p.trot > 0.5 ? 'trotting' : 'walking') : p.graze > 0.3 ? 'grazing' : 'resting';
+    const panic = cell.panic[k];
+    hit.doing =
+      panic === FLEEING
+        ? 'fleeing'
+        : panic === WATCHING && p.stride <= 0.05
+          ? 'watching you'
+          : p.stride > 0.05
+            ? p.trot > 0.5
+              ? 'trotting'
+              : 'walking'
+            : p.graze > 0.3
+              ? 'grazing'
+              : cell.alert > 0.5
+                ? 'on the alert'
+                : 'resting';
     hit.origin = cell.origin;
     hit.speciesKey = cell.speciesKey;
     hit.position.set(cell.drawn[k * 3]!, cell.drawn[k * 3 + 1]!, cell.drawn[k * 3 + 2]!);
@@ -666,6 +884,10 @@ export class SurfaceAnimals implements Entity {
     this.scene.add(o);
     this.held.add(id);
     cell.gone[k] = HELD;
+    // It cries out, and the rest of its herd bolts from where it was taken.
+    this.entry.set(x, cell.drawn[k * 3 + 1]!, cell.drawn[k * 3 + 2]!);
+    this.event('distress', cell, k, this.entry, 0, this.clock.renderTime);
+    this.scatterFrom(cell, this.entry);
     const changes = this.changes;
     let live = true;
     // The cell may have been dropped and made again since: find it afresh.
@@ -694,6 +916,53 @@ export class SurfaceAnimals implements Entity {
         mark(HERE);
       },
     };
+  }
+
+  /** Startles a herd away from `from` (body frame), if any of the rest of it is drawn. */
+  private scatterFrom(cell: HerdCell, from: THREE.Vector3): void {
+    const { herd, path } = cell;
+    if (!herd || !path || herd.count < 2) return;
+    let cx = 0;
+    let cy = 0;
+    let cz = 0;
+    let n = 0;
+    let first = -1;
+    let best = Infinity;
+    for (let k = 0; k < herd.count; k++) {
+      const x = cell.drawn[k * 3]!;
+      if (cell.gone[k] !== HERE || Number.isNaN(x)) continue;
+      const y = cell.drawn[k * 3 + 1]!;
+      const z = cell.drawn[k * 3 + 2]!;
+      cx += x;
+      cy += y;
+      cz += z;
+      n++;
+      const d = Math.hypot(x - from.x, y - from.y, z - from.z);
+      if (d < best) {
+        best = d;
+        first = k;
+      }
+    }
+    if (n === 0) return;
+    const vx = cx / n - from.x;
+    const vy = cy / n - from.y;
+    const vz = cz / n - from.z;
+    const { e1, e2 } = path;
+    let ax = vx * e1.x + vy * e1.y + vz * e1.z;
+    let ay = vx * e2.x + vy * e2.y + vz * e2.z;
+    const l = Math.hypot(ax, ay);
+    if (l < 1e-6) {
+      ax = 1;
+      ay = 0;
+    } else {
+      ax /= l;
+      ay /= l;
+    }
+    const t = this.clock.renderTime;
+    let panic = this.panics.get(cell.key);
+    if (!panic) this.panics.set(cell.key, (panic = new HerdPanic(herd.seed, herd.count, path.gait)));
+    // The alarm from whichever of the others is nearest.
+    if (panic.startle(t, ax, ay)) this.event('startle', cell, first, from, panic.startles, t);
   }
 
   dispose(): void {

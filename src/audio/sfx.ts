@@ -1,5 +1,6 @@
 import type { AmbientCue, LoopCue, SoundCue } from './cues';
 import type { SoundHandle } from './CuePlayer';
+import type { SynthOutput } from './animalSynth';
 
 /** Cues that play once. */
 export type OneShotCue = Exclude<SoundCue, LoopCue | AmbientCue>;
@@ -43,4 +44,10 @@ export interface SoundEffects {
    * Stop it when its owner goes away.
    */
   ambient(cue: AmbientCue): AmbientSound;
+  /**
+   * Where to synthesise sounds of the game's own making (the animals'
+   * calls, audio/animalSynth.ts): the running context and the Effects
+   * channel; null while audio is locked or suspended, like `play`.
+   */
+  synth(): SynthOutput | null;
 }
