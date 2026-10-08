@@ -126,34 +126,13 @@ export class AnimalLabPanel {
     e.add(s, 'weight', 0, 3, 0.05).name('abundance').onChange(changed);
 
     const form = s.form as Mutable<AnimalSpecies['form']>;
-    const b = this.folder('Body (shares of its length)');
+    // The body is one of the creature editor's random creatures, from the seed (🎲 Reroll draws another).
+    const b = this.folder('Body (a creature from the editor)');
     const plans: Record<string, BodyPlan> = {};
     for (const p of BODY_PLANS) plans[PLAN_LABELS[p]] = p;
     b.add(form, 'plan', plans).name('body plan').onChange((p: BodyPlan) => void lab.setBodyPlan(p));
-    b.add(form, 'seed', 0, 0xffffff, 1).onChange(changed);
-    b.add(form, 'bodyDepth', 0.1, 0.7, 0.01).name('body depth').onChange(changed);
-    b.add(form, 'bodyWidth', 0.4, 1.6, 0.01).name('width / depth').onChange(changed);
-    b.add(form, 'chest', 0.5, 2, 0.01).name('chest / hips').onChange(changed);
-    b.add(form, 'hump', 0, 1, 0.01).onChange(changed);
-    b.add(form, 'legLength', 0.15, 1.5, 0.01).name('leg length').onChange(changed);
-    b.add(form, 'legThickness', 0.03, 0.25, 0.005).name('leg radius / leg length').onChange(changed);
-    b.add(form, 'neckLength', 0, 1.2, 0.01).name('neck length').onChange(changed);
-    b.add(form, 'neckAngle', -10, 85, 1).name('neck angle°').onChange(changed);
-    b.add(form, 'headSize', 0.1, 0.5, 0.01).name('head length').onChange(changed);
-    b.add(form, 'snout', 0, 0.8, 0.01).name('snout share').onChange(changed);
-    b.add(form, 'tailLength', 0, 1.6, 0.01).name('tail length').onChange(changed);
-    b.add(form, 'tailThickness', 0.05, 0.8, 0.01).name('tail thickness').onChange(changed);
-    b.add(form, 'tailRaise', -60, 80, 1).name('tail raised°').onChange(changed);
-    b.add(form, 'arms', 0, 1, 0.01).name('arms (two legs)').onChange(changed);
-
-    const x = this.folder('Features');
-    x.add(form, 'horns', 0, 2, 1).name('pairs of horns').onChange(changed);
-    x.add(form, 'hornLength', 0.1, 2.5, 0.01).name('horn length / head').onChange(changed);
-    x.add(form, 'hornCurve', -1.5, 1.5, 0.01).name('horns curve back (−) / forward (+)').onChange(changed);
-    x.add(form, 'ears', 0, 1.5, 0.01).name('ears (antennae)').onChange(changed);
-    x.add(form, 'crest', 0, 1.5, 0.01).name('crest of spines').onChange(changed);
-    x.add(form, 'eyeSize', 0.05, 0.6, 0.005).name('eye size (of the skull)').onChange(changed);
-    x.add(form, 'eyesForward', 0, 1, 0.01).name('eyes: sides (prey) → front (hunter)').onChange(changed);
+    b.add(form, 'seed', 0, 0xffffff, 1).name('body seed').onChange(changed);
+    b.add(form, 'legGirth', 0.5, 2, 0.01).name('leg girth (size, gravity)').onChange(changed);
 
     const c = this.folder('Coat');
     c.addColor(form, 'color').name('back').onChange(changed);

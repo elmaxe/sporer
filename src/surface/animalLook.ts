@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { COAT_PATTERNS, type AnimalSkeleton, type Vec3 } from '../gen/animalForm';
 import { animalGait, type AnimalSpecies } from '../gen/animals';
-import { growCreature, speciesDesign, type CreatureDesign, type GrownCreature } from '../gen/creature';
-import { MAX_RIG_LIMBS, creatureRig, rigVertices, type CreatureRig } from '../gen/creatureRig';
+import { MAX_RIG_LIMBS, rigVertices, type CreatureRig } from '../gen/creatureRig';
+import { forgetSpeciesBody, speciesBody } from '../gen/speciesBody';
 import { DUTY_FACTOR } from '../gen/creatureMotion';
 import { groundDepthPass } from '../world/groundDepth';
 import { ANIMAL_LOD_COUNT, buildAnimalMesh, linearRgb, type AnimalMeshData } from './animalMesh';
@@ -31,41 +31,17 @@ import { FADE_START, LOD_TINTS, TINT_MIX, fadeWindow } from './plantLook';
  */
 export const ANIMAL_LODS: readonly number[] = [15, 40, 110];
 
-/** A species as a creature-editor creature: its design, grown at rest, and the rig its walk is played from. */
-export interface SpeciesCreature {
-  readonly design: CreatureDesign;
-  readonly grown: GrownCreature;
-  readonly rig: CreatureRig;
-}
-
-/** Each species' creature (grown once per species object). */
-const creatures = new WeakMap<AnimalSpecies, SpeciesCreature>();
-
-/**
- * A species' body: one of the creature editor's random creatures
- * (gen/creature.ts `speciesDesign`: from the species' seed, with its body
- * plan, coat and size), so the game's animals are the editor's creatures,
- * built and walking exactly as they do there.
- */
-export function speciesCreature(s: AnimalSpecies): SpeciesCreature {
-  let c = creatures.get(s);
-  if (!c) {
-    const design = speciesDesign(s.form, s.length, s.name);
-    const grown = growCreature(design);
-    c = { design, grown, rig: creatureRig(grown) };
-    creatures.set(s, c);
-  }
-  return c;
-}
+/** A species' body (gen/speciesBody.ts): the creature editor's creature, grown, and its rig. */
+export const speciesCreature = speciesBody;
 
 /** A species' skeleton, at rest. */
 export function animalSkeleton(s: AnimalSpecies): AnimalSkeleton {
-  return speciesCreature(s).grown.skeleton;
+  return speciesBody(s).grown.skeleton;
 }
 
 /** Drops a species' cached body (after editing it in place, as the animal lab does). */
 export function forgetAnimal(s: AnimalSpecies): void {
-  creatures.delete(s);
+  forgetSpeciesBody(s);
 }
 
 export function animalMeshData(s: AnimalSpecies, lod: number): AnimalMeshData {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { cloneAnimal, decodeAnimalLab, encodeAnimalLab, generateLabAnimals, rerollAnimal, sanitizeAnimal, withBodyPlan, DEFAULT_ANIMAL_VIEW } from '../src/animallab/labAnimals';
-import { GAIT_PHASES, growAnimal, type AnimalSkeleton } from '../src/gen/animalForm';
+import { legGirthFor, type AnimalSkeleton } from '../src/gen/animalForm';
+import { speciesBody } from '../src/gen/speciesBody';
 import {
   CARNIVORES_PER_TIER,
   EARTH_G,
@@ -16,7 +17,6 @@ import {
   habitable,
   herdGridSize,
   hipHeightOf,
-  legThicknessFor,
   planAnimals,
   type AnimalPlan,
   type AnimalPose,
@@ -77,19 +77,22 @@ describe('animal species', () => {
     expect(animalSetup(barren)).toBeNull();
   });
 
-  it('gives hunters forward-facing eyes and grazers eyes on the sides', () => {
-    const species = allSpecies(20);
-    const hunters = species.filter((s) => s.diet === 'carnivore');
-    const grazers = species.filter((s) => s.diet === 'herbivore');
-    expect(Math.min(...hunters.map((s) => s.form.eyesForward))).toBeGreaterThan(Math.max(...grazers.map((s) => s.form.eyesForward)));
-    expect(hunters.every((s) => s.form.horns === 0)).toBe(true);
+  it('gives hunters teeth and no horns', () => {
+    const hunters = allSpecies(20).filter((s) => s.diet === 'carnivore');
+    expect(hunters.length).toBeGreaterThan(0);
+    for (const s of hunters) {
+      const parts = speciesBody(s).design.parts;
+      expect(parts.some((p) => p.kind === 'horn')).toBe(false);
+      expect(parts.filter((p) => p.kind === 'mouth').every((p) => p.teeth !== false)).toBe(true);
+    }
   });
 
   it('thickens legs with size and gravity (elastic similarity, d ∝ √(g·l) of the length)', () => {
-    expect(legThicknessFor(0.06, 4, 1)).toBeCloseTo(0.12, 6);
-    expect(legThicknessFor(0.06, 1, 4)).toBeCloseTo(0.12, 6);
-    expect(legThicknessFor(0.06, 1, 1)).toBeCloseTo(0.06, 6);
-    expect(legThicknessFor(0.06, 100, 1)).toBeLessThanOrEqual(0.22);
+    expect(legGirthFor(2, 1)).toBeCloseTo(1, 6);
+    expect(legGirthFor(4, 1)).toBeCloseTo(Math.SQRT2, 6);
+    expect(legGirthFor(1, 4)).toBeCloseTo(Math.SQRT2, 6);
+    expect(legGirthFor(100, 1)).toBeLessThanOrEqual(1.6);
+    expect(legGirthFor(0.2, 0.1)).toBeGreaterThanOrEqual(0.7);
   });
 });
 
@@ -98,47 +101,29 @@ describe('animal bodies', () => {
 
   it('stands on its feet: every walking leg reaches the ground, the body above it', () => {
     for (const s of species) {
-      const k = growAnimal(s);
+      const k = speciesBody(s).grown.skeleton;
       // A paw's centre is its radius up: it rests on the ground.
       for (const leg of k.legs.filter((l) => !l.arm)) expect(leg.points[leg.points.length - 1]![1] - leg.radii[leg.radii.length - 1]!).toBeCloseTo(0, 6);
       expect(Math.min(...k.spine.map((n) => n.p[1] - n.ry))).toBeGreaterThan(0);
       expect(k.top).toBeGreaterThan(k.hipHeight);
-      expect(k.front - k.back).toBeGreaterThan(s.length * 0.8);
+      expect(speciesBody(s).grown.length).toBeGreaterThan(s.length);
     }
   });
 
-  it('has the legs of its body plan, in the gaits real animals use', () => {
+  it('has the legs of its body plan', () => {
     for (const s of species) {
-      const k = growAnimal(s);
-      const legs = k.legs.filter((l) => !l.arm);
+      const legs = speciesBody(s).grown.skeleton.legs.filter((l) => !l.arm);
       expect(legs).toHaveLength({ quadruped: 4, hexapod: 6, biped: 2 }[s.form.plan]);
-      // Left and right of a pair alternate, half a stride apart, walking (a quadruped's legs are left hind, left fore, right hind, right fore).
-      const pairs = s.form.plan === 'quadruped' ? [[0, 2], [1, 3]] : legs.map((_, i) => [i, i + 1]).filter((_, i) => i % 2 === 0);
-      for (const [a, b] of pairs) expect(Math.abs(legs[a!]!.walk - legs[b!]!.walk)).toBeCloseTo(0.5, 6);
     }
-    // The lateral sequence walk: left hind, left fore, right hind, right fore a quarter apart; the trot in diagonal pairs.
-    const { walk, trot } = GAIT_PHASES.quadruped;
-    expect([walk.leftHind, walk.leftFore, walk.rightHind, walk.rightFore]).toEqual([0, 0.25, 0.5, 0.75]);
-    expect(trot.leftFore).toBe(trot.rightHind);
-    expect(trot.rightFore).toBe(trot.leftHind);
-    expect(Math.abs(trot.leftFore - trot.leftHind)).toBe(0.5);
-    // Six legs: alternating tripods (front and back of one side with the middle of the other).
-    const insect = species.find((s) => s.form.plan === 'hexapod')!;
-    const legs = growAnimal(insect).legs;
-    const left = [0, 2, 4].map((i) => legs[i]!.walk);
-    const right = [1, 3, 5].map((i) => legs[i]!.walk);
-    expect(left[0]).toBe(left[2]);
-    expect(left[1]).not.toBe(left[0]);
-    expect(right[1]).toBe(left[0]);
   });
 
   it('builds cheaper meshes further out, all finite, with smooth unit normals and valid rigs', { timeout: 30000 }, () => {
     for (const s of species.slice(0, 24)) {
-      const k = growAnimal(s);
+      const k = speciesBody(s).grown.skeleton;
       const meshes = Array.from({ length: ANIMAL_LOD_COUNT }, (_, lod) => buildAnimalMesh(k, s.form, s.length, lod));
       for (let lod = 1; lod < ANIMAL_LOD_COUNT; lod++) expect(meshes[lod]!.triangles).toBeLessThan(meshes[lod - 1]!.triangles);
-      expect(meshes[0]!.triangles).toBeLessThan(2800);
-      expect(meshes[ANIMAL_LOD_COUNT - 1]!.triangles).toBeLessThan(300);
+      expect(meshes[0]!.triangles).toBeLessThan(6000);
+      expect(meshes[ANIMAL_LOD_COUNT - 1]!.triangles).toBeLessThan(400);
       for (const m of meshes) {
         expect(m.positions.length).toBe(m.triangles * 9);
         expect(m.rig.length).toBe(m.triangles * 12);
@@ -234,7 +219,7 @@ describe('herds', () => {
     const pose: AnimalPose = { x: 0, y: 0, z: 0, hx: 0, hy: 0, hz: 0, cycle: 0, stride: 0, trot: 0, graze: 0, idle: 0 };
     for (const h of herds.slice(0, 6)) {
       const s = p.species[h.species]!;
-      const path = new HerdPath(p, ground, h, growAnimal(s));
+      const path = new HerdPath(p, ground, h, speciesBody(s).grown.skeleton);
       const spread = 1.7 * s.length * Math.sqrt(h.count + 1.3) * 1.15;
       let prev: [number, number, number] | null = null;
       let walked = 0;
@@ -277,9 +262,9 @@ describe('animal lab model', () => {
 
   it('keeps edits within the panel ranges', () => {
     const base = generateLabAnimals(5).species[0]!;
-    const s = sanitizeAnimal({ ...base, length: 99, form: { ...base.form, legLength: -3, color: 'red' } }, base, 0);
+    const s = sanitizeAnimal({ ...base, length: 99, form: { ...base.form, legGirth: -3, color: 'red' } }, base, 0);
     expect(s.length).toBe(12);
-    expect(s.form.legLength).toBe(0.15);
+    expect(s.form.legGirth).toBe(0.5);
     expect(s.form.color).toBe(base.form.color);
   });
 

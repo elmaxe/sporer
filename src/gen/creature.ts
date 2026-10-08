@@ -1,5 +1,5 @@
-import { COAT_PATTERNS, growAnimal, type AnimalForm, type AnimalSkeleton, type BodyPlan, type CoatPattern, type Eye, type Leg, type Mouth, type SpineNode, type Spike, type Vec3 } from './animalForm';
-import { animalGait } from './animals';
+import { COAT_PATTERNS, type AnimalForm, type Diet, type AnimalSkeleton, type BodyPlan, type CoatPattern, type Eye, type Leg, type Mouth, type SpineNode, type Spike, type Vec3 } from './animalForm';
+import { animalGait } from './gait';
 import { hslToHex } from './color';
 import { REST_POSE, bodyBob, breath, dutyFactor, footPath, legPhase, solveTwoBone, spineSway, type CreaturePose } from './creatureMotion';
 import { Rng } from './rng';
@@ -595,35 +595,14 @@ function growSpike(frames: readonly SpineFrame[], part: CreaturePart, theta: num
 }
 
 /**
- * The `AnimalForm` the mesh builder and material read (its colours and
- * pattern; the body numbers are unused, the skeleton is already grown).
+ * The `AnimalForm` the mesh builder and material read (its coat; the skeleton is already grown).
  */
 export function creatureForm(design: CreatureDesign): AnimalForm {
   const p = design.paint;
   return {
     plan: 'quadruped',
     seed: design.seed,
-    bodyDepth: 0.4,
-    bodyWidth: 1,
-    chest: 1,
-    hump: 0,
-    legLength: 0.4,
-    legThickness: 0.12,
-    neckLength: 0.1,
-    neckAngle: 30,
-    headSize: 0.35,
-    snout: 0.2,
-    tailLength: 0.4,
-    tailThickness: 0.3,
-    tailRaise: 0,
-    horns: 0,
-    hornLength: 0.4,
-    hornCurve: 0,
-    ears: 0,
-    crest: 0,
-    eyeSize: 0.3,
-    eyesForward: 0.5,
-    arms: 0,
+    legGirth: 1,
     pattern: p.pattern,
     patternScale: p.patternScale,
     color: p.base,
@@ -895,13 +874,19 @@ const PLAN_BODIES: Record<BodyPlan, { postures: readonly Posture[]; legPairs: nu
 
 /**
  * A planet species' body: a random creature from the creature editor
- * (`randomCreature`, from the species' seed) with the species' body plan,
- * its coat, and its size (the spine about one and a half times its head and
- * body length, as the generated animals' tails and necks make it).
+ * (`randomCreature`, from the species' seed) with the species' body plan
+ * and diet (a hunter has teeth and no horns),
+ * its coat, its size (the spine about one and a half times its head and
+ * body length) and its legs' girth.
  */
-export function speciesDesign(form: AnimalForm, length: number, name = 'Creature'): CreatureDesign {
+export function speciesDesign(form: AnimalForm, length: number, name = 'Creature', diet: Diet = 'herbivore'): CreatureDesign {
   const plan = PLAN_BODIES[form.plan];
   const d = randomCreature(form.seed, plan);
+  // Hunters bare their teeth and grow no horns.
+  if (diet === 'carnivore') {
+    d.parts = d.parts.filter((p) => p.kind !== 'horn');
+    for (const p of d.parts) if (p.kind === 'mouth') p.teeth = true;
+  }
   let along = 0;
   for (let i = 1; i < d.spine.length; i++) along += Math.hypot(d.spine[i]!.y - d.spine[i - 1]!.y, d.spine[i]!.z - d.spine[i - 1]!.z);
   const k = (length * 1.5) / Math.max(1e-3, along);
@@ -909,7 +894,11 @@ export function speciesDesign(form: AnimalForm, length: number, name = 'Creature
     v.y *= k;
     v.z *= k;
     v.r *= k;
+    // Clear of the ground (the editor lets a tail drag through it; a herd walks on it).
+    v.y = Math.max(v.y, v.r * 1.08);
   }
+  // Stockier legs for big animals and heavy worlds.
+  for (const p of d.parts) if (p.kind === 'leg') p.size *= form.legGirth;
   return {
     ...d,
     name,
@@ -946,56 +935,6 @@ export function randomPaint(rng: Rng): CreaturePaint {
     patternScale: rng.range(1, 2.5),
     accent: hslToHex(rng.range(20, 45), rng.range(0.15, 0.4), rng.range(0.6, 0.82)),
     eye: hslToHex(rng.range(0, 360), rng.range(0.55, 0.9), rng.range(0.3, 0.5)),
-  };
-}
-
-/**
- * A creature made from one of the game's generated animals (gen/animalForm.ts):
- * its spine thinned to vertebrae, its legs, eyes, horns, ears and crest
- * turned into parts at the same places, its coat as paint. A way into the
- * editor from any species on any planet.
- */
-export function designFromAnimal(form: AnimalForm, length: number, name = 'Creature'): CreatureDesign {
-  const k: AnimalSkeleton = growAnimal({ length, form });
-  const nodes = k.spine;
-  const count = Math.min(MAX_VERTEBRAE - 2, Math.max(MIN_VERTEBRAE + 3, Math.round(nodes.length / 2)));
-  const spine: Vertebra[] = [];
-  for (let i = 0; i < count; i++) {
-    const q = nodes[Math.round((i / (count - 1)) * (nodes.length - 1))]!;
-    spine.push({ y: q.p[1], z: q.p[2], r: q.ry, w: q.rx / q.ry });
-  }
-  tidySpine(spine);
-  const frames = spineFrames(sampleSpine(spine));
-  const parts: CreaturePart[] = [];
-  const at = (p: Vec3) => anchorOf(frames, p);
-  for (const leg of k.legs) {
-    const hip = leg.points[0]!;
-    if (hip[0] < 0) continue;
-    const foot = leg.points[leg.points.length - 1]!;
-    const a = at(hip);
-    const h = Math.max(0.05, hip[1]);
-    parts.push({ kind: leg.arm ? 'arm' : 'leg', s: a.s, theta: Math.max(1.4, Math.abs(a.theta)), size: 1, tilt: leg.arm ? 0 : clamp((foot[2] - hip[2]) / (h * 0.5), -1, 1), spread: leg.arm ? 0.2 : clamp((foot[0] - hip[0]) / (h * 0.8), 0, 1), mirror: true });
-  }
-  for (const e of k.eyes) {
-    if (e.centre[0] < 0) continue;
-    const a = at(add(e.centre, e.look, e.radius));
-    parts.push({ kind: 'eye', s: a.s, theta: a.theta, size: 1.1, tilt: 0, spread: 0, mirror: true });
-  }
-  for (const sp of k.spikes) {
-    const base = sp.points[0]!;
-    if (base[0] < -1e-6) continue;
-    const kind: PartKind = sp.kind === 'crest' ? 'spike' : sp.kind;
-    const a = at(base);
-    parts.push({ kind, s: a.s, theta: Math.abs(a.theta), size: 0.8, tilt: kind === 'horn' ? -0.4 : 0, spread: 0, mirror: Math.abs(base[0]) > 1e-6 });
-  }
-  parts.push({ kind: 'mouth', s: 1 + CAP * 0.8, theta: Math.PI * 0.6, size: 0.7, tilt: 0.4, spread: 0.08, mirror: false });
-  return {
-    name,
-    seed: form.seed,
-    spine,
-    parts,
-    paint: { base: form.color, belly: form.belly, pattern: form.pattern, patternColor: form.patternColor, patternScale: form.patternScale, accent: form.accentColor, eye: form.eyeColor },
-    splats: [],
   };
 }
 

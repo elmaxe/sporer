@@ -18,7 +18,7 @@ function main(): void {
   const kit = {
     blob: defaultCreature,
     random: randomCreature,
-    animal: (seed: number, plan: 'quadruped' | 'hexapod' | 'biped' = 'quadruped') => speciesDesign(generateAnimalForm(new Rng(seed), plan, 'herbivore', (seed * 47) % 360), 4, `Species ${seed}`),
+    animal: (seed: number, plan: 'quadruped' | 'hexapod' | 'biped' = 'quadruped') => speciesDesign(generateAnimalForm(new Rng(seed), plan, (seed * 47) % 360), 4, `Species ${seed}`),
   };
   Object.assign(window, { creatureLab: lab, creatureKit: kit });
 }
