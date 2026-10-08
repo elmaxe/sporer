@@ -41,8 +41,22 @@ export interface Vertebra {
   w: number;
 }
 
-export type PartKind = 'leg' | 'arm' | 'eye' | 'mouth' | 'horn' | 'ear' | 'spike' | 'antenna';
-export const PART_KINDS: readonly PartKind[] = ['leg', 'arm', 'eye', 'mouth', 'horn', 'ear', 'spike', 'antenna'];
+export type BodyPartKind = 'leg' | 'arm' | 'eye' | 'mouth' | 'horn' | 'ear' | 'spike' | 'antenna';
+/**
+ * Accessories (Outfit mode): space gear and hats dragged onto the skin and
+ * moved and resized like a part, as Spore's outfitter has them; drawn by
+ * creaturelab/outfitLook.ts, not the body's mesh.
+ */
+export type GearKind = 'helmet' | 'goggles' | 'hat' | 'dish' | 'jetpack' | 'tank' | 'chest' | 'pad' | 'badge' | 'beacon';
+export type PartKind = BodyPartKind | GearKind;
+/** The Build palette. */
+export const PART_KINDS: readonly BodyPartKind[] = ['leg', 'arm', 'eye', 'mouth', 'horn', 'ear', 'spike', 'antenna'];
+/** The Outfit palette. */
+export const GEAR_KINDS: readonly GearKind[] = ['helmet', 'goggles', 'hat', 'dish', 'jetpack', 'tank', 'chest', 'pad', 'badge', 'beacon'];
+
+export function isGear(kind: PartKind): kind is GearKind {
+  return (GEAR_KINDS as readonly PartKind[]).includes(kind);
+}
 
 /** A part on the skin. */
 export interface CreaturePart {
@@ -97,6 +111,27 @@ export interface PaintSplat {
   hardness?: number;
 }
 
+/**
+ * What a space-faring creature wears over its whole body (Outfit mode), all
+ * in one colour scheme with its accessories: a suit over the torso (its span
+ * along the spine, sleeves down the limbs), boots on the feet and gloves on
+ * the hands.
+ */
+export interface CreatureOutfit {
+  suit: boolean;
+  /** The suit's span along the spine (0 the tail's tip, 1 the snout). */
+  suitFrom: number;
+  suitTo: number;
+  /** The suit carries on down the legs and arms. */
+  sleeves: boolean;
+  boots: boolean;
+  gloves: boolean;
+  /** The suit's and gear's colour, their trim, and their lights. */
+  color: string;
+  trim: string;
+  glow: string;
+}
+
 export interface CreatureDesign {
   name: string;
   /** Tail's tip first, snout last; z rises along it. */
@@ -106,6 +141,8 @@ export interface CreatureDesign {
   splats: PaintSplat[];
   /** The coat pattern's random stream. */
   seed: number;
+  /** Space clothes (none when unset). */
+  outfit?: CreatureOutfit;
 }
 
 // --- Vectors ---
@@ -701,6 +738,7 @@ export function cloneDesign(d: CreatureDesign): CreatureDesign {
 
 /** A part of kind `kind` at (s, θ) with its usual settings. */
 export function newPart(kind: PartKind, s: number, theta: number): CreaturePart {
+  if (isGear(kind)) return { kind, s, theta, size: 1, tilt: 0, spread: 0, mirror: kind === 'pad' || kind === 'beacon' || kind === 'goggles' };
   if (kind === 'mouth') return { kind, s, theta, size: 1, tilt: 0.4, spread: 0.12, mirror: false };
   return { kind, s, theta, size: 1, tilt: kind === 'horn' ? -0.4 : 0, spread: kind === 'leg' ? 0.15 : 0.2, mirror: true };
 }

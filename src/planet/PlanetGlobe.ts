@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { Entity } from '../core/Entity';
+import { now, type Defer } from '../core/jobs';
 import { surfaceNoise } from '../gen/craters';
 import { isGas, type PlanetConfig } from '../world/Planet';
 import { atmosphereLook } from '../gen/atmosphere';
@@ -73,7 +74,7 @@ export class PlanetGlobe implements Entity {
   /** Bodies with weather: the cloud layer's look, its storms and lightning (planet/Weather.ts draws the rain and bolts). */
   readonly weather: WeatherLook | null;
   /** Ringed bodies: the ring's rocks and ice up close. */
-  readonly rings: RingRocks | null;
+  rings: RingRocks | null = null;
   /** Icy bodies: snow, glacier ice, the frozen sea and lineae. */
   private readonly ice: IceLook | null;
   /** Water seas: the wind's waves on them. */
@@ -83,7 +84,7 @@ export class PlanetGlobe implements Entity {
   /** The sea (water, ice or lava), refined and culled like the ground. */
   private readonly water: LodSurface | null = null;
   /** Bodies with an atmosphere: its shell, in patches. */
-  private readonly air: SpherePatches | null = null;
+  private air: SpherePatches | null = null;
   /** The surface as drawn: radius (and colour) in a direction. */
   private readonly sample: SurfaceSampler;
   /** Worlds with a sea: the ground is never lower than its surface. */
@@ -106,6 +107,8 @@ export class PlanetGlobe implements Entity {
     /** The surface refines where this camera is. */
     private readonly camera: THREE.Camera,
     debug: Debug,
+    /** Where the rings, the air and the clouds are built and the first chunks made (see core/jobs.ts). */
+    defer: Defer = now,
   ) {
     const { seed, style } = config;
     const R = (this.radius = globeRadius(config.radius));
@@ -148,25 +151,31 @@ export class PlanetGlobe implements Entity {
       this.water = createWater(config.type, style.sea!, R, this.waves, this.sample, ice?.surface.frozenSea ? ice : null);
       this.object.add(this.water.object);
     }
-    if (config.rings) {
-      const sheet = createRings(config.rings, seed, PLANET_SCALE);
-      this.rings = new RingRocks(config.rings, seed, config.spin, PLANET_SCALE, debug);
-      this.rings.fadeSheet(sheet.material as THREE.Material);
-      this.object.add(sheet, this.rings.object);
-    } else {
-      this.rings = null;
+    const rings = config.rings;
+    if (rings) {
+      // Not once busted (see bust): there's nothing left to show it on.
+      defer(() => {
+        if (this.busted) return;
+        const sheet = createRings(rings, seed, PLANET_SCALE);
+        this.rings = new RingRocks(rings, seed, config.spin, PLANET_SCALE, debug);
+        this.rings.fadeSheet(sheet.material as THREE.Material);
+        this.object.add(sheet, this.rings.object);
+      });
     }
     // The same look as in the system view (in planet radii), so the two match across the zoom.
     const look = config.atmosphere && config.climate ? atmosphereLook(config.climate, config.radius) : null;
     this.ground = look ? new GroundDepth() : null;
     if (look) {
-      this.air = createAtmosphereShell(R, config.atmosphere!, look, { vector: this.sun, point: false, strength: this.sunStrength }, ATMOSPHERE_SEGMENTS, SHELL_PATCHES, this.ground);
-      this.object.add(this.air.object);
+      defer(() => {
+        if (this.busted) return;
+        this.air = createAtmosphereShell(R, config.atmosphere!, look, { vector: this.sun, point: false, strength: this.sunStrength }, ATMOSPHERE_SEGMENTS, SHELL_PATCHES, this.ground);
+        this.object.add(this.air.object);
+      });
     }
-    this.weather = gas ? null : createWeatherLook(config, this.lava?.activity ?? null);
-    if (this.weather) this.object.add(this.weather.createCloudLayer(1, CLOUD_SEGMENTS, { vector: this.sun, point: false, strength: this.sunStrength }, undefined, SHELL_PATCHES));
+    const weather = (this.weather = gas ? null : createWeatherLook(config, this.lava?.activity ?? null));
+    if (weather) defer(() => this.busted || this.object.add(weather.createCloudLayer(1, CLOUD_SEGMENTS, { vector: this.sun, point: false, strength: this.sunStrength }, undefined, SHELL_PATCHES)));
     scene.add(this.object);
-    this.update(0);
+    defer(() => this.update(0));
   }
 
   /**
@@ -263,10 +272,11 @@ export class PlanetGlobe implements Entity {
 
   /** Draws what the scene reads from textures, the ground's depth for the atmosphere and the sea's wave tiles: call before drawing the scene with `camera`. */
   /** Compiles the shaders of `renderDepth`'s passes (see GroundDepth.compile). */
-  compileDepth(renderer: THREE.WebGLRenderer, camera: THREE.Camera): void {
+  compileDepth(renderer: THREE.WebGLRenderer, camera: THREE.Camera, defer: Defer = now): void {
     if (this.busted) return;
-    this.ground?.compile(renderer, this.scene, camera);
-    this.waves?.compile(renderer);
+    this.ground?.compile(renderer, this.scene, camera, defer);
+    const waves = this.waves;
+    if (waves) defer(() => waves.compile(renderer));
   }
 
   renderDepth(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera): void {

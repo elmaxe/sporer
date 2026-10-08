@@ -1,11 +1,13 @@
 import { BODY_PLANS, COAT_PATTERNS, generateAnimalForm, type CoatPattern } from '../gen/animalForm';
-import { defaultCreature, randomCreature, randomPaint, speciesDesign, type CreaturePart, type PartKind, PART_KINDS } from '../gen/creature';
+import { defaultCreature, isGear, randomCreature, randomPaint, speciesDesign, type CreatureOutfit, type CreaturePart, type PartKind, GEAR_KINDS, PART_KINDS } from '../gen/creature';
+import { defaultOutfit, randomOutfitColors, suitSpan, suitUp, undress } from '../gen/creatureOutfit';
 import { Rng } from '../gen/rng';
 import type { CreatureLab, EditorMode } from './CreatureLab';
 
 /*
  * The creature editor's controls, plain DOM: a top bar (modes, undo, new
- * creatures, share), the parts palette on the left in Build mode, and an
+ * creatures, share), the parts palette on the left in Build mode (the
+ * gear's in Outfit mode), and an
  * inspector on the right for whatever is selected, the paint, or the walk
  * (with a live footfall diagram: one row per leg, dark while its foot is
  * on the ground, as gait diagrams are drawn).
@@ -20,11 +22,22 @@ const PART_LABELS: Record<PartKind, { icon: string; name: string; tip: string }>
   ear: { icon: '👂', name: 'Ear', tip: 'Flat lobes' },
   spike: { icon: '🔺', name: 'Spike', tip: 'Plates and spines, often along the back' },
   antenna: { icon: '📡', name: 'Antenna', tip: 'Long feelers with a bobble' },
+  helmet: { icon: '🫧', name: 'Helmet', tip: 'A glass bubble: on the head it takes in the whole head and snout, anywhere else the body there' },
+  goggles: { icon: '🥽', name: 'Goggles', tip: 'A pair, over the eyes' },
+  hat: { icon: '🎩', name: 'Top hat', tip: 'For formal occasions on other worlds; dropped inside a helmet it sits on top of the glass' },
+  dish: { icon: '📡', name: 'Radar dish', tip: 'A dish on a mast, listening for home' },
+  jetpack: { icon: '🚀', name: 'Jetpack', tip: 'Twin tanks for the back; the flames roar as it walks' },
+  tank: { icon: '🧯', name: 'Air tank', tip: 'One tank, lying along the body' },
+  chest: { icon: '🦺', name: 'Chest plate', tip: 'Armour with a row of lights' },
+  pad: { icon: '🛡', name: 'Shoulder pad', tip: 'Armour for shoulders and hips' },
+  badge: { icon: '⭐', name: 'Badge', tip: 'A glowing star for the crew' },
+  beacon: { icon: '🚨', name: 'Beacon', tip: 'A mast with a blinking light' },
 };
 
 const MODES: { mode: EditorMode; label: string }[] = [
   { mode: 'build', label: 'Build' },
   { mode: 'paint', label: 'Paint' },
+  { mode: 'outfit', label: 'Outfit' },
   { mode: 'play', label: 'Play' },
 ];
 
@@ -38,6 +51,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', text = ''):
 export class CreaturePanel {
   private readonly top = el('div', 'cr-top');
   private readonly palette = el('div', 'cr-palette');
+  private readonly gearPalette = el('div', 'cr-palette');
   private readonly inspector = el('div', 'cr-inspector');
   private readonly hint = el('div', 'cr-hint');
   private readonly modeButtons = new Map<EditorMode, HTMLButtonElement>();
@@ -54,9 +68,10 @@ export class CreaturePanel {
     root: HTMLElement,
     private readonly lab: CreatureLab,
   ) {
-    root.append(this.top, this.palette, this.inspector, this.hint);
+    root.append(this.top, this.palette, this.gearPalette, this.inspector, this.hint);
     this.buildTop();
-    this.buildPalette();
+    this.buildPalette(this.palette, 'Parts', PART_KINDS);
+    this.buildPalette(this.gearPalette, 'Accessories', GEAR_KINDS);
     lab.onChange = () => this.refresh();
     this.refresh();
     const tick = () => {
@@ -117,9 +132,9 @@ export class CreaturePanel {
     this.top.append(title, modes, actions);
   }
 
-  private buildPalette(): void {
-    this.palette.append(el('div', 'cr-palette-head', 'Parts'));
-    for (const kind of PART_KINDS) {
+  private buildPalette(palette: HTMLElement, title: string, kinds: readonly PartKind[]): void {
+    palette.append(el('div', 'cr-palette-head', title));
+    for (const kind of kinds) {
       const info = PART_LABELS[kind];
       const b = el('button', 'cr-part');
       b.title = `${info.tip}. Click, then click the body (Shift: place more), or drag it onto the body.`;
@@ -134,7 +149,7 @@ export class CreaturePanel {
         if (this.lab.placing === kind) this.lab.startPlacing(kind, false);
       });
       this.paletteButtons.set(kind, b);
-      this.palette.append(b);
+      palette.append(b);
     }
   }
 
@@ -158,19 +173,24 @@ export class CreaturePanel {
     for (const [m, b] of this.modeButtons) b.classList.toggle('on', lab.mode === m);
     for (const [k, b] of this.paletteButtons) b.classList.toggle('on', lab.placing === k);
     this.palette.hidden = lab.mode !== 'build';
+    this.gearPalette.hidden = lab.mode !== 'outfit';
     this.undoBtn.disabled = !lab.canUndo;
     this.redoBtn.disabled = !lab.canRedo;
     if (document.activeElement !== this.nameInput) this.nameInput.value = lab.design.name;
     const sel = lab.selection;
     const key = `${lab.mode}:${sel ? `${sel.kind}${sel.index}` : '-'}:${lab.design.parts.length}:${lab.design.spine.length}:${lab.placing ?? ''}:${lab.wireframe}:${lab.walking}`;
-    if (key !== this.inspectorKey || lab.mode === 'build') this.buildInspector(key);
+    if (key !== this.inspectorKey || lab.editing) this.buildInspector(key);
     this.hint.textContent =
       lab.mode === 'build'
         ? lab.placing
           ? `Move over the body to place the ${PART_LABELS[lab.placing].name.toLowerCase()}; click to stick it on (Shift: keep placing), Esc to cancel.`
-          : 'Drag the green dots (spine) to shape the body, wheel over one to fatten it (Shift: widen). Pull an end dot out to grow the spine. Drag a yellow dot to move a part, wheel to resize; drag the pink dots to pose knees and feet, elbows and hands. Drag empty space to turn the view.'
+          : 'Point at the creature to see its skeleton. Drag a vertebra of the spine to shape the body, wheel over one to fatten it (Shift: widen). Pull an end vertebra out to grow the spine. Drag a yellow dot to move a part, wheel to resize; drag the pink dots to pose knees and feet, elbows and hands. Drag empty space to turn the view.'
         : lab.mode === 'paint'
           ? 'Paint on the body with the brush; it paints both sides when mirrored. Pick the coat on the right.'
+          : lab.mode === 'outfit'
+            ? lab.placing
+              ? `Move over the body to place the ${PART_LABELS[lab.placing].name.toLowerCase()}; click to stick it on (Shift: keep placing), Esc to cancel.`
+              : 'Drag an accessory from the left onto the body. Grab one to move it, wheel over it to resize, drag it off the body to take it off. The suit, boots and gloves are on the right.'
           : 'WASD or the arrows: steer it (Shift trots). Space: walk on or stand. The legs step in a wave from back to front, the two sides half a stride apart; faster, the wave closes up into a trot.';
   }
 
@@ -188,6 +208,7 @@ export class CreaturePanel {
     const lab = this.lab;
     if (lab.mode === 'build') this.buildInspectorBuild();
     else if (lab.mode === 'paint') this.buildInspectorPaint();
+    else if (lab.mode === 'outfit') this.buildInspectorOutfit();
     else this.buildInspectorPlay();
   }
 
@@ -298,12 +319,68 @@ export class CreaturePanel {
       const s = this.section('Body');
       const legs = d.parts.filter((p) => p.kind === 'leg').reduce((n, p) => n + (p.mirror && Math.abs(Math.sin(p.theta)) > 0.06 ? 2 : 1), 0);
       s.append(el('div', 'cr-note', `${d.spine.length} vertebrae, ${d.parts.length} parts, ${legs} legs.`));
-      s.append(el('div', 'cr-note', 'Select a green dot (vertebra) or a yellow one (part) to edit it.'));
+      s.append(el('div', 'cr-note', 'Point at the creature to see its skeleton; select a vertebra or a part\'s yellow dot to edit it.'));
       const row = el('div', 'cr-buttons');
       this.button(row, '+ Vertebra at the snout', () => lab.addVertebra());
       s.append(row);
     }
     this.buildViewSection(true);
+  }
+
+  private buildInspectorOutfit(): void {
+    const lab = this.lab;
+    const d = lab.design;
+    const sel = lab.selection;
+    if (sel?.kind === 'part' && d.parts[sel.index] && isGear(d.parts[sel.index]!.kind)) {
+      this.buildInspectorBuild();
+      return;
+    }
+    // The outfit edited in place; made the first time something is switched on.
+    const o = (): CreatureOutfit => (d.outfit ??= { ...defaultOutfit(d), suit: false, boots: false, gloves: false });
+    const now = d.outfit;
+    const acc = this.section('Accessories');
+    const gear = d.parts.filter((p) => isGear(p.kind)).length;
+    acc.append(el('div', 'cr-note', `${gear === 0 ? 'None yet' : `${gear} on`}. Drag one from the left onto the body; grab it to move it, wheel over it to resize, drag it off the body to take it off. Click one for its settings.`));
+    const r2 = el('div', 'cr-buttons');
+    this.button(r2, '🧑‍🚀 Suit up', () => lab.setDesign(suitUp(d), false), 'The suit, boots and gloves, a helmet, a jetpack on the back, shoulder pads and a badge');
+    this.button(r2, 'Take it all off', () => lab.setDesign(undress(d), false));
+    acc.append(r2);
+    const s = this.section('Clothes');
+    this.check(s, 'Suit', () => now?.suit ?? false, (x) => {
+      const out = o();
+      out.suit = x;
+      // Fitted to the torso as it is now.
+      if (x) Object.assign(out, (({ from, to }) => ({ suitFrom: from, suitTo: to }))(suitSpan(d)));
+    }, () => (lab.changed(), lab.commit(), this.rebuild()));
+    if (now?.suit) {
+      this.slider(s, 'From', 0, 1, 0.005, () => now.suitFrom, (x) => (now.suitFrom = Math.min(x, now.suitTo - 0.02)));
+      this.slider(s, 'To', 0, 1, 0.005, () => now.suitTo, (x) => (now.suitTo = Math.max(x, now.suitFrom + 0.02)));
+      this.check(s, 'Sleeves down the limbs', () => now.sleeves, (x) => (now.sleeves = x));
+    }
+    this.check(s, 'Boots', () => now?.boots ?? false, (x) => (o().boots = x));
+    this.check(s, 'Gloves', () => now?.gloves ?? false, (x) => (o().gloves = x));
+
+    const c = this.section('Colours');
+    const shown = now ?? defaultOutfit(d);
+    this.color(c, 'Suit', () => shown.color, (x) => (o().color = x));
+    this.color(c, 'Trim', () => shown.trim, (x) => (o().trim = x));
+    this.color(c, 'Lights', () => shown.glow, (x) => (o().glow = x));
+    const row = el('div', 'cr-buttons');
+    this.button(row, '🎲 Colours', () => {
+      Object.assign(o(), randomOutfitColors(new Rng(Date.now() % 1e6)));
+      lab.changed();
+      lab.commit();
+      this.rebuild();
+    });
+    c.append(row);
+
+    this.buildViewSection(true);
+  }
+
+  /** Redraws the inspector now (a switch showed or hid its settings). */
+  private rebuild(): void {
+    this.inspectorKey = '';
+    this.refresh();
   }
 
   /** The camera's named views (in Build) and the wireframe switch (in every mode). */

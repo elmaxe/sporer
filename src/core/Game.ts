@@ -44,6 +44,12 @@ export class Game {
   private fadingFrom: Level | null = null;
   private fadeWeight = 1;
   private readonly crossfade = new Crossfade();
+  /**
+   * While crossfading, where each level left the shared camera as it drew. A level's entities that read the camera
+   * before its orbit control moves it (a planet's LOD and horizon culling, say) would otherwise read the other
+   * level's pose, in that level's space and scale; each level gets its own back instead.
+   */
+  private readonly poses = new Map<Level, { position: THREE.Vector3; quaternion: THREE.Quaternion }>();
   private readonly entities: Entity[] = [];
   private readonly fixedStep = new FixedStep(FIXED_DT);
   private lastTime = -1;
@@ -93,6 +99,7 @@ export class Game {
    */
   setCrossfade(from: Level | null, weight = 1): void {
     this.fadingFrom = from === this._level ? null : from;
+    if (!this.fadingFrom) this.poses.clear();
     this.fadeWeight = weight;
   }
 
@@ -166,13 +173,17 @@ export class Game {
     const from = this.fadingFrom;
     if (from) {
       // Each level moves the shared camera in its update, so update each right before drawing it.
+      this.restorePose(from);
       from.update(frameDt, alpha);
       from.render(this.renderer, this.viewCamera?.(from, this.camera) ?? this.camera);
+      this.savePose(from);
       this.crossfade.capture(this.renderer);
+      if (level) this.restorePose(level);
     }
     if (level) {
       level.update(frameDt, alpha);
       level.render(this.renderer, this.viewCamera?.(level, this.camera) ?? this.camera);
+      if (from) this.savePose(level);
     }
     if (from) {
       const solo = this.crossfadeSolo;
@@ -181,6 +192,21 @@ export class Game {
     this.afterFrame?.();
     this.debug.endFrame();
   };
+
+  private savePose(level: Level): void {
+    let pose = this.poses.get(level);
+    if (!pose) this.poses.set(level, (pose = { position: new THREE.Vector3(), quaternion: new THREE.Quaternion() }));
+    pose.position.copy(this.camera.position);
+    pose.quaternion.copy(this.camera.quaternion);
+  }
+
+  private restorePose(level: Level): void {
+    const pose = this.poses.get(level);
+    if (!pose) return;
+    this.camera.position.copy(pose.position);
+    this.camera.quaternion.copy(pose.quaternion);
+    this.camera.updateMatrixWorld();
+  }
 
   private resize = () => {
     const { clientWidth: w, clientHeight: h } = this.renderer.domElement.parentElement!;

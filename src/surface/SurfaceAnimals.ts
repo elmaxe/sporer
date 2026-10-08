@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
+import { now, type Defer } from '../core/jobs';
 import { HERD_CELL_SIZE, HOME_RANGE, PACK_RANGE_FACTOR, HerdPath, generateHerd, herdGridSize, type AnimalPlan, type AnimalPose, type AnimalSpecies, type HerdData } from '../gen/animals';
 import type { GroundRadius } from '../gen/plants';
 import { hashSeed } from '../gen/rng';
@@ -169,6 +170,8 @@ export class SurfaceAnimals implements Entity {
     debug: Debug,
     /** The planet's change list: removed animals stay gone, and those set down here roam it (none in the labs). */
     private readonly changes: SurfaceChanges | null = null,
+    /** Where the species' meshes are built (see core/jobs.ts). */
+    defer: Defer = now,
   ) {
     const R = plan.radius;
     const n = (this.gridSize = herdGridSize(R));
@@ -190,22 +193,25 @@ export class SurfaceAnimals implements Entity {
     this.tallest = longest * 2;
     // A herd strays from its cell's centre by the cell, its range and its spread.
     this.maxBound = HERD_CELL_SIZE * 0.8 + Math.max(...plan.species.map((s) => s.length * 1.7 * Math.sqrt(s.herdMax + 1))) + HOME_RANGE * PACK_RANGE_FACTOR;
-    this.geometries = plan.species.map((s) => Array.from({ length: ANIMAL_LOD_COUNT }, (_, lod) => createAnimalGeometry(s, lod)));
+    this.geometries = plan.species.map(() => []);
+    // A species at a time: its meshes are the costly part.
     for (const s of plan.species) {
-      const motion = animalMotion(s, plan.gravity);
-      const row: Batch[] = [];
-      for (let lod = 0; lod < ANIMAL_LOD_COUNT; lod++) {
-        const { material, uniforms } = createAnimalMaterial(lod, s, motion);
-        const geometry = this.geometries[s.index]![lod]!;
-        row.push({ ...this.createMesh(geometry, material, FIRST_CAPACITY), geometry, material, uniforms, lod, count: 0 });
-      }
-      this.batches.push(row);
+      defer(() => {
+        const motion = animalMotion(s, plan.gravity);
+        const row: Batch[] = [];
+        for (let lod = 0; lod < ANIMAL_LOD_COUNT; lod++) {
+          const { material, uniforms } = createAnimalMaterial(lod, s, motion);
+          const geometry = (this.geometries[s.index]![lod] = createAnimalGeometry(s, lod));
+          row.push({ ...this.createMesh(geometry, material, FIRST_CAPACITY), geometry, material, uniforms, lod, count: 0 });
+        }
+        this.batches[s.index] = row;
+      });
     }
     this.hit = { id: '', species: plan.species[0]!, scale: 1, distance: 0, doing: '', origin: null, speciesKey: null, position: new THREE.Vector3() };
     this.object.name = 'Animals';
     scene.add(this.object);
     addAnimalDebug(debug);
-    if (changes) for (const a of changes.releasedAnimals) this.release(a);
+    if (changes) for (const a of changes.releasedAnimals) defer(() => this.release(a));
   }
 
   /** An animal set down here that lives here now: recorded in the planet's change list and drawn roaming round where it landed. */

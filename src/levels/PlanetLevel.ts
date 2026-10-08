@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { now, type Defer } from '../core/jobs';
 import type { Debug } from '../core/Debug';
 import type { Input } from '../core/Input';
 import { ParticlePool } from '../cargo/CargoFx';
@@ -213,7 +214,7 @@ export class PlanetLevel extends Level implements ItemUser {
   ) {
     super();
     this.frame = this.add(new PlanetFrame(body, system.world.time, debug));
-    const globe = (this.globe = this.add(new PlanetGlobe(this.scene, body.config, this.frame, camera, debug)));
+    const globe = (this.globe = this.add(new PlanetGlobe(this.scene, body.config, this.frame, camera, debug, this.jobs.defer)));
     const busted = blastTime !== null;
     if (busted) {
       globe.bust(globe.radius * DEBRIS_REACH);
@@ -258,6 +259,7 @@ export class PlanetLevel extends Level implements ItemUser {
         this.frame,
         system.world.moons.filter((m) => m.parent === body),
         globe.sun,
+        this.jobs.defer,
       ),
     );
     this.hidden = [body, ...this.moons.moons];
@@ -333,12 +335,12 @@ export class PlanetLevel extends Level implements ItemUser {
     // After the volcanoes, so it hears them from where the shaken camera is.
     this.volcanoSounds = volcanoes ? this.add(new VolcanoSounds(camera, volcanoes, sfx, debug)) : null;
     const plantsSetup = busted ? null : plantSetup(config);
-    this.plants = plantsSetup ? this.add(new SurfaceEntities(this.scene, plantsSetup.plan, plantsSetup.ground, camera, changes, debug)) : null;
+    this.plants = plantsSetup ? this.add(new SurfaceEntities(this.scene, plantsSetup.plan, plantsSetup.ground, camera, changes, debug, this.jobs.defer)) : null;
     const rocks = busted ? null : rockSetup(config);
     this.rocks = rocks ? this.add(new GroundRocks(this.scene, rocks.plan, rocks.ground, camera, debug)) : null;
     this.buryPlants();
     const animalsSetup = busted ? null : animalSetup(config, plantsSetup);
-    this.animals = animalsSetup ? this.add(new SurfaceAnimals(this.scene, animalsSetup.plan, animalsSetup.ground, camera, this.frame, debug, changes)) : null;
+    this.animals = animalsSetup ? this.add(new SurfaceAnimals(this.scene, animalsSetup.plan, animalsSetup.ground, camera, this.frame, debug, changes, this.jobs.defer)) : null;
     // After the ship and the camera: its waves spread round where the ship is drawn this frame.
     this.radar = animalsSetup
       ? this.add(new Radar(this.scene, animalsSetup.plan, animalsSetup.ground, this.ship, camera, this.frame, sfx, () => switches.isOn('radar'), debug, changes))
@@ -703,10 +705,10 @@ export class PlanetLevel extends Level implements ItemUser {
     return out;
   }
 
-  override compile(renderer: THREE.WebGLRenderer, camera: THREE.Camera): void {
-    super.compile(renderer, camera);
-    this.globe.compileDepth(renderer, camera);
-    this.map.compile(renderer);
+  override compile(renderer: THREE.WebGLRenderer, camera: THREE.Camera, defer: Defer = now): void {
+    super.compile(renderer, camera, defer);
+    this.globe.compileDepth(renderer, camera, defer);
+    defer(() => this.map.compile(renderer));
   }
 
   override render(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera): void {
