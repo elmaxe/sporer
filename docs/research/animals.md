@@ -158,7 +158,7 @@ Pinned in `tests/animals.test.ts`:
 - The amplitude A makes a foot sweep back half a stride during the half cycle it moves back: 2·A·r = λ/2, with r the hip height (or the reach to the side).
 - **Stylised:** with a sinusoid, the foot matches the ground's speed only on average, not standing still through the stance as a real foot does. Hecker's duty factors and authored foot paths would fix it, at the cost of IK in the shader.
 
-**Footfalls** (`GAIT_PHASES`):
+**Footfalls** (now `creatureMotion.ts` `legPhase`, which gives these phases):
 - Four legs: the lateral-sequence walk, LH 0, LF 0.25, RH 0.5, RF 0.75 (the "singlefoot", evenly spaced), and the trot in diagonal pairs (LF with RH, RF with LH) half a stride apart. The trot mix blends the two by speed.
 - Six legs: alternating tripods, L1 L3 R2 against R1 R3 L2.
 - Two legs: half a stride apart; arms swing against the leg on their side.
@@ -167,13 +167,13 @@ Pinned in `tests/animals.test.ts`:
 - *A relatively large head, a round face, a big cranium compared to the face:* the head is 32–44% of the body length (`headSize`), most of it a round skull a little wider than tall (round cheeks), set up on the neck (a high forehead), with a short snout (`snout` 5–32% of the head).
 - *Large eyes below the skull's midline:* eyes are 27–38% of the skull's radius (`eyeSize`), set just below the midline, with a white eyeball, an iris, a dark pupil and a highlight.
 - *Small nose and mouth:* the snout is short and narrows to a round nose.
-- *Plump body, short thick limbs (unverified, see Sources):* a deep, wide torso (`bodyDepth` 0.34–0.48 of the length, `bodyWidth` 0.88–1.2), shorter legs (`legLength` 0.24–0.5 on four legs), thicker (`legThickness` 0.1–0.15 before the size and gravity rule), round ears and stubby rounded horns.
+- *Plump body, short thick limbs (unverified, see Sources):* the old generated bodies drew this from the baby schema. The game now draws its species as the creature editor's random creatures (`gen/creature.ts` `speciesDesign`), so their proportions come from `randomCreature`.
 - Coats are brighter (saturation 0.45–0.75) and the pattern is drawn per pixel with soft edges (`surface/animalLook.ts`).
 - **Stylised**: the schema describes infants' faces; applied here to adult animals' whole bodies, as games do, not a measured rule for animals.
 
 **Mass and legs:**
 - `animalMass(h) = (h / 0.163)^(1/0.36)` kg, from Mohamed Thangal & Donelan's hind-limb fit. Hip height stands in for hind-limb length.
-- Leg thickness follows elastic similarity with gravity. A leg's buckling load ∝ d⁴/l² must carry M·g with M ∝ d²·l, so d² ∝ g·l³ and d ∝ g^½·l^1.5. A leg's radius as a share of its length therefore grows as √(g·l), relative to a 1 m animal at 1 g (`legThicknessFor`, clamped to 0.04–0.22). Insects' legs are drawn at 0.42 of the thickness (struts, not pillars).
+- Leg thickness follows elastic similarity with gravity. A leg's buckling load ∝ d⁴/l² must carry M·g with M ∝ d²·l, so d² ∝ g·l³ and d ∝ g^½·l^1.5. A leg's radius as a share of its length therefore grows as √(g·l), relative to a 2 m animal at 1 g (`legGirthFor`, a factor on the creature's leg size clamped to 0.7–1.6).
 
 **Abundance** (`generateHerd`):
 - Each herbivore's herd share is ∝ (M / M₀)^−0.75 (Damuth, capped at 8× so the smallest don't swamp the rest) × how lush the ground is (`fertility`, as for plants) × its climate window.

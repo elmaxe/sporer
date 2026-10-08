@@ -4,13 +4,13 @@ import {
   anchorOf,
   decodeDesign,
   defaultCreature,
-  designFromAnimal,
   encodeDesign,
   growCreature,
   insertVertebra,
   randomCreature,
   removeVertebra,
   skinPoint,
+  speciesDesign,
   splatAt,
   splatPosition,
   tidySpine,
@@ -215,10 +215,14 @@ describe('creature design', () => {
     expect(tall).toBeLessThan(50);
   });
 
-  it('makes a design from a game animal', () => {
+  it("makes a game species' body: a random creature with its plan's legs, its size and its coat", () => {
     for (const plan of ['quadruped', 'hexapod', 'biped'] as const) {
-      const form = generateAnimalForm(new Rng(5), plan, 'herbivore', 120);
-      const d = designFromAnimal(form, 2.5);
+      const form = generateAnimalForm(new Rng(5), plan, 120);
+      const d = speciesDesign(form, 2.5);
+      expect(d.paint.base).toBe(form.color);
+      const g = growCreature(d);
+      expect(g.length).toBeGreaterThan(2.5);
+      expect(g.length).toBeLessThan(2.5 * 2.5);
       const legs = d.parts.filter((p) => p.kind === 'leg').length;
       expect(legs).toBe(plan === 'quadruped' ? 2 : plan === 'hexapod' ? 3 : 1);
       expect(growCreature(d).skeleton.legs.filter((l) => !l.arm).length).toBe(legs * 2);

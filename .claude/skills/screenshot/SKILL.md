@@ -176,7 +176,7 @@ For how animals look and move (bodies, coats, the walk and trot, grazing, levels
 | `animalLab.generate(seed, { tier, diet, plan })` | a new set of species, as a planet of that tier has (diet: herbivore, carnivore; plan: quadruped, hexapod, biped) |
 | `animalLab.load(galaxySeed, star, planet, moon?, species?)` | a game planet's animals (and its gravity) |
 | `animalLab.select(i)` | show and edit species `i` of the set |
-| `animalLab.set({ length: 4, form: { neckLength: 0.8 } })`, `animalLab.setForm({ pattern: 'stripes' })` | edit the selected species |
+| `animalLab.set({ length: 4, form: { seed: 1234 } })`, `animalLab.setForm({ pattern: 'stripes' })` | edit the selected species |
 | `animalLab.setBodyPlan('hexapod')`, `animalLab.reroll()` | another body plan, or new proportions of the same one (the coat kept) |
 | `animalLab.setView({ view: 'specimen' \| 'lineup' \| 'species' \| 'herds', pace: 'stand' \| 'graze' \| 'walk' \| 'trot', speed, gravity, lod: 'auto' \| 0..2, showLods, wireframe, skeleton })` | what to show and what the specimen does (it walks round a circle and the camera follows) |
 | `animalLab.look(yaw, pitch, distance)`, `animalLab.lookAtHerd(i)` | camera (degrees; distance in the animal's lengths, the herds' in units), or over the i-th nearest herd |

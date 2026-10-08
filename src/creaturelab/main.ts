@@ -1,5 +1,5 @@
 import { generateAnimalForm } from '../gen/animalForm';
-import { defaultCreature, designFromAnimal, randomCreature } from '../gen/creature';
+import { defaultCreature, randomCreature, speciesDesign } from '../gen/creature';
 import { suitUp, undress } from '../gen/creatureOutfit';
 import { Rng } from '../gen/rng';
 import { CreatureLab } from './CreatureLab';
@@ -21,7 +21,7 @@ function main(): void {
     random: randomCreature,
     suitUp,
     undress,
-    animal: (seed: number, plan: 'quadruped' | 'hexapod' | 'biped' = 'quadruped') => designFromAnimal(generateAnimalForm(new Rng(seed), plan, 'herbivore', (seed * 47) % 360), 4, `Species ${seed}`),
+    animal: (seed: number, plan: 'quadruped' | 'hexapod' | 'biped' = 'quadruped') => speciesDesign(generateAnimalForm(new Rng(seed), plan, (seed * 47) % 360), 4, `Species ${seed}`),
   };
   Object.assign(window, { creatureLab: lab, creatureKit: kit });
 }

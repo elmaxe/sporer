@@ -1,9 +1,13 @@
 import { faceGridPoint, type Vec3Like } from '../world/cubeSphereMath';
-import { generateAnimalForm, growAnimal, type AnimalForm, type AnimalSkeleton, type BodyPlan, type Diet } from './animalForm';
+import { generateAnimalForm, legGirthFor, type AnimalForm, type AnimalSkeleton, type BodyPlan, type Diet } from './animalForm';
 import type { Habitability } from './climate';
 import { generateName } from './names';
 import { MIN_ELEVATION, fertility, localTemperature, type GroundRadius } from './plants';
+import { animalGait, type AnimalGait } from './gait';
 import { Rng, hashSeed } from './rng';
+import { speciesBody } from './speciesBody';
+
+export { EARTH_G, STRIDE_COEFFICIENT, STRIDE_EXPONENT, TROT_FROUDE, WALK_FROUDE, animalGait, type AnimalGait } from './gait';
 
 /*
  * Animals on habitable bodies (the animal lab): which species a planet has
@@ -84,21 +88,6 @@ export const DAMUTH_EXPONENT = -0.75;
  */
 export const CARNIVORE_SHARE = 0.15;
 
-/**
- * Dynamic similarity (Alexander): animals of any size move alike at equal
- * Froude numbers Fr = v²/(g·h), h the hip height, taking strides of
- * λ/h = 2.3·Fr^0.3 (Alexander 1976, the trackway formula v = 0.25·g^½·λ^1.67·h^−1.17).
- * They stroll at Fr ≈ 0.25 (people's preferred 1.4 m/s on 0.89 m legs is
- * 0.22), and quadrupeds go from an amble to a trot at Fr ≈ 1
- * (docs/research/animals.md).
- */
-export const WALK_FROUDE = 0.25;
-export const TROT_FROUDE = 1;
-export const STRIDE_COEFFICIENT = 2.3;
-export const STRIDE_EXPONENT = 0.3;
-/** Earth's surface gravity, m/s² (units/s², animals' units read as metres). */
-export const EARTH_G = 9.81;
-
 /** Cells are about this many units across (planet-level); a herd roams within HOME_RANGE of its home. */
 export const HERD_CELL_SIZE = 96;
 export const HOME_RANGE = 36;
@@ -177,8 +166,7 @@ export function generateAnimalSpecies(rng: Rng, index: number, diet: Diet, size:
   ]);
   const name = generateName(rng);
   const formRng = rng.fork('form');
-  const base = generateAnimalForm(formRng, plan, diet, hue);
-  const form: AnimalForm = { ...base, legThickness: legThicknessFor(base.legThickness, length, gravity) };
+  const form: AnimalForm = { ...generateAnimalForm(formRng, plan, hue), legGirth: legGirthFor(length, gravity) };
   const nouns = diet === 'carnivore' ? CARNIVORE_NOUNS : HERBIVORE_NOUNS;
   // Grazers' herds are tens to thousands and predators' groups about 5–15 (docs/research/animals.md): fewer here, to draw.
   const herd: readonly [number, number] = diet === 'carnivore' ? [rng.int(1, 2), rng.int(3, 6)] : [rng.int(3, 5), rng.int(7, 16)];
@@ -197,17 +185,6 @@ export function generateAnimalSpecies(rng: Rng, index: number, diet: Diet, size:
 }
 
 /**
- * Elastic similarity (McMahon): a leg bone keeps from buckling under the
- * body's weight M·g when its diameter d ∝ g^½·l^1.5 (M ∝ d²·l, buckling load
- * ∝ d⁴/l²), so a leg's radius as a share of its length grows as √(g·l):
- * bigger animals and heavier worlds have stockier legs. Relative to a
- * 1-unit animal on Earth, kept within the lab's range (docs/research/animals.md).
- */
-export function legThicknessFor(base: number, length: number, gravity: number): number {
-  return Math.min(0.22, Math.max(0.04, base * Math.sqrt(Math.max(0.05, gravity) * length)));
-}
-
-/**
  * Body mass in kg from hip height (units ≈ m), inverting mammals' hind limb
  * length 0.163·M^0.36 m (Kilbourne & Hoffman's 44 species, fitted by
  * Mohamed Thangal & Donelan): 0.16 m at 1 kg, 0.86 m at 100 kg
@@ -219,35 +196,14 @@ export function animalMass(hipHeight: number): number {
 
 const hips = new WeakMap<AnimalSpecies, number>();
 
-/** A species' standing hip height (units), from its grown skeleton (kept per species object). */
+/** A species' standing hip height (units), from its body (kept per species object). */
 export function hipHeightOf(s: AnimalSpecies): number {
   let h = hips.get(s);
   if (h === undefined) {
-    h = growAnimal(s).hipHeight;
+    h = speciesBody(s).grown.hipHeight;
     hips.set(s, h);
   }
   return h;
-}
-
-/** How an animal of a species moves on a world of gravity `gravity` (Earth = 1). */
-export interface AnimalGait {
-  /** Hip height (units) and gravity (units/s²) it scales with. */
-  readonly hip: number;
-  readonly g: number;
-  /** Walking and trotting speed (units/s) and stride length (units: one full cycle of every leg). */
-  readonly walkSpeed: number;
-  readonly trotSpeed: number;
-  readonly walkStride: number;
-  readonly trotStride: number;
-}
-
-/** A species' gait from its skeleton's hip height (see the dynamic similarity constants above). */
-export function animalGait(skeleton: Pick<AnimalSkeleton, 'hipHeight'>, gravity: number): AnimalGait {
-  const hip = Math.max(0.05, skeleton.hipHeight);
-  const g = EARTH_G * Math.max(0.05, gravity);
-  const speed = (fr: number) => Math.sqrt(fr * g * hip);
-  const stride = (fr: number) => STRIDE_COEFFICIENT * fr ** STRIDE_EXPONENT * hip;
-  return { hip, g, walkSpeed: speed(WALK_FROUDE), trotSpeed: speed(TROT_FROUDE), walkStride: stride(WALK_FROUDE), trotStride: stride(TROT_FROUDE) };
 }
 
 // --- Herds ---

@@ -1,4 +1,4 @@
-import { growAnimal } from '../gen/animalForm';
+import { speciesBody } from '../gen/speciesBody';
 import type { AnimalSpecies } from '../gen/animals';
 import type { PlantSpecies } from '../gen/plants';
 
@@ -55,7 +55,7 @@ export function cargoSize(c: Cargo): CargoSize {
   if (c.kind === 'plant') return { height: c.species.height, radius: c.species.crownRadius };
   let size = animalSizes.get(c.species);
   if (!size) {
-    const k = growAnimal(c.species);
+    const k = speciesBody(c.species).grown.skeleton;
     size = { height: k.top, radius: Math.max(k.front, k.back, k.width) };
     animalSizes.set(c.species, size);
   }

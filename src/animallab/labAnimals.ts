@@ -1,5 +1,5 @@
-import { BODY_PLANS, COAT_PATTERNS, generateAnimalForm, type AnimalForm, type BodyPlan, type CoatPattern, type Diet } from '../gen/animalForm';
-import { generateAnimalSpecies, legThicknessFor, planAnimals, type AnimalSpecies } from '../gen/animals';
+import { BODY_PLANS, COAT_PATTERNS, generateAnimalForm, legGirthFor, type AnimalForm, type BodyPlan, type CoatPattern, type Diet } from '../gen/animalForm';
+import { generateAnimalSpecies, planAnimals, type AnimalSpecies } from '../gen/animals';
 import type { Habitability } from '../gen/climate';
 import { Rng, hashSeed } from '../gen/rng';
 import { hueOf } from '../plantlab/labPlants';
@@ -95,23 +95,23 @@ export function cloneAnimal(s: AnimalSpecies): AnimalSpecies {
   return { ...s, form: { ...s.form } };
 }
 
-/** The species rebuilt with body plan `plan`: a new form from its seed, its coat colours kept. */
+/** The species rebuilt with body plan `plan`: a new body from its seed, its coat colours kept. */
 export function withBodyPlan(s: AnimalSpecies, plan: BodyPlan): AnimalSpecies {
   const rng = new Rng(hashSeed(s.form.seed, 'plan', plan));
-  return { ...s, form: keepCoat(generateAnimalForm(rng, plan, s.diet, hueOf(s.form.color)), s, 1) };
+  return { ...s, form: keepCoat(generateAnimalForm(rng, plan, hueOf(s.form.color)), s, 1) };
 }
 
-/** A different random form of the same body plan (new proportions, the coat's colours kept). */
+/** Another random creature of the same body plan (the coat's colours kept). */
 export function rerollAnimal(s: AnimalSpecies, roll: number, gravity = 1): AnimalSpecies {
   const rng = new Rng(hashSeed(s.form.seed, 'reroll', roll));
-  return { ...s, form: keepCoat(generateAnimalForm(rng, s.form.plan, s.diet, hueOf(s.form.color)), s, gravity) };
+  return { ...s, form: keepCoat(generateAnimalForm(rng, s.form.plan, hueOf(s.form.color)), s, gravity) };
 }
 
 function keepCoat(form: AnimalForm, s: AnimalSpecies, gravity: number): AnimalForm {
   const old = s.form;
   return {
     ...form,
-    legThickness: legThicknessFor(form.legThickness, s.length, gravity),
+    legGirth: legGirthFor(s.length, gravity),
     color: old.color,
     belly: old.belly,
     patternColor: old.patternColor,
@@ -175,27 +175,7 @@ export function sanitizeAnimal(raw: Partial<AnimalSpecies>, base: AnimalSpecies,
   const form: AnimalForm = {
     plan,
     seed: Math.round(num(f.seed, b.seed, 0, 0xffffffff)),
-    bodyDepth: num(f.bodyDepth, b.bodyDepth, 0.1, 0.7),
-    bodyWidth: num(f.bodyWidth, b.bodyWidth, 0.4, 1.6),
-    chest: num(f.chest, b.chest, 0.5, 2),
-    hump: num(f.hump, b.hump, 0, 1),
-    legLength: num(f.legLength, b.legLength, 0.15, 1.5),
-    legThickness: num(f.legThickness, b.legThickness, 0.03, 0.25),
-    neckLength: num(f.neckLength, b.neckLength, 0, 1.2),
-    neckAngle: num(f.neckAngle, b.neckAngle, -10, 85),
-    headSize: num(f.headSize, b.headSize, 0.1, 0.5),
-    snout: num(f.snout, b.snout, 0, 0.8),
-    tailLength: num(f.tailLength, b.tailLength, 0, 1.6),
-    tailThickness: num(f.tailThickness, b.tailThickness, 0.05, 0.8),
-    tailRaise: num(f.tailRaise, b.tailRaise, -60, 80),
-    horns: Math.round(num(f.horns, b.horns, 0, 2)),
-    hornLength: num(f.hornLength, b.hornLength, 0.1, 2.5),
-    hornCurve: num(f.hornCurve, b.hornCurve, -1.5, 1.5),
-    ears: num(f.ears, b.ears, 0, 1.5),
-    crest: num(f.crest, b.crest, 0, 1.5),
-    eyeSize: num(f.eyeSize, b.eyeSize, 0.05, 0.6),
-    eyesForward: num(f.eyesForward, b.eyesForward, 0, 1),
-    arms: num(f.arms, b.arms, 0, 1),
+    legGirth: num(f.legGirth, b.legGirth, 0.5, 2),
     pattern: COAT_PATTERNS.includes(f.pattern as CoatPattern) ? (f.pattern as CoatPattern) : b.pattern,
     patternScale: num(f.patternScale, b.patternScale, 0.2, 6),
     color: isHex(f.color) ? f.color : b.color,

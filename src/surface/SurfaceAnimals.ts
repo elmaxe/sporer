@@ -9,7 +9,7 @@ import type { RenderClock } from '../planet/PlanetFrame';
 import { faceGridPoint } from '../world/cubeSphereMath';
 import { GROUND_DETAIL_LAYER } from '../world/groundDepth';
 import { viewFreeze } from '../world/viewFreeze';
-import { ANIMAL_LODS, FADE_START, addAnimationAttributes, animalMotion, animalSkeleton, createAnimalGeometry, createAnimalMaterial, setAnimalTint, type AnimalUniforms } from './animalLook';
+import { ANIMAL_LODS, FADE_START, addAnimationAttributes, animCycle, animalMotion, animalSkeleton, createAnimalGeometry, createAnimalMaterial, setAnimalTint, type AnimalUniforms } from './animalLook';
 import { ANIMAL_LOD_COUNT } from './animalMesh';
 import { addAnimalDebug, animalParams } from './animalParams';
 import type { ReleasedAnimal, SurfaceChanges } from './changes';
@@ -501,7 +501,7 @@ export class SurfaceAnimals implements Entity {
     m[at + 14] = pz;
     m[at + 15] = 1;
     const a = b.anim.array as Float32Array;
-    a[b.count * 4] = p.cycle - Math.floor(p.cycle);
+    a[b.count * 4] = animCycle(p.cycle);
     a[b.count * 4 + 1] = p.stride;
     a[b.count * 4 + 2] = p.trot;
     a[b.count * 4 + 3] = p.graze;
