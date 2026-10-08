@@ -85,7 +85,6 @@ const PART_HANDLE_COLOR = new THREE.Color('#ffcc66');
 const LIMB_HANDLE_COLOR = new THREE.Color('#ff7ad9');
 const SELECTED_COLOR = new THREE.Color('#ffffff');
 const BONE_COLOR = new THREE.Color('#efe4c8');
-const BONE_HOVER_COLOR = new THREE.Color('#fff3a8');
 /** Floor tile (units): the floor slides back by whole tiles as the creature walks. */
 const TILE = 2;
 const UP = new THREE.Vector3(0, 1, 0);
@@ -134,9 +133,10 @@ export class CreatureLab {
   private readonly redoStack: string[] = [];
   private readonly handles = new THREE.Group();
   private handleMeshes: THREE.Mesh[] = [];
-  /** The spine's vertebrae as little bones (its handles), and the bones joining them and down each limb. */
+  /** A row of little vertebrae all along the spine (drawn only: the round nodes over them are the handles), and the bones joining the nodes and down each limb. */
   private vertebraMeshes: THREE.Mesh[] = [];
   private boneMeshes: THREE.Mesh[] = [];
+  private readonly vertebraMaterial = new THREE.MeshLambertMaterial({ color: BONE_COLOR, emissive: '#3a3428', depthTest: false, transparent: true });
   private readonly boneMaterial = new THREE.MeshLambertMaterial({ color: BONE_COLOR, emissive: '#3a3428', depthTest: false, transparent: true, opacity: 0.85 });
   /** The skeleton shows while the pointer is over the creature (always once a finger has touched the screen: it can't hover), fading in and out. */
   private overCreature = false;
@@ -526,8 +526,8 @@ export class CreatureLab {
 
   /**
    * The skeleton, where it is this frame: in Build the spine as a row of
-   * vertebrae joined by bones (drag one to reshape it, the wheel to fatten
-   * it), the limbs' bones with their knee and foot (or elbow and hand)
+   * vertebrae with round nodes at its control points (drag one to reshape
+   * it, the wheel to fatten it), the limbs' bones with their knee and foot (or elbow and hand)
    * nodes, and the parts' dots; in Outfit the selected accessory's dot.
    * It shows while the pointer is over the creature, and fades away when
    * it leaves.
@@ -548,30 +548,40 @@ export class CreatureLab {
     const h = this.hovered;
     const isHovered = (info: HandleInfo) => h !== null && h.kind === info.kind && h.index === info.index && h.mirrored === info.mirrored;
 
-    // The vertebrae, each turned along the spine (its spinous process up, its transverse processes out to the sides).
+    // The vertebrae, a row of little bones all along the spine, each turned along it (its spinous process up, its
+    // transverse processes out to the sides); the spine's control points are the round nodes drawn over them.
     const spine = build ? this.design.spine.map((_, i) => frames[Math.min(frames.length - 1, i * SPINE_SUBDIVISIONS)]!) : [];
-    while (this.vertebraMeshes.length < spine.length) {
-      const m = new THREE.Mesh(vertebraGeometry, new THREE.MeshLambertMaterial({ emissive: '#3a3428', depthTest: false, transparent: true }));
+    const rows: { p: THREE.Vector3; side: Vec3; up: Vec3; t: Vec3 }[] = [];
+    if (build)
+      for (let i = 0; i < frames.length; i++) {
+        const f = frames[i]!;
+        rows.push({ p: new THREE.Vector3(...f.p), side: f.side, up: f.up, t: f.t });
+        const g = frames[i + 1];
+        if (g) rows.push({ p: new THREE.Vector3(...f.p).lerp(new THREE.Vector3(...g.p), 0.5), side: f.side, up: f.up, t: f.t });
+      }
+    // Spaced so neighbours just touch.
+    const step = rows.length > 1 ? rows[0]!.p.distanceTo(rows[1]!.p) : r * 2;
+    const vr = Math.min(r * 1.6, Math.max(r * 0.6, step * 1.2));
+    while (this.vertebraMeshes.length < rows.length) {
+      const m = new THREE.Mesh(vertebraGeometry, this.vertebraMaterial);
       m.renderOrder = 11;
       this.handles.add(m);
       this.vertebraMeshes.push(m);
     }
+    this.vertebraMaterial.opacity = 0.9 * fade;
     const basis = new THREE.Matrix4();
     this.vertebraMeshes.forEach((m, i) => {
-      const f = spine[i];
+      const f = rows[i];
       m.visible = !!f;
       if (!f) return;
-      const info: HandleInfo = { kind: 'vertebra', index: i, mirrored: false };
-      m.userData = info;
-      m.position.set(...f.p);
+      m.position.copy(f.p);
       basis.makeBasis(new THREE.Vector3(...f.side), new THREE.Vector3(...f.up), new THREE.Vector3(...f.t));
       m.quaternion.setFromRotationMatrix(basis);
-      const selected = sel?.kind === 'vertebra' && sel.index === i;
-      const hover = isHovered(info);
-      const mat = m.material as THREE.MeshLambertMaterial;
-      mat.color.copy(selected ? HANDLE_COLOR : hover ? BONE_HOVER_COLOR : BONE_COLOR);
-      mat.opacity = 0.95 * fade;
-      m.scale.setScalar(r * 2 * (hover || selected ? 1.25 : 1));
+      m.scale.setScalar(vr);
+    });
+    spine.forEach((f, i) => {
+      infos.push({ kind: 'vertebra', index: i, mirrored: false });
+      points.push(f.p);
     });
 
     this.design.parts.forEach((p, i) => {
@@ -586,7 +596,7 @@ export class CreatureLab {
     });
     // Bones: from vertebra to vertebra, and down each limb from its root to its knee or elbow and its foot or hand (their nodes).
     const bones: [Vec3, Vec3, number][] = [];
-    for (let i = 1; i < spine.length; i++) bones.push([spine[i - 1]!.p, spine[i]!.p, r * 0.45]);
+    for (let i = 1; i < spine.length; i++) bones.push([spine[i - 1]!.p, spine[i]!.p, r * 0.3]);
     if (build)
       this.grown.limbs.forEach((l, li) => {
         const pts = this.grown.skeleton.legs[li]!.points;
@@ -628,12 +638,13 @@ export class CreatureLab {
       m.userData = info;
       m.position.set(...points[i]!);
       const node = info.kind === 'joint' || info.kind === 'end';
-      const selected = sel !== null && sel.kind === 'part' && sel.index === info.index && !node;
+      const vertebra = info.kind === 'vertebra';
+      const selected = sel !== null && sel.kind === (vertebra ? 'vertebra' : 'part') && sel.index === info.index && !node;
       const hover = isHovered(info);
       const mat = m.material as THREE.MeshBasicMaterial;
-      mat.color.copy(selected ? SELECTED_COLOR : node ? LIMB_HANDLE_COLOR : PART_HANDLE_COLOR);
+      mat.color.copy(selected ? SELECTED_COLOR : vertebra ? HANDLE_COLOR : node ? LIMB_HANDLE_COLOR : PART_HANDLE_COLOR);
       mat.opacity = 0.9 * fade;
-      m.scale.setScalar(r * (node ? 0.75 : 0.8) * (hover || selected ? 1.4 : 1));
+      m.scale.setScalar(r * (vertebra ? 1 : node ? 0.75 : 0.8) * (hover || selected ? 1.4 : 1));
     });
   }
 
@@ -665,7 +676,7 @@ export class CreatureLab {
     let best: HandleInfo | null = null;
     let bestD = Infinity;
     const ray = this.raycaster.ray;
-    for (const m of [...this.vertebraMeshes, ...this.handleMeshes]) {
+    for (const m of this.handleMeshes) {
       if (!m.visible) continue;
       const d = ray.distanceToPoint(m.position);
       const along = ray.origin.distanceTo(m.position);
