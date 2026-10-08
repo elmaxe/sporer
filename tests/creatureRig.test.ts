@@ -40,7 +40,7 @@ describe('game animals as editor creatures', () => {
     }
   });
 
-  it("tags each vertex with its limb and bone, or its place along the spine", () => {
+  it("tags each vertex with its limb and bone, or its place along the spine", { timeout: 20000 }, () => {
     for (const s of species.slice(0, 8)) {
       const grown = growCreature(speciesDesign(s.form, s.length));
       const rig = creatureRig(grown);
@@ -52,20 +52,21 @@ describe('game animals as editor creatures', () => {
         });
         expect(tags.length).toBe((m.positions.length / 3) * 4);
         expect(tags.every(Number.isFinite)).toBe(true);
+        // Checked in plain code and counted (an expect per vertex is too slow for tens of thousands).
         const used = new Set<number>();
+        let bad = 0;
+        let pawsUpper = 0;
         for (let i = 0; i < tags.length; i += 4) {
           const limb = tags[i]!;
-          expect(Number.isInteger(limb)).toBe(true);
-          expect(limb).toBeLessThanOrEqual(rig.limbs.length);
+          if (!Number.isInteger(limb) || limb > rig.limbs.length) bad++;
           if (limb > 0) used.add(limb);
-          for (const k of [1, 2, 3]) {
-            expect(tags[i + k]).toBeGreaterThanOrEqual(0);
-            expect(tags[i + k]).toBeLessThanOrEqual(1);
-          }
+          for (const k of [1, 2, 3]) if (tags[i + k]! < 0 || tags[i + k]! > 1) bad++;
           // The paw belongs to the lower bone.
           const v = i / 4;
-          if (limb > 0 && m.positions[v * 3 + 1]! < rig.limbs[limb - 1]!.foot[1] * 0.5) expect(tags[i + 1]).toBeGreaterThan(0.9);
+          if (limb > 0 && m.positions[v * 3 + 1]! < rig.limbs[limb - 1]!.foot[1] * 0.5 && tags[i + 1]! <= 0.9) pawsUpper++;
         }
+        expect(bad).toBe(0);
+        expect(pawsUpper).toBe(0);
         // Every limb has its vertices.
         expect(used.size).toBe(rig.limbs.length);
       }
