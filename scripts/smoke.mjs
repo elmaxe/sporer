@@ -890,6 +890,8 @@ await section('galaxy', async () => {
   await wheel(-50000);
   await sleep(600);
   galaxyLoop.heldWhileTravelling = await evaluate(`levels.galaxyLevel.ship.travelling && levels.mode === 'galaxy'`);
+  // A line from the ship to the star, and the distance still to fly.
+  galaxyLoop.course = await evaluate(`({ line: levels.galaxyLevel.hud.courseShown, hud: document.getElementById('hud-target').textContent })`);
   galaxyLoop.zoomedWhileTravelling = (await evaluate(`levels.galaxyLevel.orbit.zoom`)) < zoomBeforeJump * 0.9;
   for (let i = 0; i < 60 && (await evaluate(`levels.galaxyLevel.ship.travelling`)); i++) await sleep(250);
   await sleep(1500);
@@ -924,6 +926,8 @@ await section('galaxy', async () => {
     galaxyLoop.polish.dust.haze > 0 &&
     galaxyLoop.clicked.destination === galaxyLoop.clicked.nearest &&
     galaxyLoop.heldWhileTravelling &&
+    galaxyLoop.course.line &&
+    / light years · .* AU · .* km to go$/.test(galaxyLoop.course.hud) &&
     galaxyLoop.zoomedWhileTravelling &&
     galaxyLoop.dockedAt === galaxyLoop.clicked.nearest &&
     galaxyLoop.handoverShot !== null &&
