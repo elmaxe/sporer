@@ -113,11 +113,15 @@ export function createCreatureLook(design: CreatureDesign, length: number): Crea
       attr('normal', posed.normals, 3);
       attr('color', posed.colors, 3);
       attr('aCoat', posed.coat, 1);
-      attr('aRig', new Float32Array(n * 4), 4);
-      attr('aPivot', new Float32Array(n * 3), 3);
+      // The game's walk in the shader stays still (the pose is in the vertices): zeros, set once per topology.
+      if (!geometry.getAttribute('aRig')) {
+        attr('aRig', new Float32Array(n * 4), 4);
+        attr('aPivot', new Float32Array(n * 3), 3);
+      }
       if (rest || !geometry.getAttribute('aRestPos')) attr('aRestPos', (rest ?? posed).positions, 3);
-      geometry.computeBoundingSphere();
-      geometry.computeBoundingBox();
+      // Worked out again only when something asks (the picker's raycast): not every frame in Play.
+      geometry.boundingSphere = null;
+      geometry.boundingBox = null;
     },
     repaint(d, restFrames, len) {
       const p = d.paint;
