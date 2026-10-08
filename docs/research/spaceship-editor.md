@@ -1,6 +1,6 @@
 # A Spore-style spaceship editor
 
-What Spore's spaceship creator does, and how the prototype editor (`ship.html`) does it. Code: `src/gen/ship.ts` (the design: parts, symmetry, frames, editing, random ships), `src/shiplab/` (the page: `shipMesh.ts` draws a design, `ShipLab.ts` edits and flies it, `ShipPanel.ts` the controls). Tests: `tests/ship.test.ts`. It sits beside the creature editor (`creature.html`, `docs/research/creature-editor.md`) and shares its controls and look.
+What Spore's spaceship creator does, and how the prototype editor (`ship.html`) does it. Code: `src/gen/ship.ts` (the design: parts, symmetry, frames, editing, random ships), `src/player/shipMesh.ts` draws a design (in the editor, and as the game's UFO), `src/shiplab/` (the page: `ShipLab.ts` edits and flies it, `ShipPanel.ts` the controls). Tests: `tests/ship.test.ts`. It sits beside the creature editor (`creature.html`, `docs/research/creature-editor.md`) and shares its controls and look.
 
 ## Sources
 
@@ -26,13 +26,16 @@ The Spore wiki (fandom) refuses automated fetches, so its quotes below are from 
 
 **The test flight.** The ship hovers over a planet, banking and pitching as it's steered (WASD or the arrows), its engines and thrusters burning additive plumes as long as the throttle (Shift boosts), rings turning, lights blinking. Spore's parts are cosmetic, and so are these: the flight doesn't depend on what's built.
 
+## In the game
+
+The editor's 🚀 Fly in the game keeps the design in local storage (`player/customShip.ts`) and opens the game, whose UFO (`buildUfoMesh`, used by the system, planet and galaxy levels) is then the design drawn by `buildDesignedUfo`: scaled so its widest is the saucer's 4 units, centred, raised if its underside would hang lower than the saucer's (`HULL_DEPTH`, what the ground keeps clear of), turned to fly nose first (the game's UFO flies towards its −z), with metal kept mostly diffuse since space has no environment to reflect. Its rings turn with the saucer's light ring. Everything that collides, lands or flies keeps using the saucer's sizes, so the game needs nothing else changed. `?ship=<design>` in the game's address flies a design for that visit only. The editor opens on the kept ship when its address has no design, and its Fly mode can put the saucer back.
+
 ## Random ships
 
 `randomShip(seed)` picks a core (saucer, pod, sphere, cone or block), then a cockpit on top or at the front, wings or fins, engines (a pair at the back, or a ring of thrusters under a round hull), and maybe guns, lights (a ring round a saucer), a mast or dish, a grabber and a ring, with a colour scheme round one hue. Parts on the core are placed on the ellipsoid the core roughly fills (`coreSurface`).
 
 ## Next steps
 
-- **Into the game**: the UFO is `buildUfoMesh()` (`player/Ship.ts`, also used by the planet and galaxy levels); it could build the player's design instead (scaled to the same 4-unit width, its ring parts as the spinning `ring`), kept in local storage.
 - **Parts as meshes**: authored parts (Spore's rigblocks) instead of primitives, with variants for the middle line and the sides.
 - **Snapping**: Spore snaps parts to the middle line and to each other's ends; here only the middle line and the vertical axis are special.
 - **Paint brush**: per-region paint (Spore's Paint Brush mode) rather than per part.

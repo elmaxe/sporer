@@ -22,7 +22,7 @@ import {
   type ShipPartKind,
   type Vec3,
 } from '../gen/ship';
-import { ShipMaterials, buildShipModel, outlineMaterial, type PartMeshInfo, type ShipModel } from './shipMesh';
+import { ShipMaterials, buildShipModel, outlineMaterial, type PartMeshInfo, type ShipModel } from '../player/shipMesh';
 
 /*
  * The spaceship editor (ship.html): Spore's spaceship creator. Three modes:

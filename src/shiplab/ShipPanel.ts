@@ -1,4 +1,5 @@
 import { CORE_KINDS, HULL_FINISHES, HULL_PATTERNS, MAX_COMPLEXITY, MAX_RADIAL, SHIP_CATEGORIES, SHIP_PARTS, SHIP_PART_KINDS, defaultShip, onMiddleLine, randomShip, type HullFinish, type HullPattern, type ShipCategory, type ShipPaint, type ShipPartKind } from '../gen/ship';
+import { keepShip, keptShip } from '../player/customShip';
 import type { ShipLab, ShipMode } from './ShipLab';
 
 /*
@@ -113,7 +114,19 @@ export class ShipPanel {
       },
       'Copy a link to this ship',
     );
+    const play = this.button(actions, '🚀 Fly in the game', () => this.flyInGame(), 'Keep this ship as your UFO and open the game');
+    play.classList.add('on');
     this.top.append(title, modes, actions);
+  }
+
+  /** Keeps the ship for the game (local storage) and opens the game with it. */
+  private flyInGame(): void {
+    this.lab.commit();
+    if (!keepShip(this.lab.design)) {
+      this.flash("This browser won't keep it (storage is off)");
+      return;
+    }
+    location.href = new URL('./', location.href).href;
   }
 
   private buildPalette(): void {
@@ -432,5 +445,21 @@ export class ShipPanel {
     for (const v of ['chase', 'side', 'front', 'below'] as const) this.button(views, v, () => lab.look(v));
     s.append(views);
     this.wireframeCheck(s);
+
+    const game = this.section('In the game');
+    const kept = keptShip();
+    game.append(el('div', 'cr-note', kept ? `The game flies your ${kept.name}. Fly in the game keeps this one instead.` : 'The game flies the classic saucer. Fly in the game makes this ship your UFO.'));
+    const row = el('div', 'cr-buttons');
+    this.button(row, '🚀 Fly in the game', () => this.flyInGame());
+    if (kept) {
+      this.button(row, 'Edit the kept ship', () => this.lab.setDesign(kept));
+      this.button(row, 'Back to the saucer', () => {
+        keepShip(null);
+        this.inspectorKey = '';
+        this.refresh();
+        this.flash('The game flies the saucer again');
+      });
+    }
+    game.append(row);
   }
 }

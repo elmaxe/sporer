@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { AFTER_ATMOSPHERE_RENDER_ORDER } from '../world/atmosphereShell';
+import { HULL_DEPTH, HULL_RADIUS } from '../planet/ground';
 import { SHIP_PARTS, instances, partFrame, type PaintChannel, type ShipDesign, type ShipPaint, type ShipPart, type ShipPartKind } from '../gen/ship';
 
 /*
@@ -269,7 +271,12 @@ export class ShipMaterials {
   readonly exhaust: THREE.MeshBasicMaterial;
   private paintKey = '';
 
-  constructor() {
+  /**
+   * `reflections`: the scene has an environment for metal to reflect (the
+   * editor's hangar). The game's space has none, and metal with nothing to
+   * reflect draws black, so there metal finishes are kept mostly diffuse.
+   */
+  constructor(private readonly reflections = true) {
     this.blink = new THREE.MeshBasicMaterial({ toneMapped: false });
     this.exhaust = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false });
   }
@@ -292,7 +299,7 @@ export class ShipMaterials {
     const key = channel === 'base' ? `base|${base}|${trim}` : channel === 'trim' ? `trim|${trim}` : channel;
     let m = this.cache.get(key);
     if (m) return m;
-    const finish = FINISH[paint.finish];
+    const finish = this.reflections ? FINISH[paint.finish] : { metalness: Math.min(0.35, FINISH[paint.finish].metalness), roughness: Math.max(0.4, FINISH[paint.finish].roughness) };
     switch (channel) {
       case 'base': {
         const map = patternTexture(paint, base, trim);
@@ -303,7 +310,7 @@ export class ShipMaterials {
         m = new THREE.MeshStandardMaterial({ color: trim, metalness: finish.metalness * 0.8, roughness: Math.min(0.9, finish.roughness + 0.1), side: THREE.DoubleSide });
         break;
       case 'detail':
-        m = new THREE.MeshStandardMaterial({ color: paint.detail, metalness: 0.7, roughness: 0.45, side: THREE.DoubleSide });
+        m = new THREE.MeshStandardMaterial({ color: paint.detail, metalness: this.reflections ? 0.7 : 0.3, roughness: 0.45, side: THREE.DoubleSide });
         break;
       case 'glass':
         m = new THREE.MeshPhysicalMaterial({ color: paint.glass, emissive: new THREE.Color(paint.glass).multiplyScalar(0.25), metalness: 0, roughness: 0.05, transparent: true, opacity: 0.78, clearcoat: 1 });
@@ -339,7 +346,8 @@ export interface ShipModel {
 
 const noRaycast = () => {};
 
-export function buildShipModel(design: ShipDesign, materials: ShipMaterials): ShipModel {
+/** `ownGeometry`: each mesh gets its own copy of its geometry, so disposing the ship (as the game does) leaves the shared ones alone. */
+export function buildShipModel(design: ShipDesign, materials: ShipMaterials, ownGeometry = false): ShipModel {
   materials.setPaint(design.paint);
   const group = new THREE.Group();
   const meshes: THREE.Mesh[] = [];
@@ -356,7 +364,7 @@ export function buildShipModel(design: ShipDesign, materials: ShipMaterials): Sh
       group.add(copy);
       let spin: THREE.Group | null = null;
       for (const piece of pieces(part.kind)) {
-        const m = new THREE.Mesh(piece.geometry, materials.get(piece.channel, design.paint, part.paint));
+        const m = new THREE.Mesh(ownGeometry ? piece.geometry.clone() : piece.geometry, materials.get(piece.channel, design.paint, part.paint));
         const info: PartMeshInfo = { part: i, copy: inst.copy, mirrored: inst.mirrored };
         m.userData = info;
         if (piece.at) m.position.set(...piece.at);
@@ -392,4 +400,43 @@ export function outlineMaterial(color: string, width: number, opacity = 1): THRE
     shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `vec3 transformed = position + normal * ${width.toFixed(4)};`);
   };
   return m;
+}
+
+/**
+ * The player's own ship as the game's UFO (in place of `buildUfoMesh`'s
+ * saucer): the design drawn, then scaled and centred to the saucer's
+ * footprint, HULL_RADIUS across its widest and no deeper than HULL_DEPTH
+ * below its centre (what the planet's ground keeps clear of; a taller ship
+ * rides higher), so everything that flies, lands and collides with the
+ * saucer does the same with it, nose first. `ring` stands for the saucer's turning
+ * light ring: the levels turn it, and the ship's own rings turn with it.
+ */
+export function buildDesignedUfo(design: ShipDesign): { group: THREE.Group; ring: THREE.Group } {
+  const model = buildShipModel(design, new ShipMaterials(false), true);
+  const inner = model.group;
+  inner.updateMatrixWorld(true);
+  const box = new THREE.Box3();
+  for (const m of model.meshes) box.expandByObject(m);
+  const size = box.getSize(new THREE.Vector3());
+  const centre = box.getCenter(new THREE.Vector3());
+  const scale = HULL_RADIUS / Math.max(size.x / 2, size.z / 2, 1e-3);
+  inner.scale.setScalar(scale);
+  // Centred over its middle, and raised if that would put its underside lower than the saucer's.
+  inner.position.set(-centre.x * scale, Math.max(-centre.y * scale, -HULL_DEPTH - box.min.y * scale), -centre.z * scale);
+  // The editor's nose is +z; the game's UFO flies towards its −z.
+  const turn = new THREE.Group();
+  turn.rotation.y = Math.PI;
+  turn.add(inner);
+  const group = new THREE.Group();
+  group.add(turn);
+  const ring = new THREE.Group();
+  const spin = () => {
+    for (const s of model.spinners) s.rotation.y = ring.rotation.y;
+  };
+  if (model.meshes[0]) model.meshes[0].onBeforeRender = spin;
+  // A group's renderOrder sorts everything under it, up to a nested group: set it on every one.
+  group.traverse((o) => {
+    if (!(o instanceof THREE.Mesh)) o.renderOrder = AFTER_ATMOSPHERE_RENDER_ORDER;
+  });
+  return { group, ring };
 }
