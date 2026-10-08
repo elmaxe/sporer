@@ -22,11 +22,16 @@ const PART_LABELS: Record<PartKind, { icon: string; name: string; tip: string }>
   ear: { icon: '👂', name: 'Ear', tip: 'Flat lobes' },
   spike: { icon: '🔺', name: 'Spike', tip: 'Plates and spines, often along the back' },
   antenna: { icon: '📡', name: 'Antenna', tip: 'Long feelers with a bobble' },
+  helmet: { icon: '🫧', name: 'Helmet', tip: 'A glass bubble: on the head it takes in the whole head and snout, anywhere else the body there' },
+  goggles: { icon: '🥽', name: 'Goggles', tip: 'A pair, over the eyes' },
+  hat: { icon: '🎩', name: 'Top hat', tip: 'For formal occasions on other worlds; dropped inside a helmet it sits on top of the glass' },
+  dish: { icon: '📡', name: 'Radar dish', tip: 'A dish on a mast, listening for home' },
   jetpack: { icon: '🚀', name: 'Jetpack', tip: 'Twin tanks for the back; the flames roar as it walks' },
-  beacon: { icon: '🚨', name: 'Beacon', tip: 'A mast with a blinking light' },
-  badge: { icon: '⭐', name: 'Badge', tip: 'A glowing star for the crew' },
+  tank: { icon: '🧯', name: 'Air tank', tip: 'One tank, lying along the body' },
+  chest: { icon: '🦺', name: 'Chest plate', tip: 'Armour with a row of lights' },
   pad: { icon: '🛡', name: 'Shoulder pad', tip: 'Armour for shoulders and hips' },
-  hat: { icon: '🎩', name: 'Top hat', tip: 'For formal occasions on other worlds; on a helmet it sits on top of the glass' },
+  badge: { icon: '⭐', name: 'Badge', tip: 'A glowing star for the crew' },
+  beacon: { icon: '🚨', name: 'Beacon', tip: 'A mast with a blinking light' },
 };
 
 const MODES: { mode: EditorMode; label: string }[] = [
@@ -66,7 +71,7 @@ export class CreaturePanel {
     root.append(this.top, this.palette, this.gearPalette, this.inspector, this.hint);
     this.buildTop();
     this.buildPalette(this.palette, 'Parts', PART_KINDS);
-    this.buildPalette(this.gearPalette, 'Space gear', GEAR_KINDS);
+    this.buildPalette(this.gearPalette, 'Accessories', GEAR_KINDS);
     lab.onChange = () => this.refresh();
     this.refresh();
     const tick = () => {
@@ -185,7 +190,7 @@ export class CreaturePanel {
           : lab.mode === 'outfit'
             ? lab.placing
               ? `Move over the body to place the ${PART_LABELS[lab.placing].name.toLowerCase()}; click to stick it on (Shift: keep placing), Esc to cancel.`
-              : 'Dress it for space on the right: suit, helmet, boots and gloves. Add gear from the left; drag a yellow dot to move it, wheel over it to resize.'
+              : 'Drag an accessory from the left onto the body. Grab one to move it, wheel over it to resize, drag it off the body to take it off. The suit, boots and gloves are on the right.'
           : 'WASD or the arrows: steer it (Shift trots). Space: walk on or stand. The legs step in a wave from back to front, the two sides half a stride apart; faster, the wave closes up into a trot.';
   }
 
@@ -331,9 +336,16 @@ export class CreaturePanel {
       return;
     }
     // The outfit edited in place; made the first time something is switched on.
-    const o = (): CreatureOutfit => (d.outfit ??= { ...defaultOutfit(d), suit: false, helmet: false, boots: false, gloves: false });
+    const o = (): CreatureOutfit => (d.outfit ??= { ...defaultOutfit(d), suit: false, boots: false, gloves: false });
     const now = d.outfit;
-    const s = this.section('Space suit');
+    const acc = this.section('Accessories');
+    const gear = d.parts.filter((p) => isGear(p.kind)).length;
+    acc.append(el('div', 'cr-note', `${gear === 0 ? 'None yet' : `${gear} on`}. Drag one from the left onto the body; grab it to move it, wheel over it to resize, drag it off the body to take it off. Click one for its settings.`));
+    const r2 = el('div', 'cr-buttons');
+    this.button(r2, '🧑‍🚀 Suit up', () => lab.setDesign(suitUp(d), false), 'The suit, boots and gloves, a helmet, a jetpack on the back, shoulder pads and a badge');
+    this.button(r2, 'Take it all off', () => lab.setDesign(undress(d), false));
+    acc.append(r2);
+    const s = this.section('Clothes');
     this.check(s, 'Suit', () => now?.suit ?? false, (x) => {
       const out = o();
       out.suit = x;
@@ -345,8 +357,6 @@ export class CreaturePanel {
       this.slider(s, 'To', 0, 1, 0.005, () => now.suitTo, (x) => (now.suitTo = Math.max(x, now.suitFrom + 0.02)));
       this.check(s, 'Sleeves down the limbs', () => now.sleeves, (x) => (now.sleeves = x));
     }
-    this.check(s, 'Helmet', () => now?.helmet ?? false, (x) => (o().helmet = x), () => (lab.changed(), lab.commit(), this.rebuild()));
-    if (now?.helmet) this.slider(s, 'Helmet size', 0.6, 1.8, 0.01, () => now.helmetSize, (x) => (now.helmetSize = x));
     this.check(s, 'Boots', () => now?.boots ?? false, (x) => (o().boots = x));
     this.check(s, 'Gloves', () => now?.gloves ?? false, (x) => (o().gloves = x));
 
@@ -364,13 +374,6 @@ export class CreaturePanel {
     });
     c.append(row);
 
-    const all = this.section('Crew');
-    const gear = d.parts.filter((p) => isGear(p.kind)).length;
-    all.append(el('div', 'cr-note', `${gear} piece${gear === 1 ? '' : 's'} of gear. Pick gear on the left and stick it anywhere on the body.`));
-    const r2 = el('div', 'cr-buttons');
-    this.button(r2, '🧑‍🚀 Suit up', () => lab.setDesign(suitUp(d), false), 'The whole outfit, a jetpack on the back, shoulder pads and a badge');
-    this.button(r2, 'Take it all off', () => lab.setDesign(undress(d), false));
-    all.append(r2);
     this.buildViewSection(true);
   }
 

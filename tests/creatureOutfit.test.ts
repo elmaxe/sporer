@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { decodeDesign, defaultCreature, encodeDesign, growCreature, isGear, randomCreature, skinPoint } from '../src/gen/creature';
-import { gearFrame, helmetFit, suitRing, suitSpan, suitUp, undress, SUIT_PUFF } from '../src/gen/creatureOutfit';
+import { gearFrame, helmetAt, helmetFit, HEAD_S, suitRing, suitSpan, suitUp, undress, SUIT_PUFF } from '../src/gen/creatureOutfit';
 import { buildAnimalMesh } from '../src/surface/animalMesh';
 import { creatureForm } from '../src/gen/creature';
 
@@ -43,6 +43,14 @@ describe('creature outfits', () => {
     }
   });
 
+  it('puts a helmet dropped on the head round the head, and one dropped lower round the body there', () => {
+    const g = growCreature(defaultCreature());
+    expect(helmetAt(g.frames, HEAD_S + 0.1)).toEqual(helmetFit(g.frames));
+    const neck = helmetAt(g.frames, 0.7);
+    const ring = Array.from({ length: 8 }, (_, i) => skinPoint(g.frames, 0.7, (i / 8) * Math.PI * 2).p);
+    for (const p of ring) expect(dist(p, neck.centre)).toBeLessThan(neck.radius);
+  });
+
   it('builds gear in a right-handed frame standing out of the skin, lifted onto the suit', () => {
     const d = suitUp(defaultCreature());
     const g = growCreature(d);
@@ -59,8 +67,8 @@ describe('creature outfits', () => {
   it("suits up a creature with gear that doesn't change its body, and takes it all off again", () => {
     const d = defaultCreature();
     const dressed = suitUp(d);
-    expect(dressed.outfit?.helmet).toBe(true);
-    expect(dressed.parts.filter((p) => isGear(p.kind)).map((p) => p.kind).sort()).toEqual(['badge', 'jetpack', 'pad']);
+    expect(dressed.outfit?.suit).toBe(true);
+    expect(dressed.parts.filter((p) => isGear(p.kind)).map((p) => p.kind).sort()).toEqual(['badge', 'helmet', 'jetpack', 'pad']);
     // Gear is drawn apart from the body: the body's mesh is the same.
     const a = buildAnimalMesh(growCreature(d).skeleton, creatureForm(d), 4, 0);
     const b = buildAnimalMesh(growCreature(dressed).skeleton, creatureForm(dressed), 4, 0);

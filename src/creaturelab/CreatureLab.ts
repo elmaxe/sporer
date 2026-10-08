@@ -38,10 +38,11 @@ import { createOutfitLook, type OutfitLook } from './outfitLook';
  *    over the body, the wheel over it to resize it.
  *  - Paint: the coat (colours, pattern) and a brush that paints soft dabs on
  *    the body, mirrored across it.
- *  - Outfit: space clothes (gen/creatureOutfit.ts, drawn by outfitLook.ts):
- *    a suit, a bubble helmet, boots and gloves worn over the whole body,
- *    and gear (jetpack, beacon, badge, shoulder pads) stuck on the skin
- *    from its own palette and moved and resized like Build's parts.
+ *  - Outfit: Spore's outfitter (gen/creatureOutfit.ts, drawn by
+ *    outfitLook.ts): accessories (helmet, goggles, hat, jetpack...) dragged
+ *    from their palette onto the skin, grabbed by themselves to move them,
+ *    the wheel over one to resize it, dragged off the body to take it off;
+ *    and a suit, boots and gloves worn over the whole body.
  *  - Play: the creature walks or trots over the floor, its legs stepping
  *    in the gait worked out for its body (gen/creatureMotion.ts), with a
  *    footfall diagram. WASD (or the arrows) steer it, relative to the
@@ -139,7 +140,7 @@ export class CreatureLab {
   private hovered: HandleInfo | null = null;
   private drag:
     | { kind: 'vertebra'; index: number }
-    | { kind: 'part'; index: number; mirrored: boolean }
+    | { kind: 'part'; index: number; mirrored: boolean; off?: boolean }
     | { kind: 'node'; node: 'joint' | 'end'; index: number; limb: number; plane: THREE.Plane }
     | { kind: 'paint'; last: THREE.Vector3 | null }
     | null = null;
@@ -539,6 +540,8 @@ export class CreatureLab {
       });
     this.design.parts.forEach((p, i) => {
       if (isGear(p.kind) === build) return;
+      // Accessories are grabbed by themselves: only the selected one shows its dot (where it's stuck on).
+      if (!build && !(this.selection?.kind === 'part' && this.selection.index === i)) return;
       for (const mirrored of p.mirror && Math.abs(Math.sin(p.theta)) > 0.06 ? [false, true] : [false]) {
         infos.push({ kind: 'part', index: i, mirrored });
         const k = skinPoint(frames, p.s, mirrored ? -p.theta : p.theta);
@@ -593,7 +596,17 @@ export class CreatureLab {
     return e.target === this.renderer.domElement;
   }
 
+  /** A handle under the pointer, or in Outfit mode an accessory itself (grabbed as in Spore). */
   private pickHandle(): HandleInfo | null {
+    const h = this.pickDot();
+    if (h || this.mode !== 'outfit' || !this.handles.visible) return h;
+    this.raycaster.layers.set(0);
+    const hit = this.outfit.pick(this.raycaster);
+    this.raycaster.layers.set(1);
+    return hit ? { kind: 'part', index: hit.index, mirrored: hit.mirrored } : null;
+  }
+
+  private pickDot(): HandleInfo | null {
     if (!this.handles.visible) return null;
     // Handles draw over everything, so pick them by screen distance to the ray, nearest first.
     let best: HandleInfo | null = null;
@@ -724,6 +737,11 @@ export class CreatureLab {
         p.theta = drag.mirrored ? -a.theta : a.theta;
         this.restDirty = true;
       }
+      // An accessory dragged off the body comes off when let go (as in Spore); it shows faded meanwhile.
+      if (this.mode === 'outfit') {
+        drag.off = !hit;
+        this.outfit.fade(drag.off ? drag.index : null);
+      }
     } else {
       const p = this.hitBody();
       if (p && (!drag.last || p.distanceTo(drag.last) > this.brush.size * this.grown.length * 0.35)) this.dab(p);
@@ -793,7 +811,14 @@ export class CreatureLab {
       return;
     }
     if (this.drag) {
+      const drag = this.drag;
       this.drag = null;
+      if (drag.kind === 'part' && drag.off) {
+        this.outfit.fade(null);
+        this.design.parts.splice(drag.index, 1);
+        this.selection = null;
+        this.changed();
+      }
       this.commit();
       this.onChange?.();
     }

@@ -49,6 +49,7 @@
 //   tap:<element id>             tap (--phone) or click the middle of that element, then wait two frames
 //   hover:<x>,<y> | hover:<expression>
 //                                move the mouse there (CSS px; or an expression giving {x, y}), wait a few frames
+//                                (after a press: drags there with the button held, and `release` lets go there)
 //   press:<x>,<y> | press:<expression>
 //                                press and hold the mouse button (a finger with --phone) there (CSS px; or an
 //                                expression giving {x, y}), wait a few frames; `release` lets go (the beam)
@@ -314,7 +315,9 @@ async function run(step) {
       const xy = /^\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*$/.exec(rest);
       const at = xy ? { x: Number(xy[1]), y: Number(xy[2]) } : await page.evaluate(rest);
       if (!at || !Number.isFinite(at.x) || !Number.isFinite(at.y)) throw new Error(`no point to hover: ${JSON.stringify(at)}`);
-      await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at.x, y: at.y });
+      // While pressed it's a drag: the button stays down, and the release comes where it was dragged to.
+      await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at.x, y: at.y, ...(pressed ? { button: 'left', buttons: 1 } : {}) });
+      if (pressed) pressed = at;
       await page.evaluate(`new Promise((r) => { let n = 0; (function f() { if (++n === 4) r(); else requestAnimationFrame(f); })(); })`);
       return;
     }

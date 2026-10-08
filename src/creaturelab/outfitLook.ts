@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Vec3 } from '../gen/animalForm';
 import { isGear, type CreatureDesign, type CreatureOutfit, type GrownCreature } from '../gen/creature';
-import { defaultOutfit, gearFrame, helmetFit, suitRing, SUIT_PUFF } from '../gen/creatureOutfit';
+import { defaultOutfit, gearFrame, helmetAt, suitRing, SUIT_PUFF, type HelmetFit } from '../gen/creatureOutfit';
 
 /*
  * How an editor creature's space clothes are drawn (Outfit mode; the data
@@ -11,18 +11,23 @@ import { defaultOutfit, gearFrame, helmetFit, suitRing, SUIT_PUFF } from '../gen
  *  - The suit is a shell a little off the skin along a stretch of the
  *    spine, its sleeves tubes down the limbs, both rebuilt from the posed
  *    spine and limbs each frame; trim at the cuffs and down the back.
- *  - The helmet is a glass bubble (brighter at its rim, as glass seen edge
- *    on reflects more) on a collar; boots and gloves sit on the feet and
- *    hands.
- *  - Gear stuck on the skin like a part (jetpack, beacon, badge, shoulder
- *    pad, top hat) is built of primitives in the frame gen/creatureOutfit.ts gives
- *    it; a jetpack's flames grow as the creature walks and a beacon blinks.
+ *  - Boots and gloves sit on the feet and hands.
+ *  - Accessories dragged onto the skin like a part (helmet, goggles, top
+ *    hat, radar dish, jetpack, air tank, chest plate, shoulder pad, badge,
+ *    beacon) are built of primitives in the frame gen/creatureOutfit.ts gives
+ *    it; a helmet is a glass bubble (brighter at its rim, as glass seen
+ *    edge on reflects more) on a collar, round the head or the body where
+ *    it was dropped; a jetpack's flames grow as the creature walks and a beacon blinks.
  */
 
 export interface OutfitLook {
   readonly group: THREE.Group;
   /** Refits everything to this frame's grown creature; `thrust` 0 to 1 (how hard it is walking). */
   update(design: CreatureDesign, grown: GrownCreature, time: number, thrust: number): void;
+  /** The accessory (its part's index, and which of a mirrored pair) a ray hits first, if any: grabbed to move it, as in Spore. */
+  pick(raycaster: THREE.Raycaster): { index: number; mirrored: boolean } | null;
+  /** Shows the accessory `index` shrunk (dragged off the body: it comes off when let go), or none. */
+  fade(index: number | null): void;
   dispose(): void;
 }
 
@@ -116,6 +121,7 @@ export function createOutfitLook(): OutfitLook {
   const trim = new THREE.MeshStandardMaterial({ roughness: 0.32, metalness: 0.45 });
   const metal = new THREE.MeshStandardMaterial({ color: '#3b424c', roughness: 0.3, metalness: 0.85 });
   const felt = new THREE.MeshStandardMaterial({ color: '#1d1c22', roughness: 0.75 });
+  const lens = new THREE.MeshPhysicalMaterial({ color: '#16303d', roughness: 0.05, metalness: 0.2, clearcoat: 1, emissive: '#0b3a52' });
   const sole = new THREE.MeshStandardMaterial({ color: '#25282d', roughness: 0.8 });
   const suit = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.08 });
   const glow = new THREE.MeshBasicMaterial({ toneMapped: false });
@@ -134,7 +140,7 @@ export function createOutfitLook(): OutfitLook {
     );
   };
   glass.customProgramCacheKey = () => 'helmet-glass';
-  const materials = [felt, main, trim, metal, sole, suit, glow, blink, core, flame, glass];
+  const materials = [felt, lens, main, trim, metal, sole, suit, glow, blink, core, flame, glass];
 
   const mesh = (geometry: THREE.BufferGeometry, material: THREE.Material, at: Vec3 = [0, 0, 0], scale: Vec3 = [1, 1, 1], rotX = 0): THREE.Mesh => {
     const m = new THREE.Mesh(geometry, material);
@@ -205,6 +211,51 @@ export function createOutfitLook(): OutfitLook {
       g.add(mesh(torus, glow, [0, 0, -0.74], [0.66, 0.66, 0.3]));
       return g;
     },
+    goggles: () => {
+      // One goggle (a mirrored pair makes two): a lens in a metal rim, a strap stub to either side.
+      const g = new THREE.Group();
+      g.add(mesh(cylinder, metal, [0, 0.2, 0], [0.46, 0.4, 0.46]));
+      g.add(mesh(torus, trim, [0, 0.4, 0], [0.46, 0.46, 0.7], Math.PI / 2));
+      g.add(mesh(cylinder, lens, [0, 0.405, 0], [0.38, 0.02, 0.38]));
+      g.add(mesh(box, sole, [0, 0.08, 0], [1.3, 0.09, 0.18]));
+      return g;
+    },
+    dish: () => {
+      // A radar dish on a short mast, its bowl tipped up and forward, a feed horn with a light at its focus.
+      const g = new THREE.Group();
+      g.add(mesh(cylinder, trim, [0, 0.03, 0], [0.16, 0.06, 0.16]));
+      g.add(mesh(cylinder, metal, [0, 0.3, 0], [0.04, 0.55, 0.04]));
+      const bowl = new THREE.Group();
+      bowl.position.set(0, 0.6, 0);
+      bowl.rotation.x = 0.5;
+      bowl.add(mesh(padCap, main, [0, 0.28, 0], [0.55, 0.28, 0.55], Math.PI));
+      bowl.add(mesh(cylinder, metal, [0, 0.3, 0], [0.02, 0.5, 0.02]));
+      bowl.add(mesh(sphere, glow, [0, 0.56, 0], [0.05, 0.05, 0.05]));
+      g.add(bowl);
+      return g;
+    },
+    tank: () => {
+      // One air tank lying along the back, a valve and a gauge light.
+      const g = new THREE.Group();
+      g.add(mesh(cylinder, trim, [0, 0.3, 0], [0.3, 0.95, 0.3], Math.PI / 2));
+      g.add(mesh(sphere, trim, [0, 0.3, 0.47], [0.3, 0.3, 0.3]));
+      g.add(mesh(sphere, trim, [0, 0.3, -0.47], [0.3, 0.3, 0.3]));
+      g.add(mesh(cylinder, metal, [0, 0.3, 0.8], [0.08, 0.16, 0.08], Math.PI / 2));
+      g.add(mesh(torus, main, [0, 0.3, 0.15], [0.31, 0.31, 0.6]));
+      g.add(mesh(sphere, glow, [0, 0.62, -0.1], [0.06, 0.06, 0.06]));
+      return g;
+    },
+    chest: () => {
+      // A chest plate: a curved shell with a trim edge and a row of lights.
+      const g = new THREE.Group();
+      g.add(mesh(padCap, main, [0, -0.22, 0], [0.75, 0.32, 0.6]));
+      const rimY = -0.22 + 0.32 * Math.cos(Math.PI * 0.42);
+      const rimR = Math.sin(Math.PI * 0.42);
+      g.add(mesh(torus, trim, [0, rimY, 0], [0.75 * rimR, 0.6 * rimR, 0.5], Math.PI / 2));
+      for (const x of [-0.2, 0, 0.2]) g.add(mesh(sphere, glow, [x, 0.1, 0.12], [0.05, 0.05, 0.05]));
+      g.add(mesh(box, trim, [0, 0.085, -0.12], [0.45, 0.05, 0.12]));
+      return g;
+    },
     boot: () => {
       const g = new THREE.Group();
       g.add(mesh(cylinder, sole, [0, 0.18, 0.15], [1.45, 0.36, 1.45]));
@@ -224,7 +275,8 @@ export function createOutfitLook(): OutfitLook {
 
   const pools = new Map<string, THREE.Object3D[]>();
   const used = new Map<string, number>();
-  const take = (kind: string): THREE.Object3D => {
+  /** The next object of `kind` this frame, tagged with the accessory it draws (none for boots and gloves). */
+  const take = (kind: string, part?: number, mirrored = false): THREE.Object3D => {
     const pool = pools.get(kind) ?? [];
     pools.set(kind, pool);
     const i = used.get(kind) ?? 0;
@@ -237,9 +289,12 @@ export function createOutfitLook(): OutfitLook {
     }
     const o = pool[i]!;
     o.visible = true;
+    o.userData = part === undefined ? {} : { part, mirrored };
     return o;
   };
+  let faded: number | null = null;
   const place = (o: THREE.Object3D, p: Vec3, x: Vec3, y: Vec3, z: Vec3, scale: number): void => {
+    if (o.userData.part !== undefined && o.userData.part === faded) scale *= 0.55;
     o.matrix.makeBasis(new THREE.Vector3(...x), new THREE.Vector3(...y), new THREE.Vector3(...z));
     o.matrix.scale(new THREE.Vector3(scale, scale, scale));
     o.matrix.setPosition(...p);
@@ -255,7 +310,7 @@ export function createOutfitLook(): OutfitLook {
     group,
     update(design, grown, time, thrust) {
       used.clear();
-      const outfit: CreatureOutfit = design.outfit ?? { ...defaultOutfit(design), suit: false, helmet: false, boots: false, gloves: false };
+      const outfit: CreatureOutfit = design.outfit ?? { ...defaultOutfit(design), suit: false, boots: false, gloves: false };
       main.color.set(outfit.color);
       trim.color.set(outfit.trim);
       glow.color.set(outfit.glow);
@@ -301,11 +356,15 @@ export function createOutfitLook(): OutfitLook {
       }
       for (let i = sl; i < sleeves.length; i++) sleeves[i]!.mesh.visible = false;
 
-      const helmet = outfit.helmet ? helmetFit(frames, outfit.helmetSize) : null;
-      if (helmet) {
-        const f = helmet;
-        const head = frames[frames.length - 1]!;
-        place(take('helmet'), f.centre, head.side, head.up, head.t, f.radius);
+      // Helmets first: a hat dropped inside one sits on top of its bubble.
+      const instances = design.parts.flatMap((part, index) => (isGear(part.kind) ? (part.mirror && Math.abs(Math.sin(part.theta)) > 0.06 ? [false, true] : [false]).map((mirrored) => ({ part, index, mirrored })) : []));
+      const helmets: HelmetFit[] = [];
+      for (const { part, index, mirrored } of instances) {
+        if (part.kind !== 'helmet') continue;
+        const f = helmetAt(frames, part.s, part.size);
+        helmets.push(f);
+        const o = take('helmet', index, mirrored);
+        place(o, f.centre, f.side, f.up, f.axis, f.radius);
       }
 
       legs.forEach((leg, i) => {
@@ -322,28 +381,40 @@ export function createOutfitLook(): OutfitLook {
         }
       });
 
-      design.parts.forEach((part) => {
-        if (!isGear(part.kind)) return;
-        for (const mirrored of part.mirror && Math.abs(Math.sin(part.theta)) > 0.06 ? [false, true] : [false]) {
-          const g = gearFrame(frames, part, mirrored, outfit.suit && part.s >= outfit.suitFrom && part.s <= outfit.suitTo);
-          // A hat on a helmeted head sits on top of the bubble.
-          if (part.kind === 'hat' && helmet && Math.hypot(g.p[0] - helmet.centre[0], g.p[1] - helmet.centre[1], g.p[2] - helmet.centre[2]) < helmet.radius) {
-            g.p = [helmet.centre[0] + g.y[0] * helmet.radius * 0.97, helmet.centre[1] + g.y[1] * helmet.radius * 0.97, helmet.centre[2] + g.y[2] * helmet.radius * 0.97];
-          }
-          const o = take(part.kind);
-          place(o, g.p, g.x, g.y, g.z, g.scale * (part.kind === 'beacon' ? 0.9 : part.kind === 'badge' ? 0.8 : 1));
-          if (part.kind === 'jetpack') {
-            let k = 0;
-            o.traverse((c) => {
-              if (c.name !== 'flame') return;
-              const len = (0.25 + 0.95 * thrust) * (0.85 + 0.15 * Math.sin(time * 41 + k++ * 2.1));
-              c.scale.set(1, 1, len);
-            });
-          }
+      for (const { part, index, mirrored } of instances) {
+        if (part.kind === 'helmet') continue;
+        const g = gearFrame(frames, part, mirrored, outfit.suit && part.s >= outfit.suitFrom && part.s <= outfit.suitTo);
+        const helmet = part.kind === 'hat' ? helmets.find((h) => Math.hypot(g.p[0] - h.centre[0], g.p[1] - h.centre[1], g.p[2] - h.centre[2]) < h.radius) : undefined;
+        if (helmet) g.p = [helmet.centre[0] + g.y[0] * helmet.radius * 0.97, helmet.centre[1] + g.y[1] * helmet.radius * 0.97, helmet.centre[2] + g.y[2] * helmet.radius * 0.97];
+        const o = take(part.kind, index, mirrored);
+        place(o, g.p, g.x, g.y, g.z, g.scale * (part.kind === 'beacon' ? 0.9 : part.kind === 'badge' ? 0.8 : 1));
+        if (part.kind === 'jetpack') {
+          let k = 0;
+          o.traverse((c) => {
+            if (c.name !== 'flame') return;
+            const len = (0.25 + 0.95 * thrust) * (0.85 + 0.15 * Math.sin(time * 41 + k++ * 2.1));
+            c.scale.set(1, 1, len);
+          });
         }
-      });
+      }
 
       for (const [kind, pool] of pools) pool.forEach((o, i) => (o.visible = i < (used.get(kind) ?? 0)));
+    },
+    fade(index) {
+      faded = index;
+    },
+    pick(raycaster) {
+      group.updateMatrixWorld();
+      const hits = raycaster.intersectObjects(
+        group.children.filter((o) => o.visible && o.userData.part !== undefined),
+        true,
+      );
+      for (const h of hits) {
+        let o: THREE.Object3D | null = h.object;
+        while (o && o.parent !== group) o = o.parent;
+        if (o && o.visible && o.userData.part !== undefined) return { index: o.userData.part as number, mirrored: o.userData.mirrored as boolean };
+      }
+      return null;
     },
     dispose() {
       shell.dispose();

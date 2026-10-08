@@ -5,9 +5,9 @@ import { Rng } from './rng';
 
 /*
  * Space clothes for editor creatures (creature.html's Outfit mode), as pure
- * data: where the suit's shell runs over the body, where the bubble helmet
- * sits on the head, and the frame each piece of gear (jetpack, beacon,
- * badge, shoulder pad) is built in on the skin. creaturelab/outfitLook.ts
+ * data: where the suit's shell runs over the body, where a bubble helmet
+ * dropped on the body sits, and the frame every other accessory (jetpack,
+ * hat, goggles, badge...) is built in on the skin. creaturelab/outfitLook.ts
  * draws them over the posed body every frame, so they walk with it.
  */
 
@@ -38,7 +38,7 @@ export function suitSpan(design: CreatureDesign): { from: number; to: number } {
 /** A white suit with orange trim and cyan lights, as worn on the Moon, covering the torso. */
 export function defaultOutfit(design: CreatureDesign): CreatureOutfit {
   const { from, to } = suitSpan(design);
-  return { suit: true, suitFrom: from, suitTo: to, sleeves: true, helmet: true, helmetSize: 1, boots: true, gloves: true, color: '#e9eef3', trim: '#ff8a2a', glow: '#4fe3ff' };
+  return { suit: true, suitFrom: from, suitTo: to, sleeves: true, boots: true, gloves: true, color: '#e9eef3', trim: '#ff8a2a', glow: '#4fe3ff' };
 }
 
 /** Another colour scheme: a pale or dark suit, a bold trim, bright lights. */
@@ -53,14 +53,15 @@ export function randomOutfitColors(rng: Rng): Pick<CreatureOutfit, 'color' | 'tr
 }
 
 /**
- * The design dressed for space: the whole outfit, and a jetpack on the
- * middle of its back, shoulder pads and a badge on its flank where it has
- * none yet.
+ * The design dressed for space: the whole outfit, and the accessories it
+ * hasn't got yet: a helmet on its head, a jetpack on the middle of its
+ * back, shoulder pads and a badge on its flank.
  */
 export function suitUp(design: CreatureDesign): CreatureDesign {
   const d = cloneDesign(design);
   const o = d.outfit ?? defaultOutfit(d);
-  d.outfit = { ...o, suit: true, helmet: true, boots: true, gloves: true };
+  d.outfit = { ...o, suit: true, boots: true, gloves: true };
+  if (!d.parts.some((p) => p.kind === 'helmet')) d.parts.push({ kind: 'helmet', s: 1, theta: 0, size: 1, tilt: 0, spread: 0, mirror: false });
   const mid = (o.suitFrom + o.suitTo) / 2;
   if (!d.parts.some((p) => p.kind === 'jetpack')) d.parts.push({ kind: 'jetpack', s: mid, theta: 0, size: 1, tilt: 0, spread: 0, mirror: false });
   // Shoulder pads over the frontmost limbs (the arms, else the front legs).
@@ -90,12 +91,14 @@ export function suitRing(frames: readonly SpineFrame[], s: number, segments: num
   return out;
 }
 
-/** The bubble helmet over the head: its centre, radius, and the neck's direction (into the collar, from the centre). */
+/** A bubble helmet: its centre, radius, its frame (along the spine, across, up), and its collar. */
 export interface HelmetFit {
   centre: Vec3;
   radius: number;
-  /** Along the spine at the head, pointing to the snout. */
+  /** Along the spine, pointing to the snout. */
   axis: Vec3;
+  side: Vec3;
+  up: Vec3;
   /** Where the collar ring sits (behind the centre, round the neck) and its radius. */
   collar: Vec3;
   collarRadius: number;
@@ -109,7 +112,22 @@ export function helmetFit(frames: readonly SpineFrame[], size = 1): HelmetFit {
   // Round the head's widest ring with room for eyes, and past the snout's tip.
   const radius = Math.max(Math.max(head.rx, head.ry) * 1.4, Math.hypot(...tip.map((v, i) => v - centre[i]!)) * 1.3) * clamp(size, 0.5, 2);
   const back = 0.82;
-  return { centre, radius, axis: head.t, collar: add(centre, head.t, -radius * back), collarRadius: radius * Math.sqrt(1 - back * back) };
+  return { centre, radius, axis: head.t, side: head.side, up: head.up, collar: add(centre, head.t, -radius * back), collarRadius: radius * Math.sqrt(1 - back * back) };
+}
+
+/** Where the head ends and a helmet dropped there goes round the whole head and snout. */
+export const HEAD_S = 0.85;
+
+/**
+ * A helmet dropped at `s` along the body: round the whole head from HEAD_S
+ * on, else a bubble round the body there (a long neck's, say).
+ */
+export function helmetAt(frames: readonly SpineFrame[], s: number, size = 1): HelmetFit {
+  if (s >= HEAD_S) return helmetFit(frames, size);
+  const f = frameAt(frames, s);
+  const radius = Math.max(f.rx, f.ry) * 1.45 * clamp(size, 0.5, 2);
+  const back = 0.82;
+  return { centre: f.p, radius, axis: f.t, side: f.side, up: f.up, collar: add(f.p, f.t, -radius * back), collarRadius: radius * Math.sqrt(1 - back * back) };
 }
 
 /** A piece of gear's frame on the skin: `y` out of the skin, `z` along the spine towards the head, `x` across; `scale` the body's radius there times the part's size. */
