@@ -373,6 +373,29 @@ describe('LOD surface', () => {
     surface.dispose();
   });
 
+  it('shows the chunks that come over the horizon while they merge, zooming out', () => {
+    const surface = make();
+    expect(settle(surface, new THREE.Vector3(0, 0, R * 1.15))).toBe(true);
+    // Far out over a spot that was behind the horizon: the low chunks still blend back before merging.
+    const camera = new THREE.Vector3(R * 20, 0, 0);
+    surface.update(camera, 0.01);
+    type Node = { centre: THREE.Vector3; angle: number; shown: boolean; visible: boolean; submerged: boolean; children: Node[] | null };
+    let missing = 0;
+    let shown = 0;
+    const walk = (node: Node) => {
+      if (node.shown) {
+        shown++;
+        const hidden = beyondHorizon(camera.angleTo(node.centre), node.angle, camera.length(), R * 0.92, R * 1.08);
+        if (!hidden && !node.submerged && !node.visible) missing++;
+      }
+      if (node.children) for (const k of node.children) walk(k);
+    };
+    for (const root of (surface as unknown as { roots: Node[] }).roots) walk(root);
+    expect(shown).toBeGreaterThan(6);
+    expect(missing).toBe(0);
+    surface.dispose();
+  });
+
   it('blends a new chunk in over morphSeconds instead of popping', () => {
     const surface = make();
     expect(settle(surface, new THREE.Vector3(0, 0, R * 20))).toBe(true);
