@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { onGroundLayers } from '../world/groundDepth';
 import type { Entity } from '../core/Entity';
 import { starLightColor } from '../gen/stars';
 import { starLightIntensity, type Star } from '../world/Star';
@@ -18,7 +19,7 @@ const LIGHT_DISTANCE = 1000;
  */
 export class PlanetLights implements Entity {
   private readonly lights: THREE.DirectionalLight[];
-  private readonly ambient = new THREE.AmbientLight('#9bb8ff', 0.4);
+  private readonly ambient = onGroundLayers(new THREE.AmbientLight('#9bb8ff', 0.4));
   private readonly starPosition = new THREE.Vector3();
 
   constructor(
@@ -34,8 +35,8 @@ export class PlanetLights implements Entity {
     private readonly galacticCentre: THREE.Vector3 | null = null,
   ) {
     // Same intensity as the star's point light in the system view.
-    this.lights = stars.map((s) => new THREE.DirectionalLight(starLightColor(s.data), starLightIntensity(s.data)));
-    if (this.lights.length === 0) this.lights.push(new THREE.DirectionalLight(galacticLightParams.color, galacticLightParams.intensity));
+    this.lights = stars.map((s) => onGroundLayers(new THREE.DirectionalLight(starLightColor(s.data), starLightIntensity(s.data))));
+    if (this.lights.length === 0) this.lights.push(onGroundLayers(new THREE.DirectionalLight(galacticLightParams.color, galacticLightParams.intensity)));
     scene.add(this.ambient, ...this.lights);
     ambientLight?.copy(this.ambient.color).multiplyScalar(this.ambient.intensity);
     this.update();

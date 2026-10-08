@@ -666,6 +666,11 @@ export class SeaWaveLook {
   }
 
   /** Redraws the wave tiles for this frame (call before drawing the sea). */
+  /** Compiles the shaders `render` draws its tiles with. */
+  compile(renderer: THREE.WebGLRenderer): void {
+    this.tiles.compile(renderer);
+  }
+
   render(renderer: THREE.WebGLRenderer): void {
     if (this.uniforms.uSeaWind.value > 0) this.tiles.render(renderer, this.time);
   }

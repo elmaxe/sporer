@@ -262,6 +262,13 @@ export class PlanetGlobe implements Entity {
   }
 
   /** Draws what the scene reads from textures, the ground's depth for the atmosphere and the sea's wave tiles: call before drawing the scene with `camera`. */
+  /** Compiles the shaders of `renderDepth`'s passes (see GroundDepth.compile). */
+  compileDepth(renderer: THREE.WebGLRenderer, camera: THREE.Camera): void {
+    if (this.busted) return;
+    this.ground?.compile(renderer, this.scene, camera);
+    this.waves?.compile(renderer);
+  }
+
   renderDepth(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera): void {
     if (this.busted) return;
     this.ground?.render(renderer, this.scene, camera);

@@ -107,10 +107,8 @@ export function createAtmosphereShell(
   const meshRadius = shellRadius(radius, look);
   const material = atmosphereMaterial(radius, color, look, sun, ground);
   const shell = new SpherePatches(meshRadius, segments, perFace, material, 'Atmosphere');
-  for (const { mesh } of shell.patches) {
-    mesh.renderOrder = ATMOSPHERE_RENDER_ORDER;
-    mesh.onBeforeRender = depthTestOutside(mesh, material, meshRadius);
-  }
+  shell.mesh.renderOrder = ATMOSPHERE_RENDER_ORDER;
+  shell.beforeRender(depthTestOutside(shell.mesh, material, meshRadius));
   return shell;
 }
 

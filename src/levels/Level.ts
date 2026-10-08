@@ -68,6 +68,14 @@ export class Level {
     this.flushRemovals();
   }
 
+  /**
+   * Compiles the shaders the level will draw with, before it's first drawn (a transition does it as it starts, so
+   * the compile doesn't stall a frame mid-crossfade). Hidden objects are included. The default compiles its scene.
+   */
+  compile(renderer: THREE.WebGLRenderer, camera: THREE.Camera): void {
+    renderer.compile(this.scene, camera);
+  }
+
   /** Draws the level; the default renders its scene (as a wireframe with the menu's switch, see renderScene). */
   render(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera): void {
     renderScene(renderer, this.scene, camera);

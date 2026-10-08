@@ -17,6 +17,18 @@ export const GROUND_LAYER = 1;
  */
 export const GROUND_DETAIL_LAYER = 2;
 
+/**
+ * Puts a light on the ground layers too, so GroundDepth's passes see the same lights as the scene's own pass.
+ * three.js keys every lit material's program on the lights it sees: a pass without them makes each lit material
+ * look its program up again on every pass, every frame (a few ms and a lot of garbage near the ground). Every light
+ * in a scene GroundDepth draws goes through this.
+ */
+export function onGroundLayers<T extends THREE.Light>(light: T): T {
+  light.layers.enable(GROUND_LAYER);
+  light.layers.enable(GROUND_DETAIL_LAYER);
+  return light;
+}
+
 /** True while GroundDepth draws the GROUND_DETAIL_LAYER meshes: their shaders skip the shading. */
 export const groundDepthPass = { value: false };
 
@@ -43,6 +55,13 @@ export class GroundDepth {
   private readonly material = new THREE.MeshBasicMaterial({ colorWrite: false });
   private readonly size = new THREE.Vector2();
   private readonly layers = new THREE.Layers();
+  /**
+   * Each GROUND_DETAIL_LAYER material's twin for the second pass (see `depthTwin`), and the meshes swapped to theirs
+   * for it. A material drawn both into this texture and onto the screen would have its program looked up again at
+   * every switch, twice a frame (three.js keys programs on the target's tone mapping and colour space).
+   */
+  private readonly twins = new WeakMap<THREE.Material, THREE.Material>();
+  private readonly swapped: { mesh: THREE.Mesh; material: THREE.Material }[] = [];
 
   constructor() {
     this.target = new THREE.WebGLRenderTarget(1, 1, {
@@ -79,15 +98,84 @@ export class GroundDepth {
     camera.layers.set(GROUND_DETAIL_LAYER);
     scene.overrideMaterial = null;
     renderer.autoClear = false;
+    this.swapToTwins(scene);
     groundDepthPass.value = true;
     renderer.render(scene, camera);
     groundDepthPass.value = false;
+    this.swapBack();
     renderer.setRenderTarget(target);
     renderer.autoClear = autoClear;
     scene.overrideMaterial = override;
     scene.background = background;
     camera.layers.mask = this.layers.mask;
     endFrozenCulling();
+  }
+
+  /**
+   * Compiles the shaders `render` will draw with (into this texture, so not those of the scene's own pass), hidden
+   * meshes on GROUND_DETAIL_LAYER included (plants, rocks and animals that only show near the ground), so they
+   * don't compile on the frame they're first drawn.
+   */
+  compile(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera): void {
+    const target = renderer.getRenderTarget();
+    const mask = camera.layers.mask;
+    renderer.setRenderTarget(this.target);
+    // The ground pass draws its meshes with one material (a program per kind of mesh: batched, instanced or plain).
+    camera.layers.set(GROUND_LAYER);
+    this.compileEach(renderer, scene, camera, GROUND_LAYER, () => this.material);
+    camera.layers.set(GROUND_DETAIL_LAYER);
+    this.compileEach(renderer, scene, camera, GROUND_DETAIL_LAYER, (material) => this.depthTwin(material));
+    camera.layers.mask = mask;
+    renderer.setRenderTarget(target);
+  }
+
+  private compileEach(
+    renderer: THREE.WebGLRenderer,
+    scene: THREE.Scene,
+    camera: THREE.Camera,
+    layer: number,
+    drawnWith: (material: THREE.Material) => THREE.Material,
+  ): void {
+    scene.traverse((o) => {
+      if (!(o instanceof THREE.Mesh) || Array.isArray(o.material) || !o.layers.isEnabled(layer)) return;
+      const material = o.material as THREE.Material;
+      o.material = drawnWith(material);
+      renderer.compile(o, camera, scene);
+      o.material = material;
+    });
+  }
+
+  private swapToTwins(scene: THREE.Scene): void {
+    scene.traverseVisible((o) => {
+      if (!(o instanceof THREE.Mesh) || Array.isArray(o.material) || !o.layers.isEnabled(GROUND_DETAIL_LAYER)) return;
+      const material = o.material as THREE.Material;
+      this.swapped.push({ mesh: o, material });
+      o.material = this.depthTwin(material);
+    });
+  }
+
+  private swapBack(): void {
+    for (const { mesh, material } of this.swapped) mesh.material = material;
+    this.swapped.length = 0;
+  }
+
+  /**
+   * A copy of `material` with the same shader changes and uniforms (so it reads `groundDepthPass` and stops after
+   * its discard test), drawn only into this pass's texture. Made the first time it's needed, disposed with it.
+   */
+  private depthTwin(material: THREE.Material): THREE.Material {
+    let twin = this.twins.get(material);
+    if (twin) return twin;
+    twin = material.clone();
+    twin.onBeforeCompile = material.onBeforeCompile;
+    // A shader material's clone copies its uniforms: the twin must read the same ones.
+    if (material instanceof THREE.ShaderMaterial) (twin as THREE.ShaderMaterial).uniforms = material.uniforms;
+    const key = material.customProgramCacheKey.bind(material);
+    twin.customProgramCacheKey = () => `${key()}|ground-depth`;
+    this.twins.set(material, twin);
+    const made = twin;
+    material.addEventListener('dispose', () => made.dispose());
+    return twin;
   }
 
   dispose(): void {
