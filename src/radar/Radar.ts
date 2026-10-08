@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
 import { HOME_RANGE, PACK_RANGE_FACTOR, HerdPath, type AnimalPlan, type AnimalPose, type HerdData } from '../gen/animals';
+import { panicParams, type HerdPanic } from '../gen/panic';
 import type { GroundRadius } from '../gen/plants';
 import type { SoundEffects } from '../audio/sfx';
 import type { SurfaceChanges } from '../surface/changes';
@@ -138,10 +139,13 @@ export class Radar implements Entity {
     debug: Debug,
     /** Animals beamed up or killed (`<herd id>:<k>`), which it no longer finds (none in tests). */
     private readonly changes: Pick<SurfaceChanges, 'removedAnimalCount' | 'isAnimalRemoved'> | null = null,
+    /** A herd's panic (gen/panic.ts), if it has run from the ship: it finds them where they fled to (none in tests). */
+    private readonly panics: ((herdId: string) => HerdPanic | undefined) | null = null,
   ) {
     this.census = new HerdCensus(plan, ground);
-    // A herd strays at most its range (a pack's is longer) and its spread from home.
-    this.reach = Math.max(...plan.species.map((s) => s.length * 1.7 * Math.sqrt(s.herdMax + 1))) + HOME_RANGE * PACK_RANGE_FACTOR;
+    // A herd strays at most its range (a pack's is longer) and its spread from home, and as far again as it may have fled.
+    this.reach =
+      Math.max(...plan.species.map((s) => s.length * 1.7 * Math.sqrt(s.herdMax + 1))) + HOME_RANGE * PACK_RANGE_FACTOR + 2 * panicParams.fleeRadius * panicParams.fleeFactor;
     this.uniforms = {
       uAges: { value: new THREE.Vector4(-1, -1, -1, -1) },
       uSpread: { value: radarParams.farSpread },
@@ -287,10 +291,12 @@ export class Radar implements Entity {
     let best = Infinity;
     for (const herd of this.candidates) {
       const path = this.pathOf(herd);
+      const panic = this.panics?.(herd.id);
       const removed = this.changes && this.changes.removedAnimalCount > 0 ? this.changes : null;
       for (let k = 0; k < herd.count; k++) {
         if (removed?.isAnimalRemoved(`${herd.id}:${k}`)) continue;
         path.pose(k, t, pose);
+        panic?.apply(path, k, t, pose);
         const d = groundDistance(from, pose, R);
         if (d >= best) continue;
         best = d;

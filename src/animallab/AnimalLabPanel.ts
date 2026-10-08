@@ -2,6 +2,8 @@ import type GUI from 'lil-gui';
 import { BODY_PLANS, COAT_PATTERNS, type BodyPlan } from '../gen/animalForm';
 import type { AnimalSpecies } from '../gen/animals';
 import type { Habitability } from '../gen/climate';
+import { playCall } from '../audio/animalSynth';
+import { CALL_KINDS, callShape, makeVoice } from '../gen/animalVoice';
 import { animalParams } from '../surface/animalParams';
 import type { FpsCounter } from '../ui/FpsCounter';
 import { ANIMAL_LAB_PACES, sanitizeAnimal, type AnimalLabLod } from './labAnimals';
@@ -142,6 +144,30 @@ export class AnimalLabPanel {
     c.addColor(form, 'patternColor').name('pattern').onChange(changed);
     c.addColor(form, 'accentColor').name('horns, hooves, claws').onChange(changed);
     c.addColor(form, 'eyeColor').name('eyes').onChange(changed);
+
+    // Its voice (gen/animalVoice.ts), as the game synthesises it: each kind of call, a new variation every press.
+    const v = this.folder('Calls (hear it)');
+    const voice = { info: '' };
+    const describe = () => {
+      const x = makeVoice(lab.species);
+      voice.info = `${Math.round(x.mass)} kg · ${Math.round(x.pitch)} Hz · tract ${x.tract.toFixed(1)} cm`;
+      return x;
+    };
+    describe();
+    v.add(voice, 'info').name('voice').disable().listen();
+    for (const kind of CALL_KINDS) {
+      v.add({ [kind]: () => this.call(describe(), kind) }, kind);
+    }
+  }
+
+  private audio: AudioContext | null = null;
+  private variant = 1;
+
+  /** Plays a call of the selected species' voice (the context is made on the first press: a gesture). */
+  private call(voice: ReturnType<typeof makeVoice>, kind: (typeof CALL_KINDS)[number]): void {
+    this.audio ??= new AudioContext();
+    void this.audio.resume();
+    playCall({ ctx: this.audio, out: this.audio.destination }, voice, callShape(voice, kind, this.variant++), 0.8, 0);
   }
 
   private folder(title: string): GUI {
