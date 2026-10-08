@@ -284,6 +284,8 @@ export class IceLook {
   constructor(
     readonly surface: IceSurface,
     real: boolean,
+    /** gen/ice.ts lineaeIndex of its lines (built here if not given). */
+    index: Uint8Array = lineaeIndex(surface.lines),
   ) {
     const s = surface;
     const linear = (hex: string) => new THREE.Color(hex);
@@ -296,7 +298,7 @@ export class IceLook {
       b[i]!.set(...l.ref, l.width * Math.sqrt(1 - l.offset * l.offset));
       c[i]!.set(l.centre, l.half, l.strength, l.ridge);
     });
-    this.index = new THREE.DataTexture(lineaeIndex(s.lines), LINEAE_INDEX_SIZE[0], LINEAE_INDEX_SIZE[1]);
+    this.index = new THREE.DataTexture(index, LINEAE_INDEX_SIZE[0], LINEAE_INDEX_SIZE[1]);
     this.index.magFilter = this.index.minFilter = THREE.NearestFilter;
     this.index.needsUpdate = true;
     const off = new Rng(hashSeed(s.lines.length, s.lineaeColor, 'ice-offset'));
@@ -507,5 +509,22 @@ export class IceLook {
 export function createIceLook(config: PlanetConfig): IceLook | null {
   if (config.shape) return null;
   const surface = iceSurface(config);
-  return surface ? new IceLook(surface, realSurface(config.seed) !== undefined) : null;
+  return surface ? new IceLook(surface, realSurface(config.seed) !== undefined, cachedIndex(config.seed, surface)) : null;
+}
+
+/**
+ * The lineae indices of the bodies drawn lately: the system view, low orbit and its moons each draw the same body, and
+ * its index is the costly part of its look. A body's lines are its seed's stream, as many as its heat flow gives.
+ */
+const indices = new Map<string, Uint8Array>();
+const KEPT_INDICES = 32;
+
+function cachedIndex(seed: number, surface: IceSurface): Uint8Array {
+  const key = `${seed}:${surface.lines.length}`;
+  let index = indices.get(key);
+  if (index) indices.delete(key);
+  else index = lineaeIndex(surface.lines);
+  indices.set(key, index);
+  if (indices.size > KEPT_INDICES) indices.delete(indices.keys().next().value!);
+  return index;
 }

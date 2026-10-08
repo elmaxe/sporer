@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { now, type Defer } from '../core/jobs';
 import { beginFrozenCulling, endFrozenCulling } from './viewFreeze';
 
 /**
@@ -116,33 +117,27 @@ export class GroundDepth {
    * meshes on GROUND_DETAIL_LAYER included (plants, rocks and animals that only show near the ground), so they
    * don't compile on the frame they're first drawn.
    */
-  compile(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera): void {
-    const target = renderer.getRenderTarget();
-    const mask = camera.layers.mask;
-    renderer.setRenderTarget(this.target);
-    // The ground pass draws its meshes with one material (a program per kind of mesh: batched, instanced or plain).
-    camera.layers.set(GROUND_LAYER);
-    this.compileEach(renderer, scene, camera, GROUND_LAYER, () => this.material);
-    camera.layers.set(GROUND_DETAIL_LAYER);
-    this.compileEach(renderer, scene, camera, GROUND_DETAIL_LAYER, (material) => this.depthTwin(material));
-    camera.layers.mask = mask;
-    renderer.setRenderTarget(target);
+  compile(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, defer: Defer = now): void {
+    scene.traverse((o) => {
+      if (!(o instanceof THREE.Mesh) || Array.isArray(o.material)) return;
+      // The ground pass draws its meshes with one material (a program per kind of mesh: batched, instanced or plain).
+      if (o.layers.isEnabled(GROUND_LAYER)) defer(() => this.compileAs(renderer, scene, camera, o, GROUND_LAYER, this.material));
+      if (o.layers.isEnabled(GROUND_DETAIL_LAYER)) defer(() => this.compileAs(renderer, scene, camera, o, GROUND_DETAIL_LAYER, this.depthTwin(o.material)));
+    });
   }
 
-  private compileEach(
-    renderer: THREE.WebGLRenderer,
-    scene: THREE.Scene,
-    camera: THREE.Camera,
-    layer: number,
-    drawnWith: (material: THREE.Material) => THREE.Material,
-  ): void {
-    scene.traverse((o) => {
-      if (!(o instanceof THREE.Mesh) || Array.isArray(o.material) || !o.layers.isEnabled(layer)) return;
-      const material = o.material as THREE.Material;
-      o.material = drawnWith(material);
-      renderer.compile(o, camera, scene);
-      o.material = material;
-    });
+  /** Compiles `mesh` as drawn into this texture on `layer` with `material`. */
+  private compileAs(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, mesh: THREE.Mesh, layer: number, material: THREE.Material): void {
+    const target = renderer.getRenderTarget();
+    const mask = camera.layers.mask;
+    const own = mesh.material;
+    renderer.setRenderTarget(this.target);
+    camera.layers.set(layer);
+    mesh.material = material;
+    renderer.compile(mesh, camera, scene);
+    mesh.material = own;
+    camera.layers.mask = mask;
+    renderer.setRenderTarget(target);
   }
 
   private swapToTwins(scene: THREE.Scene): void {
