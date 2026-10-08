@@ -2,6 +2,7 @@ import { BODY_PLANS, COAT_PATTERNS, generateAnimalForm, type CoatPattern } from 
 import { defaultCreature, isGear, randomCreature, randomPaint, speciesDesign, type CreatureOutfit, type CreaturePart, type PartKind, GEAR_KINDS, PART_KINDS } from '../gen/creature';
 import { defaultOutfit, randomOutfitColors, suitSpan, suitUp, undress } from '../gen/creatureOutfit';
 import { Rng } from '../gen/rng';
+import { keepCaptain } from '../player/captain';
 import type { CreatureLab, EditorMode } from './CreatureLab';
 
 /*
@@ -129,6 +130,8 @@ export class CreaturePanel {
       },
       'Copy a link to this creature',
     );
+    const captain = this.button(actions, '🧑‍🚀 Captain', () => this.makeCaptain(), "Make this creature your ship's captain: it sits in the cockpit in a space suit");
+    captain.classList.add('on');
     this.top.append(title, modes, actions);
   }
 
@@ -159,6 +162,16 @@ export class CreaturePanel {
     b.addEventListener('click', onClick);
     parent.append(b);
     return b;
+  }
+
+  /** Keeps the creature as the ship's captain (local storage) and opens the spaceship editor with it in the cockpit. */
+  private makeCaptain(): void {
+    this.lab.commit();
+    if (!keepCaptain(this.lab.design)) {
+      this.flash("This browser won't keep it (storage is off)");
+      return;
+    }
+    location.href = new URL('ship.html', location.href).href;
   }
 
   private flash(text: string): void {

@@ -12,6 +12,8 @@ import { hoverGap, parkGap, zoomCurveParams } from './zoomCurve';
 import { AFTER_ATMOSPHERE_RENDER_ORDER } from '../world/atmosphereShell';
 import { customShip } from './customShip';
 import { buildDesignedUfo } from './shipMesh';
+import { captainDesign } from './captain';
+import { CaptainLook } from './captainMesh';
 
 /** Tunables, exposed in the debug panel. */
 export const shipParams = {
@@ -333,11 +335,13 @@ export class Ship implements Entity {
 /**
  * The player's UFO: their own design from the spaceship editor if they keep
  * one (player/customShip.ts), else the classic flying saucer: a hull disc,
- * a glass dome and a spinning light ring.
+ * a glass dome and a spinning light ring. Their creature (player/captain.ts)
+ * sits in its cockpit in a space suit.
  */
 export function buildUfoMesh(): { group: THREE.Group; ring: THREE.Group } {
   const design = customShip();
-  if (design) return buildDesignedUfo(design);
+  const captain = new CaptainLook(captainDesign());
+  if (design) return buildDesignedUfo(design, captain);
   const group = new THREE.Group();
 
   const hull = new THREE.Mesh(
@@ -352,14 +356,21 @@ export function buildUfoMesh(): { group: THREE.Group; ring: THREE.Group } {
     new THREE.SphereGeometry(0.9, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2),
     new THREE.MeshStandardMaterial({
       color: '#7fd8ff',
-      emissive: '#1a6f99',
+      emissive: '#0d3a50',
       transparent: true,
-      opacity: 0.85,
+      // Clear enough to see the captain inside.
+      opacity: 0.5,
       roughness: 0.1,
     }),
   );
   dome.position.y = 0.35;
   group.add(dome);
+
+  // The captain under the dome, on the hull's top (0.56 up), facing the way it flies (−z).
+  captain.fit([0.9, 0.9, 0.9], 0.56 - 0.35 + 0.03);
+  captain.group.position.y = 0.35;
+  captain.group.rotation.y = Math.PI;
+  group.add(captain.group);
 
   const ring = new THREE.Group();
   const lightGeometry = new THREE.SphereGeometry(0.16, 8, 6);
@@ -375,8 +386,10 @@ export function buildUfoMesh(): { group: THREE.Group; ring: THREE.Group } {
     ring.add(light);
   }
   group.add(ring);
-  // A group's renderOrder sorts everything under it (up to a nested group, hence the ring too).
-  group.renderOrder = ring.renderOrder = AFTER_ATMOSPHERE_RENDER_ORDER;
+  // A group's renderOrder sorts everything under it (up to a nested group, hence the ring and the captain's too).
+  group.traverse((o) => {
+    if (!(o instanceof THREE.Mesh)) o.renderOrder = AFTER_ATMOSPHERE_RENDER_ORDER;
+  });
 
   return { group, ring };
 }

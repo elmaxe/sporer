@@ -22,6 +22,8 @@ import {
   type ShipPartKind,
   type Vec3,
 } from '../gen/ship';
+import { captainDesign } from '../player/captain';
+import { CaptainLook } from '../player/captainMesh';
 import { ShipMaterials, buildShipModel, outlineMaterial, type PartMeshInfo, type ShipModel } from '../player/shipMesh';
 
 /*
@@ -77,6 +79,8 @@ export class ShipLab {
   throttle = 0.6;
   /** Draw the ship as its triangles' edges (X), to see how parts are built and where they meet. */
   private _wireframe = false;
+  /** The player's creature, seated in the cockpit (player/captain.ts). */
+  readonly captain: CaptainLook;
   /** Called when the design, the selection or the mode changes (the panel redraws). */
   onChange: (() => void) | null = null;
 
@@ -176,6 +180,7 @@ export class ShipLab {
     this.scene.add(this.hangar, this.space, this.rig);
     this.raycaster.layers.enableAll();
 
+    this.captain = new CaptainLook(captainDesign());
     this.setBackdrop();
     this.resize();
     this.rebuild();
@@ -431,6 +436,7 @@ export class ShipLab {
     if (this.model) this.rig.remove(this.model.group);
     this.model = buildShipModel(this.design, this.materials);
     this.rig.add(this.model.group);
+    this.captain.seatIn(this.design, this.model.group);
     this.addOutlines();
     this.applyWireframe();
     // Stand the ship on its pad, a little clear of it.
