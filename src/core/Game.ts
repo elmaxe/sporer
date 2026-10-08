@@ -60,6 +60,9 @@ export class Game {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     // Reading back each shader's log waits for its compile and costs time on every new shader: only while debugging.
     this.renderer.debug.checkShaderErrors = debug.enabled;
+    // Turned on now rather than by the first BatchedMesh compiled (a planet's ground): turning an extension on can make
+    // the browser set its shader compiler up again, a long stall (95–280 ms under software WebGL) in the zoom down.
+    this.renderer.extensions.has('WEBGL_multi_draw');
     // Draw counts add up over the whole frame (every level and pass), reset in `frame`: the debug dump reads them.
     this.renderer.info.autoReset = false;
     container.appendChild(this.renderer.domElement);
