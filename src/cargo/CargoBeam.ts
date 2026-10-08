@@ -85,9 +85,9 @@ interface Target {
   readonly base: THREE.Vector3;
 }
 
-/** Whoever screams for the animals on the beam (surface/AnimalSounds.ts): a scream at `at` (the level's frame), `frenzy` 0 to 1; how long it lasts (0: not heard). */
+/** Whoever screams for the animals on the beam (surface/AnimalSounds.ts): a scream at `at` (the level's frame), `frenzy` 0 to 1, by an animal `size` times its species' (a young one shrieks higher); how long it lasts (0: not heard). */
 export interface AnimalScreams {
-  scream(species: AnimalSpecies, at: THREE.Vector3, variant: number, frenzy: number): number;
+  scream(species: AnimalSpecies, at: THREE.Vector3, variant: number, frenzy: number, size?: number): number;
 }
 
 /** Seconds after it's grabbed (and gives its first cry) that an abducted animal starts screaming, and the breath it takes between screams. */
@@ -666,7 +666,7 @@ export class CargoBeam implements Entity {
     if (!this.screams || load.cargo.kind !== 'animal') return;
     load.screamIn -= dt;
     if (load.screamIn > 0) return;
-    const lasts = this.screams.scream(load.cargo.species, load.object.position, hashSeed(load.key, load.foot.x, load.screams++), frenzy);
+    const lasts = this.screams.scream(load.cargo.species, load.object.position, hashSeed(load.key, load.foot.x, load.screams++), frenzy, load.full);
     load.screamIn = (lasts > 0 ? lasts : FIRST_SCREAM) + this.rng.range(SCREAM_GAP_MIN, SCREAM_GAP_MAX);
   }
 

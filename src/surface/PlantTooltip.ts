@@ -58,8 +58,8 @@ export class PlantTooltip implements Entity {
       const limit = ground === null ? Infinity : ground + GROUND_SLACK;
       const animal = this.animals?.pick(ray, limit) ?? null;
       if (animal) {
-        const { species, scale, doing } = animal;
-        const info = `${species.diet === 'carnivore' ? 'Carnivore' : 'Herbivore'} · ${(species.length * scale).toFixed(1)} u long · ${doing}`;
+        const { species, scale, young, doing } = animal;
+        const info = `${young ? 'Young ' : ''}${species.diet === 'carnivore' ? (young ? 'carnivore' : 'Carnivore') : young ? 'herbivore' : 'Herbivore'} · ${(species.length * scale).toFixed(1)} u long · ${doing}`;
         this.tooltip.show(animal.id, species.name, info, pointer.clientX, pointer.clientY, animal.origin ? `Brought from ${animal.origin}` : undefined, this.input.touchMode);
         this.shown = true;
         return;

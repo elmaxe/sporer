@@ -88,6 +88,17 @@ export const DAMUTH_EXPONENT = -0.75;
  */
 export const CARNIVORE_SHARE = 0.15;
 
+/**
+ * Young per adult in a herd or pack: deer and elk herds count 20–45 calves
+ * per 100 cows, about a fifth of the herd (docs/research/animals.md). A lone
+ * animal has none; a pair may have one.
+ */
+export const YOUNG_PER_ADULT: readonly [number, number] = [0.2, 0.45];
+/** An adult's own size (times its species' length), from its id. */
+export const ADULT_SCALE: readonly [number, number] = [0.85, 1.15];
+/** A young one's: its species' body, scaled down (stylised, as Spore's babies: small enough to read as young from the ship). */
+export const YOUNG_SCALE: readonly [number, number] = [0.5, 0.67];
+
 /** Cells are about this many units across (planet-level); a herd roams within HOME_RANGE of its home. */
 export const HERD_CELL_SIZE = 96;
 export const HOME_RANGE = 36;
@@ -213,7 +224,9 @@ export interface HerdData {
   /** Stable: `face:i:j`; its animals are `<id>:<k>`. */
   readonly id: string;
   readonly species: number;
+  /** Its animals, young included: the last `young` of them are young, each keeping beside an adult. */
   readonly count: number;
+  readonly young: number;
   /** Home: unit direction (body frame). */
   readonly home: Vec3Like;
   /** How far from home its waypoints fall (units). */
@@ -301,16 +314,38 @@ export function generateHerd(plan: AnimalPlan, ground: GroundRadius, face: numbe
   }
   const s = plan.species[chosen]!;
   const carnivore = s.diet === 'carnivore';
+  const adults = s.herdMin + Math.floor(countRoll * (s.herdMax - s.herdMin + 1));
+  // Hashed, not drawn: the stream above is the herd's as it always was.
+  const share = YOUNG_PER_ADULT[0] + ((hashSeed(seed, 'young') & 0xffff) / 0x10000) * (YOUNG_PER_ADULT[1] - YOUNG_PER_ADULT[0]);
+  const young = Math.round(adults * share);
   return {
     id: `${face}:${i}:${j}`,
     species: chosen,
-    count: s.herdMin + Math.floor(countRoll * (s.herdMax - s.herdMin + 1)),
+    count: adults + young,
+    young,
     home: { x: home.x, y: home.y, z: home.z },
     range: HOME_RANGE * (carnivore ? PACK_RANGE_FACTOR : 1),
     slot: (carnivore ? 50 : 30) + slotRoll * (carnivore ? 60 : 40),
     offset: offsetRoll * 1000,
     seed,
   };
+}
+
+/** Whether member `k` of a herd is young. */
+export function isYoung(herd: Pick<HerdData, 'count' | 'young'>, k: number): boolean {
+  return k >= herd.count - herd.young;
+}
+
+/** Member `k`'s size, times its species' length: adults vary a little about it, the young are scaled down. */
+export function memberScale(herd: Pick<HerdData, 'count' | 'young' | 'seed'>, k: number): number {
+  const [lo, hi] = isYoung(herd, k) ? YOUNG_SCALE : ADULT_SCALE;
+  return lo + ((hashSeed(herd.seed, 'size', k) & 0xffff) / 0x10000) * (hi - lo);
+}
+
+/** The adult a young member keeps beside (its mother; twins share one), or -1 for an adult. */
+export function motherOf(herd: Pick<HerdData, 'count' | 'young' | 'seed'>, k: number): number {
+  if (!isYoung(herd, k)) return -1;
+  return hashSeed(herd.seed, 'mother', k) % (herd.count - herd.young);
 }
 
 // --- Where a herd is ---
@@ -351,6 +386,9 @@ export interface AnimalPose {
 const MEMBER_LAG = 3;
 /** Animals of a herd stand about this many body lengths apart. */
 const MEMBER_SPACING = 1.7;
+/** A young one keeps about this many of its species' lengths from its mother, and lags her by at most this (s). */
+const YOUNG_SPACING = 0.75;
+const YOUNG_LAG = 0.6;
 /** Slots' waypoints a herd keeps (its animals' lags span a few). */
 const SLOT_CACHE = 6;
 /** Seconds a herd takes to turn towards its next waypoint before setting off. */
@@ -374,6 +412,9 @@ export class HerdPath {
   private readonly offsets: Float64Array;
   private readonly lags: Float64Array;
   private readonly phases: Float64Array;
+  /** Each member's size (times its species' length: `memberScale`, or as given) and the adult each young one keeps beside (-1: an adult). */
+  readonly scales: Float32Array;
+  readonly mothers: Int32Array;
   readonly gait: AnimalGait;
   readonly species: AnimalSpecies;
 
@@ -382,6 +423,7 @@ export class HerdPath {
     readonly ground: GroundRadius,
     readonly herd: HerdData,
     skeleton: Pick<AnimalSkeleton, 'hipHeight'>,
+    scales?: Float32Array,
   ) {
     this.species = plan.species[herd.species]!;
     this.gait = animalGait(skeleton, plan.gravity);
@@ -390,15 +432,28 @@ export class HerdPath {
     this.offsets = new Float64Array(n * 2);
     this.lags = new Float64Array(n);
     this.phases = new Float64Array(n);
+    this.scales = scales ?? Float32Array.from({ length: n }, (_, k) => memberScale(herd, k));
+    this.mothers = Int32Array.from({ length: n }, (_, k) => motherOf(herd, k));
     const rng = new Rng(herd.seed).fork('members');
     const spacing = MEMBER_SPACING * this.species.length;
-    for (let k = 0; k < n; k++) {
+    const adults = n - herd.young;
+    for (let k = 0; k < adults; k++) {
       // A sunflower: evenly packed, round, jittered.
       const r = k === 0 ? 0 : spacing * Math.sqrt(k + 0.3) * rng.range(0.75, 1.15);
       const a = k * GOLDEN_ANGLE + rng.range(-0.4, 0.4);
       this.offsets[k * 2] = Math.cos(a) * r;
       this.offsets[k * 2 + 1] = Math.sin(a) * r;
       this.lags[k] = rng.range(-1, 1) * MEMBER_LAG;
+      this.phases[k] = rng.range(0, 1000);
+    }
+    // The young keep at their mothers' sides, starting and stopping with them.
+    for (let k = adults; k < n; k++) {
+      const m = this.mothers[k]!;
+      const r = YOUNG_SPACING * this.species.length * rng.range(0.8, 1.2);
+      const a = rng.range(0, Math.PI * 2);
+      this.offsets[k * 2] = this.offsets[m * 2]! + Math.cos(a) * r;
+      this.offsets[k * 2 + 1] = this.offsets[m * 2 + 1]! + Math.sin(a) * r;
+      this.lags[k] = this.lags[m]! + rng.range(-1, 1) * YOUNG_LAG;
       this.phases[k] = rng.range(0, 1000);
     }
   }
@@ -575,10 +630,13 @@ export class HerdPath {
     out.hx = hx / hl;
     out.hy = hy / hl;
     out.hz = hz / hl;
-    const trot = smoothstep(gait.walkSpeed, gait.trotSpeed, speed);
-    const stride = gait.walkStride + (gait.trotStride - gait.walkStride) * trot;
+    // Its own size's gait (dynamic similarity: speeds as the root of its size, strides as its size), so a young one keeping up trots.
+    const size = this.scales[k]!;
+    const root = Math.sqrt(size);
+    const trot = smoothstep(gait.walkSpeed * root, gait.trotSpeed * root, speed);
+    const stride = (gait.walkStride + (gait.trotStride - gait.walkStride) * trot) * size;
     out.trot = trot;
-    out.stride = Math.min(1, speed / (gait.walkSpeed * 0.6));
+    out.stride = Math.min(1, speed / (gait.walkSpeed * root * 0.6));
     this.speed = speed;
     out.cycle = (s * distance) / stride;
     // Herbivores graze in bouts while resting: head down, then up to look round.

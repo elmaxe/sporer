@@ -11,12 +11,16 @@ import {
   STRIDE_COEFFICIENT,
   STRIDE_EXPONENT,
   WALK_FROUDE,
+  YOUNG_PER_ADULT,
+  YOUNG_SCALE,
   animalGait,
   animalMass,
   generateHerd,
   habitable,
   herdGridSize,
   hipHeightOf,
+  isYoung,
+  memberScale,
   planAnimals,
   type AnimalPlan,
   type AnimalPose,
@@ -248,6 +252,71 @@ describe('herds', () => {
       expect({ ...path.pose(0, 123.4, pose) }).toEqual(a);
       expect(h.range).toBeLessThanOrEqual(HOME_RANGE * 1.8);
     }
+  });
+});
+
+describe('young', () => {
+  const p = plan(3, 77);
+  const n = herdGridSize(RADIUS);
+  const herds: HerdData[] = [];
+  for (let face = 0; face < 6; face++) for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+    const h = generateHerd(p, ground, face, i, j);
+    if (h) herds.push(h);
+  }
+
+  it('are a minority of most herds (20–45 per 100 adults), and scaled down', () => {
+    let young = 0;
+    let adults = 0;
+    for (const h of herds) {
+      const grown = h.count - h.young;
+      const s = p.species[h.species]!;
+      expect(grown).toBeGreaterThanOrEqual(s.herdMin);
+      expect(grown).toBeLessThanOrEqual(s.herdMax);
+      expect(h.young).toBeLessThanOrEqual(Math.round(grown * YOUNG_PER_ADULT[1]));
+      expect(h.young).toBeLessThan(grown);
+      young += h.young;
+      adults += grown;
+      for (let k = 0; k < h.count; k++) {
+        const scale = memberScale(h, k);
+        if (isYoung(h, k)) {
+          expect(k).toBeGreaterThanOrEqual(grown);
+          expect(scale).toBeGreaterThanOrEqual(YOUNG_SCALE[0]);
+          expect(scale).toBeLessThanOrEqual(YOUNG_SCALE[1]);
+        } else expect(scale).toBeGreaterThan(YOUNG_SCALE[1]);
+      }
+    }
+    expect(herds.filter((h) => h.young > 0).length).toBeGreaterThan(herds.length * 0.6);
+    expect(young / adults).toBeGreaterThan(0.18);
+    expect(young / adults).toBeLessThan(0.47);
+  });
+
+  it("keep beside their mothers, and take their own size's strides to keep up", () => {
+    const a: AnimalPose = { x: 0, y: 0, z: 0, hx: 0, hy: 0, hz: 0, cycle: 0, stride: 0, trot: 0, graze: 0, idle: 0 };
+    const b: AnimalPose = { ...a };
+    let checked = 0;
+    for (const h of herds.filter((x) => x.young > 0).slice(0, 8)) {
+      const s = p.species[h.species]!;
+      const path = new HerdPath(p, ground, h, speciesBody(s).grown.skeleton);
+      for (let k = h.count - h.young; k < h.count; k++) {
+        const m = path.mothers[k]!;
+        expect(m).toBeGreaterThanOrEqual(0);
+        expect(isYoung(h, m)).toBe(false);
+        expect(path.scales[k]).toBeCloseTo(memberScale(h, k), 6);
+        for (let t = 0; t < 300; t += 7) {
+          path.pose(k, t, a);
+          path.pose(m, t, b);
+          // Within a couple of body lengths of her, however the herd walks (they lag her by under a second).
+          const apart = Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z) * RADIUS;
+          expect(apart).toBeLessThan(s.length * 1.0 + path.gait.trotSpeed * 1.2);
+          // Resting after the same walk, it has taken more strides: as many more as it is smaller.
+          if (a.stride === 0 && b.stride === 0 && b.cycle > 0.5 && Math.abs(a.cycle * path.scales[k]! - b.cycle * path.scales[m]!) < 1e-6) {
+            expect(a.cycle / b.cycle).toBeGreaterThan(1.25);
+            checked++;
+          }
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
   });
 });
 
