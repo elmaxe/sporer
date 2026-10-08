@@ -797,9 +797,9 @@ if (started && (runs('galaxy') || runs('nebulas') || runs('rogues') || runs('bla
       const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
       if (!s.px || s.px.length !== w * h * 4) s.px = new Uint8Array(w * h * 4);
       gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, s.px);
-      let sum = 0, n = 0;
+      let sum = 0, n = 0, peak = 0;
       for (let y = 2; y < h; y += 8) for (let x = 2; x < w; x += 8) {
-        const i = 4 * (y * w + x); sum += s.px[i] + s.px[i + 1] + s.px[i + 2]; n++;
+        const i = 4 * (y * w + x); const v = s.px[i] + s.px[i + 1] + s.px[i + 2]; sum += v; n++; if (v > peak) peak = v;
       }
       const weight = levels.crossfade;
       // Planet zooms: how far the camera is from the body's centre, in radii: in the planet level, of the ground
@@ -811,7 +811,7 @@ if (started && (runs('galaxy') || runs('nebulas') || runs('rogues') || runs('bla
         ? p.length() / pl.groundRadius(p.clone().normalize())
         : p.distanceTo(pl.body.renderPosition) / pl.body.radius;
       const peaks = pl && levels.mode === 'planet' ? p.length() / pl.top : null;
-      s.current.frames.push({ weight, brightness: sum / (3 * n), clearance, peaks });
+      s.current.frames.push({ weight, brightness: sum / (3 * n), peak: peak / 3, clearance, peaks });
       if (s.freezeWhen && weight !== null && weight > 0.35 && levels.mode === s.freezeWhen) {
         s.freezeWhen = null; s.frozen = true; game.stop();
       }
@@ -1805,6 +1805,9 @@ await section('planet', async () => {
         frames: seg.frames.length,
         crossfadeFrames: blended.length,
         minBrightness: +Math.min(...seg.frames.map((x) => x.brightness)).toFixed(2),
+        // The dimmest frame's brightest sample: a dark view of space (a small body far from its star) is dim on
+        // average, but something in it is lit; a black frame has nothing.
+        minPeak: Math.min(...seg.frames.map((x) => x.peak)),
         minClearance: +Math.min(...seg.frames.map((x) => x.clearance ?? Infinity)).toFixed(3),
         minOverPeaks: +Math.min(...seg.frames.map((x) => x.peaks ?? Infinity)).toFixed(3),
       };
@@ -1820,7 +1823,7 @@ await section('planet', async () => {
     'planet → system',
   ];
   seamless.ok =
-    kinds.every((k) => seamless.kinds.includes(k)) && seamless.segments.every((x) => x.crossfadeFrames > 0 && x.minBrightness > 0.5 && (x.minClearance ?? Infinity) >= 1);
+    kinds.every((k) => seamless.kinds.includes(k)) && seamless.segments.every((x) => x.crossfadeFrames > 0 && (x.minBrightness > 0.5 || x.minPeak > 40) && (x.minClearance ?? Infinity) >= 1);
   // Audio is only unlocked by the audio section's real click, so only then does the loop ask for its sounds.
   const heard = !sections.audio || (['reentry', planetLoop.soundBefore].includes(planetLoop.soundIn) && planetLoop.soundOut === 'leavePlanet');
   const asteroidsOk = !hasBelt || (asteroidLoops.length === 2 && asteroidLoops.every((l) => l.ok));

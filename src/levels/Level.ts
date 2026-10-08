@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { Entity } from '../core/Entity';
+import { Jobs, now, type Defer } from '../core/jobs';
 import type { Physics } from '../physics/Physics';
 import { renderScene } from '../world/wireframe';
 
@@ -30,6 +31,8 @@ export class Level {
    * what it's at, see player/zoomCurve.ts).
    */
   zoomLocked = false;
+  /** What building the level put off (see core/jobs.ts): a zoom into it runs them a few per frame before it's drawn. */
+  readonly jobs = new Jobs();
   private readonly entities: Entity[] = [];
 
   constructor(readonly physics: Physics | null = null) {}
@@ -70,10 +73,11 @@ export class Level {
 
   /**
    * Compiles the shaders the level will draw with, before it's first drawn (a transition does it as it starts, so
-   * the compile doesn't stall a frame mid-crossfade). Hidden objects are included. The default compiles its scene.
+   * the compile doesn't stall a frame mid-crossfade): a job per object with a material not seen yet, as each can be a
+   * shader to compile. Hidden objects are included.
    */
-  compile(renderer: THREE.WebGLRenderer, camera: THREE.Camera): void {
-    renderer.compile(this.scene, camera);
+  compile(renderer: THREE.WebGLRenderer, camera: THREE.Camera, defer: Defer = now): void {
+    eachNewMaterial(this.scene, (object) => defer(() => renderer.compile(object, camera, this.scene)));
   }
 
   /** Draws the level; the default renders its scene (as a wireframe with the menu's switch, see renderScene). */
@@ -105,4 +109,20 @@ export class Level {
     this.entities.length = 0;
     this.physics?.dispose();
   }
+}
+
+/** Calls `visit` with each drawable object under `root` that has a material no earlier one had. */
+export function eachNewMaterial(root: THREE.Object3D, visit: (object: THREE.Object3D) => void): void {
+  const seen = new Set<THREE.Material>();
+  root.traverse((o) => {
+    const material = (o as Partial<THREE.Mesh>).material;
+    if (!material) return;
+    let fresh = false;
+    for (const m of Array.isArray(material) ? material : [material]) {
+      if (seen.has(m)) continue;
+      seen.add(m);
+      fresh = true;
+    }
+    if (fresh) visit(o);
+  });
 }

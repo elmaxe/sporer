@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
+import { now, type Defer } from '../core/jobs';
 import { MAX_PLANT_SCALE, PLANT_CELL_SIZE, generateCell, parsePlantId, plantGridSize, type GroundRadius, type PlantData, type PlantPlan, type PlantSpecies } from '../gen/plants';
 import { HULL_DEPTH, HULL_RADIUS, obstacleClearance, type ObstacleVisit, type Obstacles } from '../planet/ground';
 import { faceGridPoint } from '../world/cubeSphereMath';
@@ -161,6 +162,8 @@ export class SurfaceEntities implements Entity, Obstacles {
     private readonly cameraSource: THREE.Camera,
     private readonly changes: SurfaceChanges,
     debug: Debug,
+    /** Where the species' meshes are built (see core/jobs.ts). */
+    defer: Defer = now,
   ) {
     const R = plan.radius;
     const n = (this.gridSize = plantGridSize(R));
@@ -180,20 +183,23 @@ export class SurfaceEntities implements Entity, Obstacles {
         }
       }
     }
-    this.geometries = plan.species.map((s) => Array.from({ length: PLANT_LOD_COUNT }, (_, lod) => createPlantGeometry(s, lod)));
+    this.geometries = plan.species.map(() => []);
     this.liveMaterials = plan.species.map(() => null);
     this.widestCrown = Math.max(...plan.species.map((s) => s.crownRadius)) * MAX_PLANT_SCALE;
     this.maxReach = Math.max(...plan.species.map((s) => s.height * 1.25 * farthest(s)));
+    // A species at a time: its meshes are the costly part.
     for (const s of plan.species) {
-      const ranges = PLANT_LODS[s.kind];
-      const row: Batch[] = [];
-      for (let lod = 0; lod < PLANT_LOD_COUNT; lod++) {
-        const { material, uniforms } = createPlantMaterial(lod, s.height, ranges);
-        const geometry = this.geometries[s.index]![lod]!;
-        const mesh = this.createMesh(geometry, material, FIRST_CAPACITY);
-        row.push({ mesh, geometry, material, uniforms, lod });
-      }
-      this.batches.push(row);
+      defer(() => {
+        const ranges = PLANT_LODS[s.kind];
+        const row: Batch[] = [];
+        for (let lod = 0; lod < PLANT_LOD_COUNT; lod++) {
+          const { material, uniforms } = createPlantMaterial(lod, s.height, ranges);
+          const geometry = (this.geometries[s.index]![lod] = createPlantGeometry(s, lod));
+          const mesh = this.createMesh(geometry, material, FIRST_CAPACITY);
+          row.push({ mesh, geometry, material, uniforms, lod });
+        }
+        this.batches[s.index] = row;
+      });
     }
     this.hit = { id: '', plant: null as unknown as PlantData, species: plan.species[0]!, distance: 0 };
     this.object.name = 'Plants';

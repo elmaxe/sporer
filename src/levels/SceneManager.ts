@@ -63,6 +63,12 @@ interface ProgramStatus {
  */
 export const shaderWaitParams = { maxHold: 2 };
 
+/**
+ * Milliseconds a frame spends on the incoming level's put-off building and shader compiles (see core/jobs.ts) while
+ * the outgoing level plays its lead; the handover waits for all of them (a job that runs over takes its frame longer).
+ */
+export const buildParams = { budget: 6 };
+
 interface SeamlessTransition {
   zoom: SeamlessZoom;
   elapsed: number;
@@ -472,12 +478,19 @@ export class SceneManager implements Entity {
     // The timeline drives both cameras: their distances mustn't move the ships.
     t.outgoing.zoomLocked = t.incoming.zoomLocked = true;
     t.apply(sampleSeamlessZoom(t.zoom, 0));
-    // Compile the incoming level's shaders now, not on its first frame mid-crossfade (a visible stall). With
-    // parallel compiling the driver works on them while the outgoing level plays its lead (see stepSeamless).
+    // What building the incoming level put off, then its shaders, a few jobs a frame while the outgoing level plays its
+    // lead, not on its first frame mid-crossfade (a visible stall). With parallel compiling the driver works on the
+    // shaders meanwhile; the handover waits for the jobs and, a while, for the shaders (see stepSeamless).
     const renderer = this.game.renderer;
     const known = new Set(renderer.info.programs);
-    t.incoming.compile(renderer, this.game.camera);
-    this.seamless.compiling = (renderer.info.programs ?? []).filter((p) => !known.has(p)) as unknown as ProgramStatus[];
+    const { jobs } = t.incoming;
+    const seamless = this.seamless;
+    jobs.defer(() => {
+      t.incoming.compile(renderer, this.game.camera, jobs.defer);
+      jobs.defer(() => {
+        seamless.compiling = (renderer.info.programs ?? []).filter((p) => !known.has(p)) as unknown as ProgramStatus[];
+      });
+    });
   }
 
   private stepSeamless(frameDt: number): void {
@@ -485,10 +498,13 @@ export class SceneManager implements Entity {
     // The first frame's time went into setting the zoom up (building a level, compiling): don't skip ahead by it.
     if (t.started) t.elapsed += frameDt;
     t.started = true;
+    const { jobs } = t.incoming;
+    if (!t.swapped) jobs.run(buildParams.budget);
     let s = sampleSeamlessZoom(t.zoom, t.elapsed);
-    // The incoming level is about to be drawn: wait at the end of the lead while its shaders still compile.
-    if (!t.swapped && s.blend > 0 && t.held < shaderWaitParams.maxHold && t.compiling.some((p) => !p.isReady())) {
-      t.held += frameDt;
+    // The incoming level is about to be drawn: wait at the end of the lead while it's still being built, and a while
+    // for its shaders to compile.
+    if (!t.swapped && s.blend > 0 && (!jobs.done || (t.held < shaderWaitParams.maxHold && t.compiling.some((p) => !p.isReady())))) {
+      if (jobs.done) t.held += frameDt;
       t.elapsed = Math.min(t.elapsed - frameDt, t.zoom.lead);
       s = sampleSeamlessZoom(t.zoom, t.elapsed);
     }
