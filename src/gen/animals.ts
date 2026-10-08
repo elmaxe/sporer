@@ -365,8 +365,11 @@ const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
  */
 export class HerdPath {
   private readonly cache: SlotPath[] = [];
-  private readonly e1: Vec3Like = { x: 0, y: 0, z: 0 };
-  private readonly e2: Vec3Like = { x: 0, y: 0, z: 0 };
+  /** Two unit vectors across the ground at the herd's home: the members' places (and a panic's flight, gen/panic.ts) are offsets along them. */
+  readonly e1: Vec3Like = { x: 0, y: 0, z: 0 };
+  readonly e2: Vec3Like = { x: 0, y: 0, z: 0 };
+  /** The last `pose`d member's speed along the ground (units/s). */
+  speed = 0;
   /** Each member's offset from the herd's centre (units, in the home's tangent basis), lag (s) and grazing phase. */
   private readonly offsets: Float64Array;
   private readonly lags: Float64Array;
@@ -576,6 +579,7 @@ export class HerdPath {
     const stride = gait.walkStride + (gait.trotStride - gait.walkStride) * trot;
     out.trot = trot;
     out.stride = Math.min(1, speed / (gait.walkSpeed * 0.6));
+    this.speed = speed;
     out.cycle = (s * distance) / stride;
     // Herbivores graze in bouts while resting: head down, then up to look round.
     out.graze = species.diet === 'herbivore' ? rest * smoothstep(-0.3, 0.3, Math.sin(idle * 0.35)) : 0;

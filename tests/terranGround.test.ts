@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { hexToRgb, rgbToHsl } from '../src/gen/color';
-import { detailedTerrain } from '../src/gen/noise';
+import { detailedTerrain, terrainNoise } from '../src/gen/noise';
 import { landElevation, planetStyle, PLAINS_SLOPE, type PlanetStyle } from '../src/gen/planets';
 import { Rng } from '../src/gen/rng';
 import { groundPalette, groundTemperature, PEAK_KM, SNOW_TEMPERATURE, snowTemperature } from '../src/gen/terranGround';
@@ -64,16 +64,42 @@ describe('land elevation', () => {
     expect(lower).toBeGreaterThan(0.98 * land);
   });
 
-  it('gives green worlds plains, lower relief than barren rock', () => {
+  it('gives green worlds plains and lower relief than barren rock', () => {
     for (let i = 0; i < 50; i++) {
       for (const type of ['terran', 'ocean'] as const) {
         const style = planetStyle(new Rng(i), type);
         expect(style.plains).toBe(1);
-        expect(style.relief).toBeGreaterThanOrEqual(0.02);
-        expect(style.relief).toBeLessThanOrEqual(0.035);
+        expect(style.relief).toBeGreaterThanOrEqual(0.012);
+        expect(style.relief).toBeLessThanOrEqual(0.02);
       }
       for (const type of ['barren', 'desert', 'lava', 'ice'] as const) expect(planetStyle(new Rng(i), type).plains ?? 0).toBe(0);
     }
+  });
+
+  it('keeps most of a terran world dry land, and most of an ocean world sea', () => {
+    // The share of the globe under the sea, from evenly spread directions (a Fibonacci sphere).
+    const seaShare = (style: PlanetStyle, seed: number) => {
+      const n = 1500;
+      let wet = 0;
+      for (let k = 0; k < n; k++) {
+        const y = 1 - (2 * (k + 0.5)) / n, r = Math.sqrt(1 - y * y), t = k * 2.399963;
+        if (terrainNoise(r * Math.cos(t), y, r * Math.sin(t), seed) < style.seaLevel) wet++;
+      }
+      return wet / n;
+    };
+    const terran: number[] = [];
+    const ocean: number[] = [];
+    for (let i = 0; i < 60; i++) {
+      const seed = 1000 + i * 7919;
+      terran.push(seaShare(planetStyle(new Rng(i), 'terran'), seed));
+      ocean.push(seaShare(planetStyle(new Rng(i), 'ocean'), seed));
+    }
+    const mean = (shares: number[]) => shares.reduce((a, b) => a + b, 0) / shares.length;
+    expect(mean(terran)).toBeGreaterThan(0.15);
+    expect(mean(terran)).toBeLessThan(0.3);
+    expect(Math.max(...terran)).toBeLessThan(0.5);
+    expect(mean(ocean)).toBeGreaterThan(0.7);
+    expect(Math.min(...ocean)).toBeGreaterThan(0.5);
   });
 });
 

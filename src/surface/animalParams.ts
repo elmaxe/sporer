@@ -1,4 +1,5 @@
 import type { Debug } from '../core/Debug';
+import { panicParams } from '../gen/panic';
 
 /**
  * Tunables of the animals (debug panel: Animals). `enabled` is the menu's
@@ -21,4 +22,11 @@ export function addAnimalDebug(debug: Debug): void {
   f?.add(animalParams, 'range', 0.3, 2, 0.05);
   f?.add(animalParams, 'budgetMs', 0.25, 8, 0.25);
   f?.add(animalParams, 'showLods').name('show LODs');
+  const p = debug.folder('Animal panic');
+  p?.add(panicParams, 'fleeRadius', 0, 80).name('flee radius');
+  p?.add(panicParams, 'alertFactor', 1, 4).name('alert (flee radii)');
+  p?.add(panicParams, 'fleeFactor', 0.5, 4).name('runs to (flee radii)');
+  p?.add(panicParams, 'fleeFroude', 0.5, 4).name('gallop Froude');
+  p?.add(panicParams, 'scatter', 0, 1.5);
+  p?.add(panicParams, 'calm', 0, 20).name('calm (s)');
 }

@@ -73,7 +73,8 @@
 // down in the sea drowns; what was taken
 // and planted is still so after leaving and coming back; the cues abductStart, abductBeam, abductSuccess, exportBeam
 // and dropImpact are asked for (all that with the animals hidden, so only plants are caught). Then with the animals
-// shown, over a herd: holding the beam on an animal beams it up into its own stack (an animal's picture), and set down
+// shown, over a herd: holding the beam on an animal beams it up into its own stack (an animal's picture), crying out and
+// screaming all the way up (synthesised, once audio runs), and set down
 // on the ground it roams there; Tab and a real 3 arm the laser (Weapons' third slot), and holding it on an animal and on
 // a tree kills them (recorded as removed, burning away), with the laserBeam and laserHit cues; the animals taken or
 // killed and the one set down are still so after leaving and coming back.
@@ -102,10 +103,13 @@
 // and the Report button saves a debug dump of the lab.
 // Animals: in the animal lab every body plan draws at every level of detail, the specimen walks and grazes, zooming out goes
 // through the levels, the line-ups and herds draw, a game planet's animals load, the planet lab links to them; in the game a
-// herd roams near the ship on the home planet and the tooltip names an animal under the pointer; the planet map's Species
+// herd roams near the ship on the home planet (it bolts from the ship come down beside it, issue #156) and the tooltip names
+// an animal under the pointer once it stands watching the ship; the planet map's Species
 // tab lists the planet's animals and plants with their pictures and counts the herds; a real click on that herd's species
 // picks it, but the radar stays quiet until the item bar's Radar switch is turned on (a real click): then waves round the
 // ship, close by, whole rings, the radarPing cue at its highest pitch; switched off it goes quiet again, and a second click on the species stops it.
+// Then, flown low right over the herd, it bolts and gives the alarm, synthesised from its voice (the herds talk meanwhile),
+// and once the ship has gone it stops watching for it and walks back.
 // Prints JSON with FPS, console errors and screenshot paths. Exit 1 on failure.
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -2260,7 +2264,14 @@ async function runGameAnimals() {
   await until(`Math.abs(planet.ship.radius - planet.ship.goalRadius) < 0.05`, 30000);
   await drawFrames(10);
   r.stats = await evaluate(`planet.animals.stats()`);
-  // Hover the nearest drawn animal (aimed and moved to in one go, as the camera may still ease): the tooltip names it.
+  // The ship came down beside the herd, which bolted from it (issue #156): once it stands watching the ship,
+  r.settledPanic = await until(`planet.animals.stats().fleeing === 0`, 60000);
+  // turn the camera to it, from beyond the ship (it may have run out of view), and
+  await evaluate(`(() => { const A = planet.animals; const p = A.herdPositions()[0]; if (!p) return; A.object.localToWorld(p);
+    planet.orbit.lookFrom(planet.ship.object.position.clone().sub(p).normalize().addScaledVector(planet.ship.up, 0.6)); })()`);
+  await sleep(1000);
+  await drawFrames(10);
+  // hover the nearest drawn animal (aimed and moved to in one go, as the camera may still ease): the tooltip names it.
   for (let i = 0; i < 6 && !r.named; i++) {
     r.tooltip = await evaluate(`new Promise((resolve) => {
       const A = planet.animals; const v = new (planet.ship.up.constructor)(); const canvas = game.renderer.domElement; const rect = canvas.getBoundingClientRect();
@@ -2276,7 +2287,31 @@ async function runGameAnimals() {
   r.screenshot = join(outDir, 'animals.png');
   writeFileSync(r.screenshot, await page.screenshot());
   r.radar = await runRadar(r.found?.species);
-  r.ok = !!r.found && r.stats.herds > 0 && r.stats.drawn > 0 && r.stats.drawCalls > 0 && r.named && r.radar.ok;
+  r.panic = await runPanic();
+  r.ok = !!r.found && r.stats.herds > 0 && r.stats.drawn > 0 && r.stats.drawCalls > 0 && r.settledPanic && r.named && r.radar.ok && r.panic.ok;
+  return r;
+}
+
+/**
+ * Issue #156: flown low over a herd, it bolts from the ship and gives the alarm, synthesised from its voice (audio was
+ * unlocked by the radar's real clicks); out of the ship's way it watches it, and once the ship has gone it walks back to
+ * where the clock has it and its panic is forgotten. Meanwhile the herds talk among themselves.
+ */
+async function runPanic() {
+  const r = {};
+  r.before = await evaluate(`({ heard: { ...planet.animalSounds.heard }, audio: audio.state })`);
+  // Right over the nearest herd, low.
+  r.target = await evaluate(`(() => { const A = planet.animals; const at = A.herdPositions()[0]; if (!at) return false;
+    planet.orbit.zoomTo(10); planet.ship.moveTo(at.clone().normalize().multiplyScalar(A.plan.radius)); return true; })()`);
+  r.fled = r.target && (await until(`planet.animals.stats().fleeing > 0 && planet.animals.stats().panics > 0`, 60000));
+  r.herd = await evaluate(`(() => { let id = null; planet.animals.forEachHerd((c) => { if (!id && c.panic.includes(1)) id = c.key; }); return id; })()`);
+  r.alarm = r.fled && (await until(`planet.animalSounds.heard.alarm > ${r.before.heard.alarm}`, 30000));
+  r.during = await evaluate(`({ stats: planet.animals.stats(), heard: { ...planet.animalSounds.heard }, last: planet.animalSounds.last })`);
+  // The ship gone, the herd stops watching for it and walks back (the walk home itself is in tests/animalPanic.test.ts).
+  await evaluate(`planet.ship.moveTo(planet.ship.up.clone().applyAxisAngle(new (planet.ship.up.constructor)(0, 1, 0).cross(planet.ship.up).normalize(), 0.5).multiplyScalar(planet.animals.plan.radius))`);
+  r.over = !!r.herd && (await until(`(() => { const p = planet.animals.panicOf(${JSON.stringify(r.herd)}); return !p || (p.returnAt < planet.frame.renderTime && !p.fleeing(planet.frame.renderTime)); })()`, 120000));
+  r.after = await evaluate(`({ heard: { ...planet.animalSounds.heard }, calls: planet.animalSounds.calls })`);
+  r.ok = r.before.audio === 'running' && !!r.target && !!r.fled && !!r.alarm && !!r.over && r.during.last?.gain > 0;
   return r;
 }
 
@@ -3074,6 +3109,13 @@ await section('cargo', async () => {
       return null; }`);
     // Beamed up: into a stack of its own, with its picture (the plants above may have filled the hold: emptied first).
     await evaluate(`levels.inventory.load({ stacks: [] })`);
+    // The herd bolted from the ship coming down beside it (issue #156): aimed at once it stands watching the ship, the
+    // camera turned to it from beyond the ship (it may have run out of view).
+    await until(`planet.animals.stats().fleeing === 0`, 60000);
+    await evaluate(`(() => { const A = planet.animals; const p = A.herdPositions()[0]; if (!p) return; A.object.localToWorld(p);
+      planet.orbit.lookFrom(planet.ship.object.position.clone().sub(p).normalize().addScaledVector(planet.ship.up, 0.6)); })()`);
+    await sleep(1000);
+    await drawFrames(10);
     // (The fling above left the beam armed: a 1 now would put it away.)
     await evaluate(`planet.select('abduct')`);
     const at = await evaluate(`__animal()`);
@@ -3088,6 +3130,8 @@ await section('cargo', async () => {
       up = await evaluate(`(() => { const s = levels.inventory.stacks.find((s) => s.kind === 'animal'); return s && { key: s.key, name: s.species.name, count: s.count,
         img: document.querySelector('.item-slot[data-item="cargo:' + s.key + '"] img')?.src.slice(0, 22) }; })()`);
       if (up) up.taken = (await evaluate(`${animalChanges}.removedAnimalCount`)) - takenBefore;
+      // It screamed all the way up (synthesised from its voice, once audio is running).
+      if (up) Object.assign(up, await evaluate(`({ audio: audio.state, screams: planet.animalSounds.heard.scream, cries: planet.animalSounds.heard.distress })`));
     }
     // Set down on land: it roams there.
     let release = null;
@@ -3119,6 +3163,13 @@ await section('cargo', async () => {
       await drawFrames(3);
       return { what, ...on, killed: (await evaluate(`planet.laser.killed`)) - killed, burning: await evaluate(`planet.laser.burning`), off: !(await evaluate(`planet.laser.on`)) };
     };
+    // Those left of the herd bolted when two were taken: shot once they stand still again, the camera turned to them
+    // from beyond the ship (they may have run out of view, or under the item bar).
+    await until(`planet.animals.stats().fleeing === 0`, 60000);
+    await evaluate(`(() => { const A = planet.animals; const p = A.herdPositions()[0]; if (!p) return; A.object.localToWorld(p);
+      planet.orbit.lookFrom(planet.ship.object.position.clone().sub(p).normalize().addScaledVector(planet.ship.up, 0.6)); })()`);
+    await sleep(1000);
+    await drawFrames(10);
     const animalKills = await evaluate(`${animalChanges}.removedAnimalCount`);
     const shotAnimal = await fire(await evaluate(`__animal()`), 'animal');
     const killedAnimals = (await evaluate(`${animalChanges}.removedAnimalCount`)) - animalKills;
@@ -3187,6 +3238,7 @@ await section('cargo', async () => {
     // Animals of a herd stand close: the beam may catch more than one, all into the one stack.
     animals.up?.taken >= 1 &&
     animals.up.count === animals.up.taken &&
+    (animals.up.audio !== 'running' || (animals.up.screams >= 1 && animals.up.cries >= 1)) &&
     animals.up.img === 'data:image/png;base64,' &&
     animals.release?.released === 1 &&
     /roam/.test(animals.release.hint) &&
