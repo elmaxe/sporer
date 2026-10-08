@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { COAT_PATTERNS, type AnimalSkeleton, type Vec3 } from '../gen/animalForm';
 import { animalGait, type AnimalSpecies } from '../gen/animals';
-import { designFromAnimal, growCreature, type CreatureDesign, type GrownCreature } from '../gen/creature';
+import { growCreature, speciesDesign, type CreatureDesign, type GrownCreature } from '../gen/creature';
 import { MAX_RIG_LIMBS, creatureRig, rigVertices, type CreatureRig } from '../gen/creatureRig';
 import { DUTY_FACTOR } from '../gen/creatureMotion';
 import { groundDepthPass } from '../world/groundDepth';
@@ -42,15 +42,15 @@ export interface SpeciesCreature {
 const creatures = new WeakMap<AnimalSpecies, SpeciesCreature>();
 
 /**
- * A species' body: the creature editor's creature made from its form
- * (gen/creature.ts `designFromAnimal`: its spine smoothed through
- * vertebrae, legs, eyes, horns, ears and crest stuck on as parts, a mouth),
- * so the game's animals are built and walk exactly as the editor's do.
+ * A species' body: one of the creature editor's random creatures
+ * (gen/creature.ts `speciesDesign`: from the species' seed, with its body
+ * plan, coat and size), so the game's animals are the editor's creatures,
+ * built and walking exactly as they do there.
  */
 export function speciesCreature(s: AnimalSpecies): SpeciesCreature {
   let c = creatures.get(s);
   if (!c) {
-    const design = designFromAnimal(s.form, s.length, s.name);
+    const design = speciesDesign(s.form, s.length, s.name);
     const grown = growCreature(design);
     c = { design, grown, rig: creatureRig(grown) };
     creatures.set(s, c);

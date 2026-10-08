@@ -1,5 +1,5 @@
 import { BODY_PLANS, COAT_PATTERNS, generateAnimalForm, type CoatPattern } from '../gen/animalForm';
-import { defaultCreature, designFromAnimal, randomCreature, randomPaint, type CreaturePart, type PartKind, PART_KINDS } from '../gen/creature';
+import { defaultCreature, randomCreature, randomPaint, speciesDesign, type CreaturePart, type PartKind, PART_KINDS } from '../gen/creature';
 import { Rng } from '../gen/rng';
 import type { CreatureLab, EditorMode } from './CreatureLab';
 
@@ -98,7 +98,7 @@ export class CreaturePanel {
         const rng = new Rng(seed * 7919);
         const plan = BODY_PLANS[seed % BODY_PLANS.length]!;
         const form = generateAnimalForm(rng, plan, rng.chance(0.3) ? 'carnivore' : 'herbivore', rng.range(0, 360));
-        this.lab.setDesign(designFromAnimal(form, 4, `Species ${seed}`));
+        this.lab.setDesign(speciesDesign(form, 4, `Species ${seed}`));
       },
       "One of the game's own generated animals, opened in the editor",
     );

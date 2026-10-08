@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { generateLabAnimals } from '../src/animallab/labAnimals';
 import type { Vec3 } from '../src/gen/animalForm';
-import { designFromAnimal, growCreature } from '../src/gen/creature';
+import { growCreature, speciesDesign } from '../src/gen/creature';
 import { MAX_RIG_LIMBS, creatureRig, rigVertices } from '../src/gen/creatureRig';
 import { ANIMAL_LOD_COUNT, buildAnimalMesh } from '../src/surface/animalMesh';
 
@@ -10,7 +10,7 @@ const species = [1, 2, 3, 4, 5, 6].flatMap((seed) => generateLabAnimals(seed).sp
 describe('game animals as editor creatures', () => {
   it('rigs every species: legs ranked, a hip on the spine, a neck ahead of the front legs', () => {
     for (const s of species) {
-      const grown = growCreature(designFromAnimal(s.form, s.length));
+      const grown = growCreature(speciesDesign(s.form, s.length));
       const rig = creatureRig(grown);
       expect(rig.limbs.length).toBeGreaterThan(0);
       expect(rig.limbs.length).toBeLessThanOrEqual(MAX_RIG_LIMBS);
@@ -29,7 +29,7 @@ describe('game animals as editor creatures', () => {
 
   it('bends the head down to the ground to graze', () => {
     for (const s of species) {
-      const grown = growCreature(designFromAnimal(s.form, s.length));
+      const grown = growCreature(speciesDesign(s.form, s.length));
       const { neck } = creatureRig(grown);
       const tip = grown.rest[grown.rest.length - 1]!;
       const y = tip.p[1] - tip.ry - neck.pivot[1];
@@ -42,7 +42,7 @@ describe('game animals as editor creatures', () => {
 
   it("tags each vertex with its limb and bone, or its place along the spine", () => {
     for (const s of species.slice(0, 8)) {
-      const grown = growCreature(designFromAnimal(s.form, s.length));
+      const grown = growCreature(speciesDesign(s.form, s.length));
       const rig = creatureRig(grown);
       for (let lod = 0; lod < ANIMAL_LOD_COUNT; lod++) {
         const m = buildAnimalMesh(grown.skeleton, s.form, s.length, lod);

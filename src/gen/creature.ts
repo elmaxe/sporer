@@ -1,4 +1,4 @@
-import { COAT_PATTERNS, growAnimal, type AnimalForm, type AnimalSkeleton, type CoatPattern, type Eye, type Leg, type Mouth, type SpineNode, type Spike, type Vec3 } from './animalForm';
+import { COAT_PATTERNS, growAnimal, type AnimalForm, type AnimalSkeleton, type BodyPlan, type CoatPattern, type Eye, type Leg, type Mouth, type SpineNode, type Spike, type Vec3 } from './animalForm';
 import { animalGait } from './animals';
 import { hslToHex } from './color';
 import { REST_POSE, bodyBob, breath, dutyFactor, footPath, legPhase, solveTwoBone, spineSway, type CreaturePose } from './creatureMotion';
@@ -758,21 +758,22 @@ export function defaultCreature(): CreatureDesign {
  * pairs of legs, sometimes arms, one to three pairs of eyes (or one in the
  * middle), and horns, ears, spikes or antennae, with a random coat.
  */
-export function randomCreature(seed: number): CreatureDesign {
+export function randomCreature(seed: number, options: RandomCreatureOptions = {}): CreatureDesign {
   const rng = new Rng(seed).fork('creature');
   // How the body is carried: long and low, upright on its hind legs (or a rearing snake), a tall neck,
   // or a centaur's horizontal back half with an upright front.
-  const posture = rng.weighted<Posture>([
+  const picked = rng.weighted<Posture>([
     ['low', 3],
     ['upright', 2],
     ['tall neck', 1.3],
     ['centaur', 1],
   ]);
+  const posture = options.postures && !options.postures.includes(picked) ? options.postures[seed % options.postures.length]! : picked;
   const n = posture === 'low' ? rng.int(6, 12) : rng.int(9, 14);
   const torso = rng.range(0.45, 0.8);
   const tailShare = posture === 'centaur' ? rng.range(0.12, 0.22) : rng.range(0.2, 0.4);
   const neckShare = posture === 'tall neck' ? rng.range(0.3, 0.45) : rng.range(0.12, 0.3);
-  const legPairs = rng.weighted<number>(
+  const randomPairs = rng.weighted<number>(
     posture === 'upright'
       ? [
           [0, 0.8],
@@ -791,6 +792,7 @@ export function randomCreature(seed: number): CreatureDesign {
             [4, posture === 'low' ? 0.8 : 0.2],
           ],
   );
+  const legPairs = options.legPairs ?? randomPairs;
   const height = legPairs === 0 ? torso : rng.range(0.9, 1.6) * (legPairs === 1 ? 1.4 : 1);
   const length = rng.range(3.5, 6) * (posture === 'low' ? 1 : 1.1);
   // A scorpion's tail, curling up over the back.
@@ -876,7 +878,45 @@ export function randomCreature(seed: number): CreatureDesign {
   return { name: 'Creature', seed: rng.int(0, 0xffffff), spine, parts, paint: randomPaint(rng), splats: [] };
 }
 
-type Posture = 'low' | 'upright' | 'tall neck' | 'centaur';
+export type Posture = 'low' | 'upright' | 'tall neck' | 'centaur';
+
+/** What a random creature must be: the postures it may take (the first that fits if its own doesn't) and its pairs of legs. */
+export interface RandomCreatureOptions {
+  readonly postures?: readonly Posture[];
+  readonly legPairs?: number;
+}
+
+/** The postures and pairs of legs that make each of the game's body plans. */
+const PLAN_BODIES: Record<BodyPlan, { postures: readonly Posture[]; legPairs: number }> = {
+  quadruped: { postures: ['low', 'tall neck', 'centaur'], legPairs: 2 },
+  hexapod: { postures: ['low', 'centaur'], legPairs: 3 },
+  biped: { postures: ['upright'], legPairs: 1 },
+};
+
+/**
+ * A planet species' body: a random creature from the creature editor
+ * (`randomCreature`, from the species' seed) with the species' body plan,
+ * its coat, and its size (the spine about one and a half times its head and
+ * body length, as the generated animals' tails and necks make it).
+ */
+export function speciesDesign(form: AnimalForm, length: number, name = 'Creature'): CreatureDesign {
+  const plan = PLAN_BODIES[form.plan];
+  const d = randomCreature(form.seed, plan);
+  let along = 0;
+  for (let i = 1; i < d.spine.length; i++) along += Math.hypot(d.spine[i]!.y - d.spine[i - 1]!.y, d.spine[i]!.z - d.spine[i - 1]!.z);
+  const k = (length * 1.5) / Math.max(1e-3, along);
+  for (const v of d.spine) {
+    v.y *= k;
+    v.z *= k;
+    v.r *= k;
+  }
+  return {
+    ...d,
+    name,
+    seed: form.seed,
+    paint: { base: form.color, belly: form.belly, pattern: form.pattern, patternColor: form.patternColor, patternScale: form.patternScale, accent: form.accentColor, eye: form.eyeColor },
+  };
+}
 
 /** The heading at `u` between keyframes `[u, degrees]`, eased. */
 function headingAt(keys: readonly [number, number][], u: number): number {
