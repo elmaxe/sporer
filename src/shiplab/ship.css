@@ -1,0 +1,110 @@
+/*
+ * The spaceship editor (ship.html) on top of the creature editor's look
+ * (creature.css): a dark hangar instead of a meadow, the palette's category
+ * tabs and the complexity meter.
+ */
+
+html,
+body {
+  background: #1a2638;
+}
+
+#loading {
+  color: #cfe;
+}
+
+.sh-palette {
+  width: 150px;
+  max-height: calc(100vh - 120px);
+}
+
+.sh-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.sh-tab {
+  flex: 1 1 40%;
+  padding: 3px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--cr-line);
+  background: none;
+  color: var(--cr-dim);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.sh-tab.on {
+  color: var(--cr-accent);
+  border-color: var(--cr-accent);
+}
+
+.sh-parts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow: auto;
+}
+
+.cr-btn.on {
+  background: var(--cr-accent);
+  color: #062018;
+  border-color: var(--cr-accent);
+}
+
+.sh-meter {
+  position: relative;
+  width: 90px;
+  height: 18px;
+  border-radius: 9px;
+  border: 1px solid var(--cr-line);
+  background: rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+}
+
+.sh-meter::after {
+  content: attr(data-label);
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--cr-text);
+}
+
+.sh-meter-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #3ddc97, #ffd23f);
+}
+
+.sh-meter.full .sh-meter-fill {
+  background: #ff6b6b;
+}
+
+@media (max-width: 760px) {
+  .sh-palette {
+    width: auto;
+    flex-direction: column;
+  }
+  .sh-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+  .sh-tab {
+    flex: 0 0 auto;
+  }
+  .sh-parts {
+    flex-direction: row;
+  }
+  .sh-meter {
+    width: 60px;
+  }
+  /* Above the palette and its tabs. */
+  .cr-inspector {
+    bottom: 124px;
+    max-height: 30vh;
+  }
+}
