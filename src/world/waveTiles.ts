@@ -156,6 +156,17 @@ export class WaveTiles {
    * (at 60 frames a second a 0.5 m wave moves 4 cm between its updates, too
    * little to see). Does nothing when calm.
    */
+  /** Compiles the tiles' shaders (see Level.compile). */
+  compile(renderer: THREE.WebGLRenderer): void {
+    const target = renderer.getRenderTarget();
+    renderer.setRenderTarget(this.targets[0]!);
+    for (const material of this.materials) {
+      this.quad.material = material;
+      renderer.compile(this.quad, this.camera);
+    }
+    renderer.setRenderTarget(target);
+  }
+
   render(renderer: THREE.WebGLRenderer, time: number): void {
     const waves = this.waves;
     if (!waves || waves.cascades.length === 0) return;

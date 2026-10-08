@@ -10,6 +10,8 @@ import type { CelestialBody } from '../world/CelestialBody';
 import { arriveImpulse, detourWaypoint, hoverPoint, type ArriveParams, type Obstacle } from './autopilot';
 import { hoverGap, parkGap, zoomCurveParams } from './zoomCurve';
 import { AFTER_ATMOSPHERE_RENDER_ORDER } from '../world/atmosphereShell';
+import { customShip } from './customShip';
+import { buildDesignedUfo } from './shipMesh';
 
 /** Tunables, exposed in the debug panel. */
 export const shipParams = {
@@ -328,8 +330,14 @@ export class Ship implements Entity {
   }
 }
 
-/** Classic flying saucer: a hull disc, a glass dome and a spinning light ring. */
+/**
+ * The player's UFO: their own design from the spaceship editor if they keep
+ * one (player/customShip.ts), else the classic flying saucer: a hull disc,
+ * a glass dome and a spinning light ring.
+ */
 export function buildUfoMesh(): { group: THREE.Group; ring: THREE.Group } {
+  const design = customShip();
+  if (design) return buildDesignedUfo(design);
   const group = new THREE.Group();
 
   const hull = new THREE.Mesh(

@@ -12,6 +12,7 @@
 //   --plants [<query>] the plant lab (plants.html), e.g. --plants "gen=4&kind=tree&arch=palm&view=lineup" or
 //                      --plants "seed=1337&star=5&planet=1&species=2"; drive it with js:plantLab.set(...) and the like
 //   --creatures [<query>] the creature editor (creature.html); drive it with js:creatureLab.setMode('play') and the like
+//   --ships [<query>]  the spaceship editor (ship.html); drive it with js:shipLab.setDesign(shipKit.random(7)) and the like
 //   --animals [<query>] the animal lab (animals.html), e.g. --animals "gen=4&diet=carnivore&plan=biped&pace=trot" or
 //                      --animals "seed=1337&star=6&planet=0&view=herds"; drive it with js:animalLab.set(...) and the like
 //   --stars [<query>]  the star lab (stars.html), e.g. --stars "gen=4&kind=redGiant&view=system" or --stars
@@ -96,6 +97,9 @@ for (let i = 0; i < args.length; i++) {
   } else if (a === '--animals') {
     opts.animals = true;
     if (i + 1 < args.length && !args[i + 1].startsWith('--') && !/^[a-z]+(:|$)/.test(args[i + 1])) opts.animalsQuery = args[++i];
+  } else if (a === '--ships') {
+    opts.ships = true;
+    if (i + 1 < args.length && !args[i + 1].startsWith('--') && !/^[a-z]+(:|$)/.test(args[i + 1])) opts.shipsQuery = args[++i];
   } else if (a === '--creatures') {
     opts.creatures = true;
     if (i + 1 < args.length && !args[i + 1].startsWith('--') && !/^[a-z]+(:|$)/.test(args[i + 1])) opts.creaturesQuery = args[++i];
@@ -136,7 +140,9 @@ if (steps.length === (opts.dump ? 1 : 0)) steps.push(opts.dump ? 'shot:restored'
 
 if (opts.phone && !args.includes('--size') && !opts.dump) opts.size = '390x844';
 const [width, height] = opts.size.split('x').map(Number);
-const page_ = opts.creatures
+const page_ = opts.ships
+  ? `ship.html${opts.shipsQuery ? `?${opts.shipsQuery.replace(/^\?/, '')}` : ''}`
+  : opts.creatures
   ? `creature.html${opts.creaturesQuery ? `?${opts.creaturesQuery.replace(/^\?/, '')}` : ''}`
   : opts.stars
   ? `stars.html${opts.starsQuery ? `?${opts.starsQuery.replace(/^\?/, '')}` : ''}`
@@ -151,9 +157,9 @@ const url = new URL(page_, opts.url);
 for (const [k, v] of Object.entries(opts.params)) url.searchParams.set(k, v);
 if (opts.hash) url.hash = opts.hash;
 /** True once the page's game (or the lab) is running. */
-const STARTED = `typeof window.creatureLab !== 'undefined' || typeof window.lab !== 'undefined' || typeof window.plantLab !== 'undefined' || typeof window.animalLab !== 'undefined' || typeof window.starLab !== 'undefined' || (typeof window.levels !== 'undefined' && typeof window.ship !== 'undefined')`;
+const STARTED = `typeof window.shipLab !== 'undefined' || typeof window.creatureLab !== 'undefined' || typeof window.lab !== 'undefined' || typeof window.plantLab !== 'undefined' || typeof window.animalLab !== 'undefined' || typeof window.starLab !== 'undefined' || (typeof window.levels !== 'undefined' && typeof window.ship !== 'undefined')`;
 /** True when nothing is changing: no level transition in the game, the latest edit built and drawn in the lab. */
-const SETTLED = `typeof window.creatureLab !== 'undefined' ? creatureLab.ready : typeof window.starLab !== 'undefined' ? starLab.ready : typeof window.animalLab !== 'undefined' ? animalLab.ready : typeof window.plantLab !== 'undefined' ? plantLab.ready : typeof window.lab !== 'undefined' ? lab.ready : !levels.transitioning`;
+const SETTLED = `typeof window.shipLab !== 'undefined' ? shipLab.ready : typeof window.creatureLab !== 'undefined' ? creatureLab.ready : typeof window.starLab !== 'undefined' ? starLab.ready : typeof window.animalLab !== 'undefined' ? animalLab.ready : typeof window.plantLab !== 'undefined' ? plantLab.ready : typeof window.lab !== 'undefined' ? lab.ready : !levels.transitioning`;
 const out = resolve(opts.out ?? mkdtempSync(join(tmpdir(), 'spore2-shots-')));
 mkdirSync(out, { recursive: true });
 

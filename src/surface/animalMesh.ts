@@ -140,13 +140,30 @@ interface Vertex {
   coat: number;
 }
 
+/** A Float32Array that grows as it's written (the creature editor rebuilds a mesh every frame: no number[] to copy). */
+class Floats {
+  array = new Float32Array(4096);
+  length = 0;
+
+  reserve(n: number): void {
+    if (this.length + n <= this.array.length) return;
+    const grown = new Float32Array(Math.max(this.array.length * 2, this.length + n));
+    grown.set(this.array.subarray(0, this.length));
+    this.array = grown;
+  }
+
+  result(): Float32Array {
+    return this.array.slice(0, this.length);
+  }
+}
+
 class Builder {
-  readonly positions: number[] = [];
-  readonly normals: number[] = [];
-  readonly colors: number[] = [];
-  readonly rig: number[] = [];
-  readonly pivots: number[] = [];
-  readonly coats: number[] = [];
+  readonly positions = new Floats();
+  readonly normals = new Floats();
+  readonly colors = new Floats();
+  readonly rig = new Floats();
+  readonly pivots = new Floats();
+  readonly coats = new Floats();
   constructor(
     readonly form: AnimalForm,
     readonly coat: Coat,
@@ -155,17 +172,41 @@ class Builder {
 
   /** A triangle, wound so its face looks the way its vertices' normals do. */
   tri(a: Vertex, b: Vertex, c: Vertex): void {
-    const face = cross(sub(b.p, a.p), sub(c.p, a.p));
-    const avg = add(add(a.n, b.n), c.n);
-    const verts = dot(face, avg) >= 0 ? [a, b, c] : [a, c, b];
-    for (const v of verts) {
-      this.positions.push(v.p[0], v.p[1], v.p[2]);
-      this.normals.push(v.n[0], v.n[1], v.n[2]);
-      this.colors.push(v.c[0], v.c[1], v.c[2]);
-      this.rig.push(v.rig[0]!, v.rig[1]!, v.rig[2]!, v.rig[3]!);
-      this.pivots.push(v.pivot[0], v.pivot[1], v.pivot[2]);
-      this.coats.push(v.coat);
+    // (b − a) × (c − a) against the summed normals, without allocating.
+    const ux = b.p[0] - a.p[0], uy = b.p[1] - a.p[1], uz = b.p[2] - a.p[2];
+    const vx = c.p[0] - a.p[0], vy = c.p[1] - a.p[1], vz = c.p[2] - a.p[2];
+    const facing =
+      (uy * vz - uz * vy) * (a.n[0] + b.n[0] + c.n[0]) +
+      (uz * vx - ux * vz) * (a.n[1] + b.n[1] + c.n[1]) +
+      (ux * vy - uy * vx) * (a.n[2] + b.n[2] + c.n[2]);
+    this.positions.reserve(9);
+    this.normals.reserve(9);
+    this.colors.reserve(9);
+    this.pivots.reserve(9);
+    this.rig.reserve(12);
+    this.coats.reserve(3);
+    this.vertex(a);
+    if (facing >= 0) {
+      this.vertex(b);
+      this.vertex(c);
+    } else {
+      this.vertex(c);
+      this.vertex(b);
     }
+  }
+
+  private vertex(v: Vertex): void {
+    write3(this.positions, v.p);
+    write3(this.normals, v.n);
+    write3(this.colors, v.c);
+    write3(this.pivots, v.pivot);
+    const r = this.rig;
+    r.array[r.length] = v.rig[0]!;
+    r.array[r.length + 1] = v.rig[1]!;
+    r.array[r.length + 2] = v.rig[2]!;
+    r.array[r.length + 3] = v.rig[3]!;
+    r.length += 4;
+    this.coats.array[this.coats.length++] = v.coat;
   }
 
   /**
@@ -280,15 +321,22 @@ class Builder {
   build(): AnimalMeshData {
     const n = this.positions.length / 3;
     return {
-      positions: new Float32Array(this.positions),
-      normals: new Float32Array(this.normals),
-      colors: new Float32Array(this.colors),
-      rig: new Float32Array(this.rig),
-      pivots: new Float32Array(this.pivots),
-      coat: new Float32Array(this.coats),
+      positions: this.positions.result(),
+      normals: this.normals.result(),
+      colors: this.colors.result(),
+      rig: this.rig.result(),
+      pivots: this.pivots.result(),
+      coat: this.coats.result(),
       triangles: n / 3,
     };
   }
+}
+
+function write3(f: Floats, v: readonly [number, number, number]): void {
+  f.array[f.length] = v[0];
+  f.array[f.length + 1] = v[1];
+  f.array[f.length + 2] = v[2];
+  f.length += 3;
 }
 
 function rigOf(part: BodyPart, w: number): number[] {

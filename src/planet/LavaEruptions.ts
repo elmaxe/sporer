@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { onGroundLayers } from '../world/groundDepth';
 import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
 import {
@@ -111,7 +112,7 @@ export class LavaEruptions implements Entity {
   private cursor = 0;
   private readonly glowTexture: THREE.CanvasTexture;
   private readonly glows: THREE.Sprite[];
-  private readonly light = new THREE.PointLight('#ff7a2a', 0, 0, 2);
+  private readonly light = onGroundLayers(new THREE.PointLight('#ff7a2a', 0, 0, 2));
   private readonly drawingSize = new THREE.Vector2();
   private readonly write = (event: EruptionEvent): void => this.writeEvent(event);
   private readonly ranked: EruptionEvent[] = [];

@@ -500,10 +500,8 @@ export class WeatherLook {
       // The same triangles in patches, so the ones out of view can be skipped (the per-vertex drift and the storms'
       // margin stay as they are).
       const patched = new SpherePatches(radius, segments, perFace, material, 'Cloud sheet');
-      for (const { mesh } of patched.patches) {
-        mesh.onBeforeRender = pickSide(mesh);
-        mesh.renderOrder = CLOUD_RENDER_ORDER;
-      }
+      patched.beforeRender(pickSide(patched.mesh));
+      patched.mesh.renderOrder = CLOUD_RENDER_ORDER;
       this.patchedSheet = patched;
       this.reachMargin = material.uniforms.uNearMargin!.value as number;
       sheet = patched.object;

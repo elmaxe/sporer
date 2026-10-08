@@ -162,10 +162,8 @@ describe('LOD surface', () => {
     lodParams.budgetMs = budget;
     return surface.settled;
   };
-  const drawn = (surface: LodSurface) =>
-    surface.object.children.filter((m): m is THREE.Mesh => m instanceof THREE.Mesh && m.visible);
-  const triangles = (surface: LodSurface) =>
-    drawn(surface).reduce((n, m) => n + m.geometry.getIndex()!.count / 3, 0);
+  const drawn = (surface: LodSurface) => surface.drawnGeometries();
+  const triangles = (surface: LodSurface) => drawn(surface).reduce((n, g) => n + g.getIndex()!.count / 3, 0);
 
   it('bounds a chunk by its farthest point from the centre too, over both shapes', () => {
     const own = new Float32Array([3, 0, 0, 0, 4, 0]);
@@ -220,8 +218,8 @@ describe('LOD surface', () => {
     const segments = new Map<string, number>();
     let collapsed = 0;
     let checked = 0;
-    for (const mesh of drawn(surface)) {
-      const p = mesh.geometry.getAttribute('position') as THREE.BufferAttribute;
+    for (const geometry of drawn(surface)) {
+      const p = geometry.getAttribute('position') as THREE.BufferAttribute;
       for (const [start, step] of [[0, 1], [0, side], [CHUNK_CELLS, side], [CHUNK_CELLS * side, 1]] as const) {
         for (let e = 0; e < CHUNK_CELLS; e++) {
           const a = new THREE.Vector3().fromBufferAttribute(p, start + e * step);
@@ -289,9 +287,9 @@ describe('LOD surface', () => {
     const side = CHUNK_CELLS + 1;
     const at = new Map<string, Set<string>>();
     const v = new THREE.Vector3();
-    for (const mesh of drawn(surface)) {
-      const p = mesh.geometry.getAttribute('position') as THREE.BufferAttribute;
-      const n = mesh.geometry.getAttribute('normal') as THREE.BufferAttribute;
+    for (const geometry of drawn(surface)) {
+      const p = geometry.getAttribute('position') as THREE.BufferAttribute;
+      const n = geometry.getAttribute('normal') as THREE.BufferAttribute;
       for (let e = 0; e <= CHUNK_CELLS; e++) {
         for (const i of [e, e * side, e * side + CHUNK_CELLS, CHUNK_CELLS * side + e]) {
           v.fromBufferAttribute(p, i);
@@ -321,9 +319,9 @@ describe('LOD surface', () => {
     let count = 0;
     const p = new THREE.Vector3();
     const n = new THREE.Vector3();
-    for (const mesh of drawn(surface)) {
-      const position = mesh.geometry.getAttribute('position') as THREE.BufferAttribute;
-      const normal = mesh.geometry.getAttribute('normal') as THREE.BufferAttribute;
+    for (const geometry of drawn(surface)) {
+      const position = geometry.getAttribute('position') as THREE.BufferAttribute;
+      const normal = geometry.getAttribute('normal') as THREE.BufferAttribute;
       for (let i = 0; i < position.count; i++) {
         tilt += n.fromBufferAttribute(normal, i).angleTo(p.fromBufferAttribute(position, i));
         count++;
@@ -347,11 +345,11 @@ describe('LOD surface', () => {
     const surface = make(detailed);
     expect(settle(surface, new THREE.Vector3(0, 0, R * 20))).toBe(true);
     // Where every drawn vertex is now, by its direction (geometry.userData.directions).
-    const where = (meshes: THREE.Mesh[]) => {
+    const where = (geometries: THREE.BufferGeometry[]) => {
       const out = new Map<string, string>();
-      for (const m of meshes) {
-        const d = m.geometry.userData.directions as Float32Array;
-        const p = m.geometry.getAttribute('position');
+      for (const g of geometries) {
+        const d = g.userData.directions as Float32Array;
+        const p = g.getAttribute('position');
         for (let i = 0; i < p.count; i++) out.set(`${d[i * 3]},${d[i * 3 + 1]},${d[i * 3 + 2]}`, `${p.getX(i)},${p.getY(i)},${p.getZ(i)}`);
       }
       return out;
@@ -415,7 +413,7 @@ describe('LOD surface', () => {
     expect(triangles(coast)).toBeLessThan(triangles(fine) / 3);
     // Fewer than the fixed 46-segment sea sphere it replaces drew from anywhere (12·46²), before the frustum culls any.
     expect(triangles(coast)).toBeLessThan(12 * 46 * 46);
-    expect(drawn(coast).every((m) => m.renderOrder === -1)).toBe(true);
+    expect(coast.object.children.every((m) => m.renderOrder === -1)).toBe(true);
     for (const s of [fine, outline, coast]) s.dispose();
   });
 
@@ -453,8 +451,8 @@ describe('LOD surface', () => {
       expect(shown.length).toBeGreaterThan(0);
       expect(shown.length).toBeLessThan(drawn(all).length);
       // Every chunk drawn reaches above the sea, and those left out don't.
-      const top = (m: THREE.Mesh) => {
-        const p = m.geometry.getAttribute('position');
+      const top = (g: THREE.BufferGeometry) => {
+        const p = g.getAttribute('position');
         let t = 0;
         for (let i = 0; i < p.count; i++) t = Math.max(t, Math.hypot(p.getX(i), p.getY(i), p.getZ(i)));
         return t;

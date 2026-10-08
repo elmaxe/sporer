@@ -29,7 +29,7 @@ describe('sphere patches', () => {
     const patches = new SpherePatches(2.5, segments, perFace, material, 'Test');
     expect(patches.patches).toHaveLength(6 * perFace * perFace);
     const whole = triangles(createCubeSphere(2.5, segments)).sort();
-    const cut = patches.patches.flatMap((p) => triangles(p.mesh.geometry)).sort();
+    const cut = patches.patches.flatMap((p) => triangles(p.geometry)).sort();
     expect(cut).toEqual(whole);
     expect(patches.triangles).toBe(whole.length);
   });
@@ -51,10 +51,10 @@ describe('sphere patches', () => {
         camera.set(Math.sin(k * 1.7) * Math.cos(k), Math.cos(k * 2.3), Math.sin(k * 0.9)).setLength(d);
         patches.cullBehind(camera);
         for (const p of patches.patches) {
-          if (p.mesh.visible) continue;
+          if (p.visible) continue;
           hidden++;
-          const pos = p.mesh.geometry.getAttribute('position');
-          const index = p.mesh.geometry.index!;
+          const pos = p.geometry.getAttribute('position');
+          const index = p.geometry.index!;
           for (let t = 0; t < index.count; t += 3) {
             a.fromBufferAttribute(pos, index.getX(t));
             b.fromBufferAttribute(pos, index.getX(t + 1));
@@ -74,8 +74,8 @@ describe('sphere patches', () => {
   it('keeps every patch from inside', () => {
     const patches = new SpherePatches(10, 37, 4, new THREE.MeshBasicMaterial(), 'Test');
     patches.cullBehind(new THREE.Vector3(0, 9.9, 0));
-    expect(patches.patches.every((p) => p.mesh.visible)).toBe(true);
+    expect(patches.patches.every((p) => p.visible)).toBe(true);
     patches.cullBehind(new THREE.Vector3(0, 9.9, 0), (p) => p.centre.y > 0);
-    expect(patches.patches.filter((p) => p.mesh.visible).length).toBeLessThan(patches.patches.length);
+    expect(patches.patches.filter((p) => p.visible).length).toBeLessThan(patches.patches.length);
   });
 });

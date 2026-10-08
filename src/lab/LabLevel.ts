@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { onGroundLayers } from '../world/groundDepth';
 import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
 import { FIXED_DT } from '../core/Game';
@@ -103,7 +104,7 @@ export class LabSun implements Entity {
   /** The light (colour × intensity) and the ambient, for shaders that light themselves. */
   readonly sunLight = new THREE.Color();
   readonly ambientLight = new THREE.Color();
-  private readonly light = new THREE.DirectionalLight();
+  private readonly light = onGroundLayers(new THREE.DirectionalLight());
   private readonly ambient: THREE.AmbientLight | THREE.HemisphereLight;
   private readonly glow: THREE.Sprite;
   private star: LabStar | null = null;
@@ -118,7 +119,7 @@ export class LabSun implements Entity {
     private readonly globe: boolean,
   ) {
     // The same ambient as the planet level (PlanetLights) and the system view (StarSystem).
-    this.ambient = globe ? new THREE.AmbientLight('#9bb8ff', 0.4) : new THREE.HemisphereLight('#9bb8ff', '#1a1020', 0.35);
+    this.ambient = onGroundLayers(globe ? new THREE.AmbientLight('#9bb8ff', 0.4) : new THREE.HemisphereLight('#9bb8ff', '#1a1020', 0.35));
     this.glow = new THREE.Sprite(
       new THREE.SpriteMaterial({
         map: createGlowTexture(),
