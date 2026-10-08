@@ -1,5 +1,6 @@
 import type { CrateredBody } from '../gen/craters';
 import * as THREE from 'three';
+import { onGroundLayers } from '../world/groundDepth';
 import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
 import { groundRadius } from '../gen/geysers';
@@ -156,7 +157,7 @@ interface Bolt {
 export class Weather implements Entity {
   readonly rain: THREE.InstancedMesh<THREE.CylinderGeometry, THREE.ShaderMaterial> | null;
   readonly bolts: THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial>;
-  readonly light = new THREE.PointLight('#cfdcff', 0, 0, 2);
+  readonly light = onGroundLayers(new THREE.PointLight('#cfdcff', 0, 0, 2));
   private readonly rainCentre: THREE.InstancedBufferAttribute | null = null;
   private readonly rainSpan: THREE.InstancedBufferAttribute | null = null;
   private readonly boltPool: Bolt[];
