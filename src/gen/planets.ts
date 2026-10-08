@@ -286,12 +286,15 @@ export function planetStyle(rng: Rng, type: Exclude<PlanetType, 'gas'> | MoonTyp
       const vegetation: Hsl = rng.chance(0.2) ? [rng.range(0, 360), 0.5, 0.38] : [rng.range(85, 140), 0.45, 0.35];
       return {
         sea: jitterHsl(rng, [rng.range(195, 225), 0.65, 0.36]),
-        seaLevel: type === 'ocean' ? rng.range(0.25, 0.4) : rng.range(-0.15, 0.15),
+        // A terran world's seas cover 15–33% of it (about 23% on most; the noise's spread in docs/research/terran-ground.md):
+        // mostly land, as Spore's green worlds are (was half sea). An ocean world's keep 75–85%. The same draws as ever,
+        // so nothing else moves.
+        seaLevel: type === 'ocean' ? rng.range(0.25, 0.4) : rng.range(-0.4, -0.15),
         low: jitterHsl(rng, vegetation),
         high: jitterHsl(rng, [rng.range(30, 50), 0.2, 0.85]),
         // Lower than the barren and desert worlds' and flattened into plains (landElevation): green worlds are mostly
-        // lowland under a few mountain ranges, as in Spore. The same draws as ever, so nothing else moves.
-        relief: rng.range(0.02, 0.035),
+        // lowland under a few mountain ranges, as in Spore: rolling country under low ranges. The same draw as ever.
+        relief: rng.range(0.012, 0.02),
         plains: 1,
       };
     }
