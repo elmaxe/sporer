@@ -703,6 +703,12 @@ export class PlanetLevel extends Level implements ItemUser {
     return out;
   }
 
+  override compile(renderer: THREE.WebGLRenderer, camera: THREE.Camera): void {
+    super.compile(renderer, camera);
+    this.globe.compileDepth(renderer, camera);
+    this.map.compile(renderer);
+  }
+
   override render(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera): void {
     // The sky camera sits where this camera is, in system space, looking the same way.
     const sky = this.skyCamera;

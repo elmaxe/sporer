@@ -396,6 +396,11 @@ export class PlanetMap implements Entity {
     }
   }
 
+  /** Compiles the shader `render` draws with. */
+  compile(renderer: THREE.WebGLRenderer): void {
+    renderer.compile(this.quad, this.camera);
+  }
+
   /** Draws the map into the game's canvas, under the panel. Called by the level after its scene. */
   render(renderer: THREE.WebGLRenderer): void {
     if (!this.drawing) return;

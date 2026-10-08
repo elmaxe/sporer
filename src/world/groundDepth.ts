@@ -62,6 +62,15 @@ export class GroundDepth {
    */
   private readonly twins = new WeakMap<THREE.Material, THREE.Material>();
   private readonly swapped: { mesh: THREE.Mesh; material: THREE.Material }[] = [];
+  /**
+   * Stands in for the ground pass's meshes when compiling (see `compile`): a program depends on the attributes its
+   * geometry has, so it has the chunks' position and normal.
+   */
+  private readonly probe = new THREE.Mesh(
+    new THREE.BufferGeometry()
+      .setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0], 3))
+      .setAttribute('normal', new THREE.Float32BufferAttribute([0, 0, 1], 3)),
+  );
 
   constructor() {
     this.target = new THREE.WebGLRenderTarget(1, 1, {
@@ -111,6 +120,31 @@ export class GroundDepth {
     endFrozenCulling();
   }
 
+  /**
+   * Compiles the shaders `render` will draw with (into this texture, so not those of the scene's own pass), hidden
+   * meshes on GROUND_DETAIL_LAYER included (plants, rocks and animals that only show near the ground), so they
+   * don't compile on the frame they're first drawn.
+   */
+  compile(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera): void {
+    const target = renderer.getRenderTarget();
+    const mask = camera.layers.mask;
+    renderer.setRenderTarget(this.target);
+    camera.layers.set(GROUND_LAYER);
+    // The ground pass draws everything with one material: a stand-in mesh for it is enough.
+    this.probe.material = this.material;
+    renderer.compile(this.probe, camera, scene);
+    camera.layers.set(GROUND_DETAIL_LAYER);
+    scene.traverse((o) => {
+      if (!(o instanceof THREE.Mesh) || Array.isArray(o.material) || !o.layers.isEnabled(GROUND_DETAIL_LAYER)) return;
+      const material = o.material as THREE.Material;
+      o.material = this.depthTwin(material);
+      renderer.compile(o, camera, scene);
+      o.material = material;
+    });
+    camera.layers.mask = mask;
+    renderer.setRenderTarget(target);
+  }
+
   private swapToTwins(scene: THREE.Scene): void {
     scene.traverseVisible((o) => {
       if (!(o instanceof THREE.Mesh) || Array.isArray(o.material) || !o.layers.isEnabled(GROUND_DETAIL_LAYER)) return;
@@ -148,5 +182,6 @@ export class GroundDepth {
     this.target.depthTexture?.dispose();
     this.target.dispose();
     this.material.dispose();
+    this.probe.geometry.dispose();
   }
 }

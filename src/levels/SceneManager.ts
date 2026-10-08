@@ -51,6 +51,18 @@ const SETTLED_DEBRIS = 600;
 export type LevelMode = 'system' | 'galaxy' | 'planet';
 
 /** A running zoom between two levels: one timeline (seamlessZoom.ts) driving both. */
+/** What three.js's WebGLProgram has (and its types leave out): done compiling, never blocking (KHR_parallel_shader_compile). */
+interface ProgramStatus {
+  isReady(): boolean;
+}
+
+/**
+ * The longest the handover waits for the incoming level's shaders to finish compiling in the background, in seconds:
+ * the zoom pauses at the end of its lead instead of the frame stalling. Only with KHR_parallel_shader_compile (most
+ * desktop GPUs in Chrome); without it shaders count as ready at once and compile on first use, as before.
+ */
+export const shaderWaitParams = { maxHold: 2 };
+
 interface SeamlessTransition {
   zoom: SeamlessZoom;
   elapsed: number;
@@ -58,6 +70,9 @@ interface SeamlessTransition {
   outgoing: Level;
   incoming: Level;
   swapped: boolean;
+  /** The incoming level's shader programs still compiling (see `beginSeamless`), and seconds the handover has waited. */
+  compiling: readonly ProgramStatus[];
+  held: number;
   /** Poses both levels for this point of the timeline (before they update this frame). */
   apply: (s: SeamlessSample) => void;
   /** Once, as the crossfade starts: the incoming level becomes the active one. */
@@ -451,14 +466,18 @@ export class SceneManager implements Entity {
     return { lead, overlap, tail, start, handover, end };
   }
 
-  private beginSeamless(t: Omit<SeamlessTransition, 'elapsed' | 'swapped' | 'started'>): void {
-    this.seamless = { ...t, elapsed: 0, swapped: false, started: false };
+  private beginSeamless(t: Omit<SeamlessTransition, 'elapsed' | 'swapped' | 'started' | 'compiling' | 'held'>): void {
+    this.seamless = { ...t, elapsed: 0, swapped: false, started: false, compiling: [], held: 0 };
     this.game.input.blocked = true;
     // The timeline drives both cameras: their distances mustn't move the ships.
     t.outgoing.zoomLocked = t.incoming.zoomLocked = true;
     t.apply(sampleSeamlessZoom(t.zoom, 0));
-    // Compile the incoming level's shaders now, not on its first frame mid-crossfade (a visible stall).
-    this.game.renderer.compile(t.incoming.scene, this.game.camera);
+    // Compile the incoming level's shaders now, not on its first frame mid-crossfade (a visible stall). With
+    // parallel compiling the driver works on them while the outgoing level plays its lead (see stepSeamless).
+    const renderer = this.game.renderer;
+    const known = new Set(renderer.info.programs);
+    t.incoming.compile(renderer, this.game.camera);
+    this.seamless.compiling = (renderer.info.programs ?? []).filter((p) => !known.has(p)) as unknown as ProgramStatus[];
   }
 
   private stepSeamless(frameDt: number): void {
@@ -466,7 +485,13 @@ export class SceneManager implements Entity {
     // The first frame's time went into setting the zoom up (building a level, compiling): don't skip ahead by it.
     if (t.started) t.elapsed += frameDt;
     t.started = true;
-    const s = sampleSeamlessZoom(t.zoom, t.elapsed);
+    let s = sampleSeamlessZoom(t.zoom, t.elapsed);
+    // The incoming level is about to be drawn: wait at the end of the lead while its shaders still compile.
+    if (!t.swapped && s.blend > 0 && t.held < shaderWaitParams.maxHold && t.compiling.some((p) => !p.isReady())) {
+      t.held += frameDt;
+      t.elapsed = Math.min(t.elapsed - frameDt, t.zoom.lead);
+      s = sampleSeamlessZoom(t.zoom, t.elapsed);
+    }
     if (!t.swapped && s.blend > 0) {
       t.swapped = true;
       t.swap();
