@@ -3315,12 +3315,15 @@ await section('scan', async () => {
   const slots = await evaluate(`[...document.querySelectorAll('.item-slot[data-item]')].map((s) => s.dataset.item)`);
   await key('Digit3', '3');
   const armed = await evaluate(`({ selected: planet.selected, cursor: document.body.classList.contains('scanning'), hint: document.getElementById('item-hint').textContent })`);
-  // Hovering an animal: not in the repository yet.
-  const first = await evaluate(`__animal()`);
-  if (!first) return false;
-  await mouse('mouseMoved', first);
-  await drawFrames(4);
-  const hover = await evaluate(`document.getElementById('item-hint').textContent`);
+  // Hovering an animal: not in the repository yet (kept on it: the herd may bolt from the ship).
+  if (!(await evaluate(`__animal()`))) return false;
+  let hover = '';
+  for (let i = 0; i < 20 && !/not in your repository/.test(hover); i++) {
+    const at = await evaluate(`__animal()`);
+    if (at) await mouse('mouseMoved', at);
+    await drawFrames(2);
+    hover = await evaluate(`document.getElementById('item-hint').textContent`);
+  }
   // Held on it, following it as it walks, until its species is read.
   const follow = async (where, done, tries = 120) => {
     let at = await evaluate(where);
