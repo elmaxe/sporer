@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { AFTER_ATMOSPHERE_RENDER_ORDER } from '../world/atmosphereShell';
 import { HULL_DEPTH, HULL_RADIUS } from '../planet/ground';
+import type { CaptainLook } from './captainMesh';
 import { SHIP_PARTS, instances, partFrame, type PaintChannel, type ShipDesign, type ShipPaint, type ShipPart, type ShipPartKind } from '../gen/ship';
 
 /*
@@ -313,7 +314,8 @@ export class ShipMaterials {
         m = new THREE.MeshStandardMaterial({ color: paint.detail, metalness: this.reflections ? 0.7 : 0.3, roughness: 0.45, side: THREE.DoubleSide });
         break;
       case 'glass':
-        m = new THREE.MeshPhysicalMaterial({ color: paint.glass, emissive: new THREE.Color(paint.glass).multiplyScalar(0.25), metalness: 0, roughness: 0.05, transparent: true, opacity: 0.78, clearcoat: 1 });
+        // Clear enough to see the captain inside.
+        m = new THREE.MeshPhysicalMaterial({ color: paint.glass, emissive: new THREE.Color(paint.glass).multiplyScalar(0.12), metalness: 0, roughness: 0.05, transparent: true, opacity: 0.45, clearcoat: 1 });
         break;
       case 'glow':
         m = new THREE.MeshBasicMaterial({ color: paint.glow, toneMapped: false, side: THREE.DoubleSide });
@@ -410,8 +412,9 @@ export function outlineMaterial(color: string, width: number, opacity = 1): THRE
  * rides higher), so everything that flies, lands and collides with the
  * saucer does the same with it, nose first. `ring` stands for the saucer's turning
  * light ring: the levels turn it, and the ship's own rings turn with it.
+ * `captain`, if given, is seated in its cockpit.
  */
-export function buildDesignedUfo(design: ShipDesign): { group: THREE.Group; ring: THREE.Group } {
+export function buildDesignedUfo(design: ShipDesign, captain: CaptainLook | null = null): { group: THREE.Group; ring: THREE.Group } {
   const model = buildShipModel(design, new ShipMaterials(false), true);
   const inner = model.group;
   inner.updateMatrixWorld(true);
@@ -423,6 +426,7 @@ export function buildDesignedUfo(design: ShipDesign): { group: THREE.Group; ring
   inner.scale.setScalar(scale);
   // Centred over its middle, and raised if that would put its underside lower than the saucer's.
   inner.position.set(-centre.x * scale, Math.max(-centre.y * scale, -HULL_DEPTH - box.min.y * scale), -centre.z * scale);
+  captain?.seatIn(design, inner);
   // The editor's nose is +z; the game's UFO flies towards its −z.
   const turn = new THREE.Group();
   turn.rotation.y = Math.PI;

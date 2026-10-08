@@ -1,4 +1,6 @@
 import { CORE_KINDS, HULL_FINISHES, HULL_PATTERNS, MAX_COMPLEXITY, MAX_RADIAL, SHIP_CATEGORIES, SHIP_PARTS, SHIP_PART_KINDS, defaultShip, onMiddleLine, randomShip, type HullFinish, type HullPattern, type ShipCategory, type ShipPaint, type ShipPartKind } from '../gen/ship';
+import { encodeDesign } from '../gen/creature';
+import { captainDesign } from '../player/captain';
 import { keepShip, keptShip } from '../player/customShip';
 import type { ShipLab, ShipMode } from './ShipLab';
 
@@ -359,6 +361,7 @@ export class ShipPanel {
       const s = this.section('Ship');
       s.append(el('div', 'cr-note', `${d.parts.length} parts, drawn as ${lab.complexity} pieces (most ${MAX_COMPLEXITY}).`));
       s.append(el('div', 'cr-note', 'Click a part to select it; click the core to change its shape.'));
+      this.captainSection();
     }
     const views = this.section('View');
     const row = el('div', 'cr-buttons');
@@ -461,5 +464,19 @@ export class ShipPanel {
       });
     }
     game.append(row);
+    this.captainSection();
+  }
+
+  /** Who sits in the cockpit, and a way to change them (the creature editor's Captain button). */
+  private captainSection(): void {
+    const s = this.section('Captain');
+    const captain = captainDesign();
+    const cockpit = this.lab.design.parts.some((p) => p.kind === 'dome' || p.kind === 'canopy');
+    s.append(el('div', 'cr-note', cockpit ? `${captain.name} sits in the cockpit in a space suit.` : `${captain.name} needs a cockpit to sit in: add a dome or a canopy (Cockpit).`));
+    const row = el('div', 'cr-buttons');
+    this.button(row, '🦎 Change the captain', () => {
+      location.href = new URL(`creature.html#${encodeDesign(captain)}`, location.href).href;
+    });
+    s.append(row);
   }
 }
