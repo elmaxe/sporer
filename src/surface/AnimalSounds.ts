@@ -26,6 +26,9 @@ export const animalSoundParams = {
   voices: 8,
 };
 
+/** A scream rises by this share of its pitch as the animal is carried up the beam (stylised: terror mounting). */
+const SCREAM_RISE = 0.35;
+
 /** Calls of a herd for a conversation slot, and each animal's next grunt (kept until the slot moves on). */
 interface HerdTalk {
   slot: number;
@@ -100,6 +103,7 @@ export class AnimalSounds implements Entity {
     // A clock jump (or the first frame) starts nothing: the calls of the skipped time are past.
     if (this.muted || !animalParams.enabled || !(step > 0 && step < 1)) {
       if (!(step > 0 && step < 1)) this.pending.length = 0;
+      this.animals.events.length = 0;
       return;
     }
     this.camera.updateMatrixWorld();
@@ -110,7 +114,7 @@ export class AnimalSounds implements Entity {
     for (const e of this.animals.events) {
       const herd = e.cell.herd;
       if (!herd) continue;
-      if (e.kind === 'distress') this.play(e.cell, e.member, 'distress', herd.seed ^ Math.floor(e.time * 1000), e.x, e.y, e.z);
+      if (e.kind === 'distress') this.play(e.cell.species, 'distress', herd.seed ^ Math.floor(e.time * 1000), e.x, e.y, e.z);
       else if (e.kind === 'alert') this.pending.push({ at: t + 0.15, cell: e.cell, call: { at: t + 0.15, member: e.member, kind: 'alert', variant: herd.seed ^ Math.floor(t) } });
       else {
         // Bolting: the alarm, not the snort it was about to give.
@@ -119,6 +123,7 @@ export class AnimalSounds implements Entity {
         for (const call of alarmCalls(herd.seed, e.startle, t, herd.count, e.member, this.scratch)) this.pending.push({ at: call.at, cell: e.cell, call });
       }
     }
+    this.animals.events.length = 0;
     for (let i = this.pending.length - 1; i >= 0; i--) {
       const p = this.pending[i]!;
       if (p.at > t) continue;
@@ -178,29 +183,42 @@ export class AnimalSounds implements Entity {
   /** Plays a planned call by an animal of `cell` where it is (on screen or not), if it's still there. */
   private playMember(cell: HerdView, call: PlannedCall): void {
     const p = this.where;
-    if (this.animals.whereIs(cell, call.member, p)) this.play(cell, call.member, call.kind, call.variant, p.x, p.y, p.z);
+    if (this.animals.whereIs(cell, call.member, p)) this.play(cell.species, call.kind, call.variant, p.x, p.y, p.z);
   }
 
   /** Synthesises a call by animal `k` of `cell` at (x, y, z) (body frame), as loud as it is near the camera, panned to its side. */
-  private play(cell: HerdView, k: number, kind: CallKind, variant: number, x: number, y: number, z: number): void {
-    const species = cell.species;
+  /**
+   * An animal off the ground screams: carried up the beam (higher the higher
+   * it's carried, `frenzy` 0 to 1) or falling. `at` is where it is (body
+   * frame). Returns how long the scream lasts, seconds (0 when nothing was
+   * heard, as when audio is locked or the animals are off).
+   */
+  scream(species: AnimalSpecies, at: THREE.Vector3, variant: number, frenzy: number): number {
+    if (this.muted || !animalParams.enabled) return 0;
+    return this.play(species, 'scream', variant, at.x, at.y, at.z, 1 + SCREAM_RISE * Math.min(1, Math.max(0, frenzy)));
+  }
+
+  /** Synthesises a call by an animal of `species` at (x, y, z) (body frame), as loud as it is near the camera, panned to its side, its pitch × `pitch`; returns how long it lasts (0: not played). */
+  private play(species: AnimalSpecies | null, kind: CallKind, variant: number, x: number, y: number, z: number, pitch = 1): number {
     const out = this.sfx.synth();
-    if (!species || !out || k < 0) return;
+    if (!species || !out) return 0;
     const p = animalSoundParams;
     const d = this.at.set(x, y, z).sub(this.eye).length();
     const ref = this.reachOf(species);
     const gain = p.volume / (1 + (d / ref) ** 2);
-    if (gain < p.quietest) return;
-    // Room for it? Distress and alarms are always heard.
+    if (gain < p.quietest) return 0;
+    // Room for it? Screams, distress and alarms are always heard.
     const now = out.ctx.currentTime;
     for (let i = this.ends.length - 1; i >= 0; i--) if (this.ends[i]! <= now) this.ends.splice(i, 1);
-    if (this.ends.length >= p.voices && kind !== 'distress' && kind !== 'alarm') return;
+    if (this.ends.length >= p.voices && kind !== 'distress' && kind !== 'alarm' && kind !== 'scream') return 0;
     const pan = d > 1e-3 ? (this.at.dot(this.right) / d) * 0.85 : 0;
     const voice = animalVoice(species);
-    this.ends.push(playCall(out, voice, callShape(voice, kind, variant), gain, pan));
+    const end = playCall(out, voice, callShape(voice, kind, variant, pitch), gain, pan);
+    this.ends.push(end);
     this.calls++;
     this.heard[kind]++;
     this.last = { kind, species: species.name, gain };
+    return end - now;
   }
 
   dispose(): void {

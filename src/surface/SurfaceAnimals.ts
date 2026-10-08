@@ -195,7 +195,7 @@ export class SurfaceAnimals implements Entity {
   private threat: THREE.Object3D | null = null;
   private readonly threatAt = new THREE.Vector3();
   private lastTime = Number.NaN;
-  /** What happened to the animals this frame (cleared at the start of each `update`; the animals' sounds read it after). */
+  /** What has happened to the animals since their sounds last took it (`AnimalSounds` empties it: a grab or a shot comes after it has run in a frame). */
   readonly events: AnimalEvent[] = [];
   /** Animals set down here, by their record's id (always loaded: there are few). */
   private readonly released = new Map<string, HerdCell>();
@@ -398,7 +398,6 @@ export class SurfaceAnimals implements Entity {
   }
 
   update(): void {
-    this.events.length = 0;
     const enabled = animalParams.enabled;
     this.object.visible = enabled;
     if (!enabled) {
@@ -518,7 +517,7 @@ export class SurfaceAnimals implements Entity {
   }
 
   private event(kind: AnimalEvent['kind'], cell: HerdCell, member: number, at: THREE.Vector3, startle: number, time: number): void {
-    // Kept for one frame; nothing reads them in the labs, so at most a frame's worth.
+    // Nothing takes them in the labs: at most a few kept.
     if (this.events.length < 64) this.events.push({ kind, cell, member, x: at.x, y: at.y, z: at.z, startle, time });
   }
 

@@ -58,8 +58,16 @@ export const MIN_PITCH = 70;
 export const MAX_PITCH = 1600;
 
 /** What a call is for. */
-export type CallKind = 'contact' | 'answer' | 'grunt' | 'alert' | 'alarm' | 'distress' | 'growl';
-export const CALL_KINDS: readonly CallKind[] = ['contact', 'answer', 'grunt', 'alert', 'alarm', 'distress', 'growl'];
+export type CallKind = 'contact' | 'answer' | 'grunt' | 'alert' | 'alarm' | 'distress' | 'growl' | 'scream';
+export const CALL_KINDS: readonly CallKind[] = ['contact', 'answer', 'grunt', 'alert', 'alarm', 'distress', 'growl', 'scream'];
+
+/**
+ * A scream's rasp: its loudness shaken at 30–150 Hz, the modulation rates
+ * Arnal et al. (2015) found screams (and alarms) fill and speech leaves
+ * empty, heard as roughness; each scream picks a rate in it.
+ */
+export const SCREAM_RASP_MIN = 30;
+export const SCREAM_RASP_MAX = 150;
 
 /** A species' voice. */
 export interface AnimalVoice {
@@ -173,6 +181,8 @@ export interface Syllable {
   loudness: number;
   breath: number;
   rough: number;
+  /** The rasp's rate, Hz (a scream's roughness); unset, the voice's own. */
+  rasp?: number;
 }
 
 /** How each kind of call differs from a contact call: pitch, length, loudness, breath and rasp (Morton: fear and alarm high and tonal, hostility low and harsh). */
@@ -184,6 +194,9 @@ const KINDS: Record<CallKind, { pitch: number; length: number; loudness: number;
   alarm: { pitch: 1.6, length: 0.55, loudness: 1, breath: 0.5, rough: 0.3, syllables: (_, r) => r.int(2, 4) },
   distress: { pitch: 1.9, length: 1.6, loudness: 1, breath: 0.8, rough: 1.8, syllables: () => 1 },
   growl: { pitch: 0.55, length: 1.4, loudness: 0.75, breath: 1.4, rough: 2.5, syllables: () => 1 },
+  // Carried off by the beam: as high as it goes, as harsh as it goes (Morton; Arnal's roughness), short and over and over;
+  // louder, as the deep rasp takes a third of its power (measured: peaks as the distress cry's).
+  scream: { pitch: 2.2, length: 0.9, loudness: 1.25, breath: 0.7, rough: 3, syllables: (_, r) => r.int(1, 2) },
 };
 
 /** Gap between a call's syllables, as a share of a syllable. */
@@ -191,22 +204,23 @@ const SYLLABLE_GAP = 0.35;
 
 /**
  * The syllables of one call of `kind` by `voice`; `variant` picks one of
- * its endless variations (the same variant is the same call).
+ * its endless variations (the same variant is the same call). `pitch`
+ * raises or lowers it all (a scream rising as the animal is carried up).
  */
-export function callShape(voice: AnimalVoice, kind: CallKind, variant: number): Syllable[] {
+export function callShape(voice: AnimalVoice, kind: CallKind, variant: number, pitch = 1): Syllable[] {
   const r = new Rng(variant >>> 0).fork('call', kind);
   const k = KINDS[kind];
   const n = k.syllables(voice, r);
   const out: Syllable[] = [];
   let at = 0;
-  const base = voice.pitch * k.pitch * r.range(0.94, 1.06);
+  const base = voice.pitch * k.pitch * pitch * r.range(0.94, 1.06);
   const length = voice.syllable * k.length;
   const open = 1 - voice.mouth;
   for (let i = 0; i < n; i++) {
     const duration = length * r.range(0.8, 1.2) * (kind === 'alarm' && i > 0 ? 0.8 : 1);
     // The contour, with alarms sharp and falling at the end, distress falling, growls flat, grunts dropping.
     let shape: AnimalVoice['contour'] = voice.contour;
-    if (kind === 'alarm') shape = 'arch';
+    if (kind === 'alarm' || kind === 'scream') shape = 'arch';
     else if (kind === 'distress' || kind === 'grunt') shape = 'fall';
     else if (kind === 'growl') shape = 'warble';
     else if (kind === 'answer' && r.chance(0.5)) shape = shape === 'rise' ? 'fall' : 'rise';
@@ -222,7 +236,8 @@ export function callShape(voice: AnimalVoice, kind: CallKind, variant: number): 
       closure: [Math.min(0.9, shut + 0.3), shut],
       loudness: k.loudness * (i === 0 ? 1 : r.range(0.75, 0.95)),
       breath: Math.min(1, voice.breath * k.breath),
-      rough: Math.min(1, voice.rough * k.rough + (voice.hunter && kind !== 'alarm' ? 0.1 : 0)),
+      rough: Math.min(1, voice.rough * k.rough + (voice.hunter && kind !== 'alarm' ? 0.1 : 0) + (kind === 'scream' ? 0.6 : 0)),
+      ...(kind === 'scream' ? { rasp: SCREAM_RASP_MIN * (SCREAM_RASP_MAX / SCREAM_RASP_MIN) ** r.next() } : {}),
     });
     at += duration * (1 + SYLLABLE_GAP * r.range(0.6, 1.4));
   }

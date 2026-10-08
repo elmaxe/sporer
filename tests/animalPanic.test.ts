@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { HerdPath, animalGait, generateHerd, herdGridSize, planAnimals, type AnimalPlan, type AnimalPose, type HerdData } from '../src/gen/animals';
 import { alarmCalls, gruntAt, herdConversation, talkSlot } from '../src/gen/animalTalk';
-import { CALL_KINDS, TRACT_SOUND_SPEED, animalVoice, callLength, callPitch, callShape, formant, speciesMass, tractLength } from '../src/gen/animalVoice';
+import { CALL_KINDS, SCREAM_RASP_MAX, SCREAM_RASP_MIN, TRACT_SOUND_SPEED, animalVoice, callLength, callPitch, callShape, formant, speciesMass, tractLength } from '../src/gen/animalVoice';
 import { terrainNoise } from '../src/gen/noise';
 import { HerdPanic, fleeSpeed, moveAt, moveDuration, panicParams, type PanicState } from '../src/gen/panic';
 import type { GroundRadius } from '../src/gen/plants';
@@ -212,6 +212,17 @@ describe('animal voices', () => {
     expect(peak('distress')).toBeGreaterThan(peak('contact'));
     expect(peak('growl')).toBeLessThan(peak('contact'));
     expect(callShape(v, 'growl', 7)[0]!.rough).toBeGreaterThan(callShape(v, 'alarm', 7)[0]!.rough);
+    // A scream on the beam: higher than any other call, as harsh as it goes, its rasp at screams' roughness rates (Arnal et al. 2015).
+    expect(peak('scream')).toBeGreaterThan(peak('distress'));
+    for (let variant = 0; variant < 50; variant++) {
+      for (const s of callShape(v, 'scream', variant)) {
+        expect(s.rough).toBe(1);
+        expect(s.rasp).toBeGreaterThanOrEqual(SCREAM_RASP_MIN);
+        expect(s.rasp).toBeLessThanOrEqual(SCREAM_RASP_MAX);
+      }
+    }
+    // Rising as it's carried up.
+    expect(Math.max(...callShape(v, 'scream', 3, 1.35).flatMap((x) => x.pitch))).toBeCloseTo(Math.max(...callShape(v, 'scream', 3).flatMap((x) => x.pitch)) * 1.35, 9);
     for (const kind of CALL_KINDS) {
       const shape = callShape(v, kind, 123);
       expect(shape).toEqual(callShape(v, kind, 123));

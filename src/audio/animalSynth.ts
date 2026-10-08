@@ -127,6 +127,7 @@ export function playCall(target: SynthOutput, voice: AnimalVoice, syllables: rea
     noiseLevel.gain.setValueAtTime(s.breath * 0.9, a);
     // The level swings between 1 − 2·depth/(1 + depth) and 1: never over the unshaken source.
     const depth = voice.buzz > 0 ? 0.9 : s.rough * 0.8;
+    if (s.rasp !== undefined && voice.buzz === 0) shaker.frequency.setValueAtTime(s.rasp, a);
     source.gain.setValueAtTime(1 / (1 + depth), a);
     shake.gain.setValueAtTime(depth / (1 + depth), a);
     envelope.gain.setValueAtTime(0, a);

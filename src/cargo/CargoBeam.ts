@@ -14,6 +14,7 @@ import { plantYaw, type PlantHit, type SurfaceEntities } from '../surface/Surfac
 import { animalParams } from '../surface/animalParams';
 import { createAnimalObject, type AnimalObject } from '../surface/liveAnimal';
 import type { AnimalHit, SurfaceAnimals } from '../surface/SurfaceAnimals';
+import type { AnimalSpecies } from '../gen/animals';
 import { GROUND_DETAIL_LAYER } from '../world/groundDepth';
 import { createGlowTexture } from '../world/glowTexture';
 import { CLOUD_RENDER_ORDER } from '../world/weatherLook';
@@ -84,6 +85,16 @@ interface Target {
   readonly base: THREE.Vector3;
 }
 
+/** Whoever screams for the animals on the beam (surface/AnimalSounds.ts): a scream at `at` (the level's frame), `frenzy` 0 to 1; how long it lasts (0: not heard). */
+export interface AnimalScreams {
+  scream(species: AnimalSpecies, at: THREE.Vector3, variant: number, frenzy: number): number;
+}
+
+/** Seconds after it's grabbed (and gives its first cry) that an abducted animal starts screaming, and the breath it takes between screams. */
+const FIRST_SCREAM = 0.45;
+const SCREAM_GAP_MIN = 0.08;
+const SCREAM_GAP_MAX = 0.3;
+
 /** What an animal or a plant lifted off the ground was there: put it back, or it's gone for good. */
 interface LoadSource {
   destroy(): void;
@@ -137,6 +148,9 @@ interface Load {
   owed: number;
   /** Its one-off ending (shattering, the last of the ash) has been thrown. */
   burst: boolean;
+  /** An animal's next scream (seconds), and the screams so far. */
+  screamIn: number;
+  screams: number;
 }
 
 /**
@@ -233,6 +247,8 @@ export class CargoBeam implements Entity {
     /** Why nothing can be beamed now (the planet buster going off), or null. */
     private readonly blocked: () => string | null,
     debug: Debug,
+    /** The animals' voices: an abducted animal screams all the way up, and as it falls if let go (none in tests). */
+    private readonly screams: AnimalScreams | null = null,
   ) {
     this.rng = new Rng(hashSeed('cargo', body.key));
     this.gravity = fallGravity(body.gravity);
@@ -500,6 +516,8 @@ export class CargoBeam implements Entity {
       kick: 0,
       owed: 0,
       burst: false,
+      screamIn: FIRST_SCREAM,
+      screams: 0,
     };
     this.loads.push(load);
     this.pose(load, foot, full);
@@ -606,6 +624,8 @@ export class CargoBeam implements Entity {
         this.v.addScaledVector(this.up, -0.5 * e * load.size.height * load.scale);
         this.track(load, this.v, dt);
         this.pose(load, this.v, load.scale);
+        // Taken up: it screams all the way, higher as it goes.
+        if (load.state === 'up' && load.source) this.scream(load, dt, e);
         if (load.state === 'up' && load.t >= 1) this.arrive(load);
         else if (load.state === 'down' && load.t <= 0) {
           this.lowering = null;
@@ -622,6 +642,7 @@ export class CargoBeam implements Entity {
         this.kick(load, dt, 1.5);
         load.scale = fallScale(height, load.fallFrom, load.fallFromScale, load.full);
         this.pose(load, load.fall.position, load.scale);
+        this.scream(load, dt, 1);
         if (height === 0) {
           this.dir(load, load.fall.position);
           this.land(load, false);
@@ -638,6 +659,15 @@ export class CargoBeam implements Entity {
         this.playFate(load, dt);
         if (load.age >= FATE_TIME[load.fate]) this.drop(load);
     }
+  }
+
+  /** An animal off the ground screams, a breath between screams; `frenzy` (0 to 1) raises them. */
+  private scream(load: Load, dt: number, frenzy: number): void {
+    if (!this.screams || load.cargo.kind !== 'animal') return;
+    load.screamIn -= dt;
+    if (load.screamIn > 0) return;
+    const lasts = this.screams.scream(load.cargo.species, load.object.position, hashSeed(load.key, load.foot.x, load.screams++), frenzy);
+    load.screamIn = (lasts > 0 ? lasts : FIRST_SCREAM) + this.rng.range(SCREAM_GAP_MIN, SCREAM_GAP_MAX);
   }
 
   /** An animal kicks its legs (`rate` times its usual) while off the ground. */

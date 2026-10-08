@@ -400,6 +400,7 @@ export class PlanetLevel extends Level implements ItemUser {
             sfx,
             () => (this.busy ? 'Not while the planet buster goes off' : null),
             debug,
+            this.animalSounds,
           ),
         )
       : null;

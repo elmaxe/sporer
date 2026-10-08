@@ -73,7 +73,8 @@
 // down in the sea drowns; what was taken
 // and planted is still so after leaving and coming back; the cues abductStart, abductBeam, abductSuccess, exportBeam
 // and dropImpact are asked for (all that with the animals hidden, so only plants are caught). Then with the animals
-// shown, over a herd: holding the beam on an animal beams it up into its own stack (an animal's picture), and set down
+// shown, over a herd: holding the beam on an animal beams it up into its own stack (an animal's picture), crying out and
+// screaming all the way up (synthesised, once audio runs), and set down
 // on the ground it roams there; Tab and a real 3 arm the laser (Weapons' third slot), and holding it on an animal and on
 // a tree kills them (recorded as removed, burning away), with the laserBeam and laserHit cues; the animals taken or
 // killed and the one set down are still so after leaving and coming back.
@@ -3095,8 +3096,13 @@ await section('cargo', async () => {
       return null; }`);
     // Beamed up: into a stack of its own, with its picture (the plants above may have filled the hold: emptied first).
     await evaluate(`levels.inventory.load({ stacks: [] })`);
-    // The herd bolted from the ship coming down beside it (issue #156): aimed at once it stands watching the ship.
+    // The herd bolted from the ship coming down beside it (issue #156): aimed at once it stands watching the ship, the
+    // camera turned to it from beyond the ship (it may have run out of view).
     await until(`planet.animals.stats().fleeing === 0`, 60000);
+    await evaluate(`(() => { const A = planet.animals; const p = A.herdPositions()[0]; if (!p) return; A.object.localToWorld(p);
+      planet.orbit.lookFrom(planet.ship.object.position.clone().sub(p).normalize().addScaledVector(planet.ship.up, 0.6)); })()`);
+    await sleep(1000);
+    await drawFrames(10);
     // (The fling above left the beam armed: a 1 now would put it away.)
     await evaluate(`planet.select('abduct')`);
     const at = await evaluate(`__animal()`);
@@ -3111,6 +3117,8 @@ await section('cargo', async () => {
       up = await evaluate(`(() => { const s = levels.inventory.stacks.find((s) => s.kind === 'animal'); return s && { key: s.key, name: s.species.name, count: s.count,
         img: document.querySelector('.item-slot[data-item="cargo:' + s.key + '"] img')?.src.slice(0, 22) }; })()`);
       if (up) up.taken = (await evaluate(`${animalChanges}.removedAnimalCount`)) - takenBefore;
+      // It screamed all the way up (synthesised from its voice, once audio is running).
+      if (up) Object.assign(up, await evaluate(`({ audio: audio.state, screams: planet.animalSounds.heard.scream, cries: planet.animalSounds.heard.distress })`));
     }
     // Set down on land: it roams there.
     let release = null;
@@ -3216,6 +3224,7 @@ await section('cargo', async () => {
     // Animals of a herd stand close: the beam may catch more than one, all into the one stack.
     animals.up?.taken >= 1 &&
     animals.up.count === animals.up.taken &&
+    (animals.up.audio !== 'running' || (animals.up.screams >= 1 && animals.up.cries >= 1)) &&
     animals.up.img === 'data:image/png;base64,' &&
     animals.release?.released === 1 &&
     /roam/.test(animals.release.hint) &&
