@@ -8,7 +8,7 @@ const FACING = new THREE.Vector3(0, 0, 1);
  * After every transparent layer (atmospheres, clouds): the ring writes no depth, so
  * a body's clouds drawn later would cover it even when the ring is in front of them.
  */
-const MARKER_RENDER_ORDER = CLOUD_RENDER_ORDER + 1;
+export const MARKER_RENDER_ORDER = CLOUD_RENDER_ORDER + 1;
 
 /**
  * A pulsing, glowing ring used to mark targets and locations. Not an Entity:

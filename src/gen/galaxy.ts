@@ -10,6 +10,11 @@ import { generateCompanion, generateStar, type StarData } from './stars';
 
 /** Galaxy-scene units. Unrelated to system units; each level has its own scale. */
 export const GALAXY_RADIUS = 1000;
+/**
+ * The map's radius stands for the Milky Way's D25 radius, 26.8 kpc / 2 =
+ * 43,700 ly (docs/research/nebulas.md), so a galaxy unit is 43.7 ly.
+ */
+export const LIGHT_YEARS_PER_UNIT = 43_700 / GALAXY_RADIUS;
 export const DEFAULT_STAR_COUNT = 4000;
 export const DEFAULT_DUST_COUNT = 1200;
 /** The galaxy the game opens without a ?seed (as the URL's text). */

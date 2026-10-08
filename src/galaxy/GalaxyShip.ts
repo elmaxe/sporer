@@ -86,6 +86,16 @@ export class GalaxyShip implements Entity {
   }
 
   /**
+   * Galaxy units from the ship to `ref`, leaving out its hover height: from
+   * its star when docked, and the distance still to fly when it's `ref` the
+   * ship is flying to.
+   */
+  distanceTo(ref: StarRef): number {
+    const p = ref.position;
+    return Math.hypot(this.curr.x - p.x, this.curr.y - HOVER - p.y, this.curr.z - p.z);
+  }
+
+  /**
    * Dives into the star it's docked at, 0–1: sinks from its hover height into
    * the star while shrinking to nothing (entering the system; reversed on
    * the way out).
