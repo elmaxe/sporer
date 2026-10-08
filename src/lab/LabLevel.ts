@@ -28,7 +28,9 @@ import { plantSetup } from '../surface/plantSetup';
 import { animalSetup } from '../surface/animalSetup';
 import { SurfaceAnimals } from '../surface/SurfaceAnimals';
 import { SurfaceEntities } from '../surface/SurfaceEntities';
+import { GroundGrass } from '../surface/GroundGrass';
 import { GroundRocks } from '../surface/GroundRocks';
+import { grassSetup } from '../surface/grassSetup';
 import { rockSetup } from '../surface/rockSetup';
 import { cometParams } from '../world/Comet';
 import { Planet } from '../world/Planet';
@@ -251,6 +253,8 @@ export class LabLevel extends Level {
   readonly plants: SurfaceEntities | null = null;
   /** Loose rocks on the ground near the camera (globe view, solid bodies). */
   readonly rocks: GroundRocks | null = null;
+  /** Grass on green worlds' ground near the camera (globe view). */
+  readonly grass: GroundGrass | null = null;
   /** Animals roaming where plants grow (globe view; terraform a world into a habitable tier and they come). */
   readonly animals: SurfaceAnimals | null = null;
   readonly ship: PlanetShip | null = null;
@@ -361,6 +365,8 @@ export class LabLevel extends Level {
     if (globe && plants) this.plants = this.add(new SurfaceEntities(this.scene, plants.plan, plants.ground, camera, new SurfaceChanges(), debug));
     const rocks = globe ? rockSetup(config) : null;
     if (globe && rocks) this.rocks = this.add(new GroundRocks(this.scene, rocks.plan, rocks.ground, camera, debug));
+    const grass = globe ? grassSetup(config) : null;
+    if (globe && grass) this.grass = this.add(new GroundGrass(this.scene, grass.plan, grass.ground, camera, this.ship?.object ?? null, debug));
     const animals = globe ? animalSetup(config, plants) : null;
     if (globe && animals) this.animals = this.add(new SurfaceAnimals(this.scene, animals.plan, animals.ground, camera, clock, debug));
     if (carry) {
