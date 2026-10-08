@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { animalGait } from '../gen/animals';
 import {
   MAX_SPLATS,
@@ -12,6 +13,7 @@ import {
   encodeDesign,
   growCreature,
   insertVertebra,
+  isGear,
   newPart,
   removeVertebra,
   skinPoint,
@@ -25,10 +27,11 @@ import { dutyFactor, legPhase, type CreaturePose } from '../gen/creatureMotion';
 import type { Vec3 } from '../gen/animalForm';
 import { buildAnimalMesh } from '../surface/animalMesh';
 import { createCreatureLook, type CreatureLook } from './creatureLook';
+import { createOutfitLook, type OutfitLook } from './outfitLook';
 
 /*
  * The creature editor (creature.html): Spore's creature creator on the
- * game's animal body. Three modes:
+ * game's animal body. Four modes:
  *  - Build: drag the spine's vertebrae (in the body's middle plane) to
  *    shape it, the wheel over one to fatten it (Shift: widen it); dragging
  *    an end vertebra away grows the spine. Parts come from the palette and
@@ -36,6 +39,11 @@ import { createCreatureLook, type CreatureLook } from './creatureLook';
  *    over the body, the wheel over it to resize it.
  *  - Paint: the coat (colours, pattern) and a brush that paints soft dabs on
  *    the body, mirrored across it.
+ *  - Outfit: Spore's outfitter (gen/creatureOutfit.ts, drawn by
+ *    outfitLook.ts): accessories (helmet, goggles, hat, jetpack...) dragged
+ *    from their palette onto the skin, grabbed by themselves to move them,
+ *    the wheel over one to resize it, dragged off the body to take it off;
+ *    and a suit, boots and gloves worn over the whole body.
  *  - Play: the creature walks or trots over the floor, its legs stepping
  *    in the gait worked out for its body (gen/creatureMotion.ts), with a
  *    footfall diagram. WASD (or the arrows) steer it, relative to the
@@ -45,7 +53,7 @@ import { createCreatureLook, type CreatureLook } from './creatureLook';
  * `window.creatureLab` is this object (automation: npm run shot -- --creatures).
  */
 
-export type EditorMode = 'build' | 'paint' | 'play';
+export type EditorMode = 'build' | 'paint' | 'outfit' | 'play';
 export type Selection = { kind: 'vertebra'; index: number } | { kind: 'part'; index: number } | null;
 
 export interface Brush {
@@ -76,6 +84,7 @@ const HANDLE_COLOR = new THREE.Color('#66ffcc');
 const PART_HANDLE_COLOR = new THREE.Color('#ffcc66');
 const LIMB_HANDLE_COLOR = new THREE.Color('#ff7ad9');
 const SELECTED_COLOR = new THREE.Color('#ffffff');
+const BONE_COLOR = new THREE.Color('#efe4c8');
 /** Floor tile (units): the floor slides back by whole tiles as the creature walks. */
 const TILE = 2;
 const UP = new THREE.Vector3(0, 1, 0);
@@ -104,6 +113,7 @@ export class CreatureLab {
   readonly camera = new THREE.PerspectiveCamera(38, 1, 0.05, 500);
   readonly controls: OrbitControls;
   private readonly view: CreatureLook;
+  private readonly outfit: OutfitLook;
   grown: GrownCreature;
   private restDirty = true;
   private paintDirty = true;
@@ -123,7 +133,15 @@ export class CreatureLab {
   private readonly redoStack: string[] = [];
   private readonly handles = new THREE.Group();
   private handleMeshes: THREE.Mesh[] = [];
-  private readonly spineLine: THREE.Line;
+  /** A row of little vertebrae all along the spine (drawn only: the round nodes over them are the handles), and the bones joining the nodes and down each limb. */
+  private vertebraMeshes: THREE.Mesh[] = [];
+  private boneMeshes: THREE.Mesh[] = [];
+  private readonly vertebraMaterial = new THREE.MeshLambertMaterial({ color: BONE_COLOR, emissive: '#3a3428', depthTest: false, transparent: true });
+  private readonly boneMaterial = new THREE.MeshLambertMaterial({ color: BONE_COLOR, emissive: '#3a3428', depthTest: false, transparent: true, opacity: 0.85 });
+  /** The skeleton shows while the pointer is over the creature (always once a finger has touched the screen: it can't hover), fading in and out. */
+  private overCreature = false;
+  private hoverless = false;
+  private skeletonFade = 0;
   private readonly skinPicker: THREE.Mesh;
   private readonly ground: THREE.Mesh;
   private readonly sun: THREE.DirectionalLight;
@@ -132,11 +150,10 @@ export class CreatureLab {
   private hovered: HandleInfo | null = null;
   private drag:
     | { kind: 'vertebra'; index: number }
-    | { kind: 'part'; index: number; mirrored: boolean }
+    | { kind: 'part'; index: number; mirrored: boolean; off?: boolean }
     | { kind: 'node'; node: 'joint' | 'end'; index: number; limb: number; plane: THREE.Plane }
     | { kind: 'paint'; last: THREE.Vector3 | null }
     | null = null;
-  private readonly limbLines: THREE.LineSegments;
   private ghost: number | null = null;
   private placingByDrag = false;
   private wheelTimer: ReturnType<typeof setTimeout> | null = null;
@@ -201,15 +218,11 @@ export class CreatureLab {
     this.view = createCreatureLook(design, this.grown.length);
     this.scene.add(this.body);
     this.body.add(this.view.mesh, this.view.picker, this.view.wire);
+    this.outfit = createOutfitLook();
+    this.body.add(this.outfit.group);
     this.skinPicker = new THREE.Mesh(new THREE.BufferGeometry());
     this.skinPicker.layers.set(1);
     this.body.add(this.skinPicker);
-    this.spineLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: HANDLE_COLOR, depthTest: false, transparent: true, opacity: 0.6 }));
-    this.spineLine.renderOrder = 10;
-    this.handles.add(this.spineLine);
-    this.limbLines = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: LIMB_HANDLE_COLOR, depthTest: false, transparent: true, opacity: 0.7 }));
-    this.limbLines.renderOrder = 10;
-    this.handles.add(this.limbLines);
     this.body.add(this.handles);
     this.raycaster.layers.set(1);
 
@@ -295,15 +308,15 @@ export class CreatureLab {
     this.changed();
   }
 
-  /** A whole new creature (undoable), the camera framing it. */
-  setDesign(d: CreatureDesign): void {
+  /** A whole new creature (undoable), the camera framing it (unless `frame` is false: the same creature, dressed or undressed). */
+  setDesign(d: CreatureDesign, frame = true): void {
     this.cancelPlacing();
     this.design = cloneDesign(d);
     this.selection = null;
     this.changed();
     this.commit();
     this.grown = growCreature(this.design);
-    this.frameCreature();
+    if (frame) this.frameCreature();
   }
 
   /** The design from the page's #hash, if it holds one. */
@@ -320,15 +333,21 @@ export class CreatureLab {
   setMode(mode: EditorMode): void {
     this.cancelPlacing();
     if (mode !== 'play') this.comeHome();
+    if (mode !== this.mode) this.selection = null;
     this.mode = mode;
-    if (mode !== 'build') this.selection = null;
     this.onChange?.();
+  }
+
+  /** Build and Outfit: parts (or gear) are placed, picked and dragged over the body. */
+  get editing(): boolean {
+    return this.mode === 'build' || this.mode === 'outfit';
   }
 
   /** Picks a part from the palette: it follows the pointer over the body until a click places it. */
   startPlacing(kind: PartKind, byDrag = false): void {
     this.cancelPlacing();
-    if (this.mode !== 'build') this.setMode('build');
+    const mode = isGear(kind) ? 'outfit' : 'build';
+    if (this.mode !== mode) this.setMode(mode);
     this.placing = kind;
     this.placingByDrag = byDrag;
     this.updateSkinPicker();
@@ -473,11 +492,12 @@ export class CreatureLab {
     const rest = this.restDirty ? buildAnimalMesh(growCreature(this.design).skeleton, form, this.grown.length, 0) : null;
     this.view.update(posed, rest);
     if (this.paintDirty || this.restDirty) this.view.repaint(this.design, this.grown.rest, this.grown.length);
+    this.outfit.update(this.design, this.grown, this.time, play ? this.moving : 0);
     this.restDirty = false;
     this.paintDirty = false;
     // Parts are placed and dragged over the skin alone: only needed while that happens.
-    if (this.mode === 'build' && (this.placing !== null || this.drag?.kind === 'part')) this.updateSkinPicker();
-    this.updateHandles();
+    if (this.editing && (this.placing !== null || this.drag?.kind === 'part')) this.updateSkinPicker();
+    this.updateHandles(dt);
 
     this.controls.update();
     this.renderer.render(this.scene, this.camera);
@@ -504,59 +524,128 @@ export class CreatureLab {
     g.computeBoundingSphere();
   }
 
-  /** The vertebrae's and parts' dots, where they are this frame (shown in Build mode). */
-  private updateHandles(): void {
-    const show = this.mode === 'build' && this.placing === null;
-    this.handles.visible = show;
-    if (!show) return;
+  /**
+   * The skeleton, where it is this frame: in Build the spine as a row of
+   * vertebrae with round nodes at its control points (drag one to reshape
+   * it, the wheel to fatten it), the limbs' bones with their knee and foot (or elbow and hand)
+   * nodes, and the parts' dots; in Outfit the selected accessory's dot.
+   * It shows while the pointer is over the creature, and fades away when
+   * it leaves.
+   */
+  private updateHandles(dt: number): void {
+    const editing = this.editing && this.placing === null;
+    const want = editing && (this.overCreature || this.drag !== null || this.hoverless) ? 1 : 0;
+    this.skeletonFade = want ? Math.min(1, this.skeletonFade + dt * 8) : Math.max(0, this.skeletonFade - dt * 4);
+    this.handles.visible = editing && this.skeletonFade > 0.01;
+    if (!editing) return;
+    const fade = this.skeletonFade;
+    const build = this.mode === 'build';
     const infos: HandleInfo[] = [];
     const points: Vec3[] = [];
     const frames = this.grown.frames;
-    this.design.spine.forEach((_, i) => {
-      infos.push({ kind: 'vertebra', index: i, mirrored: false });
-      points.push(frames[Math.min(frames.length - 1, i * SPINE_SUBDIVISIONS)]!.p);
+    const r = Math.max(0.05, this.grown.length * 0.013);
+    const sel = this.selection;
+    const h = this.hovered;
+    const isHovered = (info: HandleInfo) => h !== null && h.kind === info.kind && h.index === info.index && h.mirrored === info.mirrored;
+
+    // The vertebrae, a row of little bones all along the spine, each turned along it (its spinous process up, its
+    // transverse processes out to the sides); the spine's control points are the round nodes drawn over them.
+    const spine = build ? this.design.spine.map((_, i) => frames[Math.min(frames.length - 1, i * SPINE_SUBDIVISIONS)]!) : [];
+    const rows: { p: THREE.Vector3; side: Vec3; up: Vec3; t: Vec3 }[] = [];
+    if (build)
+      for (let i = 0; i < frames.length; i++) {
+        const f = frames[i]!;
+        rows.push({ p: new THREE.Vector3(...f.p), side: f.side, up: f.up, t: f.t });
+        const g = frames[i + 1];
+        if (g) rows.push({ p: new THREE.Vector3(...f.p).lerp(new THREE.Vector3(...g.p), 0.5), side: f.side, up: f.up, t: f.t });
+      }
+    // Spaced so neighbours just touch.
+    const step = rows.length > 1 ? rows[0]!.p.distanceTo(rows[1]!.p) : r * 2;
+    const vr = Math.min(r * 1.6, Math.max(r * 0.6, step * 1.2));
+    while (this.vertebraMeshes.length < rows.length) {
+      const m = new THREE.Mesh(vertebraGeometry, this.vertebraMaterial);
+      m.renderOrder = 11;
+      this.handles.add(m);
+      this.vertebraMeshes.push(m);
+    }
+    this.vertebraMaterial.opacity = 0.9 * fade;
+    const basis = new THREE.Matrix4();
+    this.vertebraMeshes.forEach((m, i) => {
+      const f = rows[i];
+      m.visible = !!f;
+      if (!f) return;
+      m.position.copy(f.p);
+      basis.makeBasis(new THREE.Vector3(...f.side), new THREE.Vector3(...f.up), new THREE.Vector3(...f.t));
+      m.quaternion.setFromRotationMatrix(basis);
+      m.scale.setScalar(vr);
     });
+    spine.forEach((f, i) => {
+      infos.push({ kind: 'vertebra', index: i, mirrored: false });
+      points.push(f.p);
+    });
+
     this.design.parts.forEach((p, i) => {
+      if (isGear(p.kind) === build) return;
+      // Accessories are grabbed by themselves: only the selected one shows its dot (where it's stuck on).
+      if (!build && !(sel?.kind === 'part' && sel.index === i)) return;
       for (const mirrored of p.mirror && Math.abs(Math.sin(p.theta)) > 0.06 ? [false, true] : [false]) {
         infos.push({ kind: 'part', index: i, mirrored });
         const k = skinPoint(frames, p.s, mirrored ? -p.theta : p.theta);
         points.push([k.p[0] + k.n[0] * 0.04, k.p[1] + k.n[1] * 0.04, k.p[2] + k.n[2] * 0.04]);
       }
     });
-    // Each limb's knee or elbow and its foot or hand, where the posed limb has them, joined to its root by lines.
-    const limbLine: number[] = [];
-    this.grown.limbs.forEach((l, li) => {
-      const pts = this.grown.skeleton.legs[li]!.points;
-      infos.push({ kind: 'joint', index: l.part, mirrored: l.mirrored, limb: li }, { kind: 'end', index: l.part, mirrored: l.mirrored, limb: li });
-      points.push(pts[1]!, pts[2]!);
-      limbLine.push(...pts[0]!, ...pts[1]!, ...pts[1]!, ...pts[2]!);
+    // Bones: from vertebra to vertebra, and down each limb from its root to its knee or elbow and its foot or hand (their nodes).
+    const bones: [Vec3, Vec3, number][] = [];
+    for (let i = 1; i < spine.length; i++) bones.push([spine[i - 1]!.p, spine[i]!.p, r * 0.3]);
+    if (build)
+      this.grown.limbs.forEach((l, li) => {
+        const pts = this.grown.skeleton.legs[li]!.points;
+        infos.push({ kind: 'joint', index: l.part, mirrored: l.mirrored, limb: li }, { kind: 'end', index: l.part, mirrored: l.mirrored, limb: li });
+        points.push(pts[1]!, pts[2]!);
+        bones.push([pts[0]!, pts[1]!, r * 0.26], [pts[1]!, pts[2]!, r * 0.22]);
+      });
+    while (this.boneMeshes.length < bones.length) {
+      const m = new THREE.Mesh(boneGeometry, this.boneMaterial);
+      m.renderOrder = 10;
+      this.handles.add(m);
+      this.boneMeshes.push(m);
+    }
+    this.boneMaterial.opacity = 0.85 * fade;
+    const a = new THREE.Vector3();
+    const b = new THREE.Vector3();
+    this.boneMeshes.forEach((m, i) => {
+      const bone = bones[i];
+      m.visible = !!bone;
+      if (!bone) return;
+      a.set(...bone[0]);
+      b.set(...bone[1]);
+      const len = a.distanceTo(b);
+      m.position.copy(a).add(b).multiplyScalar(0.5);
+      m.quaternion.setFromUnitVectors(UP, b.sub(a).normalize());
+      m.scale.set(bone[2], Math.max(1e-3, len), bone[2]);
     });
-    this.limbLines.geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(limbLine), 3));
+
     while (this.handleMeshes.length < infos.length) {
       const m = new THREE.Mesh(handleGeometry, new THREE.MeshBasicMaterial({ depthTest: false, transparent: true, opacity: 0.9 }));
-      m.renderOrder = 11;
+      m.renderOrder = 12;
       this.handles.add(m);
       this.handleMeshes.push(m);
     }
-    const r = Math.max(0.05, this.grown.length * 0.013);
     this.handleMeshes.forEach((m, i) => {
       const info = infos[i];
       m.visible = !!info;
       if (!info) return;
       m.userData = info;
       m.position.set(...points[i]!);
-      const sel = this.selection;
       const node = info.kind === 'joint' || info.kind === 'end';
-      const selected = sel !== null && sel.kind === (node ? 'part' : info.kind) && sel.index === info.index && !node;
-      const h = this.hovered;
-      const hover = h !== null && h.kind === info.kind && h.index === info.index && h.mirrored === info.mirrored;
+      const vertebra = info.kind === 'vertebra';
+      const selected = sel !== null && sel.kind === (vertebra ? 'vertebra' : 'part') && sel.index === info.index && !node;
+      const hover = isHovered(info);
       const mat = m.material as THREE.MeshBasicMaterial;
-      mat.color.copy(selected ? SELECTED_COLOR : info.kind === 'vertebra' ? HANDLE_COLOR : node ? LIMB_HANDLE_COLOR : PART_HANDLE_COLOR);
-      m.scale.setScalar(r * (info.kind === 'vertebra' ? 1 : node ? 0.75 : 0.8) * (hover || selected ? 1.4 : 1));
+      mat.color.copy(selected ? SELECTED_COLOR : vertebra ? HANDLE_COLOR : node ? LIMB_HANDLE_COLOR : PART_HANDLE_COLOR);
+      mat.opacity = 0.9 * fade;
+      m.scale.setScalar(r * (vertebra ? 1 : node ? 0.75 : 0.8) * (hover || selected ? 1.4 : 1));
     });
-    const line = new Float32Array(this.design.spine.length * 3);
-    points.slice(0, this.design.spine.length).forEach((p, i) => line.set(p, i * 3));
-    this.spineLine.geometry.setAttribute('position', new THREE.BufferAttribute(line, 3));
   }
 
   // --- Pointer ---
@@ -571,8 +660,18 @@ export class CreatureLab {
     return e.target === this.renderer.domElement;
   }
 
+  /** A handle under the pointer, or in Outfit mode an accessory itself (grabbed as in Spore). */
   private pickHandle(): HandleInfo | null {
-    if (!this.handles.visible) return null;
+    const h = this.pickDot();
+    if (h || this.mode !== 'outfit' || this.placing !== null) return h;
+    this.raycaster.layers.set(0);
+    const hit = this.outfit.pick(this.raycaster);
+    this.raycaster.layers.set(1);
+    return hit ? { kind: 'part', index: hit.index, mirrored: hit.mirrored } : null;
+  }
+
+  private pickDot(): HandleInfo | null {
+    if (!this.editing || this.placing !== null) return null;
     // Handles draw over everything, so pick them by screen distance to the ray, nearest first.
     let best: HandleInfo | null = null;
     let bestD = Infinity;
@@ -602,9 +701,10 @@ export class CreatureLab {
   }
 
   private pointerDown(e: PointerEvent): void {
+    if (e.pointerType === 'touch') this.hoverless = true;
     if (e.button !== 0) return;
     this.setRay(e);
-    if (this.mode === 'build') {
+    if (this.editing) {
       if (this.placing) {
         if (this.ghost !== null) this.place(e.shiftKey);
         else this.cancelPlacing();
@@ -686,8 +786,10 @@ export class CreatureLab {
       return;
     }
     if (!drag) {
-      const h = this.mode === 'build' && this.overCanvas(e) ? this.pickHandle() : null;
+      const over = this.editing && this.overCanvas(e);
+      const h = over ? this.pickHandle() : null;
       this.hovered = h;
+      this.overCreature = over && (h !== null || this.hitBody() !== null);
       this.renderer.domElement.style.cursor = h ? 'grab' : this.mode === 'paint' ? 'crosshair' : '';
       return;
     }
@@ -701,6 +803,11 @@ export class CreatureLab {
         p.s = a.s;
         p.theta = drag.mirrored ? -a.theta : a.theta;
         this.restDirty = true;
+      }
+      // An accessory dragged off the body comes off when let go (as in Spore); it shows faded meanwhile.
+      if (this.mode === 'outfit') {
+        drag.off = !hit;
+        this.outfit.fade(drag.off ? drag.index : null);
       }
     } else {
       const p = this.hitBody();
@@ -771,14 +878,21 @@ export class CreatureLab {
       return;
     }
     if (this.drag) {
+      const drag = this.drag;
       this.drag = null;
+      if (drag.kind === 'part' && drag.off) {
+        this.outfit.fade(null);
+        this.design.parts.splice(drag.index, 1);
+        this.selection = null;
+        this.changed();
+      }
       this.commit();
       this.onChange?.();
     }
   }
 
   private wheel(e: WheelEvent): void {
-    if (this.mode !== 'build') return;
+    if (!this.editing) return;
     this.setRay(e);
     const h = this.pickHandle();
     if (!h) return;
@@ -835,11 +949,24 @@ export class CreatureLab {
       this.onChange?.();
     } else if (e.code === 'Digit1') this.setMode('build');
     else if (e.code === 'Digit2') this.setMode('paint');
-    else if (e.code === 'Digit3') this.setMode('play');
+    else if (e.code === 'Digit3') this.setMode('outfit');
+    else if (e.code === 'Digit4') this.setMode('play');
   }
 }
 
 const handleGeometry = new THREE.SphereGeometry(1, 16, 12);
+/** A bone: a unit cylinder along y, centred. */
+const boneGeometry = new THREE.CylinderGeometry(1, 1, 1, 10);
+/** A vertebra, about a unit across: its body (the centrum) along the spine (z), a spinous process up (y) and transverse processes out to the sides (x). */
+const vertebraGeometry = (() => {
+  const centrum = new THREE.CylinderGeometry(0.5, 0.5, 0.75, 16).rotateX(Math.PI / 2);
+  const spinous = new THREE.ConeGeometry(0.2, 0.95, 10).translate(0, 0.85, -0.12);
+  const left = new THREE.ConeGeometry(0.16, 0.75, 8).rotateZ(-Math.PI / 2).translate(0.78, 0.2, 0);
+  const right = new THREE.ConeGeometry(0.16, 0.75, 8).rotateZ(Math.PI / 2).translate(-0.78, 0.2, 0);
+  const g = mergeGeometries([centrum, spinous, left, right])!;
+  g.computeVertexNormals();
+  return g;
+})();
 
 /** A soft meadow floor: grass tiles with a faint grid, so the walk reads against it. */
 function floorTexture(): THREE.CanvasTexture {

@@ -1,5 +1,6 @@
 import { generateAnimalForm } from '../gen/animalForm';
 import { defaultCreature, designFromAnimal, randomCreature } from '../gen/creature';
+import { suitUp, undress } from '../gen/creatureOutfit';
 import { Rng } from '../gen/rng';
 import { CreatureLab } from './CreatureLab';
 import { CreaturePanel } from './CreaturePanel';
@@ -14,10 +15,12 @@ function main(): void {
   const lab = new CreatureLab(document.getElementById('app')!, CreatureLab.designFromHash() ?? defaultCreature());
   new CreaturePanel(document.getElementById('ui')!, lab);
   document.getElementById('loading')?.remove();
-  // `creatureKit` makes creatures for automation: creatureLab.setDesign(creatureKit.random(7)).
+  // `creatureKit` makes creatures for automation: creatureLab.setDesign(creatureKit.random(7)), creatureKit.suitUp(creatureLab.design).
   const kit = {
     blob: defaultCreature,
     random: randomCreature,
+    suitUp,
+    undress,
     animal: (seed: number, plan: 'quadruped' | 'hexapod' | 'biped' = 'quadruped') => designFromAnimal(generateAnimalForm(new Rng(seed), plan, 'herbivore', (seed * 47) % 360), 4, `Species ${seed}`),
   };
   Object.assign(window, { creatureLab: lab, creatureKit: kit });
