@@ -722,7 +722,9 @@ export class CargoBeam implements Entity {
         load.source.restore();
       } else if (cargo.kind === 'animal') {
         load.source?.destroy();
-        this.animals?.settle({ speciesKey: load.key, species: cargo.species, origin: load.origin, x: dir.x, y: dir.y, z: dir.z, scale: load.full });
+        // It roams from where it landed, the way it faces (an animal faces +Z).
+        this.w.set(0, 0, 1).applyQuaternion(load.object.quaternion);
+        this.animals?.settle({ speciesKey: load.key, species: cargo.species, origin: load.origin, x: dir.x, y: dir.y, z: dir.z, scale: load.full }, this.w);
         if (!quiet) this.say(describe('root', cargo.species.name));
       } else {
         load.source?.destroy();
