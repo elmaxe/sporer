@@ -350,9 +350,13 @@ export class LodSurface {
     return n;
   }
 
+  /** Behind the horizon from the camera: not drawn. */
+  private beyondHorizon(node: LodNode): boolean {
+    return beyondHorizon(this.camera.angleTo(node.centre), node.angle, this.cameraDistance, this.floor, this.top);
+  }
+
   private select(node: LodNode): void {
-    const angle = this.camera.angleTo(node.centre);
-    const hidden = beyondHorizon(angle, node.angle, this.cameraDistance, this.floor, this.top);
+    const hidden = this.beyondHorizon(node);
     // Selected nodes are built, so their bounds are known.
     const b = node.bounds;
     const distance = Math.hypot(this.camera.x - b.x, this.camera.y - b.y, this.camera.z - b.z);
@@ -408,7 +412,10 @@ export class LodSurface {
 
   /**
    * Blends the shown nodes under `nodes` back towards their parents' shape
-   * (merging split ones on the way). True once they're all flat.
+   * (merging split ones on the way). True once they're all flat. They aren't
+   * selected meanwhile, so this also shows or hides them by the horizon as the
+   * camera moves: zooming out, the ones that were behind it come into view
+   * well before they've merged.
    */
   private flatten(nodes: readonly LodNode[]): boolean {
     let flat = true;
@@ -418,11 +425,12 @@ export class LodSurface {
           for (const k of node.children!) this.disposeNode(k);
           node.children = null;
           node.split = false;
-          this.show(node, true, false);
+          this.show(node, true, this.beyondHorizon(node));
         }
         flat = false;
         continue;
       }
+      this.show(node, true, this.beyondHorizon(node));
       if (node.morph > 0) {
         node.morph = Math.max(0, node.morph - this.morphStep);
         this.busy = true;
