@@ -27,6 +27,15 @@ function firstHerd(p: AnimalPlan, min = 4): HerdData {
   throw new Error('no herd');
 }
 
+function firstHerdWithYoung(p: AnimalPlan): HerdData {
+  const n = herdGridSize(p.radius);
+  for (let f = 0; f < 6; f++) for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+    const h = generateHerd(p, ground, f, i, j);
+    if (h && h.young > 0) return h;
+  }
+  throw new Error('no herd with young');
+}
+
 const pose = (): AnimalPose => ({ x: 0, y: 0, z: 0, hx: 0, hy: 0, hz: 1, cycle: 0, stride: 0, trot: 0, graze: 0, idle: 0 });
 const state = (): PanicState => ({ ox: 0, oy: 0, vx: 0, vy: 0, cycles: 0, phase: 'none', since: 0 });
 
@@ -111,6 +120,28 @@ describe('panics (issue #156)', () => {
     path.pose(0, t + 1, b);
     expect(panic.apply(path, 0, t + 1, b)).toBe('none');
     expect(b).toEqual(a);
+  });
+
+  it('sends the young running with their mothers', () => {
+    const h = firstHerdWithYoung(p);
+    const herdPath = new HerdPath(p, ground, h, { hipHeight: 0.8 });
+    const panic = new HerdPanic(h.seed, h.count, herdPath.gait, herdPath.mothers);
+    panic.startle(20, 1, 0);
+    for (let t = 20; t < 41; t += 0.5) panic.hold(t);
+    const a = state();
+    const b = state();
+    for (let k = h.count - h.young; k < h.count; k++) {
+      const m = herdPath.mothers[k]!;
+      panic.state(k, 40, a);
+      panic.state(m, 40, b);
+      // The same way, as far (a moment after her): still beside her where they stop.
+      expect(a.phase).toBe('watching');
+      expect(a.ox).toBeCloseTo(b.ox, 6);
+      expect(a.oy).toBeCloseTo(b.oy, 6);
+      panic.state(k, 20.5, a);
+      panic.state(m, 20.5, b);
+      expect(Math.hypot(a.ox, a.oy)).toBeLessThanOrEqual(Math.hypot(b.ox, b.oy));
+    }
   });
 
   it('moves smoothly while it runs and walks back (no jumps frame to frame)', () => {

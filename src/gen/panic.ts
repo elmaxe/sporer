@@ -97,6 +97,12 @@ export function fleeSpeed(gait: AnimalGait, p = panicParams): number {
   return Math.sqrt(p.fleeFroude * gait.g * gait.hip);
 }
 
+/** Which way member `k` turns round: its mother's way, if it has one. */
+function side(mothers: ArrayLike<number> | null, k: number): number {
+  const m = mothers?.[k] ?? -1;
+  return m >= 0 ? m : k;
+}
+
 function smoothstep(a: number, b: number, v: number): number {
   const t = Math.min(1, Math.max(0, (v - a) / (b - a)));
   return t * t * (3 - 2 * t);
@@ -133,6 +139,8 @@ export class HerdPanic {
     readonly seed: number,
     readonly count: number,
     readonly gait: AnimalGait,
+    /** The adult each member keeps beside (-1: none; `HerdPath.mothers`): a young one runs where its mother runs. */
+    readonly mothers: ArrayLike<number> | null = null,
     readonly params = panicParams,
   ) {
     this.o0 = new Float64Array(count * 2);
@@ -177,11 +185,13 @@ export class HerdPanic {
     let longestReturn = 0;
     const range = p.fleeRadius * p.fleeFactor;
     for (let k = 0; k < this.count; k++) {
-      const h = hashSeed(this.seed, 'panic', this.startles, k);
+      // A young one runs with its mother: her way, as far, a moment after her.
+      const m = this.mothers?.[k] ?? -1;
+      const h = hashSeed(this.seed, 'panic', this.startles, m >= 0 ? m : k);
       const u1 = (h & 0x3ff) / 0x3ff;
       const u2 = ((h >>> 10) & 0x3ff) / 0x3ff;
       const u3 = ((h >>> 20) & 0x3ff) / 0x3ff;
-      const delay = (this.delay[k] = p.reactMin + u1 * (p.reactMax - p.reactMin));
+      const delay = (this.delay[k] = p.reactMin + u1 * (p.reactMax - p.reactMin) + (m >= 0 ? 0.15 : 0));
       const turn = (u2 - 0.5) * 2 * p.scatter;
       const c = Math.cos(turn);
       const sn = Math.sin(turn);
@@ -291,7 +301,10 @@ export class HerdPanic {
     vy -= up * y;
     vz -= up * z;
     const speed = Math.hypot(vx, vy, vz);
-    const walk = this.gait.walkSpeed;
+    // Its own size's gait, as `HerdPath.pose` has it.
+    const size = path.scales[k] ?? 1;
+    const root = Math.sqrt(size);
+    const walk = this.gait.walkSpeed * root;
     let hx = pose.hx;
     let hy = pose.hy;
     let hz = pose.hz;
@@ -304,7 +317,7 @@ export class HerdPanic {
       const ax = e1.x * this.away.x + e2.x * this.away.y;
       const ay = e1.y * this.away.x + e2.y * this.away.y;
       const az = e1.z * this.away.x + e2.z * this.away.y;
-      const a = Math.PI * smoothstep(0, 1.5, s.since) * (k % 2 === 0 ? 1 : -1);
+      const a = Math.PI * smoothstep(0, 1.5, s.since) * (side(this.mothers, k) % 2 === 0 ? 1 : -1);
       const c = Math.cos(a);
       const sn = Math.sin(a);
       hx = ax * c + (y * az - z * ay) * sn;
@@ -322,9 +335,9 @@ export class HerdPanic {
     pose.hx = hx / hl;
     pose.hy = hy / hl;
     pose.hz = hz / hl;
-    pose.trot = smoothstep(walk, this.gait.trotSpeed, speed);
+    pose.trot = smoothstep(walk, this.gait.trotSpeed * root, speed);
     pose.stride = Math.min(1, speed / (walk * 0.6));
-    pose.cycle += s.cycles;
+    pose.cycle += s.cycles / size;
     pose.graze = 0;
     return s.phase;
   }

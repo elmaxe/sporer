@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
 import { now, type Defer } from '../core/jobs';
-import { HERD_CELL_SIZE, HOME_RANGE, PACK_RANGE_FACTOR, HerdPath, generateHerd, herdGridSize, tangentBasis, type AnimalPlan, type AnimalPose, type AnimalSpecies, type HerdData } from '../gen/animals';
+import { ADULT_SCALE, HERD_CELL_SIZE, HOME_RANGE, PACK_RANGE_FACTOR, HerdPath, generateHerd, herdGridSize, tangentBasis, type AnimalPlan, type AnimalPose, type AnimalSpecies, type HerdData } from '../gen/animals';
 import type { GroundRadius } from '../gen/plants';
 import { HerdPanic, panicParams, type PanicPhase } from '../gen/panic';
 import { hashSeed } from '../gen/rng';
@@ -22,9 +22,8 @@ const SCAN_DISTANCE = 6;
 const KEEP_EXTRA = 1.15;
 /** Instances a batch starts with; it doubles when full. */
 const FIRST_CAPACITY = 32;
-/** An animal's own size: its species' length times this, from its id. */
-const MIN_SCALE = 0.85;
-const MAX_SCALE = 1.15;
+/** The biggest an animal is, times its species' length (gen/animals.ts `memberScale`). */
+const MAX_SCALE = ADULT_SCALE[1];
 /** An animal set down roams this far round where it landed (units). */
 const RELEASED_RANGE = 0.5 * HOME_RANGE;
 /** In a cell's `gone`: drawn, removed for good, or out of the batches as an object of its own (`promote`). */
@@ -44,6 +43,8 @@ export interface AnimalHit {
   species: AnimalSpecies;
   /** Its size (times the species' length) and along the ray. */
   scale: number;
+  /** One of its herd's young. */
+  young: boolean;
   distance: number;
   /** Walking, trotting, grazing or resting, for the tooltip. */
   doing: string;
@@ -79,6 +80,8 @@ export interface HerdView {
   readonly gone: Uint8Array;
   readonly centre: THREE.Vector3;
   readonly bound: number;
+  /** Each animal's size (times its species' length: the young are small, and call higher). */
+  readonly scales: Float32Array;
   /** Each animal's last drawn position (body frame) or NaN, and its pose then. */
   readonly drawn: Float32Array;
   readonly poses: readonly AnimalPose[];
@@ -258,7 +261,7 @@ export class SurfaceAnimals implements Entity {
         this.batches[s.index] = row;
       });
     }
-    this.hit = { id: '', species: plan.species[0]!, scale: 1, distance: 0, doing: '', origin: null, speciesKey: null, position: new THREE.Vector3() };
+    this.hit = { id: '', species: plan.species[0]!, scale: 1, young: false, distance: 0, doing: '', origin: null, speciesKey: null, position: new THREE.Vector3() };
     this.object.name = 'Animals';
     scene.add(this.object);
     addAnimalDebug(debug);
@@ -304,6 +307,7 @@ export class SurfaceAnimals implements Entity {
       id: record.id,
       species: 0,
       count: 1,
+      young: 0,
       home: { x: record.x, y: record.y, z: record.z },
       range: RELEASED_RANGE,
       slot: 30 + (record.seed % 40),
@@ -312,10 +316,11 @@ export class SurfaceAnimals implements Entity {
       landed: record.landed,
       facing: record.facing,
     };
+    const scales = new Float32Array([record.scale]);
     this.released.set(record.id, {
       key: record.id,
       herd,
-      path: new HerdPath(plan, this.ground, herd, animalSkeleton(species)),
+      path: new HerdPath(plan, this.ground, herd, animalSkeleton(species), scales),
       species,
       row: foreign.row,
       origin: record.origin,
@@ -324,7 +329,7 @@ export class SurfaceAnimals implements Entity {
       centre: new THREE.Vector3(record.x, record.y, record.z).multiplyScalar(this.plan.radius),
       bound: RELEASED_RANGE + species.length * 2,
       drawn: new Float32Array(3).fill(NaN),
-      scales: new Float32Array([record.scale]),
+      scales,
       poses: [{ x: 0, y: 0, z: 0, hx: 0, hy: 0, hz: 1, cycle: 0, stride: 0, trot: 0, graze: 0, idle: 0 }],
       panic: new Uint8Array(1),
       alert: 0,
@@ -525,7 +530,7 @@ export class SurfaceAnimals implements Entity {
         ax /= l;
         ay /= l;
       }
-      if (!panic) this.panics.set(cell.key, (panic = new HerdPanic(herd.seed, herd.count, path.gait)));
+      if (!panic) this.panics.set(cell.key, (panic = new HerdPanic(herd.seed, herd.count, path.gait, path.mothers)));
       if (panic.startle(t, ax, ay)) this.event('startle', cell, first, this.entry, panic.startles, t);
     } else if (was < 0.5 && cell.alert >= 0.5 && !panic?.fleeing(t)) this.event('alert', cell, first, this.entry, 0, t);
   }
@@ -581,9 +586,8 @@ export class SurfaceAnimals implements Entity {
     const herd = generateHerd(this.plan, this.ground, face, i, j);
     const R = this.plan.radius;
     const count = herd?.count ?? 0;
-    const scales = new Float32Array(count);
-    for (let k = 0; k < count; k++) scales[k] = MIN_SCALE + ((hashSeed(herd!.seed, 'size', k) & 0xffff) / 0x10000) * (MAX_SCALE - MIN_SCALE);
     const species = herd ? this.plan.species[herd.species]! : null;
+    const path = herd && species ? new HerdPath(this.plan, this.ground, herd, animalSkeleton(species)) : null;
     const gone = new Uint8Array(count);
     for (let k = 0; k < count; k++) {
       const id = `${herd!.id}:${k}`;
@@ -592,7 +596,7 @@ export class SurfaceAnimals implements Entity {
     return {
       key,
       herd,
-      path: herd && species ? new HerdPath(this.plan, this.ground, herd, animalSkeleton(species)) : null,
+      path,
       species,
       row: species ? this.batches[species.index]! : null,
       origin: null,
@@ -601,7 +605,7 @@ export class SurfaceAnimals implements Entity {
       centre: herd ? new THREE.Vector3(herd.home.x, herd.home.y, herd.home.z).multiplyScalar(R) : new THREE.Vector3(x, y, z).multiplyScalar(R),
       bound: herd ? herd.range + (species!.length * 1.7 * Math.sqrt(count + 1) + species!.length) : 0,
       drawn: new Float32Array(count * 3).fill(NaN),
-      scales,
+      scales: path?.scales ?? new Float32Array(0),
       poses: Array.from({ length: count }, () => ({ x: 0, y: 0, z: 0, hx: 0, hy: 0, hz: 1, cycle: 0, stride: 0, trot: 0, graze: 0, idle: 0 })),
       panic: new Uint8Array(count),
       alert: 0,
@@ -820,6 +824,8 @@ export class SurfaceAnimals implements Entity {
     hit.id = `${cell.herd!.id}:${k}`;
     hit.species = cell.species!;
     hit.scale = cell.scales[k]!;
+    // Scaled down: one of its herd's young (or one set down here when it was).
+    hit.young = hit.scale < ADULT_SCALE[0];
     hit.distance = distance;
     const panic = cell.panic[k];
     hit.doing =
@@ -973,7 +979,7 @@ export class SurfaceAnimals implements Entity {
     }
     const t = this.clock.renderTime;
     let panic = this.panics.get(cell.key);
-    if (!panic) this.panics.set(cell.key, (panic = new HerdPanic(herd.seed, herd.count, path.gait)));
+    if (!panic) this.panics.set(cell.key, (panic = new HerdPanic(herd.seed, herd.count, path.gait, path.mothers)));
     // The alarm from whichever of the others is nearest.
     if (panic.startle(t, ax, ay)) this.event('startle', cell, first, from, panic.startles, t);
   }

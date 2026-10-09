@@ -4,7 +4,7 @@ import type { Entity } from '../core/Entity';
 import { playCall } from '../audio/animalSynth';
 import type { SoundEffects } from '../audio/sfx';
 import { alarmCalls, gruntAt, herdConversation, talkParams, talkSlot, type PlannedCall } from '../gen/animalTalk';
-import { CALL_KINDS, animalVoice, callShape, type CallKind } from '../gen/animalVoice';
+import { CALL_KINDS, animalVoice, callShape, sizePitch, type CallKind } from '../gen/animalVoice';
 import type { AnimalSpecies } from '../gen/animals';
 import type { RenderClock } from '../planet/PlanetFrame';
 import { animalParams } from './animalParams';
@@ -114,7 +114,7 @@ export class AnimalSounds implements Entity {
     for (const e of this.animals.events) {
       const herd = e.cell.herd;
       if (!herd) continue;
-      if (e.kind === 'distress') this.play(e.cell.species, 'distress', herd.seed ^ Math.floor(e.time * 1000), e.x, e.y, e.z);
+      if (e.kind === 'distress') this.play(e.cell.species, 'distress', herd.seed ^ Math.floor(e.time * 1000), e.x, e.y, e.z, sizePitch(e.cell.scales[e.member] ?? 1));
       else if (e.kind === 'alert') this.pending.push({ at: t + 0.15, cell: e.cell, call: { at: t + 0.15, member: e.member, kind: 'alert', variant: herd.seed ^ Math.floor(t) } });
       else {
         // Bolting: the alarm, not the snort it was about to give.
@@ -183,7 +183,7 @@ export class AnimalSounds implements Entity {
   /** Plays a planned call by an animal of `cell` where it is (on screen or not), if it's still there. */
   private playMember(cell: HerdView, call: PlannedCall): void {
     const p = this.where;
-    if (this.animals.whereIs(cell, call.member, p)) this.play(cell.species, call.kind, call.variant, p.x, p.y, p.z);
+    if (this.animals.whereIs(cell, call.member, p)) this.play(cell.species, call.kind, call.variant, p.x, p.y, p.z, sizePitch(cell.scales[call.member] ?? 1));
   }
 
   /** Synthesises a call by animal `k` of `cell` at (x, y, z) (body frame), as loud as it is near the camera, panned to its side. */
@@ -193,9 +193,9 @@ export class AnimalSounds implements Entity {
    * frame). Returns how long the scream lasts, seconds (0 when nothing was
    * heard, as when audio is locked or the animals are off).
    */
-  scream(species: AnimalSpecies, at: THREE.Vector3, variant: number, frenzy: number): number {
+  scream(species: AnimalSpecies, at: THREE.Vector3, variant: number, frenzy: number, size = 1): number {
     if (this.muted || !animalParams.enabled) return 0;
-    return this.play(species, 'scream', variant, at.x, at.y, at.z, 1 + SCREAM_RISE * Math.min(1, Math.max(0, frenzy)));
+    return this.play(species, 'scream', variant, at.x, at.y, at.z, (1 + SCREAM_RISE * Math.min(1, Math.max(0, frenzy))) * sizePitch(size));
   }
 
   /** Synthesises a call by an animal of `species` at (x, y, z) (body frame), as loud as it is near the camera, panned to its side, its pitch × `pitch`; returns how long it lasts (0: not played). */

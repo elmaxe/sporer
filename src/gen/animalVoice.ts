@@ -34,6 +34,10 @@ export const TRACT_SOUND_SPEED = 350;
 /** Fundamental at 1 kg (Hz) and its exponent on mass (Fletcher; Moore & Mitchinson's F = M^−0.4 kHz). */
 export const PITCH_AT_1KG = 1000;
 export const PITCH_EXPONENT = -0.4;
+/** How much higher an animal `size` times its species' size calls (its mass goes as the cube): a young one half the size squeals 2.3× higher. */
+export function sizePitch(size: number): number {
+  return Math.max(0.1, size) ** (3 * PITCH_EXPONENT);
+}
 /** Vocal tract length, cm, at 1 kg and per decade of mass (Moore & Mitchinson's eq. 7). */
 export const TRACT_AT_1KG = 3.15;
 export const TRACT_PER_DECADE = 11.53;

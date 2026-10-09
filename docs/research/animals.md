@@ -184,6 +184,14 @@ Pinned in `tests/animals.test.ts`:
 - Real grazers' herds are tens to thousands, and predators' groups about 5–15 (wolves 5.5–8, lions ~15).
 - The game draws 3–16 grazers and 1–6 hunters per group. **Stylised** smaller, to keep the instanced draws and the per-animal ground samples cheap.
 
+**Young** (`generateHerd`, `HerdPath`):
+- Sources (searched 2026-10-08): a 1962 Alaska elk survey (ADF&G, https://www.adfg.alaska.gov/static/home/library/pdfs/wildlife/federal_aid/64_elk_bis_batchelor_burris.pdf) counted 98 calves among 452 elk (22%), the calf–cow ratio averaging 26 per cent (23–33). Oregon's ODFW (https://omls.oregon.gov/pipermail/odfw-news/2005-April/000448.html) calls herds with 32–45 calves per 100 cows stable or growing; the Jackson, Wyoming herd's 20-year average is 26 per 100 (https://pinedaleonline.com/news/2007/03/JacksonElkCounted.htm).
+- So each herd or pack has 0.2–0.45 young per adult (`YOUNG_PER_ADULT`, hashed per herd), rounded: a lone animal has none, a pair at most one. They come on top of the adults (`HerdData.young`, the last members), so the adults are as they were.
+- A young one is its species' own body (the creature editor's design, `speciesBody`) scaled down to 0.5–0.67 (`YOUNG_SCALE`; adults 0.85–1.15). **Stylised**, as Spore's babies: no change of proportions, small enough to read as young from the ship.
+- Each keeps beside an adult (its mother, hashed; twins share one), about 0.75 of its species' length from her, starting and stopping with her. In a panic it runs her way, as far, a moment after her.
+- It walks by its own size (dynamic similarity, as for species): strides × its size, speeds × √its size. Keeping up with the herd it takes more strides and trots sooner, and its feet stay planted. The adults' own size now sets their strides too.
+- It calls higher: pitch ∝ M^−0.4 and M ∝ size³, so × size^−1.2 (2.3× at half size; `sizePitch`).
+
 **Sizes:**
 - Head-and-body length 1.2–7 units in three size classes. Real animals from a fox to a bison are 0.6–3 m.
 - **Stylised up** (Spore-like) so animals read from the UFO's height next to its 4 units and the game's 6–11 unit trees. The gait still treats a unit as a metre.
