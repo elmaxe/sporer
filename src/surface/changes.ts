@@ -42,6 +42,9 @@ export interface ReleasedAnimal {
   readonly scale: number;
   /** Its own stream for its wanderings. */
   readonly seed: number;
+  /** The clock (system time, seconds) when it landed, and which way it faced (gen/animals.ts `HerdData`); absent in saves from before issue #166. */
+  readonly landed?: number;
+  readonly facing?: number;
 }
 
 /** A plant the player set down that took root: its species (from wherever it grew) and where it stands. */
