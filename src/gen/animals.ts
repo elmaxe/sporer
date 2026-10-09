@@ -236,6 +236,14 @@ export interface HerdData {
   readonly offset: number;
   /** Its own stream of waypoints and timings. */
   readonly seed: number;
+  /**
+   * A herd of one the player set down (issue #166): the clock (seconds) when
+   * it landed. Its walk starts then, from home, standing as it landed (facing
+   * `facing`), so it doesn't jump to wherever the clock would have it.
+   */
+  readonly landed?: number;
+  /** Which way it faced as it landed: radians from the home's first tangent towards its second (`tangentBasis`). */
+  readonly facing?: number;
 }
 
 /** Cells per cube face edge. */
@@ -393,6 +401,8 @@ const YOUNG_LAG = 0.6;
 const SLOT_CACHE = 6;
 /** Seconds a herd takes to turn towards its next waypoint before setting off. */
 const TURN_TIME = 3;
+/** Seconds an animal set down takes to start looking about and grazing. */
+const SETTLE_TIME = 2;
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 
 /**
@@ -417,6 +427,8 @@ export class HerdPath {
   readonly mothers: Int32Array;
   readonly gait: AnimalGait;
   readonly species: AnimalSpecies;
+  /** Added to the clock for its slots: the herd's offset, or for one set down, whatever starts its first slot (0) as it lands. */
+  private readonly shift: number;
 
   constructor(
     readonly plan: AnimalPlan,
@@ -456,13 +468,15 @@ export class HerdPath {
       this.lags[k] = this.lags[m]! + rng.range(-1, 1) * YOUNG_LAG;
       this.phases[k] = rng.range(0, 1000);
     }
+    this.shift = herd.landed === undefined ? herd.offset : -herd.landed - this.lags[0]!;
   }
 
-  /** The waypoint at the start of slot `k`: somewhere habitable in the home range, else home. */
+  /** The waypoint at the start of slot `k`: somewhere habitable in the home range, else home (always, up to the slot one set down lands in). */
   waypoint(k: number, out: Vec3Like): Vec3Like {
     const { herd, plan, ground } = this;
     const R = plan.radius;
-    for (let attempt = 0; attempt < 3; attempt++) {
+    const roams = herd.landed === undefined || k > 0;
+    for (let attempt = 0; roams && attempt < 3; attempt++) {
       const h = hashSeed(herd.seed, 'waypoint', k, attempt);
       const a = ((h & 0xffff) / 0x10000) * Math.PI * 2;
       const r = Math.sqrt((h >>> 16) / 0x10000) * herd.range;
@@ -523,7 +537,7 @@ export class HerdPath {
   private headingAt(path: SlotPath, s: number, out: Vec3Like): Vec3Like {
     const { from, to, angle } = path;
     if (angle < 1e-7) {
-      const a = (this.herd.seed % 628) / 100;
+      const a = this.herd.facing ?? (this.herd.seed % 628) / 100;
       out.x = this.e1.x * Math.cos(a) + this.e2.x * Math.sin(a);
       out.y = this.e1.y * Math.cos(a) + this.e2.y * Math.sin(a);
       out.z = this.e1.z * Math.cos(a) + this.e2.z * Math.sin(a);
@@ -551,7 +565,7 @@ export class HerdPath {
    */
   pose(k: number, t: number, out: AnimalPose): AnimalPose {
     const { herd, gait, species } = this;
-    const time = t + herd.offset + this.lags[k]!;
+    const time = t + this.shift + this.lags[k]!;
     const slotIndex = Math.floor(time / herd.slot);
     const within = time - slotIndex * herd.slot;
     const path = this.slotPath(slotIndex);
@@ -606,7 +620,9 @@ export class HerdPath {
     z /= l;
     // Seconds since the last walk ended or until the next starts: resting animals look about, more the longer they rest.
     const restFor = u >= 1 ? within - start - duration : u <= 0 ? start - within : 0;
-    const rest = Math.min(1, restFor / TURN_TIME);
+    // One set down stands as it landed, then eases into looking about.
+    const settling = herd.landed === undefined ? 1 : smoothstep(0, SETTLE_TIME, t - herd.landed);
+    const rest = Math.min(1, restFor / TURN_TIME) * settling;
     const idle = this.phases[k]! + t;
     if (rest > 0) {
       const turn = rest * (0.5 * Math.sin(idle * 0.07) + 0.3 * Math.sin(idle * 0.19 + k));

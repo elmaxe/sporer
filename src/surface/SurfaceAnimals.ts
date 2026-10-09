@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { Debug } from '../core/Debug';
 import type { Entity } from '../core/Entity';
 import { now, type Defer } from '../core/jobs';
-import { ADULT_SCALE, HERD_CELL_SIZE, HOME_RANGE, PACK_RANGE_FACTOR, HerdPath, generateHerd, herdGridSize, type AnimalPlan, type AnimalPose, type AnimalSpecies, type HerdData } from '../gen/animals';
+import { ADULT_SCALE, HERD_CELL_SIZE, HOME_RANGE, PACK_RANGE_FACTOR, HerdPath, generateHerd, herdGridSize, tangentBasis, type AnimalPlan, type AnimalPose, type AnimalSpecies, type HerdData } from '../gen/animals';
 import type { GroundRadius } from '../gen/plants';
 import { HerdPanic, panicParams, type PanicPhase } from '../gen/panic';
 import { hashSeed } from '../gen/rng';
@@ -268,11 +268,23 @@ export class SurfaceAnimals implements Entity {
     if (changes) for (const a of changes.releasedAnimals) defer(() => this.release(a));
   }
 
-  /** An animal set down here that lives here now: recorded in the planet's change list and drawn roaming round where it landed. */
-  settle(a: Omit<ReleasedAnimal, 'id' | 'seed'>): ReleasedAnimal | null {
+  /**
+   * An animal set down here that lives here now: recorded in the planet's
+   * change list and drawn roaming round where it landed, starting from there
+   * now, facing `heading` (body frame, along the ground), so it doesn't jump.
+   */
+  settle(a: Omit<ReleasedAnimal, 'id' | 'seed' | 'landed' | 'facing'>, heading: THREE.Vector3): ReleasedAnimal | null {
     if (!this.changes) return null;
-    const record = this.changes.release({ ...a, seed: hashSeed(this.plan.seed, 'released', this.changes.releasedCount, a.x, a.y) & 0x7fffffff });
+    tangentBasis(a, this.xAxis, this.yAxis);
+    const record = this.changes.release({
+      ...a,
+      seed: hashSeed(this.plan.seed, 'released', this.changes.releasedCount, a.x, a.y) & 0x7fffffff,
+      landed: this.clock.renderTime,
+      facing: Math.atan2(heading.dot(this.yAxis), heading.dot(this.xAxis)),
+    });
     this.release(record);
+    // Drawn this frame already, as the beam lets go of it: not a frame without it.
+    if (animalParams.enabled) this.draw();
     return record;
   }
 
@@ -301,6 +313,8 @@ export class SurfaceAnimals implements Entity {
       slot: 30 + (record.seed % 40),
       offset: record.seed % 1000,
       seed: record.seed,
+      landed: record.landed,
+      facing: record.facing,
     };
     const scales = new Float32Array([record.scale]);
     this.released.set(record.id, {

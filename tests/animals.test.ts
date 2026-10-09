@@ -22,6 +22,7 @@ import {
   isYoung,
   memberScale,
   planAnimals,
+  tangentBasis,
   type AnimalPlan,
   type AnimalPose,
   type HerdData,
@@ -252,6 +253,53 @@ describe('herds', () => {
       expect({ ...path.pose(0, 123.4, pose) }).toEqual(a);
       expect(h.range).toBeLessThanOrEqual(HOME_RANGE * 1.8);
     }
+  });
+
+  it('start from where one set down landed, facing as it landed, and walk on from there (issue #166)', () => {
+    const pose: AnimalPose = { x: 0, y: 0, z: 0, hx: 0, hy: 0, hz: 0, cycle: 0, stride: 0, trot: 0, graze: 0, idle: 0 };
+    const e1 = { x: 0, y: 0, z: 0 };
+    const e2 = { x: 0, y: 0, z: 0 };
+    let roamed = 0;
+    // Set down on the homes of wild herds and on steep ground beside them, at odd moments, as SurfaceAnimals.release makes them.
+    for (const [i, h] of herds.slice(0, 40).entries()) {
+      const species = p.species[h.species]!;
+      tangentBasis(h.home, e1, e2);
+      const off = i % 2 === 0 ? 0 : 6 / RADIUS;
+      const x = h.home.x + e1.x * off;
+      const y = h.home.y + e1.y * off;
+      const z = h.home.z + e1.z * off;
+      const l = Math.hypot(x, y, z);
+      const home = { x: x / l, y: y / l, z: z / l };
+      const seed = (h.seed * 31 + i) & 0x7fffffff;
+      const landed = 1000 + i * 37.3;
+      const facing = (i * 0.7) % (Math.PI * 2);
+      const released: HerdData = { id: `released:${i}`, species: h.species, count: 1, young: 0, home, range: 0.5 * HOME_RANGE, slot: 30 + (seed % 40), offset: seed % 1000, seed, landed, facing };
+      const path = new HerdPath({ ...p, species: [species] }, ground, { ...released, species: 0 }, speciesBody(species).grown.skeleton);
+      path.pose(0, landed, pose);
+      // Right where it landed, facing the way it did, standing still.
+      expect(Math.hypot(pose.x - home.x, pose.y - home.y, pose.z - home.z) * RADIUS).toBeLessThan(1e-6);
+      tangentBasis(home, e1, e2);
+      expect(pose.hx).toBeCloseTo(e1.x * Math.cos(facing) + e2.x * Math.sin(facing), 6);
+      expect(pose.hy).toBeCloseTo(e1.y * Math.cos(facing) + e2.y * Math.sin(facing), 6);
+      expect(pose.hz).toBeCloseTo(e1.z * Math.cos(facing) + e2.z * Math.sin(facing), 6);
+      expect(pose.stride).toBe(0);
+      expect(pose.graze).toBe(0);
+      // Then on without a jump, roaming its range.
+      const dt = 0.25;
+      const fast = Math.max(path.gait.trotSpeed, path.gait.walkSpeed) * 1.6;
+      let prev = [pose.x * RADIUS, pose.y * RADIUS, pose.z * RADIUS];
+      let far = 0;
+      for (let t = landed + dt; t < landed + 200; t += dt) {
+        path.pose(0, t, pose);
+        const at = [pose.x * RADIUS, pose.y * RADIUS, pose.z * RADIUS];
+        expect(Math.hypot(at[0]! - prev[0]!, at[1]! - prev[1]!, at[2]! - prev[2]!)).toBeLessThan(fast * dt + 1e-6);
+        far = Math.max(far, Math.hypot(pose.x - home.x, pose.y - home.y, pose.z - home.z) * RADIUS);
+        prev = at;
+      }
+      expect(far).toBeLessThan(0.5 * HOME_RANGE + 1e-6);
+      if (far > 1) roamed++;
+    }
+    expect(roamed).toBeGreaterThan(30);
   });
 });
 

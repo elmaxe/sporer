@@ -3125,13 +3125,19 @@ await section('cargo', async () => {
     const spot = up && (await evaluate(`__ground('land', 8, 35)`));
     if (spot) {
       const before = await evaluate(`${animalChanges}.releasedCount`);
+      // Where it's drawn the first frame after it lands: where it landed, not wherever its walk would have it (issue #166).
+      await evaluate(`(() => { const A = planet.animals; const settle = A.settle; window.__landed = null;
+        A.settle = function (a, heading) { const r = settle.call(this, a, heading); const V = A.object.position.constructor; const v = new V(); const dir = new V(a.x, a.y, a.z);
+          requestAnimationFrame(() => A.forEachHerd((cell) => { if (r && cell.key === r.id && A.whereIs(cell, 0, v)) window.__landed = v.normalize().angleTo(dir) * A.plan.radius; }));
+          A.settle = settle; return r; }; })()`);
       await evaluate(`planet.select('cargo:' + ${JSON.stringify(up.key)})`);
       await mouse('mouseMoved', spot);
       await mouse('mousePressed', spot);
       await until(`!planet.cargo.beaming`, 60000);
       await mouse('mouseReleased', spot);
       await until(`planet.cargo.inFlight.length === 0`, 20000);
-      release = { released: (await evaluate(`${animalChanges}.releasedCount`)) - before, hint: await evaluate(`document.getElementById('item-hint').textContent`) };
+      release = { released: (await evaluate(`${animalChanges}.releasedCount`)) - before, hint: await evaluate(`document.getElementById('item-hint').textContent`),
+        jump: await until(`window.__landed !== null`, 5000).then(() => evaluate(`__landed`), () => null) };
     }
     // The laser: Tab to the Weapons, a real 1 arms it; held on an animal, then on a tree, it kills them.
     if (await evaluate(`document.getElementById('item-bar').dataset.tab !== 'weapons'`)) await key('Tab', 'Tab');
@@ -3228,6 +3234,8 @@ await section('cargo', async () => {
     animals.up.img === 'data:image/png;base64,' &&
     animals.release?.released === 1 &&
     /roam/.test(animals.release.hint) &&
+    animals.release.jump !== null &&
+    animals.release.jump < 0.5 &&
     animals.laserArmed.selected === 'laser' &&
     animals.laserArmed.cursor &&
     /hold to fire the laser/.test(animals.laserArmed.hint) &&
