@@ -14,7 +14,8 @@ import { VersionPicker } from './VersionPicker';
  * only way in on touch) opens it and pauses the game (time stands still, the
  * view stays drawn). It holds the sound settings (VolumeControl), the Show
  * FPS switch (FpsCounter), the Weather, Plants and Wireframe switches (GraphicsSettings) and the
- * Freeze view and Third-person view switches (ViewFreezeControl, ThirdPersonControl), a link
+ * Freeze view and Third-person view switches (ViewFreezeControl, ThirdPersonControl), the
+ * Species repository button (RepositoryDialog.ts opens it over the menu), a link
  * to the planet lab, for the planet you're at: in low orbit the one below,
  * in a system the one the autopilot is headed for (else the first planet),
  * from the galaxy an empty lab, a link to the star lab at the system

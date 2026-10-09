@@ -6,7 +6,7 @@
 //                      hole on the map, fly into its system: its shadow, bent sky and disc, and down to a planet there), dust (a young star's disc,
 //                      a debris disc, comet dust trails, meteor showers and impact flashes in low orbit), audio, planet (the home planet
 //                      loop, held zoom, seamless zooms), types (every planet type and geyser kind), lab, plants
-//                      (the plant lab), animals (the animal lab), stars (the star lab, a black hole too), touch, cargo (the abduction beam and the hold), volcano (the volcano bomb), buster
+//                      (the plant lab), animals (the animal lab), stars (the star lab, a black hole too), touch, cargo (the abduction beam and the hold), scan (the scanner and the species repository), volcano (the volcano bomb), buster
 //                      (the planet buster, last: it blows up a moon of the home system)
 //   --quick            everything but types
 //   --timeout <s>      give up after this long (default 900), reporting the section it was in
@@ -68,7 +68,7 @@
 // Cargo beam: the item bar's Inventory tab (grey; the bar and its tooltips take the tab's colour) holds the beam;
 // over a forest on the home planet a real 1 arms it, holding the mouse on a tree beams it up (the ship stays) into the
 // hold (a stack with the plant's picture and count), letting go halfway drops it again, holding on bare ground fires
-// the beam there too (and the ship stays), sweeping it over the forest catches several plants, a real 3 selects the stack and
+// the beam there too (and the ship stays), sweeping it over the forest catches several plants, a real 4 selects the stack and
 // holding on the ground sets it down to take root; one dropped with a click falls from the ship (which stays), one set
 // down in the sea drowns; what was taken
 // and planted is still so after leaving and coming back; the cues abductStart, abductBeam, abductSuccess, exportBeam
@@ -78,6 +78,13 @@
 // on the ground it roams there; Tab and a real 3 arm the laser (Weapons' third slot), and holding it on an animal and on
 // a tree kills them (recorded as removed, burning away), with the laserBeam and laserHit cues; the animals taken or
 // killed and the one set down are still so after leaving and coming back.
+// Scanner: over a herd on the home planet, a real 3 in the Inventory selects it (a crosshair, a hint), hovering an
+// animal says it isn't in the repository yet; held on the animal (following it as it walks) it reads its species: into
+// the repository as No. 1, with the scanBeam and scanSuccess cues, a notice at the top with its picture and the count on
+// the book button; held on it again it says it's already in (no second success); the planet map's Species tab marks the
+// species scanned; held on a tree, the plant goes in too; a real R opens the repository (the game paused) with both
+// species as cards with their pictures and the newest one's details, its Plants filter shows just the tree, Esc
+// closes it; reloaded, the repository is still there (saved on the device for the galaxy).
 // Volcano bomb: pressing 2 in the system says where to use it; in low orbit over a solid planet a real 2 arms it and a
 // real click on the ground fires it: a volcano rises there (the ground under it is higher, the ship flies over it; its
 // cone is one chunk seen from afar and splits into finer ones next to it, like the terrain), the cues go fire → rise, the bomb stays armed for another; over a gas giant it can't be used; the system view's globe
@@ -111,7 +118,7 @@ import { launch, sleep, StallError } from './lib/browser.mjs';
 
 const args = process.argv.slice(2);
 const option = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
-const SECTIONS = ['core', 'galaxy', 'nebulas', 'rogues', 'blackholes', 'dust', 'audio', 'planet', 'types', 'lab', 'plants', 'animals', 'stars', 'touch', 'cargo', 'volcano', 'buster'];
+const SECTIONS = ['core', 'galaxy', 'nebulas', 'rogues', 'blackholes', 'dust', 'audio', 'planet', 'types', 'lab', 'plants', 'animals', 'stars', 'touch', 'cargo', 'scan', 'volcano', 'buster'];
 const only = option('--only')?.split(',');
 if (only?.some((name) => !SECTIONS.includes(name))) {
   console.error(`--only takes some of: ${SECTIONS.join(', ')}`);
@@ -169,6 +176,7 @@ const planetTypes = [];
 let lab = null;
 let buster = null;
 let cargo = null;
+let scan = null;
 let volcano = null;
 let plantLab = null;
 let touch = null;
@@ -3012,13 +3020,18 @@ await section('cargo', async () => {
     await until(`planet.cargo.inFlight.length === 0`, 20000);
     sweep = { most, removed: (await removedCount()) - removed };
   }
-  // Select the stack (3, after the beam and the radar) and hold on the ground: it's set down and takes root.
-  await key('Digit3', '3');
+  // Every line the hint shows from here (a note lasts a few seconds, which a slow run can miss between reads).
+  const watchHints = () => evaluate(`(() => { const el = document.getElementById('item-hint'); window.__hintsSeen = [el.textContent]; window.__hintWatch?.disconnect();
+    window.__hintWatch = new MutationObserver(() => window.__hintsSeen.push(el.textContent)); window.__hintWatch.observe(el, { childList: true, characterData: true, subtree: true }); })()`);
+  const hintsSeen = () => evaluate(`window.__hintsSeen.join(' | ')`);
+  // Select the stack (4, after the beam, the radar and the scanner) and hold on the ground: it's set down and takes root.
+  await key('Digit4', '4');
   const exportArmed = await evaluate(`planet.selected`);
   const stackBefore = await evaluate(`levels.inventory.stacks[0].count`);
   const totalBefore = await evaluate(`levels.inventory.total`);
   const plantedBefore = await evaluate(`planet.plantings.count`);
   const land = await evaluate(`__ground('land', 8, 35)`);
+  await watchHints();
   await mouse('mouseMoved', land);
   await mouse('mousePressed', land);
   const lowering = await evaluate(`planet.cargo.beaming`);
@@ -3026,12 +3039,12 @@ await section('cargo', async () => {
   await mouse('mouseReleased', land);
   await until(`planet.cargo.inFlight.length === 0`, 20000);
   const setDown = { exportArmed, stackBefore, lowering, planted: (await evaluate(`planet.plantings.count`)) - plantedBefore, taken: totalBefore - (await evaluate(`levels.inventory.total`)),
-    selected: await evaluate(`planet.selected`), hint: await evaluate(`document.getElementById('item-hint').textContent`) };
+    selected: await evaluate(`planet.selected`), hint: await hintsSeen() };
   // Two more up. One dropped with a click (no hold): it falls from the ship and the ship stays put.
   await key('Digit1', '1');
   await beamUp();
   await beamUp();
-  await key('Digit3', '3');
+  await key('Digit4', '4');
   const spot = await evaluate(`__ground('land', 8, 35)`);
   await mouse('mouseMoved', spot);
   await mouse('mousePressed', spot);
@@ -3040,7 +3053,7 @@ await section('cargo', async () => {
   await until(`planet.cargo.inFlight.length === 0`, 20000);
   dropped.shipStayed = !(await evaluate(`planet.ship.enRoute`));
   // The other set down in the sea: it drowns.
-  if (!(await evaluate(`planet.selected`))) await key('Digit3', '3');
+  if (!(await evaluate(`planet.selected`))) await key('Digit4', '4');
   const sea = await evaluate(`__ground('sea', 8, 68)`);
   let drown = null;
   if (sea) {
@@ -3131,12 +3144,13 @@ await section('cargo', async () => {
           requestAnimationFrame(() => A.forEachHerd((cell) => { if (r && cell.key === r.id && A.whereIs(cell, 0, v)) window.__landed = v.normalize().angleTo(dir) * A.plan.radius; }));
           A.settle = settle; return r; }; })()`);
       await evaluate(`planet.select('cargo:' + ${JSON.stringify(up.key)})`);
+      await watchHints();
       await mouse('mouseMoved', spot);
       await mouse('mousePressed', spot);
       await until(`!planet.cargo.beaming`, 60000);
       await mouse('mouseReleased', spot);
       await until(`planet.cargo.inFlight.length === 0`, 20000);
-      release = { released: (await evaluate(`${animalChanges}.releasedCount`)) - before, hint: await evaluate(`document.getElementById('item-hint').textContent`),
+      release = { released: (await evaluate(`${animalChanges}.releasedCount`)) - before, hint: await hintsSeen(),
         jump: await until(`window.__landed !== null`, 5000).then(() => evaluate(`__landed`), () => null) };
     }
     // The laser: Tab to the Weapons, a real 1 arms it; held on an animal, then on a tree, it kills them.
@@ -3252,6 +3266,169 @@ await section('cargo', async () => {
     laserCues.includes('laserBeam') &&
     laserCues.includes('laserHit');
   return cargo.ok;
+});
+
+await section('scan', async () => {
+  // A fresh game with an empty repository (one from an earlier run would be loaded from the device).
+  if (!(await page.goto(url, READY, 60000))) return false;
+  await evaluate(`(() => { localStorage.removeItem('spore2.repository.' + galaxy.seed); levels.repository.load({ entries: [] }); })()`);
+  await drawFrames(20);
+  const key = async (code, k) => {
+    for (const type of ['keyDown', 'keyUp']) {
+      await send('Input.dispatchKeyEvent', { type, code, key: k });
+      await drawFrames(2);
+    }
+  };
+  const mouse = async (type, at, held = false) => {
+    await send('Input.dispatchMouseEvent', { type, ...at, button: 'left', buttons: type === 'mousePressed' || held ? 1 : 0, clickCount: 1 });
+    await drawFrames(2);
+  };
+  const centreOf = (selector) =>
+    evaluate(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  await evaluate(`(() => {
+    window.__cues = [];
+    const play = audio.play.bind(audio), start = audio.start.bind(audio);
+    audio.play = (c, o) => (__cues.push(c), play(c, o));
+    audio.start = (c) => (__cues.push(c), start(c));
+  })()`);
+  // Down to the home system's habitable planet, over a herd, close in.
+  await evaluate(`(() => { const p = world.planets.find((b) => b.config.climate && b.config.climate.habitability >= 2 && b.config.climate.insolation > 0); ship.parkAt(p); levels.toPlanet(p); })()`);
+  await until(`levels.mode === 'planet' && !levels.transitioning`, 60000);
+  const herd = await evaluate(`(async () => { const g = await import('/src/gen/animals.ts'); const A = planet.animals; if (!A) return null; const n = g.herdGridSize(A.plan.radius);
+    for (let f = 0; f < 6; f++) for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) { const h = g.generateHerd(A.plan, A.ground, f, i, j);
+      if (h && h.count >= 4) { const pose = {}; new g.HerdPath(A.plan, A.ground, h, { hipHeight: 1 }).pose(0, planet.frame.renderTime, pose); const e1 = {}, e2 = {}; g.tangentBasis(pose, e1, e2);
+        planet.ship.placeAt(new (planet.ship.up.constructor)(pose.x + e1.x * 0.02, pose.y + e1.y * 0.02, pose.z + e1.z * 0.02).normalize()); return { species: A.plan.species[h.species].name, count: h.count }; } }
+    return null; })()`);
+  if (!herd) return false;
+  await evaluate(`planet.orbit.zoomTo(22)`);
+  await sleep(1500);
+  await until(`planet.animals.settled && planet.plants.settled`, 30000);
+  await until(`Math.abs(planet.ship.radius - planet.ship.goalRadius) < 0.2`, 120000);
+  await drawFrames(10);
+  // The screen point of the nearest animal still there (its body, a little above its feet), and of a plant the scanner sees.
+  await evaluate(`(() => { const rect = game.renderer.domElement.getBoundingClientRect(); const px = (x, y) => ({ x: rect.left + ((x + 1) / 2) * rect.width, y: rect.top + ((1 - y) / 2) * rect.height });
+    window.__animal = () => { const A = planet.animals; const v = new (planet.ship.up.constructor)();
+      for (const p of A.herdPositions()) { v.copy(p).addScaledVector(p.clone().normalize(), 0.6); A.object.localToWorld(v); const s = v.clone().project(game.camera);
+        if (Math.abs(s.x) < 0.8 && Math.abs(s.y) < 0.8 && s.z < 1) return px(s.x, s.y); }
+      return null; };
+    window.__plant = () => { for (let y = 0.6; y > -0.7; y -= 0.04) for (let x = -0.8; x < 0.8; x += 0.04) { const t = planet.scanner.pick(x, y); if (t && t.found.kind === 'plant') return px(x, y); } return null; };
+  })()`);
+  // The Inventory tab, then a real 3 (its third slot) selects the scanner.
+  if (await evaluate(`document.getElementById('item-bar').dataset.tab !== 'inventory'`)) {
+    const tab = await centreOf('.item-tab[data-tab=inventory]');
+    await mouse('mouseMoved', tab);
+    await mouse('mousePressed', tab);
+    await mouse('mouseReleased', tab);
+  }
+  const slots = await evaluate(`[...document.querySelectorAll('.item-slot[data-item]')].map((s) => s.dataset.item)`);
+  await key('Digit3', '3');
+  const armed = await evaluate(`({ selected: planet.selected, cursor: document.body.classList.contains('scanning'), hint: document.getElementById('item-hint').textContent })`);
+  // Hovering an animal: not in the repository yet (kept on it: the herd may bolt from the ship).
+  if (!(await evaluate(`__animal()`))) return false;
+  let hover = '';
+  for (let i = 0; i < 20 && !/not in your repository/.test(hover); i++) {
+    const at = await evaluate(`__animal()`);
+    if (at) await mouse('mouseMoved', at);
+    await drawFrames(2);
+    hover = await evaluate(`document.getElementById('item-hint').textContent`);
+  }
+  // Held on it, following it as it walks, until its species is read.
+  const follow = async (where, done, tries = 120) => {
+    let at = await evaluate(where);
+    if (!at) return null;
+    await mouse('mouseMoved', at);
+    await mouse('mousePressed', at);
+    const on = await evaluate(`({ on: planet.scanner.on, cone: planet.scanner.look.cone.visible, ship: planet.ship.enRoute })`);
+    let progress = 0;
+    for (let i = 0; i < tries && !(await evaluate(done)); i++) {
+      progress = Math.max(progress, await evaluate(`planet.scanner.progress`));
+      at = (await evaluate(where)) ?? at;
+      await mouse('mouseMoved', at, true);
+    }
+    const result = { ...on, progress, done: await evaluate(done), hint: await evaluate(`document.getElementById('item-hint').textContent`) };
+    await mouse('mouseReleased', at);
+    result.off = !(await evaluate(`planet.scanner.on`));
+    return result;
+  };
+  const animal = await follow(`__animal()`, `levels.repository.size > 0`);
+  const after = await evaluate(`(() => { const e = levels.repository.entries[0]; const n = document.getElementById('scan-notice');
+    return e && { kind: e.kind, name: e.species.name, number: e.number, home: e.home, notice: !n.hidden, noticeName: document.getElementById('scan-notice-name').textContent,
+      noticeNew: n.classList.contains('new'), noticePicture: document.getElementById('scan-notice-picture').src.slice(0, 22), badge: document.getElementById('repository-count').textContent }; })()`);
+  // Again: already in, no second success.
+  const successes = () => evaluate(`__cues.filter((c) => c === 'scanSuccess').length`);
+  const successBefore = await successes();
+  const completed = await evaluate(`planet.scanner.completed`);
+  const again = await follow(`__animal()`, `planet.scanner.completed > ${completed}`);
+  const twice = { ...again, size: await evaluate(`levels.repository.size`), successes: (await successes()) - successBefore, notice: await evaluate(`document.getElementById('scan-notice-title').textContent`) };
+  // The planet map's Species tab marks it.
+  await evaluate(`document.querySelector('#planet-map-tabs [data-tab=species]').click()`);
+  await drawFrames(10);
+  const marked = await evaluate(`({ scanned: document.querySelectorAll('#planet-species .species-row.scanned').length, rows: document.querySelectorAll('#planet-species .species-row').length })`);
+  await evaluate(`document.querySelector('#planet-map-tabs [data-tab=map]').click()`);
+  // A plant.
+  const plant = await follow(`__plant()`, `levels.repository.count('plant') > 0`);
+  // A real R opens the repository: the game paused, a card for each with its picture, the newest one's details; Plants shows the tree; Esc closes.
+  await mouse('mouseMoved', { x: 640, y: 120 });
+  await key('KeyR', 'r');
+  await until(`[...document.querySelectorAll('.repository-card img')].every((i) => i.src.startsWith('data:image/png'))`, 20000);
+  const menu = await evaluate(`({ open: repository.isOpen, paused: game.paused, cards: [...document.querySelectorAll('.repository-card')].map((c) => c.querySelector('.repository-name').textContent),
+    pictures: [...document.querySelectorAll('.repository-card img')].map((i) => i.src.slice(0, 22)), detail: document.querySelector('#repository-detail .repository-name')?.textContent,
+    facts: document.querySelectorAll('#repository-detail .repository-facts dt').length, lab: document.querySelector('#repository-detail .repository-lab')?.href ?? null })`);
+  scan = { herd, slots, armed, hover, animal, after, twice, marked, plant, menu };
+  writeFileSync((scan.screenshot = join(outDir, 'repository.png')), await page.screenshot());
+  await evaluate(`document.querySelector('.repository-tab[data-filter=plant]').click()`);
+  await drawFrames(4);
+  menu.plants = await evaluate(`[...document.querySelectorAll('.repository-card')].map((c) => c.dataset.key)`);
+  await key('Escape', 'Escape');
+  menu.closed = { open: await evaluate(`repository.isOpen`), paused: await evaluate(`game.paused`), menu: await evaluate(`menu.isOpen`) };
+  const cues = (await evaluate(`__cues`)).filter((c) => /^scan/.test(c));
+  // Kept on the device: there after a reload.
+  const names = await evaluate(`levels.repository.entries.map((e) => e.species.name)`);
+  await page.goto(url, READY, 60000);
+  const reloaded = { names: await evaluate(`levels.repository.entries.map((e) => e.species.name)`), badge: await evaluate(`document.getElementById('repository-count').textContent`) };
+  await evaluate(`(() => { localStorage.removeItem('spore2.repository.' + galaxy.seed); levels.repository.load({ entries: [] }); })()`);
+  Object.assign(scan, { cues, names, reloaded });
+  scan.ok =
+    slots.join() === 'abduct,radar,scan' &&
+    armed.selected === 'scan' &&
+    armed.cursor &&
+    /hold on an animal or a plant to scan it/.test(armed.hint) &&
+    /not in your repository yet/.test(hover) &&
+    animal?.on === true &&
+    animal.cone &&
+    !animal.ship &&
+    animal.done &&
+    animal.off &&
+    after?.kind === 'animal' &&
+    after.number === 1 &&
+    after.notice &&
+    after.noticeNew &&
+    after.noticeName === after.name &&
+    after.noticePicture === 'data:image/png;base64,' &&
+    after.badge === '1' &&
+    twice.done &&
+    twice.size === 1 &&
+    twice.successes === 0 &&
+    /Already in your repository/.test(twice.notice) &&
+    marked.scanned === 1 &&
+    marked.rows > 1 &&
+    plant?.done === true &&
+    menu.open &&
+    menu.paused &&
+    menu.cards.length === 2 &&
+    menu.pictures.every((p) => p === 'data:image/png;base64,') &&
+    menu.detail === menu.cards[0] &&
+    menu.facts >= 6 &&
+    /plants\.html#/.test(menu.lab ?? '') &&
+    menu.plants.length === 1 &&
+    !menu.closed.open &&
+    !menu.closed.paused &&
+    !menu.closed.menu &&
+    cues.includes('scanBeam') &&
+    cues.filter((c) => c === 'scanSuccess').length === 2 &&
+    reloaded.names.join() === names.join() &&
+    reloaded.badge === '2';
+  return scan.ok;
 });
 
 await section('volcano', async () => {
@@ -3515,7 +3692,7 @@ const ok = started && !stalled && Object.keys(sections).length > 0 && Object.val
 console.error(`[smoke] ${ok ? 'ok' : 'FAILED'} in ${Math.round((Date.now() - T0) / 1000)} s${errors.length ? `, ${errors.length} console errors` : ''}`);
 console.log(
   JSON.stringify(
-    { ok, started, stalled, sections, before, after, autopilot, pick, systemMap, sky, living, comet, belt, galaxyLoop, nebulas, rogues, blackHoles, dust, seamless, audio, planetLoop, heldZoom, cometLoop, asteroidLoops, planetTypes, touch, touchLab, cargo, volcano, buster, lab, plantLab, animalLab, gameAnimals, starLab, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
+    { ok, started, stalled, sections, before, after, autopilot, pick, systemMap, sky, living, comet, belt, galaxyLoop, nebulas, rogues, blackHoles, dust, seamless, audio, planetLoop, heldZoom, cometLoop, asteroidLoops, planetTypes, touch, touchLab, cargo, scan, volcano, buster, lab, plantLab, animalLab, gameAnimals, starLab, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
     null,
     2,
   ),

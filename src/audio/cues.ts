@@ -27,6 +27,8 @@ export type SoundCue =
   | 'radarPing'
   | 'laserBeam'
   | 'laserHit'
+  | 'scanBeam'
+  | 'scanSuccess'
   | 'ventBurst'
   | 'starNear'
   | 'starFar'
@@ -56,6 +58,8 @@ export const SOUND_CUES: readonly SoundCue[] = [
   'radarPing',
   'laserBeam',
   'laserHit',
+  'scanBeam',
+  'scanSuccess',
   'ventBurst',
   'starNear',
   'starFar',
@@ -67,7 +71,7 @@ export const SOUND_CUES: readonly SoundCue[] = [
 ];
 
 /** Cues that loop until stopped (`SoundEffects.start`); the rest play once (`SoundEffects.play`). */
-export type LoopCue = 'systemTravel' | 'interstellarTravel' | 'busterFlight' | 'abductBeam' | 'exportBeam' | 'laserBeam';
+export type LoopCue = 'systemTravel' | 'interstellarTravel' | 'busterFlight' | 'abductBeam' | 'exportBeam' | 'laserBeam' | 'scanBeam';
 
 /**
  * Background loops on the Ambience channel whose loudness the game sets as
@@ -172,6 +176,10 @@ export const cueParams: Record<SoundCue, CueSpec> = {
   laserBeam: { ...travel(), volume: 0.6, fadeIn: 0.05, fadeOut: 0.15, loopCrossfade: 0.3 },
   // The laser killing an animal or a plant.
   laserHit: oneShot(),
+  // The scanner on, from the press until it's let go.
+  scanBeam: { ...travel(), volume: 0.55, fadeIn: 0.08, fadeOut: 0.2, loopCrossfade: 0.3 },
+  // A scan completing on a species new to the repository.
+  scanSuccess: { ...oneShot(), volume: 0.8 },
   // A vent near the camera bursting into eruption (geysers, plumes, fumaroles; see VentSounds).
   ventBurst: { ...oneShot(), volume: 0.7 },
   // A star close up, as the camera nears its surface (see StarSounds).

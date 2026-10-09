@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { AnimalSpecies } from '../gen/animals';
 import { addAnimationAttributes, animalMotion, createAnimalGeometry, createAnimalMaterial } from '../surface/animalLook';
-import { snapshotIcon } from './plantIcons';
+import { ICON_SIZE, snapshotIcon } from './plantIcons';
 
 /**
  * Pictures of animal species for the planet map's Species tab: the species'
@@ -15,16 +15,17 @@ export class AnimalIcons {
 
   constructor(private readonly renderer: THREE.WebGLRenderer) {}
 
-  /** The icon of species `species` (cached by `key`), as an image URL. */
-  url(key: string, species: AnimalSpecies): string {
-    const cached = this.cache.get(key);
+  /** The icon of species `species` (cached by `key`), `size` pixels square, as an image URL. */
+  url(key: string, species: AnimalSpecies, size = ICON_SIZE): string {
+    const id = size === ICON_SIZE ? key : `${key}@${size}`;
+    const cached = this.cache.get(id);
     if (cached) return cached;
-    const url = this.draw(species);
-    this.cache.set(key, url);
+    const url = this.draw(species, size);
+    this.cache.set(id, url);
     return url;
   }
 
-  private draw(species: AnimalSpecies): string {
+  private draw(species: AnimalSpecies, pixels: number): string {
     const geometry = createAnimalGeometry(species, 0);
     const { material } = createAnimalMaterial(0, species, animalMotion(species), false);
     // One instance, standing still where it was built (its rest pose).
@@ -50,7 +51,7 @@ export class AnimalIcons {
     camera.position.set(-distance * 0.85, distance * 0.25, distance * 0.45).add(centre);
     camera.lookAt(centre);
 
-    const url = snapshotIcon(this.renderer, scene, camera);
+    const url = snapshotIcon(this.renderer, scene, camera, pixels);
     mesh.dispose();
     geometry.dispose();
     material.dispose();

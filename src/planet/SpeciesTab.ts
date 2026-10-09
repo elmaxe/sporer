@@ -1,6 +1,6 @@
 import type { AnimalSpecies } from '../gen/animals';
 import type { PlantKind, PlantSpecies } from '../gen/plants';
-import { speciesKey } from '../cargo/inventory';
+import { animalKey, speciesKey } from '../cargo/inventory';
 import type { Radar } from '../radar/Radar';
 import { animalParams } from '../surface/animalParams';
 import type { AnimalIcons } from '../ui/animalIcons';
@@ -52,13 +52,16 @@ interface AnimalRow {
  * census found, then its plants. Clicking an animal picks it for the radar
  * (`Radar`), clicking it again stops; while the radar is switched on (the
  * item bar's Radar) it tracks the one picked, and the row says how near the
- * nearest is.
+ * nearest is. Species already in the species repository (read by the
+ * scanner, scan/repository.ts) carry a mark.
  * The DOM is shared by every planet level: `attach` fills it, `detach`
  * empties it. Pictures are drawn one a frame, so opening it never stalls.
  */
 export class SpeciesTab {
   private readonly root = document.getElementById('planet-species');
   private readonly rows: AnimalRow[] = [];
+  /** Every row, animals then plants, with its species' key in the repository. */
+  private readonly keyed: { row: HTMLElement; key: string }[] = [];
   private note: HTMLElement | null = null;
   /** Pictures still to draw: an image and how to draw it. */
   private readonly pending: { img: HTMLImageElement; draw: () => string }[] = [];
@@ -75,6 +78,8 @@ export class SpeciesTab {
     private readonly icons: SpeciesIcons | null,
     /** Whether the radar is switched on (the item bar's Radar). */
     private readonly powered: () => boolean = () => true,
+    /** Whether a species (by its key, cargo/inventory.ts) is in the species repository. */
+    private readonly scanned: (key: string) => boolean = () => false,
   ) {}
 
   /** The species tracked by the radar, or null. */
@@ -94,6 +99,7 @@ export class SpeciesTab {
     this.attached = true;
     root.replaceChildren();
     this.rows.length = 0;
+    this.keyed.length = 0;
     this.pending.length = 0;
 
     root.append(this.heading('Animals'));
@@ -114,6 +120,7 @@ export class SpeciesTab {
         button.addEventListener('click', () => this.toggle(index));
         root.append(button);
         this.rows.push({ button, status, text: '' });
+        this.keyed.push({ row: button, key: animalKey(this.body, index) });
       });
     }
     if (this.plants.length > 0) {
@@ -123,6 +130,7 @@ export class SpeciesTab {
         row.className = 'species-row plant';
         row.append(this.picture(() => this.icons!.plants.url(speciesKey(this.body, s.index), s)), this.label(s.name, describePlant(s)));
         root.append(row);
+        this.keyed.push({ row, key: speciesKey(this.body, s.index) });
       });
     }
     this.sinceRefresh = Infinity;
@@ -136,6 +144,7 @@ export class SpeciesTab {
     this.show(false);
     this.root?.replaceChildren();
     this.rows.length = 0;
+    this.keyed.length = 0;
     this.pending.length = 0;
     this.note = null;
   }
@@ -194,6 +203,13 @@ export class SpeciesTab {
         row.button.setAttribute('aria-pressed', String(on));
       }
     }
+    for (const { row, key } of this.keyed) {
+      const scanned = this.scanned(key);
+      if (row.classList.contains('scanned') !== scanned) {
+        row.classList.toggle('scanned', scanned);
+        row.title = scanned ? 'In your species repository' : '';
+      }
+    }
     if (this.note) {
       const hidden = !animalParams.enabled ? ' Animals are switched off in the menu, so you won’t see them.' : '';
       const name = tracking === null ? '' : this.animals[tracking]!.name;
@@ -235,6 +251,11 @@ export class SpeciesTab {
     const n = document.createElement('span');
     n.className = 'species-name';
     n.textContent = name;
+    // Shown once it's in the species repository.
+    const mark = document.createElement('span');
+    mark.className = 'species-scanned';
+    mark.textContent = '✓ Scanned';
+    n.append(mark);
     const l = document.createElement('span');
     l.className = 'species-line';
     l.textContent = line;

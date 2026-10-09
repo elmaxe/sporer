@@ -53,6 +53,11 @@ const ICONS: Record<ToolId, string> = {
     '<path d="M9 15l4-4" /><circle cx="13.6" cy="10.4" r="1" />' +
     '<path d="M15.5 6a4 4 0 0 1 2.5 2.5M16.5 2.5a8 8 0 0 1 5 5" />' +
     '<path d="M7 18.5 5 22h7" /></svg>',
+  scan:
+    '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M3 8V4.5A1.5 1.5 0 0 1 4.5 3H8M16 3h3.5A1.5 1.5 0 0 1 21 4.5V8M21 16v3.5a1.5 1.5 0 0 1-1.5 1.5H16M8 21H4.5A1.5 1.5 0 0 1 3 19.5V16" />' +
+    '<path d="M7 12h10" stroke-width="2" />' +
+    '<path d="M9.5 8.5c.8-1 1.6-1.5 2.5-1.5s1.7.5 2.5 1.5M9.5 15.5c.8 1 1.6 1.5 2.5 1.5s1.7-.5 2.5-1.5" /></svg>',
 };
 
 /** What the bar needs to know about the game: where the player is, what can use items there, and what's in the hold. */
@@ -82,15 +87,15 @@ interface SlotItem {
 /**
  * The item bar (#item-bar in index.html): tabs of item slots at the bottom
  * of the screen. Weapons (red) holds the laser, the volcano bomb and the
- * planet buster; Inventory (grey) the abduction beam, the radar and, after them, the
+ * planet buster; Inventory (grey) the abduction beam, the radar, the scanner and, after them, the
  * cargo hold's stacks, an animal's or a plant's picture and count each (cargo/inventory.ts). The bar
  * takes the colour of the tab on show, its tooltips too. Click a slot or
  * press its number (the tab on show's slots are 1, 2, …) to select the item
  * and again to put it away; a switch (the radar) is turned on or off
  * instead, anywhere, and keeps its light on while it's on; Tab switches tabs. What a selected item does is
  * up to the level (`ItemUser`): in low orbit the planet buster and the
- * volcano bomb fire at the next click on the planet, the laser fires while
- * the pointer is held, the beam lifts the animals and plants held under the
+ * volcano bomb fire at the next click on the planet, the laser and the
+ * scanner fire while the pointer is held, the beam lifts the animals and plants held under the
  * pointer, and a stack sets one of them down
  * where the pointer is held. Elsewhere the slots show but can't be used, and
  * say where they can. A global entity; hidden on the galaxy map.

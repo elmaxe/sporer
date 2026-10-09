@@ -1,6 +1,7 @@
 import type { VolcanoSite } from '../combat/volcano';
 import type { InventoryData } from '../cargo/inventory';
 import type { SurfaceChangesData } from '../surface/changes';
+import type { RepositoryData } from '../scan/repository';
 import type { LogEntry } from './consoleLog';
 import type { FrameStats } from './frameTimes';
 
@@ -95,6 +96,11 @@ export interface GameState {
    * from before it).
    */
   radar?: { on?: boolean; tracking: number | null; species: string | null; state: string; distance: number | null };
+  /**
+   * The species repository (missing in dumps from before the scanner) and, in low orbit, the scanner: whether it's on,
+   * the species it reads and how far along, and the scans it completed on this visit.
+   */
+  scan?: { repository: RepositoryData; scanner: { on: boolean; reading: string | null; progress: number; completed: number } | null };
   /** What the DOM overlays showed (text the screenshot's game picture leaves out). */
   ui: {
     touchMode: boolean;
@@ -284,6 +290,15 @@ export function summaryLines(dump: Omit<DebugDump, 'images'>): string[] {
       const picked = radar.tracking === null ? '' : `tracking ${radar.species ?? `species ${radar.tracking}`}`;
       const how = radar.distance !== null ? ` · nearest ${radar.distance.toFixed(0)} units away` : radar.tracking !== null && radar.state !== 'standby' ? ` · ${radar.state}` : '';
       lines.push(`Radar: ${[power, picked].filter(Boolean).join(' · ')}${how}`);
+    }
+    const scan = s.scan;
+    if (scan && (scan.repository.entries.length > 0 || scan.scanner?.on || scan.scanner?.completed)) {
+      const r = scan.repository.entries;
+      const animals = r.filter((e) => e.kind === 'animal').length;
+      const sc = scan.scanner;
+      const reading = sc?.on ? ` · scanning${sc.reading ? ` ${sc.reading} ${Math.round(sc.progress * 100)}%` : ''}` : '';
+      const done = sc?.completed ? ` · ${sc.completed} scanned here` : '';
+      lines.push(`Repository: ${r.length} species (${animals} animals, ${r.length - animals} plants)${reading}${done}`);
     }
   } else if (dump.stateError) {
     lines.push(`State unavailable: ${dump.stateError}`);

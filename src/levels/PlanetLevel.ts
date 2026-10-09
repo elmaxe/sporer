@@ -74,6 +74,8 @@ import { grassSetup } from '../surface/grassSetup';
 import { rockSetup } from '../surface/rockSetup';
 import { DEBRIS_REACH, debrisLookFor } from '../gen/debris';
 import { DEBRIS_NEAR, DebrisField } from '../world/DebrisField';
+import { Scanner } from '../scan/Scanner';
+import { SpeciesRepository, type RepositoryEntry } from '../scan/repository';
 
 /**
  * Low-orbit camera, in planet-level units (an Earth-sized globe's radius is
@@ -173,6 +175,8 @@ export class PlanetLevel extends Level implements ItemUser {
   readonly volcanoBomb: VolcanoBomb;
   /** The laser, killing the animals and plants it touches. */
   readonly laser: Laser;
+  /** The scanner, reading the species of animals and plants into the species repository. */
+  readonly scanner: Scanner;
   /** Solid bodies only (and not once busted): the volcanoes raised on it, kept in its change list. */
   volcanoes: Volcanoes | null = null;
   /** The volcanoes as heard from the camera (wherever they can stand; silent until one does, and while the level isn't the active one). */
@@ -218,6 +222,10 @@ export class PlanetLevel extends Level implements ItemUser {
     private readonly switches: ItemSwitches,
     /** Pictures of species for the map's Species tab (none in tests). */
     icons: SpeciesIcons | null = null,
+    /** The species scanned so far (kept by the scene manager for the whole game). */
+    repository: SpeciesRepository = new SpeciesRepository(),
+    /** Called when a scan completes: the species' entry and whether it's new (the repository menu's notice). */
+    onScanned: (entry: RepositoryEntry, added: boolean) => void = () => {},
   ) {
     super();
     this.frame = this.add(new PlanetFrame(body, system.world.time, debug));
@@ -382,6 +390,23 @@ export class PlanetLevel extends Level implements ItemUser {
     this.laser = this.add(
       new Laser(this.scene, camera, input, globe, this.ship, this, sfx, () => (this.busy ? 'Not while the planet buster goes off' : null), bodyKey(config), debug),
     );
+    // Before the beam and the picker too: a press the scanner takes is neither.
+    this.scanner = this.add(
+      new Scanner(
+        this.scene,
+        camera,
+        input,
+        globe,
+        this.ship,
+        this,
+        { key: bodyKey(config), name: body.name, system: system.ref.name },
+        repository,
+        sfx,
+        () => (this.busy ? 'Not while the planet buster goes off' : this.busted ? 'Nothing left here to scan' : null),
+        onScanned,
+        debug,
+      ),
+    );
     // Before the picker: a press the beam takes isn't a click that flies the ship.
     const world = { climate: config.climate ?? null, weather: weatherKind(config.type, config.climate) };
     this.cargo = this.plantings
@@ -483,7 +508,15 @@ export class PlanetLevel extends Level implements ItemUser {
         .filter(Boolean)
         .join(' · ');
     this.hud = this.add(new PlanetHud(this.ship, `${body.name} · ${body.description}`, input, detail, nowLine));
-    const species = new SpeciesTab(bodyKey(config), animalsSetup?.plan.species ?? [], plantsSetup?.plan.species ?? [], this.radar, icons, () => switches.isOn('radar'));
+    const species = new SpeciesTab(
+      bodyKey(config),
+      animalsSetup?.plan.species ?? [],
+      plantsSetup?.plan.species ?? [],
+      this.radar,
+      icons,
+      () => switches.isOn('radar'),
+      (key) => repository.has(key),
+    );
     this.map = this.add(new PlanetMap(config, body.name, this.ship, globe, input, debug, species));
     debug
       .folder('Planet lab')
@@ -521,9 +554,17 @@ export class PlanetLevel extends Level implements ItemUser {
     return this.globe.busted;
   }
 
-  /** The item bar's view of this level: the planet buster, the volcano bomb and the laser can be fired from here, and the beam used. */
+  /** The item bar's view of this level: the planet buster, the volcano bomb and the laser can be fired from here, and the beam and the scanner used. */
   get selected(): ItemId | null {
-    return this.buster.armed ? 'planetBuster' : this.volcanoBomb.armed ? 'volcanoBomb' : this.laser.armed ? 'laser' : (this.cargo?.selected ?? null);
+    return this.buster.armed
+      ? 'planetBuster'
+      : this.volcanoBomb.armed
+        ? 'volcanoBomb'
+        : this.laser.armed
+          ? 'laser'
+          : this.scanner.armed
+            ? 'scan'
+            : (this.cargo?.selected ?? null);
   }
 
   status(item: ItemId): ItemStatus {
@@ -531,6 +572,7 @@ export class PlanetLevel extends Level implements ItemUser {
     if (item === 'planetBuster') return this.buster.status();
     if (item === 'volcanoBomb') return this.volcanoBomb.status();
     if (item === 'laser') return this.laser.status();
+    if (item === 'scan') return this.scanner.status();
     if (this.cargo) return this.cargo.status(item);
     return { available: false, hint: '', reason: item === 'abduct' ? 'Nothing left here to beam up' : 'Nothing here to set it down on' };
   }
@@ -540,10 +582,12 @@ export class PlanetLevel extends Level implements ItemUser {
     if (item !== 'planetBuster') this.buster.arm(false);
     if (item !== 'volcanoBomb') this.volcanoBomb.arm(false);
     if (item !== 'laser') this.laser.arm(false);
+    if (item !== 'scan') this.scanner.arm(false);
     if (item === 'planetBuster') this.buster.arm(true);
     if (item === 'volcanoBomb') this.volcanoBomb.arm(true);
     if (item === 'laser') this.laser.arm(true);
-    this.cargo?.arm(item === 'planetBuster' || item === 'volcanoBomb' || item === 'laser' ? null : item);
+    if (item === 'scan') this.scanner.arm(true);
+    this.cargo?.arm(item === 'planetBuster' || item === 'volcanoBomb' || item === 'laser' || item === 'scan' ? null : item);
   }
 
   /** The radar's line above the item bar while it's on (a switch: always available). */
@@ -781,6 +825,7 @@ export class PlanetLevel extends Level implements ItemUser {
     this.buster.arm(false);
     this.volcanoBomb.arm(false);
     this.laser.arm(false);
+    this.scanner.arm(false);
     this.cargo?.arm(null);
     this.hud.deactivate();
     this.map.deactivate();
