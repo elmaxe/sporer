@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="theme-color" content="#000000" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" href="icons/icon-192.png" />
+    <title>Spore 2 — Space Stage</title>
+    <script type="module" crossorigin src="./assets/main-BxXz2PYn.js"></script>
+    <link rel="modulepreload" crossorigin href="./assets/groundDepth-Fvx9IZyL.js">
+    <link rel="modulepreload" crossorigin href="./assets/atmosphereShell-BPl6ZTyC.js">
+    <link rel="modulepreload" crossorigin href="./assets/FpsCounter-B1JFYIge.js">
+    <link rel="modulepreload" crossorigin href="./assets/surfaceMaps-C9S2Deib.js">
+    <link rel="modulepreload" crossorigin href="./assets/outfitLook-C3v7Oq17.js">
+    <link rel="modulepreload" crossorigin href="./assets/captainMesh-Bzeboefr.js">
+    <link rel="modulepreload" crossorigin href="./assets/BufferGeometryUtils-DxfpdjWr.js">
+    <link rel="modulepreload" crossorigin href="./assets/PlanetLevel-DlMJq6Z9.js">
+    <link rel="modulepreload" crossorigin href="./assets/StarSystem-CY30s6HF.js">
+    <link rel="modulepreload" crossorigin href="./assets/GraphicsSettings-DpEBI3VB.js">
+    <link rel="modulepreload" crossorigin href="./assets/labStars-O8FCCjwS.js">
+    <link rel="modulepreload" crossorigin href="./assets/page-BcilpqRZ.js">
+    <link rel="stylesheet" crossorigin href="./assets/FpsCounter-CEAxU8r3.css">
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="hud">
+      <div id="hud-location"></div>
+      <div id="hud-climate" hidden></div>
+      <div id="hud-speed">0 u/s</div>
+      <div id="hud-target"></div>
+      <div id="hud-help"></div>
+    </div>
+    <div id="item-bar" hidden>
+      <div id="item-hint" hidden></div>
+      <div class="item-panel">
+        <div id="item-tabs" role="tablist" aria-label="Items"></div>
+        <div id="item-slots" role="toolbar" aria-label="Item slots"></div>
+      </div>
+    </div>
+    <div id="flash" aria-hidden="true"></div>
+    <div id="tooltip" hidden>
+      <div id="tooltip-name"></div>
+      <div id="tooltip-info"></div>
+      <div id="tooltip-details" hidden></div>
+      <div id="tooltip-extra" hidden></div>
+    </div>
+    <div id="planet-map" class="map-panel" hidden>
+      <div class="map-head">
+        <span id="planet-map-title" class="map-title"></span>
+        <div id="planet-map-tabs" class="map-tabs" role="tablist" hidden>
+          <button type="button" role="tab" data-tab="map" aria-selected="true">Map</button>
+          <button type="button" role="tab" data-tab="species" aria-selected="false">Species</button>
+        </div>
+        <button id="planet-map-toggle" class="map-toggle" type="button" aria-expanded="true">
+          <svg class="fold" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+          <svg class="close" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18" /></svg>
+        </button>
+      </div>
+      <div class="map-body">
+        <canvas id="planet-map-marks" class="map-canvas"></canvas>
+        <div id="planet-species" class="species-list" hidden></div>
+      </div>
+    </div>
+    <div id="system-map" class="map-panel" hidden>
+      <div class="map-head">
+        <span id="system-map-title" class="map-title"></span>
+        <button id="system-map-toggle" class="map-toggle" type="button" aria-expanded="true">
+          <svg class="fold" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+          <svg class="close" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18" /></svg>
+        </button>
+      </div>
+      <div class="map-body">
+        <canvas id="system-map-canvas" class="map-canvas"></canvas>
+      </div>
+    </div>
+    <div id="touch-controls">
+      <div id="touch-stick" aria-label="Move"><div id="touch-knob"></div></div>
+      <div id="touch-buttons">
+        <button id="touch-boost" type="button" data-key="ShiftLeft">Boost</button>
+        <button id="touch-map" type="button" aria-label="Map" aria-expanded="false">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 4 3 6.5v13.5l6-2.5 6 2.5 6-2.5V4l-6 2.5z" /><path d="M9 4v13.5M15 6.5V20" />
+          </svg>
+        </button>
+      </div>
+    </div>
+    <button id="fullscreen-toggle" type="button" aria-label="Full screen" hidden>
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path class="expand" d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" />
+        <path class="collapse" d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5" />
+      </svg>
+    </button>
+    <div id="fullscreen-hint" hidden>To play full screen: tap <b>Share</b>, then <b>Add to Home Screen</b>, and start the game from there.</div>
+    <button id="menu-toggle" type="button" aria-label="Menu (Esc)" title="Menu (Esc)" aria-controls="menu" aria-expanded="false">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+        <path d="M4 7h16M4 12h16M4 17h16" />
+      </svg>
+      <svg class="muted-badge" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M11 5 6 9H2v6h4l5 4z" fill="currentColor" /><path d="m16 9 6 6m0-6-6 6" />
+      </svg>
+      <span class="update-badge" aria-hidden="true"></span>
+    </button>
+    <div id="menu" role="dialog" aria-modal="true" aria-labelledby="menu-title" hidden>
+      <div id="menu-panel">
+        <div class="menu-head">
+          <h2 id="menu-title">Paused</h2>
+          <button id="menu-close" type="button" aria-label="Close menu">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18" /></svg>
+          </button>
+        </div>
+        <button id="menu-resume" class="menu-button primary" type="button">Resume</button>
+        <section id="audio">
+          <h3>Sound</h3>
+          <label>Master <input type="range" data-key="master" min="0" max="1" step="0.01" /><output data-key="master"></output></label>
+          <label>Music <input type="range" data-key="music" min="0" max="1" step="0.01" /><output data-key="music"></output></label>
+          <label>Ambience <input type="range" data-key="ambience" min="0" max="1" step="0.01" /><output data-key="ambience"></output></label>
+          <label>Effects <input type="range" data-key="sfx" min="0" max="1" step="0.01" /><output data-key="sfx"></output></label>
+          <button id="audio-mute" class="menu-button" type="button"></button>
+        </section>
+        <section id="menu-display">
+          <h3>Display</h3>
+          <button id="menu-fps" class="menu-button" type="button" aria-pressed="false">Show FPS</button>
+          <button id="graphics-weather" class="menu-button" type="button" aria-pressed="true">Weather: on</button>
+          <button id="graphics-plants" class="menu-button" type="button" aria-pressed="true">Plants: on</button>
+          <button id="graphics-animals" class="menu-button" type="button" aria-pressed="true">Animals: on</button>
+          <button id="graphics-rocks" class="menu-button" type="button" aria-pressed="true">Rocks: on</button>
+          <button id="graphics-wireframe" class="menu-button" type="button" aria-pressed="false">Wireframe: off</button>
+          <button id="graphics-freeze" class="menu-button" type="button" aria-pressed="false">Freeze view: off</button>
+          <button id="graphics-third-person" class="menu-button" type="button" aria-pressed="false">Third-person view: off</button>
+          <p>Weather is clouds, storms, rain and lightning; plants stand and animals roam on habitable planets in low orbit (both off by default on phones), and rocks lie on solid ground near the UFO. Turn them off if the game runs slowly. Wireframe draws the planets, moons and ship as their triangles (turn Weather off to see under the clouds). Freeze view (F) keeps what's drawn as it was for the camera then, and outlines what that camera saw, while you turn and zoom the camera to look at it from outside. Third-person view (C) draws the whole planet, system or galaxy from a camera of its own, showing what the game's camera draws and culls and where that camera is and looks; drag and zoom to look round, and V (or the button at the top) hands the drag back to the game's camera. Clicking a planet or the ground in it flies there as usual.</p>
+        </section>
+        <section id="menu-lab-section">
+          <h3>Planet lab</h3>
+          <p>Build any planet or moon, change everything about it and look at it up close.</p>
+          <a id="menu-lab" class="menu-button" href="lab.html" target="_blank" rel="noopener">Open the planet lab</a>
+        </section>
+        <section id="menu-ship-section">
+          <h3>Your ship</h3>
+          <p>Build your own UFO from parts, paint it, and fly it here instead of the saucer.</p>
+          <a id="menu-ship" class="menu-button" href="ship.html" target="_blank" rel="noopener">Open the spaceship editor</a>
+        </section>
+        <section id="menu-stars-section">
+          <h3>Star lab</h3>
+          <p>Change a star's kind, size, colour and storms, and roll or tune the system round it.</p>
+          <a id="menu-stars" class="menu-button" href="stars.html" target="_blank" rel="noopener">Open the star lab</a>
+        </section>
+        <section id="menu-dump-section">
+          <h3>Report a problem</h3>
+          <p>Saves the screen, your marks and notes, and what's needed to reproduce it, in one file to send.</p>
+          <button id="menu-dump" class="menu-button" type="button">Save debug dump</button>
+        </section>
+        <section id="menu-refresh-section">
+          <h3>Refresh</h3>
+          <p id="menu-refresh-status"></p>
+          <button id="menu-refresh" class="menu-button" type="button">Refresh</button>
+        </section>
+        <section id="menu-notes-section" hidden>
+          <h3>What's new</h3>
+          <p id="menu-notes-latest"></p>
+          <button id="menu-notes" class="menu-button" type="button">Release notes</button>
+        </section>
+        <section id="menu-version-section" hidden>
+          <h3>Version</h3>
+          <p>Play the release, the preview of what's coming next, or a pull request's build. An app added to the home screen opens the one you pick from then on.</p>
+          <select id="menu-version" class="menu-button" aria-label="Version"></select>
+        </section>
+        <p class="menu-keys">Esc: menu · M: mute · F: freeze view · C: third-person view · F8: debug dump</p>
+        <p id="menu-build" class="menu-build"></p>
+      </div>
+    </div>
+    <div id="notes" role="dialog" aria-modal="true" aria-labelledby="notes-title" hidden>
+      <div id="notes-panel">
+        <div class="menu-head">
+          <h2 id="notes-title">What's new</h2>
+          <button id="notes-close" type="button" aria-label="Close release notes">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18" /></svg>
+          </button>
+        </div>
+        <p id="notes-build" hidden></p>
+        <div id="notes-list"></div>
+      </div>
+    </div>
+    <div id="notes-notice" role="status" hidden>
+      <span id="notes-notice-text"></span>
+      <button id="notes-notice-open" type="button">What's new</button>
+      <button id="notes-notice-close" type="button" aria-label="Dismiss">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18" /></svg>
+      </button>
+    </div>
+    <div id="dump" role="dialog" aria-modal="true" aria-labelledby="dump-title" hidden>
+      <div id="dump-panel">
+        <div class="menu-head">
+          <h2 id="dump-title">Debug dump</h2>
+          <button id="dump-close" type="button" aria-label="Cancel">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18" /></svg>
+          </button>
+        </div>
+        <p class="dump-hint">Tap the picture to mark the problem; tap a mark to remove it.</p>
+        <div id="dump-picture">
+          <img id="dump-image" alt="The screen when the dump was taken" draggable="false" />
+          <div id="dump-marks"></div>
+        </div>
+        <textarea id="dump-note" rows="3" placeholder="What's wrong? What did you expect? (optional)"></textarea>
+        <div class="dump-actions">
+          <button id="dump-share" class="menu-button primary" type="button" hidden>Share…</button>
+          <button id="dump-save" class="menu-button" type="button">Save file</button>
+          <button id="dump-clear" class="menu-button" type="button" hidden>Clear marks</button>
+          <button id="dump-cancel" class="menu-button" type="button">Cancel</button>
+        </div>
+        <p id="dump-status" class="dump-status" hidden></p>
+      </div>
+    </div>
+    <div id="fps" hidden></div>
+    <div id="freeze-note" hidden></div>
+    <div id="third-person-note" hidden><span></span><button type="button"></button></div>
+    <div id="loading">Loading…</div>
+  </body>
+</html>

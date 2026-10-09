@@ -1,0 +1,44 @@
+{
+  "versions": [
+    {
+      "id": "release",
+      "label": "Release v2026.10.08.2",
+      "path": "",
+      "ref": "v2026.10.08.2",
+      "commit": "1fb34fb",
+      "date": "2026-10-08T20:46:12Z"
+    },
+    {
+      "id": "preview",
+      "label": "Preview (main)",
+      "path": "preview/",
+      "ref": "main",
+      "commit": "4605272",
+      "date": "2026-10-09T06:28:39Z"
+    },
+    {
+      "id": "pr-140",
+      "label": "PR #140: Terraforming phase 4: greenhouse factories and carbon sinks",
+      "path": "pr/140/",
+      "ref": "claude/terraforming-phase-4-cxmkrc",
+      "commit": "2199794",
+      "date": "2026-10-06T20:01:54Z"
+    },
+    {
+      "id": "pr-138",
+      "label": "PR #138: Terraforming phase 3: mirrors, mirror lance, sunshade and aerosols",
+      "path": "pr/138/",
+      "ref": "claude/terraforming-phase-3-phjfpw",
+      "commit": "655093c",
+      "date": "2026-10-06T12:58:18Z"
+    },
+    {
+      "id": "pr-136",
+      "label": "PR #136: Terraforming phase 2: magic rays, the climate chart and the live looks",
+      "path": "pr/136/",
+      "ref": "claude/stoic-lamport-69k00e",
+      "commit": "5814521",
+      "date": "2026-10-06T08:01:00Z"
+    }
+  ]
+}
