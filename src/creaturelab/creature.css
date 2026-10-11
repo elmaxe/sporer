@@ -172,6 +172,7 @@ body {
   width: 290px;
   max-height: calc(100vh - 120px);
   overflow: auto;
+  touch-action: pan-y;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -291,7 +292,115 @@ body {
   font-weight: 600;
 }
 
+/* Steering arrows for Play on touch screens. */
+.cr-pad {
+  position: fixed;
+  left: 10px;
+  bottom: 10px;
+  display: none;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 10px;
+  background: var(--cr-bg);
+  border: 1px solid var(--cr-line);
+}
+
+.cr-pad-btn {
+  min-width: 52px;
+  height: 46px;
+  font-size: 18px;
+  touch-action: none;
+  -webkit-touch-callout: none;
+}
+
+.cr-pad-btn.on {
+  background: var(--cr-accent);
+  color: #062018;
+}
+
+@media (pointer: coarse) {
+  .cr-pad:not([hidden]) {
+    display: flex;
+  }
+  /* Bigger buttons and slider thumbs for fingers. */
+  .cr-btn,
+  .cr-mode,
+  .cr-part {
+    min-height: 36px;
+  }
+  .cr-row input[type='range'] {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 30px;
+    margin: 0;
+    background: transparent;
+  }
+  .cr-row input[type='range']::-webkit-slider-runnable-track {
+    height: 6px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.18);
+  }
+  .cr-row input[type='range']::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 24px;
+    height: 24px;
+    margin-top: -9px;
+    border-radius: 50%;
+    border: none;
+    background: var(--cr-accent);
+  }
+  .cr-row input[type='range']::-moz-range-track {
+    height: 6px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.18);
+  }
+  .cr-row input[type='range']::-moz-range-thumb {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: none;
+    background: var(--cr-accent);
+  }
+  .cr-row input[type='checkbox'] {
+    width: 20px;
+    height: 20px;
+  }
+}
+
 @media (max-width: 760px) {
+  /* Two rows on top: the modes, then the name and the actions (scrolled sideways when they don't fit). */
+  .cr-top {
+    top: 8px;
+    left: 8px;
+    right: 8px;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .cr-modes {
+    order: -1;
+    flex: 1 1 100%;
+  }
+  .cr-mode {
+    flex: 1;
+    padding: 6px 4px;
+  }
+  .cr-logo {
+    display: none;
+  }
+  .cr-name {
+    width: 84px;
+  }
+  .cr-actions {
+    flex: 1;
+    min-width: 0;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    touch-action: pan-x;
+    scrollbar-width: none;
+  }
+  .cr-actions > * {
+    flex: none;
+  }
   .cr-palette {
     top: auto;
     bottom: 10px;
@@ -299,11 +408,23 @@ body {
     right: 10px;
     flex-direction: row;
     overflow-x: auto;
+    touch-action: pan-x;
   }
   .cr-palette-head,
-  .cr-hint,
   .cr-part-name {
     display: none;
+  }
+  /* A swipe along the row scrolls it; a drag up from a part takes it onto the body. */
+  .cr-part {
+    touch-action: pan-x;
+  }
+  .cr-hint {
+    display: none;
+    top: 112px;
+    bottom: auto;
+  }
+  .cr-hint.cr-hint-placing {
+    display: block;
   }
   .cr-inspector {
     top: auto;
@@ -312,8 +433,5 @@ body {
     right: 10px;
     width: auto;
     max-height: 36vh;
-  }
-  .cr-actions {
-    flex-wrap: wrap;
   }
 }

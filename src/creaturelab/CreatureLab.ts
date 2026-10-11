@@ -88,6 +88,8 @@ const BONE_COLOR = new THREE.Color('#efe4c8');
 /** Floor tile (units): the floor slides back by whole tiles as the creature walks. */
 const TILE = 2;
 const UP = new THREE.Vector3(0, 1, 0);
+/** How far from a handle (CSS pixels) a finger still picks it. */
+const FINGER_REACH = 24;
 const STEER_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
 
 export class CreatureLab {
@@ -141,6 +143,8 @@ export class CreatureLab {
   /** The skeleton shows while the pointer is over the creature (always once a finger has touched the screen: it can't hover), fading in and out. */
   private overCreature = false;
   private hoverless = false;
+  /** The pointer pressed last was a finger (handles are then picked within a fingertip's reach). */
+  private finger = false;
   private skeletonFade = 0;
   private readonly skinPicker: THREE.Mesh;
   private readonly ground: THREE.Mesh;
@@ -157,6 +161,7 @@ export class CreatureLab {
   private ghost: number | null = null;
   private placingByDrag = false;
   private wheelTimer: ReturnType<typeof setTimeout> | null = null;
+  private inset = { top: 0, bottom: 0 };
   private last = performance.now();
 
   constructor(
@@ -386,6 +391,17 @@ export class CreatureLab {
     this.commit();
   }
 
+  /** Holds or lets go of a steering key (WASD, the arrows, Shift), as the on-screen pad does on touch screens. */
+  hold(code: string, down: boolean): void {
+    if (down) {
+      if (this.mode === 'play' && STEER_KEYS.has(code) && this.walking) {
+        this.walking = false;
+        this.onChange?.();
+      }
+      this.held.add(code);
+    } else this.held.delete(code);
+  }
+
   /** Back to the origin facing ahead, where the editor's handles and picking expect it; the camera comes along. */
   private comeHome(): void {
     this.held.clear();
@@ -448,7 +464,7 @@ export class CreatureLab {
     const centre = new THREE.Vector3(0, k.top * 0.45, (k.front + k.back) / 2);
     this.controls.target.copy(centre);
     const dir = new THREE.Vector3(1, 0.42, 0.85).normalize();
-    this.camera.position.copy(centre).addScaledVector(dir, size * 1.9 + 2);
+    this.camera.position.copy(centre).addScaledVector(dir, this.viewDistance(size));
     this.controls.update();
   }
 
@@ -459,8 +475,13 @@ export class CreatureLab {
     const centre = this.controls.target;
     const dirs: Record<typeof view, Vec3> = { front: [0, 0.2, 1], side: [1, 0.15, 0], top: [0.01, 1, 0.02], 'three-quarter': [1, 0.42, 0.85], back: [-0.6, 0.35, -1] };
     const d = new THREE.Vector3(...dirs[view]).normalize();
-    this.camera.position.copy(centre).addScaledVector(d, size * 1.9 + 2);
+    this.camera.position.copy(centre).addScaledVector(d, this.viewDistance(size));
     this.controls.update();
+  }
+
+  /** How far back the camera stands to see a creature `size` across: further on a narrow (portrait) screen, so it fits across too. */
+  private viewDistance(size: number): number {
+    return (size * 1.9 + 2) * Math.max(1, Math.min(2, 0.8 / this.camera.aspect));
   }
 
   // --- The loop ---
@@ -509,7 +530,18 @@ export class CreatureLab {
     const h = this.container.clientHeight || window.innerHeight;
     this.renderer.setSize(w, h);
     this.camera.aspect = w / h;
+    // The view's centre (the creature) is drawn halfway between the bars over it, not behind them.
+    const shift = Math.round((this.inset.top - this.inset.bottom) / 2);
+    if (shift !== 0) this.camera.setViewOffset(w, h, 0, -shift, w, h);
+    else this.camera.clearViewOffset();
     this.camera.updateProjectionMatrix();
+  }
+
+  /** How much of the view the controls cover at its top and bottom (CSS pixels; a phone's), so the creature is centred in what's left. */
+  setInset(top: number, bottom: number): void {
+    if (top === this.inset.top && bottom === this.inset.bottom) return;
+    this.inset = { top, bottom };
+    this.resize();
   }
 
   /** The skin alone (no limbs, horns or eyes), posed: what parts are placed and dragged over. */
@@ -685,6 +717,18 @@ export class CreatureLab {
         best = m.userData as HandleInfo;
       }
     }
+    if (best || !this.finger) return best;
+    // A fingertip covers far more than a dot: failing a direct hit, the dot nearest it on the screen within reach.
+    const perPixel = (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2))) / this.renderer.domElement.clientHeight;
+    for (const m of this.handleMeshes) {
+      if (!m.visible) continue;
+      const along = ray.origin.distanceTo(m.position);
+      const pixels = ray.distanceToPoint(m.position) / (along * perPixel);
+      if (pixels < FINGER_REACH && pixels < bestD) {
+        bestD = pixels;
+        best = m.userData as HandleInfo;
+      }
+    }
     return best;
   }
 
@@ -701,11 +745,14 @@ export class CreatureLab {
   }
 
   private pointerDown(e: PointerEvent): void {
-    if (e.pointerType === 'touch') this.hoverless = true;
+    this.finger = e.pointerType === 'touch';
+    if (this.finger) this.hoverless = true;
     if (e.button !== 0) return;
     this.setRay(e);
     if (this.editing) {
       if (this.placing) {
+        // A finger can't hover: the part goes where it touches (a mouse has already shown it there).
+        this.followPointer(e);
         if (this.ghost !== null) this.place(e.shiftKey);
         else this.cancelPlacing();
         e.stopImmediatePropagation();
@@ -762,27 +809,33 @@ export class CreatureLab {
     this.onChange?.();
   }
 
+  /** The part being placed follows the pointer over the skin (it's taken off again while the pointer is off the body). */
+  private followPointer(e: PointerEvent): void {
+    if (!this.placing) return;
+    const hit = this.overCanvas(e) ? this.hitSkin() : null;
+    if (hit) {
+      const a = anchorOf(this.grown.frames, hit.toArray() as Vec3);
+      if (this.ghost === null) {
+        this.design.parts.push(newPart(this.placing, a.s, a.theta));
+        this.ghost = this.design.parts.length - 1;
+      } else {
+        const p = this.design.parts[this.ghost]!;
+        p.s = a.s;
+        p.theta = a.theta;
+      }
+      this.restDirty = true;
+    } else if (this.ghost !== null) {
+      this.design.parts.splice(this.ghost, 1);
+      this.ghost = null;
+      this.restDirty = true;
+    }
+  }
+
   private pointerMove(e: PointerEvent): void {
     this.setRay(e);
     const drag = this.drag;
     if (this.placing) {
-      const hit = this.overCanvas(e) ? this.hitSkin() : null;
-      if (hit) {
-        const a = anchorOf(this.grown.frames, hit.toArray() as Vec3);
-        if (this.ghost === null) {
-          this.design.parts.push(newPart(this.placing, a.s, a.theta));
-          this.ghost = this.design.parts.length - 1;
-        } else {
-          const p = this.design.parts[this.ghost]!;
-          p.s = a.s;
-          p.theta = a.theta;
-        }
-        this.restDirty = true;
-      } else if (this.ghost !== null) {
-        this.design.parts.splice(this.ghost, 1);
-        this.ghost = null;
-        this.restDirty = true;
-      }
+      this.followPointer(e);
       return;
     }
     if (!drag) {
@@ -921,11 +974,7 @@ export class CreatureLab {
     if (this.mode === 'play' && !mod && STEER_KEYS.has(e.code)) {
       // Steering takes over from walking on its own: it stops when the keys are let go.
       e.preventDefault();
-      if (this.walking) {
-        this.walking = false;
-        this.onChange?.();
-      }
-      this.held.add(e.code);
+      this.hold(e.code, true);
       return;
     }
     if (mod && e.code === 'KeyZ') {

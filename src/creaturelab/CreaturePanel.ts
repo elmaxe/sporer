@@ -42,6 +42,11 @@ const MODES: { mode: EditorMode; label: string }[] = [
   { mode: 'play', label: 'Play' },
 ];
 
+/** A touch screen's finger (no hover, no wheel, no keys). */
+const COARSE = matchMedia('(pointer: coarse)');
+/** The phone layout (creature.css): bars along the top and bottom. */
+const PHONE = matchMedia('(max-width: 760px)');
+
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', text = ''): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -55,6 +60,10 @@ export class CreaturePanel {
   private readonly gearPalette = el('div', 'cr-palette');
   private readonly inspector = el('div', 'cr-inspector');
   private readonly hint = el('div', 'cr-hint');
+  /** Steering on touch screens in Play: arrows standing in for WASD. */
+  private readonly pad = el('div', 'cr-pad');
+  /** A finger or the mouse is down on the inspector: its controls aren't rebuilt under it (a touch doesn't focus a slider). */
+  private holding = false;
   private readonly modeButtons = new Map<EditorMode, HTMLButtonElement>();
   private readonly paletteButtons = new Map<PartKind, HTMLButtonElement>();
   private undoBtn!: HTMLButtonElement;
@@ -69,8 +78,19 @@ export class CreaturePanel {
     root: HTMLElement,
     private readonly lab: CreatureLab,
   ) {
-    root.append(this.top, this.palette, this.gearPalette, this.inspector, this.hint);
+    root.append(this.top, this.palette, this.gearPalette, this.inspector, this.hint, this.pad);
     this.buildTop();
+    this.buildPad();
+    this.inspector.addEventListener('pointerdown', () => (this.holding = true));
+    const letGo = () => {
+      if (!this.holding) return;
+      this.holding = false;
+      this.refresh();
+    };
+    window.addEventListener('pointerup', letGo);
+    window.addEventListener('pointercancel', letGo);
+    this.fitView();
+    window.addEventListener('resize', () => this.fitView());
     this.buildPalette(this.palette, 'Parts', PART_KINDS);
     this.buildPalette(this.gearPalette, 'Accessories', GEAR_KINDS);
     lab.onChange = () => this.refresh();
@@ -137,6 +157,12 @@ export class CreaturePanel {
 
   private buildPalette(palette: HTMLElement, title: string, kinds: readonly PartKind[]): void {
     palette.append(el('div', 'cr-palette-head', title));
+    /** The part whose button a finger is on: scrolling the row under it means it was a swipe, not a pick. */
+    let pressed: PartKind | null = null;
+    palette.addEventListener('scroll', () => {
+      if (pressed !== null && this.lab.placing === pressed) this.lab.cancelPlacing();
+      pressed = null;
+    });
     for (const kind of kinds) {
       const info = PART_LABELS[kind];
       const b = el('button', 'cr-part');
@@ -144,15 +170,62 @@ export class CreaturePanel {
       b.append(el('span', 'cr-part-icon', info.icon), el('span', 'cr-part-name', info.name));
       b.addEventListener('pointerdown', (e) => {
         e.preventDefault();
+        // A finger's moves would otherwise all go to what it pressed (the button or its icon), never reaching the body it's dragged onto.
+        const grabbed = e.target as Element;
+        if (grabbed.hasPointerCapture(e.pointerId)) grabbed.releasePointerCapture(e.pointerId);
         if (this.lab.placing === kind) this.lab.cancelPlacing();
         else this.lab.startPlacing(kind, true);
+        pressed = e.pointerType === 'touch' ? kind : null;
       });
+      // A swipe along the row on a phone scrolls it instead.
+      b.addEventListener('pointercancel', () => {
+        if (this.lab.placing === kind) this.lab.cancelPlacing();
+      });
+      b.addEventListener('pointerup', () => (pressed = null));
       // A click (press and release on the button) leaves the part following the pointer until the body is clicked.
       b.addEventListener('pointerup', () => {
         if (this.lab.placing === kind) this.lab.startPlacing(kind, false);
       });
       this.paletteButtons.set(kind, b);
       palette.append(b);
+    }
+  }
+
+  /** On a phone the bars cover the top and bottom of the view: the creature is framed in the band between them. */
+  private fitView(): void {
+    if (!PHONE.matches) {
+      this.lab.setInset(0, 0);
+      return;
+    }
+    // The inspector sheet at its tallest, over the palette row.
+    const cs = getComputedStyle(this.inspector);
+    const bottom = parseFloat(cs.bottom) + parseFloat(cs.maxHeight);
+    this.lab.setInset(this.top.getBoundingClientRect().bottom, Number.isFinite(bottom) ? bottom : 0);
+  }
+
+  /** Arrows that hold WASD's keys down while pressed (shown on touch screens in Play). */
+  private buildPad(): void {
+    for (const [code, label] of [
+      ['KeyA', '◀'],
+      ['KeyW', '▲'],
+      ['KeyS', '▼'],
+      ['KeyD', '▶'],
+      ['Shift', '🐾 Trot'],
+    ] as const) {
+      const b = el('button', 'cr-btn cr-pad-btn', label);
+      const up = () => {
+        b.classList.remove('on');
+        this.lab.hold(code, false);
+      };
+      b.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        b.classList.add('on');
+        this.lab.hold(code, true);
+      });
+      b.addEventListener('pointerup', up);
+      b.addEventListener('pointercancel', up);
+      b.addEventListener('contextmenu', (e) => e.preventDefault());
+      this.pad.append(b);
     }
   }
 
@@ -187,30 +260,40 @@ export class CreaturePanel {
     for (const [k, b] of this.paletteButtons) b.classList.toggle('on', lab.placing === k);
     this.palette.hidden = lab.mode !== 'build';
     this.gearPalette.hidden = lab.mode !== 'outfit';
+    this.pad.hidden = lab.mode !== 'play';
     this.undoBtn.disabled = !lab.canUndo;
     this.redoBtn.disabled = !lab.canRedo;
     if (document.activeElement !== this.nameInput) this.nameInput.value = lab.design.name;
     const sel = lab.selection;
     const key = `${lab.mode}:${sel ? `${sel.kind}${sel.index}` : '-'}:${lab.design.parts.length}:${lab.design.spine.length}:${lab.placing ?? ''}:${lab.wireframe}:${lab.walking}`;
     if (key !== this.inspectorKey || lab.editing) this.buildInspector(key);
+    // Phones show the hint only while a part is being placed (they've no room for the rest, which is about the mouse).
+    this.hint.classList.toggle('cr-hint-placing', lab.placing !== null);
     this.hint.textContent =
       lab.mode === 'build'
         ? lab.placing
-          ? `Move over the body to place the ${PART_LABELS[lab.placing].name.toLowerCase()}; click to stick it on (Shift: keep placing), Esc to cancel.`
+          ? this.placingHint(lab.placing)
           : 'Point at the creature to see its skeleton. Drag a vertebra of the spine to shape the body, wheel over one to fatten it (Shift: widen). Pull an end vertebra out to grow the spine. Drag a yellow dot to move a part, wheel to resize; drag the pink dots to pose knees and feet, elbows and hands. Drag empty space to turn the view.'
         : lab.mode === 'paint'
           ? 'Paint on the body with the brush; it paints both sides when mirrored. Pick the coat on the right.'
           : lab.mode === 'outfit'
             ? lab.placing
-              ? `Move over the body to place the ${PART_LABELS[lab.placing].name.toLowerCase()}; click to stick it on (Shift: keep placing), Esc to cancel.`
+              ? this.placingHint(lab.placing)
               : 'Drag an accessory from the left onto the body. Grab one to move it, wheel over it to resize, drag it off the body to take it off. The suit, boots and gloves are on the right.'
           : 'WASD or the arrows: steer it (Shift trots). Space: walk on or stand. The legs step in a wave from back to front, the two sides half a stride apart; faster, the wave closes up into a trot.';
+  }
+
+  private placingHint(kind: PartKind): string {
+    const name = PART_LABELS[kind].name.toLowerCase();
+    return COARSE.matches
+      ? `Tap the body to stick the ${name} on (or drag it there from its button); tap its button again to cancel.`
+      : `Move over the body to place the ${name}; click to stick it on (Shift: keep placing), Esc to cancel.`;
   }
 
   /** The inspector, rebuilt (cheap) while a slider isn't being dragged. */
   private buildInspector(key: string): void {
     const active = document.activeElement;
-    if (active instanceof HTMLInputElement && this.inspector.contains(active) && key === this.inspectorKey) {
+    if (key === this.inspectorKey && (this.holding || (active instanceof HTMLInputElement && this.inspector.contains(active)))) {
       // Keep the control being used; just refresh nothing.
       return;
     }
@@ -305,7 +388,7 @@ export class CreaturePanel {
       } else if (p.kind !== 'eye' && p.kind !== 'arm' && p.kind !== 'leg') this.slider(s, 'Lean', -1, 1, 0.01, () => p.tilt, (x) => (p.tilt = x));
       if (p.kind === 'arm' || p.kind === 'leg') {
         const [joint, end] = p.kind === 'arm' ? ['elbow', 'hand'] : ['knee', 'foot'];
-        s.append(el('div', 'cr-note', `Three nodes: the yellow dot where it sits on the body, the pink ${joint} and the pink ${end}. Drag them to pose it${p.kind === 'leg' ? ' (the foot slides over the ground)' : ''}; the wheel over one thickens it.`));
+        s.append(el('div', 'cr-note', `Three nodes: the yellow dot where it sits on the body, the pink ${joint} and the pink ${end}. Drag them to pose it${p.kind === 'leg' ? ' (the foot slides over the ground)' : ''}; the wheel over one (or Size) thickens it.`));
         const r = el('div', 'cr-buttons');
         this.button(r, `Reset ${p.kind} pose`, () => {
           delete p.joint;
@@ -332,7 +415,7 @@ export class CreaturePanel {
       const s = this.section('Body');
       const legs = d.parts.filter((p) => p.kind === 'leg').reduce((n, p) => n + (p.mirror && Math.abs(Math.sin(p.theta)) > 0.06 ? 2 : 1), 0);
       s.append(el('div', 'cr-note', `${d.spine.length} vertebrae, ${d.parts.length} parts, ${legs} legs.`));
-      s.append(el('div', 'cr-note', 'Point at the creature to see its skeleton; select a vertebra or a part\'s yellow dot to edit it.'));
+      s.append(el('div', 'cr-note', COARSE.matches ? "Tap a vertebra or a part's yellow dot to edit it; drag one to move it. Drag empty space to turn the view, pinch to zoom." : "Point at the creature to see its skeleton; select a vertebra or a part's yellow dot to edit it."));
       const row = el('div', 'cr-buttons');
       this.button(row, '+ Vertebra at the snout', () => lab.addVertebra());
       s.append(row);
@@ -353,7 +436,7 @@ export class CreaturePanel {
     const now = d.outfit;
     const acc = this.section('Accessories');
     const gear = d.parts.filter((p) => isGear(p.kind)).length;
-    acc.append(el('div', 'cr-note', `${gear === 0 ? 'None yet' : `${gear} on`}. Drag one from the left onto the body; grab it to move it, wheel over it to resize, drag it off the body to take it off. Click one for its settings.`));
+    acc.append(el('div', 'cr-note', `${gear === 0 ? 'None yet' : `${gear} on`}. ${COARSE.matches ? 'Drag one from the row below onto the body (or tap it, then the body); grab it to move it, drag it off the body to take it off. Tap one for its settings (Size resizes it).' : 'Drag one from the left onto the body; grab it to move it, wheel over it to resize, drag it off the body to take it off. Click one for its settings.'}`));
     const r2 = el('div', 'cr-buttons');
     this.button(r2, '🧑‍🚀 Suit up', () => lab.setDesign(suitUp(d), false), 'The suit, boots and gloves, a helmet, a jetpack on the back, shoulder pads and a badge');
     this.button(r2, 'Take it all off', () => lab.setDesign(undress(d), false));
