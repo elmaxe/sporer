@@ -670,13 +670,13 @@ export class PlanetLevel extends Level implements ItemUser {
     this.plantings?.bury((dir) => dir.dot(shape.centre) > shape.cosAngle);
   }
 
-  /** The plants where volcanoes stand are buried under them, and those where colonies are built cleared away. */
+  /** The plants where volcanoes stand are buried under them, and colonies' grounds cleared of them (their grass and stones under the buildings). */
   private buryPlants(): void {
     const volcanoes = this.volcanoes && this.volcanoes.count > 0 ? this.volcanoes : null;
     const colonies = this.colonies && this.colonies.count > 0 ? this.colonies : null;
     if (!volcanoes && !colonies) return;
     const test = (dir: THREE.Vector3) => (volcanoes?.covers(dir) ?? false) || (colonies?.covers(dir) ?? false);
-    this.plants?.setBuried(test);
+    this.plants?.setBuried((dir) => (volcanoes?.covers(dir) ?? false) || (colonies?.clears(dir) ?? false));
     this.rocks?.setBuried(test);
     this.grass?.setBuried(test);
   }

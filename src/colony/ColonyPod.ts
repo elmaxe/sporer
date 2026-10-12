@@ -102,8 +102,9 @@ export class ColonyPod implements Entity {
     /** The pod has landed at `point` (body frame): found the colony. */
     private readonly onLand: (point: THREE.Vector3) => void,
   ) {
-    this.good = new MarkerRing(scene, '#5dff8c', 0.1, 0.18);
-    this.bad = new MarkerRing(scene, '#ff4a4a', 0, 0.18);
+    // Plain colours: green and red that read as such over bright ground and sea.
+    this.good = new MarkerRing(scene, '#3dff7a', 0.1, 0.18, false);
+    this.bad = new MarkerRing(scene, '#ff3b3b', 0, 0.18, false);
     const model = buildShipModel(podDesign(), this.materials, true);
     // Its nose (+z) down the way it flies: turned in `update`; scaled to its size (the design is ~3.9 long).
     this.pod = new THREE.Group();

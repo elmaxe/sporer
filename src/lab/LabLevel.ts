@@ -32,6 +32,9 @@ import { GroundGrass } from '../surface/GroundGrass';
 import { GroundRocks } from '../surface/GroundRocks';
 import { grassSetup } from '../surface/grassSetup';
 import { rockSetup } from '../surface/rockSetup';
+import { Colonies } from '../colony/Colonies';
+import { colonySetup, type ColonySetup } from '../colony/colonySetup';
+import { captainDesign } from '../player/captain';
 import { cometParams } from '../world/Comet';
 import { Planet } from '../world/Planet';
 import { Starfield } from '../world/Starfield';
@@ -257,6 +260,9 @@ export class LabLevel extends Level {
   readonly grass: GroundGrass | null = null;
   /** Animals roaming where plants grow (globe view; terraform a world into a habitable tier and they come). */
   readonly animals: SurfaceAnimals | null = null;
+  /** The planet's colonies (globe view, solid bodies), at `view.colonyAge`. */
+  readonly colonies: Colonies | null = null;
+  readonly colonySetup: ColonySetup | null = null;
   readonly ship: PlanetShip | null = null;
   /** Water and lava seas (globe view): the ship's downwash on the sea below it. */
   readonly wake: ShipWake | null = null;
@@ -369,6 +375,13 @@ export class LabLevel extends Level {
     if (globe && grass) this.grass = this.add(new GroundGrass(this.scene, grass.plan, grass.ground, camera, this.ship?.object ?? null, debug));
     const animals = globe ? animalSetup(config, plants) : null;
     if (globe && animals) this.animals = this.add(new SurfaceAnimals(this.scene, animals.plan, animals.ground, camera, clock, debug));
+    const colonies = globe ? (this.colonySetup = colonySetup(config)) : null;
+    if (globe && colonies?.ground) {
+      // The colonies' clock is the lab's colony age (their founding times count from the first's).
+      this.colonies = this.add(new Colonies(this.scene, colonies, camera, clock, globe.sun, captainDesign(), () => view.colonyAge * 1000, debug));
+      for (const site of planet.colonies ?? []) this.colonies.add(site);
+      this.clearUnderColonies();
+    }
     if (carry) {
       this.orbit.lookFrom(carry.direction);
       this.orbit.setDistance(THREE.MathUtils.clamp(carry.zoom * this.radius, min, max));
@@ -379,12 +392,22 @@ export class LabLevel extends Level {
     if (this.ship) {
       const globe = this.globe!;
       this.add(new PlanetPicker(this.scene, camera, input, this.ship, (ray, out) => globe.groundHit(ray, out), globe.groundHeight));
-      if (view.map) this.map = this.add(new PlanetMap(config, planet.name, this.ship, this.globe!, input, debug));
+      if (view.map) this.map = this.add(new PlanetMap(config, planet.name, this.ship, this.globe!, input, debug, null, () => this.colonies?.marks() ?? []));
     }
     this.axes = new THREE.AxesHelper(this.radius * 1.6);
     this.scene.add(this.axes);
     this.applyLive();
     this.buildMs = performance.now() - start;
+  }
+
+  /** Colonies' grounds cleared of plants, and rocks and grass where their buildings stand (as in the game). */
+  clearUnderColonies(): void {
+    const colonies = this.colonies;
+    if (!colonies || colonies.count === 0) return;
+    const test = (dir: THREE.Vector3) => colonies.covers(dir);
+    this.plants?.setBuried((dir) => colonies.clears(dir));
+    this.rocks?.setBuried(test);
+    this.grass?.setBuried(test);
   }
 
   /** Copies the view options that don't need a rebuild (the axes; the wireframe is read as it draws). */

@@ -134,7 +134,7 @@ const KIND_WEIGHTS: readonly (readonly [BuildingKind, number])[] = [
 ];
 const KIND_SCALE: Readonly<Record<BuildingKind, readonly [number, number]>> = {
   hub: [1, 1],
-  house: [0.85, 1.15],
+  house: [1, 1.25],
   tower: [0.9, 1.15],
   farm: [0.85, 1.1],
   power: [0.9, 1.1],

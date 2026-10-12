@@ -1,4 +1,5 @@
 import { gasStormCentre } from '../gen/gasWeather';
+import { colonyBlock, colonySite, type ColonyLayout } from '../gen/colony';
 import { Vector3 } from 'three';
 import type { Debug } from '../core/Debug';
 import type { Game } from '../core/Game';
@@ -68,6 +69,8 @@ export class PlanetLab {
   private waiters: (() => void)[] = [];
   private rolls = 0;
   private vent = -1;
+  /** The lab clock's time when the colonies' age last followed it (`view.colonyGrow`). */
+  private colonyClockAt = 0;
 
   constructor(
     private readonly game: Game,
@@ -331,6 +334,63 @@ export class PlanetLab {
     return this.look(lon, lat, zoom).then(() => true);
   }
 
+  // --- Colonies ---
+
+  /**
+   * Founds a colony (globe view, solid bodies) at longitude/latitude
+   * (degrees), else under the UFO (fly camera) or the camera, as a Colony Pod
+   * landing there would, at age 0 (the others with it: they all share the
+   * lab's colony age) and growing with the lab's clock. Resolves with its
+   * layout, or the reason none can be founded there (the Colony Pod's red ring).
+   */
+  foundColony(lon?: number, lat?: number): Promise<ColonyLayout | string> {
+    const level = this._level;
+    const setup = level?.colonySetup;
+    if (!level?.colonies || !setup) return Promise.resolve('Colonies need the globe view of a solid body');
+    const dir = new Vector3();
+    if (lon !== undefined && lat !== undefined) {
+      const la = (lat * Math.PI) / 180;
+      const lo = (lon * Math.PI) / 180;
+      dir.set(Math.cos(la) * Math.sin(lo), Math.sin(la), Math.cos(la) * Math.cos(lo));
+    } else if (this.view.camera === 'fly' && level.ship) dir.copy(level.ship.direction);
+    else dir.copy(level.carry().direction);
+    const reason = colonyBlock(setup.world, setup.ground, dir, level.colonies.marks());
+    if (reason !== null) return Promise.resolve(reason);
+    const colonies = (this.planet.colonies ??= []);
+    const site = colonySite(this.planet.seed, colonies.reduce((n, c) => Math.max(n, Number(c.id.split(':')[1]) + 1), 0), dir, 0);
+    colonies.push(site);
+    const layout = level.colonies.add(site);
+    level.clearUnderColonies();
+    this.view.colonyAge = 0;
+    this.view.colonyGrow = true;
+    this.saveUrl();
+    this.onBuilt?.();
+    return this.whenReady().then(() => layout ?? 'Not built');
+  }
+
+  /** Shows the colonies at `seconds` after the first was founded (and stops their clock). */
+  setColonyAge(seconds: number): Promise<void> {
+    return this.setView({ colonyAge: Math.max(0, seconds), colonyGrow: false });
+  }
+
+  /** Takes every colony off the planet. */
+  clearColonies(): Promise<void> {
+    if (!this.planet.colonies?.length) return Promise.resolve();
+    return this.set({ colonies: [] });
+  }
+
+  /** The camera over colony `i` at `zoom` planet radii (orbit camera), or the UFO parked over it (fly camera). */
+  lookAtColony(i = 0, zoom = 1.12): Promise<void> {
+    const site = this.planet.colonies?.[i];
+    const level = this._level;
+    if (!site || !level) return Promise.resolve();
+    if (this.view.camera === 'fly' && level.ship) {
+      level.ship.placeAt(new Vector3(site.x, site.y, site.z));
+      return this.whenReady();
+    }
+    return this.look((Math.atan2(site.x, site.z) * 180) / Math.PI, (Math.asin(site.y) * 180) / Math.PI, zoom);
+  }
+
   /** Something was edited in place: rebuild once edits pause. */
   changed(): void {
     if (this.timer !== null) clearTimeout(this.timer);
@@ -381,6 +441,10 @@ export class PlanetLab {
   }
 
   private afterFrame(): void {
+    // The colonies grow with the lab's clock (a jump of the clock doesn't count).
+    const step = this.clock.time - this.colonyClockAt;
+    this.colonyClockAt = this.clock.time;
+    if (this.view.colonyGrow && step > 0 && step < 1) this.view.colonyAge += step;
     // Frames count once the surface has refined for the current view.
     if (this.timer !== null || !this.settled) return;
     if (this.framesSinceBuild < READY_FRAMES) this.framesSinceBuild++;

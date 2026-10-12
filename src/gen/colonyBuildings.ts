@@ -71,16 +71,17 @@ const BUILDERS: Record<BuildingKind, Builder> = {
       add('light', [1, 0.05, 0], { radial: 8, size: 1.2 });
       add('canopy', [0, 0.25, 1], { size: 1.3, radial: rng.pick([3, 4]) });
     }),
-  // A house: a rounded block with a canopy of windows, or a squashed sphere under a dome.
+  // A house: a round cottage with windows round it and a mast, or a squashed sphere under a dome.
   house: (rng) =>
     rng.chance(0.5)
-      ? round(core('block', 1.4, rng.range(0.9, 1.2)), (add) => {
-          add('canopy', [0, 1, 0.1], { size: 1.1 });
-          add('light', [0, 0.2, 1], { size: 1 });
-          if (rng.chance(0.6)) add('antenna', [0.6, 1, -0.6], { size: 0.9 });
+      ? round(core('sphere', 1.25, rng.range(0.95, 1.15)), (add) => {
+          add('canopy', [0, 0.2, 1], { size: 0.75, radial: 4 });
+          add('ring', [0, -0.2, 0], { size: 0.8 });
+          add('light', [0, 1, 0], { size: 1 });
+          if (rng.chance(0.6)) add('antenna', [0.5, 0.85, -0.5], { size: 0.9 });
         })
-      : round(core('sphere', 1.45, rng.range(0.65, 0.8)), (add) => {
-          add('dome', [0, 1, 0], { size: 0.9 });
+      : round(core('sphere', 1.45, rng.range(0.7, 0.85)), (add) => {
+          add('dome', [0, 1, 0], { size: 0.95 });
           add('canopy', [0, 0.1, 1], { size: 0.8, radial: 3 });
           if (rng.chance(0.5)) add('dish', [0.6, 0.8, 0], { size: 0.8 });
         }),

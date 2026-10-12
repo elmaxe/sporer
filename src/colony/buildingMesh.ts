@@ -20,6 +20,13 @@ import { createPlantMaterial, type PlantFadeUniforms } from '../surface/plantLoo
 /** Where each level ends, in the building's heights. */
 export const BUILDING_LODS: readonly number[] = [14, 45, 260];
 export const BUILDING_LOD_COUNT = BUILDING_LODS.length;
+/** The tallest a building's levels are measured for: a tower's full detail isn't worth drawing from across the colony. */
+const LOD_HEIGHT_CAP = 3;
+
+/** The height a building of height `height` changes level of detail by (its own, up to a cap). */
+export function buildingLodHeight(height: number): number {
+  return Math.min(height, LOD_HEIGHT_CAP);
+}
 
 /** Small parts left out past the full level. */
 const SMALL: ReadonlySet<ShipPartKind> = new Set(['light', 'antenna', 'grabber', 'cannon']);
@@ -180,8 +187,8 @@ export function createBuildingMaterial(lod: number, height: number, light: Build
       .replace(
         '#include <emissivemap_fragment>',
         `#include <emissivemap_fragment>
-        if (vGlow > 1.5) totalEmissiveRadiance += vColor * 1.2;
-        else if (vGlow > 0.5) totalEmissiveRadiance += mix(vColor, vec3(1.0, 0.75, 0.42), 0.75) * uWindows * vNight;`,
+        if (vGlow > 1.5) totalEmissiveRadiance += vColor.rgb * 1.2;
+        else if (vGlow > 0.5) totalEmissiveRadiance += mix(vColor.rgb, vec3(1.0, 0.72, 0.38), 0.85) * uWindows * vNight;`,
       );
   };
   return { material, uniforms };

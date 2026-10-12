@@ -6,7 +6,7 @@
 //                      hole on the map, fly into its system: its shadow, bent sky and disc, and down to a planet there), dust (a young star's disc,
 //                      a debris disc, comet dust trails, meteor showers and impact flashes in low orbit), audio, planet (the home planet
 //                      loop, held zoom, seamless zooms), types (every planet type and geyser kind), lab, plants
-//                      (the plant lab), animals (the animal lab), stars (the star lab, a black hole too), touch, cargo (the abduction beam and the hold), scan (the scanner and the species repository), volcano (the volcano bomb), buster
+//                      (the plant lab), animals (the animal lab), stars (the star lab, a black hole too), touch, cargo (the abduction beam and the hold), scan (the scanner and the species repository), volcano (the volcano bomb), colony (the colony pod), buster
 //                      (the planet buster, last: it blows up a moon of the home system)
 //   --quick            everything but types
 //   --timeout <s>      give up after this long (default 900), reporting the section it was in
@@ -89,6 +89,12 @@
 // real click on the ground fires it: a volcano rises there (the ground under it is higher, the ship flies over it; its
 // cone is one chunk seen from afar and splits into finer ones next to it, like the terrain), the cues go fire → rise, the bomb stays armed for another; over a gas giant it can't be used; the system view's globe
 // shows it, it's still there (risen) when the planet is visited again, and on the globe after a trip to the galaxy.
+// Colony pod: on the Inventory tab, 4 in the system says where to use it; over a gas giant it can't be armed, over an airless
+// world it says why no colony can live there; over the home system's habitable planet a real 4 arms it and a real click
+// on dry land drops a pod: it lands (cues drop → land), the hub rises, the hint names the colony, the spot next to it is
+// refused, it's saved in the body's change list and the galaxy's colonies; wound forward it grows every ring with
+// colonists about; the system view's globe and the galaxy map mark it, it's there when the planet is visited again and
+// after a reload, the debug dump carries it; the planet lab founds one and shows it at any age.
 // Planet buster (last, as it leaves a moon of the home system busted): the item bar shows in the system with the
 // buster unusable (pressing 1 says where to use it); in low orbit over a moon, a real 1 arms it and a real click on the
 // globe fires it (once); scrolling out is refused until it's over; the screen flashes, the globe gives way to debris,
@@ -118,7 +124,7 @@ import { launch, sleep, StallError } from './lib/browser.mjs';
 
 const args = process.argv.slice(2);
 const option = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
-const SECTIONS = ['core', 'galaxy', 'nebulas', 'rogues', 'blackholes', 'dust', 'audio', 'planet', 'types', 'lab', 'plants', 'animals', 'stars', 'touch', 'cargo', 'scan', 'volcano', 'buster'];
+const SECTIONS = ['core', 'galaxy', 'nebulas', 'rogues', 'blackholes', 'dust', 'audio', 'planet', 'types', 'lab', 'plants', 'animals', 'stars', 'touch', 'cargo', 'scan', 'volcano', 'colony', 'buster'];
 const only = option('--only')?.split(',');
 if (only?.some((name) => !SECTIONS.includes(name))) {
   console.error(`--only takes some of: ${SECTIONS.join(', ')}`);
@@ -178,6 +184,7 @@ let buster = null;
 let cargo = null;
 let scan = null;
 let volcano = null;
+let colony = null;
 let plantLab = null;
 let touch = null;
 let touchLab = null;
@@ -3024,8 +3031,8 @@ await section('cargo', async () => {
   const watchHints = () => evaluate(`(() => { const el = document.getElementById('item-hint'); window.__hintsSeen = [el.textContent]; window.__hintWatch?.disconnect();
     window.__hintWatch = new MutationObserver(() => window.__hintsSeen.push(el.textContent)); window.__hintWatch.observe(el, { childList: true, characterData: true, subtree: true }); })()`);
   const hintsSeen = () => evaluate(`window.__hintsSeen.join(' | ')`);
-  // Select the stack (4, after the beam, the radar and the scanner) and hold on the ground: it's set down and takes root.
-  await key('Digit4', '4');
+  // Select the stack (5, after the beam, the radar, the scanner and the colony pod) and hold on the ground: it's set down and takes root.
+  await key('Digit5', '5');
   const exportArmed = await evaluate(`planet.selected`);
   const stackBefore = await evaluate(`levels.inventory.stacks[0].count`);
   const totalBefore = await evaluate(`levels.inventory.total`);
@@ -3044,7 +3051,7 @@ await section('cargo', async () => {
   await key('Digit1', '1');
   await beamUp();
   await beamUp();
-  await key('Digit4', '4');
+  await key('Digit5', '5');
   const spot = await evaluate(`__ground('land', 8, 35)`);
   await mouse('mouseMoved', spot);
   await mouse('mousePressed', spot);
@@ -3053,7 +3060,7 @@ await section('cargo', async () => {
   await until(`planet.cargo.inFlight.length === 0`, 20000);
   dropped.shipStayed = !(await evaluate(`planet.ship.enRoute`));
   // The other set down in the sea: it drowns.
-  if (!(await evaluate(`planet.selected`))) await key('Digit4', '4');
+  if (!(await evaluate(`planet.selected`))) await key('Digit5', '5');
   const sea = await evaluate(`__ground('sea', 8, 68)`);
   let drown = null;
   if (sea) {
@@ -3389,7 +3396,7 @@ await section('scan', async () => {
   await evaluate(`(() => { localStorage.removeItem('spore2.repository.' + galaxy.seed); levels.repository.load({ entries: [] }); })()`);
   Object.assign(scan, { cues, names, reloaded });
   scan.ok =
-    slots.join() === 'abduct,radar,scan' &&
+    slots.join() === 'abduct,radar,scan,colonyPod' &&
     armed.selected === 'scan' &&
     armed.cursor &&
     /hold on an animal or a plant to scan it/.test(armed.hint) &&
@@ -3571,6 +3578,196 @@ await section('volcano', async () => {
     rebuilt === 1;
   return volcano.ok;
 });
+await section('colony', async () => {
+  // A fresh game, no colonies kept from before.
+  if (!(await page.goto(url, READY, 60000))) return false;
+  await evaluate(`localStorage.removeItem('spore2.colonies.' + galaxy.seed)`);
+  if (!(await page.goto(url, READY, 60000))) return false;
+  await drawFrames(20);
+  for (let i = 0; i < 40 && (await evaluate(`levels.transitioning || levels.mode !== 'system'`)); i++) {
+    if (await evaluate(`levels.mode === 'planet' && !levels.transitioning`)) await evaluate(`levels.leavePlanet()`);
+    if (await evaluate(`levels.mode === 'galaxy' && !levels.transitioning`)) await evaluate(`levels.toSystem()`);
+    await sleep(500);
+  }
+  const press = async (code, key) => {
+    for (const type of ['keyDown', 'keyUp']) {
+      await send('Input.dispatchKeyEvent', { type, code, key });
+      await drawFrames(2);
+    }
+  };
+  const inventory = async () => {
+    for (let i = 0; i < 3 && (await evaluate(`document.getElementById('item-bar').dataset.tab !== 'inventory'`)); i++) await press('Tab', 'Tab');
+  };
+  const down = async (pick) => {
+    await evaluate(`(() => { const b = ${pick}; window.__colonyBody = b; ship.parkAt(b); levels.systemLevel.orbit.lookFrom(world.stars[0].position.clone().sub(b.position)); levels.toPlanet(b); })()`);
+    await until(`levels.mode === 'planet' && !levels.transitioning`, 60000);
+    await drawFrames(5);
+  };
+  const up = async () => {
+    await evaluate(`levels.leavePlanet()`);
+    await until(`levels.mode === 'system' && !levels.transitioning`, 60000);
+  };
+  await inventory();
+  await press('Digit4', '4');
+  const inSpace = await evaluate(`({ slot: document.querySelectorAll('.item-slot[data-item]')[3]?.dataset.item, hint: document.getElementById('item-hint').textContent })`);
+  // A gas giant has no ground to build on.
+  const giant = await evaluate(`world.planets.some((p) => p.config.type === 'gas')`);
+  let gas = null;
+  if (giant) {
+    await down(`world.planets.find((p) => p.config.type === 'gas')`);
+    await inventory();
+    await press('Digit4', '4');
+    gas = await evaluate(`({ selected: planet.selected, status: planet.status('colonyPod'), colonies: planet.colonies })`);
+    await up();
+  }
+  // An airless or frozen world: armed, but the ring is red and says why.
+  const bare = await evaluate(`[...world.planets, ...world.moons].some((p) => p.config.type !== 'gas' && (p.config.climate?.habitability ?? 0) === 0)`);
+  let harsh = null;
+  if (bare) {
+    await down(`[...world.planets, ...world.moons].find((p) => p.config.type !== 'gas' && (p.config.climate?.habitability ?? 0) === 0)`);
+    harsh = await evaluate(`planet.colonySiteBlock(planet.ship.object.position.clone().normalize())`);
+    await up();
+  }
+  // Down to the habitable planet, over the sunniest dry, gentle land there is.
+  await down(`[...world.planets, ...world.moons].find((p) => p.config.type !== 'gas' && (p.config.climate?.habitability ?? 0) > 0)`);
+  const site = await evaluate(`(() => {
+    const V = planet.ship.up.constructor; const sun = planet.globe.sun.clone().normalize(); let best = null; const n = 3000;
+    // Room round it too: the click lands a little off the spot.
+    const ok = (d) => { if (planet.colonySiteBlock(d) !== null) return false; const e = new V(); for (let k = 0; k < 8; k++) { const a = k * Math.PI / 4;
+      e.set(Math.cos(a), Math.sin(a), Math.cos(a + 1)).cross(d).normalize().multiplyScalar(0.012).add(d).normalize(); if (planet.colonySiteBlock(e) !== null) return false; } return true; };
+    for (let i = 0; i < n; i++) { const y = 1 - 2 * (i + 0.5) / n, r = Math.sqrt(1 - y * y), a = i * 2.399963; const d = new V(r * Math.cos(a), y, r * Math.sin(a));
+      const s = d.dot(sun); if ((!best || s > best.s) && ok(d)) best = { s, d }; }
+    if (!best) return null;
+    window.__site = best.d; planet.ship.placeAt(best.d.clone());
+    return best.s;
+  })()`);
+  if (site === null) return false;
+  await until(`Math.abs(planet.ship.radius - planet.ship.goalRadius) < 0.05 && planet.ship.object.position.clone().normalize().dot(__site) > 0.99999`, 60000);
+  await drawFrames(5);
+  await inventory();
+  await press('Digit4', '4');
+  const armed = await evaluate(`({ selected: planet.selected, aiming: document.body.classList.contains('aiming'), hint: document.getElementById('item-hint').textContent })`);
+  // A real click on the land under the ship.
+  const target = await evaluate(`(() => {
+    const g = __site.clone().multiplyScalar(planet.groundRadius(__site));
+    const v = g.project(game.camera);
+    const r = game.renderer.domElement.getBoundingClientRect();
+    return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height };
+  })()`);
+  await evaluate(`(() => {
+    window.__cues = [];
+    const play = audio.play.bind(audio);
+    audio.play = (c) => (__cues.push(c), play(c));
+  })()`);
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...target });
+  await drawFrames(3);
+  const ring = await evaluate(`({ green: planet.colonyPod.good.mesh.visible, red: planet.colonyPod.bad.mesh.visible })`);
+  for (const type of ['mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, ...target, button: 'left', clickCount: 1 });
+  await drawFrames(2);
+  const fired = await evaluate(`({ inFlight: planet.colonyPod.inFlight, enRoute: planet.ship.enRoute, hint: document.getElementById('item-hint').textContent })`);
+  const landed = await until(`planet.colonies.count === 1`, 120000);
+  await drawFrames(2);
+  const founded = await evaluate(`(() => { const L = planet.colonies.layouts[0];
+    return { name: L.name, tier: L.tier, rings: L.rings, buildings: L.buildings.length, stats: planet.colonies.stats(), hint: document.getElementById('item-hint').textContent,
+      near: planet.colonySiteBlock(new (planet.ship.up.constructor)(L.site.x, L.site.y, L.site.z)),
+      saved: levels.surfaceChanges.forPlanet(__colonyBody.name + ':' + __colonyBody.config.seed).colonies.length, ledger: levels.colonies.size,
+      stored: JSON.parse(localStorage.getItem('spore2.colonies.' + galaxy.seed) ?? '{}').colonies?.length ?? 0 }; })()`);
+  const risen = await until(`planet.colonies.stats().standing >= 1 && planet.colonies.stats().rising === 0`, 120000);
+  // Wound on: every ring up, colonists about.
+  await evaluate(`colonyClock.offset += 1000 * 1000`);
+  await drawFrames(3);
+  const grown = await until(`planet.colonies.stats().standing === planet.colonies.stats().buildings && planet.colonies.stats().rising === 0`, 120000);
+  const after = await evaluate(`({ ...planet.colonies.stats(), marks: planet.colonies.marks().length, dump: debugDump.data().state?.colonies?.ledger?.colonies?.length ?? null })`);
+  const heard = (await evaluate(`__cues`)).filter((c) => c.startsWith('colony'));
+  await up();
+  const systemView = await evaluate(`__colonyBody.colonySites.length`);
+  await down(`__colonyBody`);
+  await until(`planet.colonies?.count === 1`, 60000);
+  const revisit = await evaluate(`planet.colonies.stats()`);
+  await up();
+  // The galaxy map tints the star.
+  await evaluate(`levels.toGalaxy()`);
+  await until(`levels.mode === 'galaxy' && !levels.transitioning`, 60000);
+  const galaxyMap = await evaluate(`({ stars: [...levels.galaxyLevel.map.colonyStars], here: levels.systemLevel?.ref?.id ?? null, star: system.id ?? null })`);
+  await evaluate(`levels.toSystem()`);
+  await until(`levels.mode === 'system' && !levels.transitioning`, 60000);
+  // Kept on the device: there after a reload, on the system view's globe and on the ground (the clock wound on as before).
+  const wound = await evaluate(`colonyClock.offset`);
+  if (!(await page.goto(url, READY, 60000))) return false;
+  await evaluate(`colonyClock.offset = ${wound}`);
+  await drawFrames(10);
+  const reloaded = { ledger: await evaluate(`levels.colonies.size`), globe: await evaluate(`[...world.planets, ...world.moons].find((b) => b.config.climate?.habitability > 0 && b.config.type !== 'gas')?.colonySites.length`) };
+  await down(`[...world.planets, ...world.moons].find((p) => p.config.type !== 'gas' && (p.config.climate?.habitability ?? 0) > 0)`);
+  reloaded.ground = await until(`planet.colonies?.count === 1`, 60000);
+  reloaded.standing = await evaluate(`planet.colonies.stats().standing`);
+  const labLink = await evaluate(`planet.labLink()`);
+  await evaluate(`colonyClock.offset = 0`);
+  await evaluate(`localStorage.removeItem('spore2.colonies.' + galaxy.seed)`);
+  // The planet lab: the game's colony comes along in its link; one founded there grows as its age is scrubbed.
+  if (!(await page.goto(labLink, `window.lab && lab.ready`, 60000))) return false;
+  await until(`lab.ready`, 60000);
+  const labColony = { linked: await evaluate(`({ count: lab.level.colonies?.count ?? 0, age: lab.view.colonyAge })`) };
+  await evaluate(`lab.clearColonies()`);
+  labColony.cleared = await evaluate(`lab.level.colonies.count`);
+  labColony.founded = await evaluate(`(async () => { const s = lab.level.colonySetup; const V = lab.level.ship.up.constructor; const n = 3000;
+    for (let i = 0; i < n; i++) { const y = 1 - 2 * (i + 0.5) / n, r = Math.sqrt(1 - y * y), a = i * 2.399963; const d = new V(r * Math.cos(a), y, r * Math.sin(a));
+      if (lab.level.colonies && (await import('/src/gen/colony.ts')).colonyBlock(s.world, s.ground, d, []) === null) {
+        const L = await lab.foundColony(Math.atan2(d.x, d.z) * 180 / Math.PI, Math.asin(d.y) * 180 / Math.PI); return typeof L === 'string' ? L : L.buildings.length; } }
+    return null; })()`);
+  await evaluate(`lab.setColonyAge(2)`);
+  labColony.young = await evaluate(`lab.level.colonies.stats()`);
+  await evaluate(`lab.setColonyAge(900)`);
+  await drawFrames(3);
+  labColony.old = await evaluate(`lab.level.colonies.stats()`);
+  labColony.kept = await evaluate(`(async () => { await lab.rebuild(); await lab.whenReady(); return lab.level.colonies.count; })()`);
+  labColony.readout = await evaluate(`document.body.textContent.includes('Colonies')`);
+  colony = { inSpace, gas, harsh, site, armed, ring, fired, landed, founded, risen, grown, after, heard, systemView, revisit, galaxyMap, reloaded, labColony };
+  colony.ok =
+    inSpace.slot === 'colonyPod' &&
+    /down to a planet or moon/.test(inSpace.hint) &&
+    (!giant || (gas.selected === null && !gas.status.available && /No ground/.test(gas.status.reason) && gas.colonies === null)) &&
+    (!bare || /air|hot|cold|harsh|Lava/.test(harsh ?? '')) &&
+    armed.selected === 'colonyPod' &&
+    armed.aiming &&
+    /drop a colony pod/.test(armed.hint) &&
+    ring.green &&
+    !ring.red &&
+    fired.inFlight &&
+    !fired.enRoute &&
+    landed &&
+    founded.tier >= 1 &&
+    founded.rings === founded.tier &&
+    founded.stats.standing <= 1 &&
+    new RegExp(`${founded.name} founded`).test(founded.hint) &&
+    /Too close to/.test(founded.near ?? '') &&
+    founded.saved === 1 &&
+    founded.ledger === 1 &&
+    founded.stored === 1 &&
+    risen &&
+    grown &&
+    after.buildings > 1 &&
+    after.colonists > 0 &&
+    after.marks === 1 &&
+    after.dump === 1 &&
+    heard.join(',') === 'colonyDrop,colonyLand' &&
+    systemView === 1 &&
+    revisit.colonies === 1 &&
+    revisit.standing === revisit.buildings &&
+    galaxyMap.stars.length === 1 &&
+    reloaded.ledger === 1 &&
+    reloaded.globe === 1 &&
+    reloaded.ground &&
+    reloaded.standing === founded.buildings &&
+    labColony.linked.count === 1 &&
+    labColony.linked.age > 900 &&
+    labColony.cleared === 0 &&
+    typeof labColony.founded === 'number' &&
+    labColony.young.standing <= 1 &&
+    labColony.old.standing === labColony.old.buildings &&
+    labColony.kept === 1 &&
+    labColony.readout;
+  return colony.ok;
+});
 await section('buster', async () => {
   // A fresh game (the lab section leaves the page on lab.html).
   if (!(await page.goto(url, READY, 60000))) return false;
@@ -3692,7 +3889,7 @@ const ok = started && !stalled && Object.keys(sections).length > 0 && Object.val
 console.error(`[smoke] ${ok ? 'ok' : 'FAILED'} in ${Math.round((Date.now() - T0) / 1000)} s${errors.length ? `, ${errors.length} console errors` : ''}`);
 console.log(
   JSON.stringify(
-    { ok, started, stalled, sections, before, after, autopilot, pick, systemMap, sky, living, comet, belt, galaxyLoop, nebulas, rogues, blackHoles, dust, seamless, audio, planetLoop, heldZoom, cometLoop, asteroidLoops, planetTypes, touch, touchLab, cargo, scan, volcano, buster, lab, plantLab, animalLab, gameAnimals, starLab, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
+    { ok, started, stalled, sections, before, after, autopilot, pick, systemMap, sky, living, comet, belt, galaxyLoop, nebulas, rogues, blackHoles, dust, seamless, audio, planetLoop, heldZoom, cometLoop, asteroidLoops, planetTypes, touch, touchLab, cargo, scan, volcano, colony, buster, lab, plantLab, animalLab, gameAnimals, starLab, fps, errors, screenshot, galaxyScreenshot: join(outDir, 'galaxy.png') },
     null,
     2,
   ),
