@@ -2,6 +2,7 @@ import type { VolcanoSite } from '../combat/volcano';
 import type { InventoryData } from '../cargo/inventory';
 import type { SurfaceChangesData } from '../surface/changes';
 import type { RepositoryData } from '../scan/repository';
+import type { ColonyLedgerData } from '../gen/colony';
 import type { LogEntry } from './consoleLog';
 import type { FrameStats } from './frameTimes';
 
@@ -101,6 +102,15 @@ export interface GameState {
    * the species it reads and how far along, and the scans it completed on this visit.
    */
   scan?: { repository: RepositoryData; scanner: { on: boolean; reading: string | null; progress: number; completed: number } | null };
+  /**
+   * Every colony founded in the galaxy (missing in dumps from before them), the colonies' clock then (ms since
+   * 1970: their ages are restored with it), and in low orbit what the body's colonies held.
+   */
+  colonies?: {
+    ledger: ColonyLedgerData;
+    now: number;
+    here: { colonies: number; buildings: number; standing: number; rising: number; colonists: number; drawn: number } | null;
+  };
   /** What the DOM overlays showed (text the screenshot's game picture leaves out). */
   ui: {
     touchMode: boolean;
@@ -290,6 +300,11 @@ export function summaryLines(dump: Omit<DebugDump, 'images'>): string[] {
       const picked = radar.tracking === null ? '' : `tracking ${radar.species ?? `species ${radar.tracking}`}`;
       const how = radar.distance !== null ? ` · nearest ${radar.distance.toFixed(0)} units away` : radar.tracking !== null && radar.state !== 'standby' ? ` · ${radar.state}` : '';
       lines.push(`Radar: ${[power, picked].filter(Boolean).join(' · ')}${how}`);
+    }
+    const col = s.colonies;
+    if (col && col.ledger.colonies.length > 0) {
+      const here = col.here ? ` · here: ${col.here.colonies} colon${col.here.colonies === 1 ? 'y' : 'ies'}, ${col.here.standing}/${col.here.buildings} buildings up, ${col.here.colonists} colonists` : '';
+      lines.push(`Colonies: ${col.ledger.colonies.map((c) => `${c.name} on ${c.body.split(':')[0]}`).join(', ')}${here}`);
     }
     const scan = s.scan;
     if (scan && (scan.repository.entries.length > 0 || scan.scanner?.on || scan.scanner?.completed)) {

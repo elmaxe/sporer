@@ -25,13 +25,15 @@ export class MarkerRing {
     private readonly pulse = 0.08,
     /** Line width as a fraction of the radius. */
     width = 0.15,
+    /** Glowing (added to what's behind), or a plain colour that keeps its hue on bright ground. */
+    glow = true,
   ) {
     this.mesh = new THREE.Mesh(
       new THREE.RingGeometry(1 - width, 1, 64),
       new THREE.MeshBasicMaterial({
         color,
         transparent: true,
-        blending: THREE.AdditiveBlending,
+        blending: glow ? THREE.AdditiveBlending : THREE.NormalBlending,
         depthWrite: false,
         side: THREE.DoubleSide,
         toneMapped: false,

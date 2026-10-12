@@ -78,6 +78,7 @@ export class LabPanel {
   ) {
     this.buildLab();
     this.buildLight();
+    this.buildColonies();
     this.planetRoot = gui.addFolder('Planet');
     this.buildPlanet();
     lab.onReplaced = () => this.refresh();
@@ -181,6 +182,31 @@ export class LabPanel {
       },
     };
     f.add(time, 't', 0, 600, 0.1).name('time (s)').listen();
+  }
+
+  /** Colonies (gen/colony.ts): found one where the camera looks, and scrub their age. */
+  private buildColonies(): void {
+    const lab = this.lab;
+    const view = lab.view;
+    const f = this.gui.addFolder('Colonies').close();
+    const result = { text: 'Found one where the camera looks' };
+    f.add(view, 'colonyAge', 0, 900, 1).name('age (s)').listen().onChange(() => {
+      view.colonyGrow = false;
+      void lab.setView({});
+    });
+    f.add(view, 'colonyGrow').name('grow with the clock').listen().onChange(() => void lab.setView({}));
+    const actions = {
+      found: () =>
+        void lab.foundColony().then((r) => {
+          result.text = typeof r === 'string' ? r : `${r.name}: ${r.buildings.length} buildings in ${r.rings} ring${r.rings === 1 ? '' : 's'}`;
+        }),
+      look: () => void lab.lookAtColony(0),
+      clear: () => void lab.clearColonies(),
+    };
+    f.add(actions, 'found').name('Found a colony here');
+    f.add(result, 'text').name('').listen().disable();
+    f.add(actions, 'look').name('Look at the first colony');
+    f.add(actions, 'clear').name('Clear the colonies');
   }
 
   /** (Re)builds the planet folders for the current planet. */

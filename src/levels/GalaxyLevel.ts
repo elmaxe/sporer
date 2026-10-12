@@ -85,6 +85,8 @@ export class GalaxyLevel extends Level {
     sfx: SoundEffects,
     /** Called when the player scrolls in past the closest zoom (to enter a system). */
     onZoomIn: () => void,
+    /** The names of the colonies in a star's system (by its id), for its tooltip. */
+    colonyNames: (star: number) => readonly string[] = () => [],
   ) {
     super();
     this.radius = galaxy.radius;
@@ -133,7 +135,7 @@ export class GalaxyLevel extends Level {
       new GalaxyPicker(camera, input, canvas, galaxy, [...galaxy.stars, ...galaxy.rogues], positions, this.ship, this.root, sfx),
     );
     this.hud = this.add(
-      new GalaxyHud(this.scene, camera, input, galaxy, this.ship, picker, tooltip, this.map, this.root),
+      new GalaxyHud(this.scene, camera, input, galaxy, this.ship, picker, tooltip, this.map, this.root, colonyNames),
     );
   }
 

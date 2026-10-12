@@ -241,6 +241,12 @@ export class LabInfo implements Entity {
       const st = animals.stats();
       rows.push(['Animals', `${animals.plan.species.length} species · ${st.animals} in ${st.herds} herds near · ${st.drawn} drawn · ${st.walking} walking, ${st.grazing} grazing`]);
     }
+    const colonies = level?.colonies;
+    if (colonies && colonies.count > 0) {
+      const st = colonies.stats();
+      const names = colonies.marks().map((m) => m.name).join(', ');
+      rows.push(['Colonies', `${names} · ${Math.round(this.lab.view.colonyAge)} s old · ${st.standing}/${st.buildings} buildings standing${st.rising ? `, ${st.rising} rising` : ''} · ${st.colonists} colonists`]);
+    }
     if (planet.rings) {
       const rocks = level?.globe?.rings;
       const near = rocks ? ` · ${Math.round(rocks.ice * 100)}% ice · ${rocks.count} rocks near` : '';

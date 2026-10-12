@@ -50,6 +50,8 @@ const PATH_SAMPLES = 48;
 const TOGGLE_KEY = 'KeyN';
 const STORAGE_KEY = 'spore2.map';
 const ACCENT = '#66ffcc';
+/** The colonies' marks. */
+const COLONY_COLOR = '#9dffc0';
 
 /** The map panel's tabs: the map itself, or the planet's species (SpeciesTab). */
 export type MapTab = 'map' | 'species';
@@ -228,6 +230,8 @@ export class PlanetMap implements Entity {
     debug: Debug,
     /** The Species tab, if the map has one (the game's; not the planet lab's). */
     private readonly species: SpeciesTab | null = null,
+    /** The colonies on the body (colony/Colonies.ts), marked with their names. */
+    private readonly colonies: () => readonly { x: number; y: number; z: number; name: string }[] = () => [],
   ) {
     // Baked for the size it will mostly be shown at (the touch overlay is bigger).
     const pixelRatio = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
@@ -551,6 +555,31 @@ export class PlanetMap implements Entity {
     ctx.shadowBlur = 8 * px;
     ctx.fill();
     ctx.shadowBlur = 0;
+
+    // The colonies: a little house each, with its name.
+    for (const c of this.colonies()) {
+      this.project(this.along.set(c.x, c.y, c.z), point);
+      const s = 5 * px;
+      ctx.beginPath();
+      ctx.moveTo(point.x - s, point.y + s * 0.8);
+      ctx.lineTo(point.x - s, point.y - s * 0.1);
+      ctx.lineTo(point.x, point.y - s);
+      ctx.lineTo(point.x + s, point.y - s * 0.1);
+      ctx.lineTo(point.x + s, point.y + s * 0.8);
+      ctx.closePath();
+      ctx.fillStyle = COLONY_COLOR;
+      ctx.shadowColor = COLONY_COLOR;
+      ctx.shadowBlur = 6 * px;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.font = `${11 * px}px system-ui, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.lineWidth = 3 * px;
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
+      ctx.strokeText(c.name, point.x, point.y + s * 1.2);
+      ctx.fillText(c.name, point.x, point.y + s * 1.2);
+    }
 
     const ship = this.ship;
     const u = ship.up;

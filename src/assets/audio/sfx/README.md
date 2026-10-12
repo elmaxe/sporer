@@ -28,6 +28,8 @@ rebuild; no code changes needed. Volumes and fades are in `cueParams` (`src/audi
 | `laserHit/` | The laser killing an animal or a plant (once for each). The file there is a synthesised placeholder: replace it with your own | one-shot |
 | `scanBeam/` | The scanner (Inventory) on: starts on the press, fades out when it's let go. The file there is a synthesised placeholder (`scripts/scanSounds.sh`): replace it with your own | loop |
 | `scanSuccess/` | A scan completing on a species new to the species repository. The file there is a synthesised placeholder (`scripts/scanSounds.sh`): replace it with your own | one-shot |
+| `colonyDrop/` | A Colony Pod (Inventory) leaving the ship. The file there is a synthesised placeholder (`scripts/colonySounds.sh`): replace it with your own | one-shot |
+| `colonyLand/` | The Colony Pod landing and the colony's hub rising out of the ground. The file there is a synthesised placeholder (`scripts/colonySounds.sh`): replace it with your own | one-shot |
 | `ventBurst/` | A geyser, plume or fumarole near the camera bursting into eruption (low orbit), louder the nearer it is | one-shot |
 | `starNear/` | A star close up: grows as the camera nears its surface, taking over from `starFar` | ambient |
 | `starFar/` | A star from across its system: fades with distance, giving way to `starNear` close up | ambient |

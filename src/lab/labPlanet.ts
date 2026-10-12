@@ -36,6 +36,7 @@ import {
   type SizeClass,
 } from '../gen/planets';
 import { Rng, hashSeed } from '../gen/rng';
+import { parseColonySite, type ColonySite } from '../gen/colony';
 import type { ShapeData } from '../gen/shape';
 import { nominalStar, type StarKind, type SpectralClass } from '../gen/stars';
 import { assessLife, moonDistance, type LifeEstimate, type LifeHost, type LifeStar } from '../gen/life';
@@ -107,6 +108,8 @@ export interface LabPlanet {
   zone: number;
   /** A game body's system for its chance of life: its stars and, for a moon, its planet. Absent: lit by the lab's star, no host. */
   home?: { stars: LifeStar[]; host: LifeHost | null } | null;
+  /** Colonies founded on it (globe view; gen/colony.ts), founded `founded` ms after the first: `LabView.colonyAge` is how long ago that was. */
+  colonies?: ColonySite[];
 }
 
 /** A comet's distance from the star in the lab by default (habitable radii): fully active, as at a close pass. */
@@ -138,6 +141,10 @@ export interface LabView {
   starfield: boolean;
   /** Editing the radius, type or size recomputes gravity, escape velocity and heat flow. */
   autoSetting: boolean;
+  /** Seconds since the first colony was founded: how far they have grown (the game's colonies grow by the device's clock). */
+  colonyAge: number;
+  /** The colonies' clock runs with the lab's (else it stands at `colonyAge`). */
+  colonyGrow: boolean;
 }
 
 export const DEFAULT_VIEW: LabView = {
@@ -154,6 +161,8 @@ export const DEFAULT_VIEW: LabView = {
   axes: false,
   starfield: true,
   autoSetting: true,
+  colonyAge: 600,
+  colonyGrow: false,
 };
 
 /**
@@ -637,6 +646,7 @@ export function decodeLab(text: string): LabState | null {
     if (planet.type !== 'gas' && !planet.climate) planet.climate = base.climate;
     if (isSmallKind(planet.kind) && !planet.shape) planet.shape = base.shape;
     if (typeof planet.zone !== 'number' || !Number.isFinite(planet.zone)) planet.zone = base.zone;
+    if (p.colonies !== undefined) planet.colonies = (Array.isArray(p.colonies) ? p.colonies : []).map(parseColonySite).filter((c) => c !== null);
     // Links from before the atmosphere was split into gases still open.
     const state: LabState = { planet: withUpgradedClimate(planet), view: { ...DEFAULT_VIEW, ...raw.view } };
     if (raw.source && typeof raw.source.star === 'number') state.source = raw.source;
