@@ -3,6 +3,7 @@ import type { Game } from '../core/Game';
 import type { SceneManager } from '../levels/SceneManager';
 import type { SystemLevel } from '../levels/SystemLevel';
 import { bodyKey } from '../combat/busted';
+import { colonyClock } from '../colony/clock';
 import { bodyLabLink } from '../lab/bodyLink';
 import { lodParams } from '../planet/LodSurface';
 import type { OrbitCamera } from '../player/OrbitCamera';
@@ -188,6 +189,7 @@ export function captureGameState(game: Game, levels: SceneManager): GameState {
       inFlight: planet?.cargo?.inFlight ?? [],
       laser: planet ? { firing: planet.laser.on, killed: planet.laser.killed, burning: planet.laser.burning } : undefined,
     },
+    colonies: { ledger: levels.colonies.toJSON(), now: colonyClock.now(), here: planet?.colonies?.stats() ?? null },
     scan: {
       repository: levels.repository.toJSON(),
       scanner: planet
@@ -286,6 +288,15 @@ export async function restoreGameState(game: Game, levels: SceneManager, state: 
       if (changes.volcanoes.some((v) => v.seed === site.seed)) continue;
       changes.addVolcano(site);
       body.addVolcano(site, null);
+    }
+  }
+  // Colonies before low orbit is built too, aged as they were.
+  if (state.colonies) {
+    colonyClock.offset = state.colonies.now - Date.now();
+    levels.loadColonies(state.colonies.ledger);
+    for (const r of state.colonies.ledger.colonies) {
+      const body = spinning(world).find((b) => bodyKey(b.config) === r.body);
+      body?.addColony(r.site, r.name);
     }
   }
   if (state.scan) {

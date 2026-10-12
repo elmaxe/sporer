@@ -29,6 +29,8 @@ export type SoundCue =
   | 'laserHit'
   | 'scanBeam'
   | 'scanSuccess'
+  | 'colonyDrop'
+  | 'colonyLand'
   | 'ventBurst'
   | 'starNear'
   | 'starFar'
@@ -60,6 +62,8 @@ export const SOUND_CUES: readonly SoundCue[] = [
   'laserHit',
   'scanBeam',
   'scanSuccess',
+  'colonyDrop',
+  'colonyLand',
   'ventBurst',
   'starNear',
   'starFar',
@@ -180,6 +184,10 @@ export const cueParams: Record<SoundCue, CueSpec> = {
   scanBeam: { ...travel(), volume: 0.55, fadeIn: 0.08, fadeOut: 0.2, loopCrossfade: 0.3 },
   // A scan completing on a species new to the repository.
   scanSuccess: { ...oneShot(), volume: 0.8 },
+  // A Colony Pod leaving the ship.
+  colonyDrop: { ...oneShot(), volume: 0.8 },
+  // The pod landing and the colony's hub rising.
+  colonyLand: oneShot(),
   // A vent near the camera bursting into eruption (geysers, plumes, fumaroles; see VentSounds).
   ventBurst: { ...oneShot(), volume: 0.7 },
   // A star close up, as the camera nears its surface (see StarSounds).

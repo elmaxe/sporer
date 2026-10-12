@@ -27,7 +27,7 @@ export interface PartMeshInfo {
   mirrored: boolean;
 }
 
-interface Piece {
+export interface Piece {
   geometry: THREE.BufferGeometry;
   channel: PaintChannel | 'exhaust' | 'blink';
   /** Pieces in a spinning group (rings) turn about the part's y while flying. */
@@ -66,7 +66,8 @@ function flatRing(r: number, tube: number): THREE.BufferGeometry {
   return new THREE.TorusGeometry(r, tube, 10, 64).rotateX(Math.PI / 2);
 }
 
-function pieces(kind: ShipPartKind): Piece[] {
+/** The meshes a part kind is made of, at size 1 in its own frame (made once; shared, never disposed). */
+export function pieces(kind: ShipPartKind): Piece[] {
   const cached = pieceCache.get(kind);
   if (cached) return cached;
   const out: Piece[] = [];

@@ -58,6 +58,13 @@ const ICONS: Record<ToolId, string> = {
     '<path d="M3 8V4.5A1.5 1.5 0 0 1 4.5 3H8M16 3h3.5A1.5 1.5 0 0 1 21 4.5V8M21 16v3.5a1.5 1.5 0 0 1-1.5 1.5H16M8 21H4.5A1.5 1.5 0 0 1 3 19.5V16" />' +
     '<path d="M7 12h10" stroke-width="2" />' +
     '<path d="M9.5 8.5c.8-1 1.6-1.5 2.5-1.5s1.7.5 2.5 1.5M9.5 15.5c.8 1 1.6 1.5 2.5 1.5s1.7-.5 2.5-1.5" /></svg>',
+  colonyPod:
+    '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M2 21h20" />' +
+    '<path d="M4 21v-3.5a3.5 3.5 0 0 1 7 0V21M13 21v-6a4 4 0 0 1 8 0v6" />' +
+    '<path d="M17 11V8.5M17 8.5l2-1.2" />' +
+    '<path d="M8 2.5c1.4 0 2.5 1.1 2.5 2.5v2.5L8 9.5 5.5 7.5V5c0-1.4 1.1-2.5 2.5-2.5z" />' +
+    '<path d="M8 11v1.5" stroke-dasharray="1 1.5" /></svg>',
 };
 
 /** What the bar needs to know about the game: where the player is, what can use items there, and what's in the hold. */

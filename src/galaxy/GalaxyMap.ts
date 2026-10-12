@@ -28,6 +28,9 @@ export const galaxyMapParams = {
  * (see binaryLayout). Everything is added to `parent`, the galaxy's rotating
  * root, and works in its local (galaxy) coordinates.
  */
+/** The tint of a star with colonies (linear RGB): the colonies' green. */
+const COLONY_TINT = [0.35, 1, 0.5];
+
 export class GalaxyMap implements Entity {
   /** Star positions as xyz triples, indexed like `galaxy.stars` (binaries: the centre of mass). */
   readonly positions: Float32Array;
@@ -44,6 +47,9 @@ export class GalaxyMap implements Entity {
   private readonly centre = new THREE.Vector3();
   private readonly inverse = new THREE.Matrix4();
   private time = 0;
+  /** The dots' own colours, kept while some are tinted for colonies. */
+  private ownColors: Float32Array | null = null;
+  private colonyIds: ReadonlySet<number> = new Set();
 
   constructor(
     private readonly parent: THREE.Object3D,
@@ -231,6 +237,29 @@ export class GalaxyMap implements Entity {
     let n = 0;
     for (let i = 0; i < holes.count; i++) n += holes.getX(i);
     return n;
+  }
+
+  /**
+   * Tints the stars with colonies (by id) towards the colonies' green, so
+   * the player's worlds stand out on the map; the rest keep their own colour.
+   */
+  markColonies(ids: ReadonlySet<number>): void {
+    const geometry = this.points.geometry;
+    const color = geometry.getAttribute('color') as THREE.BufferAttribute;
+    const starIds = geometry.getAttribute('starId');
+    this.ownColors ??= Float32Array.from(color.array as Float32Array);
+    const own = this.ownColors;
+    for (let i = 0; i < starIds.count; i++) {
+      const mark = ids.has(starIds.getX(i));
+      for (let k = 0; k < 3; k++) color.setComponent(i, k, mark ? own[i * 3 + k]! * 0.35 + COLONY_TINT[k]! * 0.65 : own[i * 3 + k]!);
+    }
+    color.needsUpdate = true;
+    this.colonyIds = new Set(ids);
+  }
+
+  /** The stars marked as having colonies. */
+  get colonyStars(): ReadonlySet<number> {
+    return this.colonyIds;
   }
 
   /** Stars (by id) that shine steadily instead of twinkling, e.g. the current and hovered one. */

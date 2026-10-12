@@ -76,6 +76,12 @@ import { DEBRIS_REACH, debrisLookFor } from '../gen/debris';
 import { DEBRIS_NEAR, DebrisField } from '../world/DebrisField';
 import { Scanner } from '../scan/Scanner';
 import { SpeciesRepository, type RepositoryEntry } from '../scan/repository';
+import { Colonies } from '../colony/Colonies';
+import { ColonyPod } from '../colony/ColonyPod';
+import { colonyClock } from '../colony/clock';
+import { colonySetup, type ColonySetup } from '../colony/colonySetup';
+import { colonyBlock, colonyRings, colonySite, type ColonyLayout, type ColonySite } from '../gen/colony';
+import { captainDesign } from '../player/captain';
 
 /**
  * Low-orbit camera, in planet-level units (an Earth-sized globe's radius is
@@ -177,6 +183,11 @@ export class PlanetLevel extends Level implements ItemUser {
   readonly laser: Laser;
   /** The scanner, reading the species of animals and plants into the species repository. */
   readonly scanner: Scanner;
+  /** The Colony Pod, dropped from here onto solid ground where a colony can live. */
+  readonly colonyPod: ColonyPod;
+  /** Solid bodies only (and not once busted): the colonies founded on it, kept in its change list. */
+  colonies: Colonies | null = null;
+  private readonly colonySetup: ColonySetup;
   /** Solid bodies only (and not once busted): the volcanoes raised on it, kept in its change list. */
   volcanoes: Volcanoes | null = null;
   /** The volcanoes as heard from the camera (wherever they can stand; silent until one does, and while the level isn't the active one). */
@@ -226,6 +237,8 @@ export class PlanetLevel extends Level implements ItemUser {
     repository: SpeciesRepository = new SpeciesRepository(),
     /** Called when a scan completes: the species' entry and whether it's new (the repository menu's notice). */
     onScanned: (entry: RepositoryEntry, added: boolean) => void = () => {},
+    /** Called when a colony is founded here (the scene manager keeps it on the device). */
+    private readonly onColonyFounded: (site: ColonySite, layout: ColonyLayout) => void = () => {},
   ) {
     super();
     this.frame = this.add(new PlanetFrame(body, system.world.time, debug));
@@ -356,6 +369,15 @@ export class PlanetLevel extends Level implements ItemUser {
     // After the ship: its downwash flattens the grass under where it's drawn this frame.
     const grass = busted ? null : grassSetup(config);
     this.grass = grass ? this.add(new GroundGrass(this.scene, grass.plan, grass.ground, camera, this.ship.object, debug)) : null;
+    // The colonies founded here, growing by the device's clock; each built a job at a time, clearing its ground of plants.
+    const colonies = (this.colonySetup = colonySetup(config, busted));
+    this.colonies = colonies.ground ? this.add(new Colonies(this.scene, colonies, camera, this.frame, globe.sun, captainDesign(), colonyClock.now, debug, this.jobs.defer)) : null;
+    for (const site of changes.colonies)
+      this.jobs.defer(() => {
+        if (!this.colonies) return;
+        this.colonies.add(site);
+        this.buryPlants();
+      });
     this.buryPlants();
     const animalsSetup = busted ? null : animalSetup(config, plantsSetup);
     this.animals = animalsSetup ? this.add(new SurfaceAnimals(this.scene, animalsSetup.plan, animalsSetup.ground, camera, this.frame, debug, changes, this.jobs.defer)) : null;
@@ -442,6 +464,20 @@ export class PlanetLevel extends Level implements ItemUser {
         (point, time) => this.raiseVolcano(point, time),
       ),
     );
+    this.colonyPod = this.add(
+      new ColonyPod(
+        this.scene,
+        this.frame,
+        camera,
+        input,
+        globe,
+        this.ship.object,
+        sfx,
+        () => this.colonyPodBlock(),
+        (dir) => this.colonySiteBlock(dir),
+        (point) => this.foundColony(point),
+      ),
+    );
     this.add(
       new PlanetPicker(
         this.scene,
@@ -450,7 +486,7 @@ export class PlanetLevel extends Level implements ItemUser {
         this.ship,
         (ray, out) => globe.groundHit(ray, out),
         globe.groundHeight,
-        (point) => this.buster.click(point) || this.volcanoBomb.click(point),
+        (point) => this.buster.click(point) || this.volcanoBomb.click(point) || this.colonyPod.click(point),
       ),
     );
     const { climate } = config;
@@ -517,7 +553,7 @@ export class PlanetLevel extends Level implements ItemUser {
       () => switches.isOn('radar'),
       (key) => repository.has(key),
     );
-    this.map = this.add(new PlanetMap(config, body.name, this.ship, globe, input, debug, species));
+    this.map = this.add(new PlanetMap(config, body.name, this.ship, globe, input, debug, species, () => this.colonies?.marks() ?? []));
     debug
       .folder('Planet lab')
       ?.add({ open: () => window.open(this.labLink(), '_blank') }, 'open')
@@ -564,7 +600,9 @@ export class PlanetLevel extends Level implements ItemUser {
           ? 'laser'
           : this.scanner.armed
             ? 'scan'
-            : (this.cargo?.selected ?? null);
+            : this.colonyPod.armed
+              ? 'colonyPod'
+              : (this.cargo?.selected ?? null);
   }
 
   status(item: ItemId): ItemStatus {
@@ -573,6 +611,7 @@ export class PlanetLevel extends Level implements ItemUser {
     if (item === 'volcanoBomb') return this.volcanoBomb.status();
     if (item === 'laser') return this.laser.status();
     if (item === 'scan') return this.scanner.status();
+    if (item === 'colonyPod') return this.colonyPod.status();
     if (this.cargo) return this.cargo.status(item);
     return { available: false, hint: '', reason: item === 'abduct' ? 'Nothing left here to beam up' : 'Nothing here to set it down on' };
   }
@@ -583,11 +622,13 @@ export class PlanetLevel extends Level implements ItemUser {
     if (item !== 'volcanoBomb') this.volcanoBomb.arm(false);
     if (item !== 'laser') this.laser.arm(false);
     if (item !== 'scan') this.scanner.arm(false);
+    if (item !== 'colonyPod') this.colonyPod.arm(false);
     if (item === 'planetBuster') this.buster.arm(true);
     if (item === 'volcanoBomb') this.volcanoBomb.arm(true);
     if (item === 'laser') this.laser.arm(true);
     if (item === 'scan') this.scanner.arm(true);
-    this.cargo?.arm(item === 'planetBuster' || item === 'volcanoBomb' || item === 'laser' || item === 'scan' ? null : item);
+    if (item === 'colonyPod') this.colonyPod.arm(true);
+    this.cargo?.arm(item === 'planetBuster' || item === 'volcanoBomb' || item === 'laser' || item === 'scan' || item === 'colonyPod' ? null : item);
   }
 
   /** The radar's line above the item bar while it's on (a switch: always available). */
@@ -629,13 +670,49 @@ export class PlanetLevel extends Level implements ItemUser {
     this.plantings?.bury((dir) => dir.dot(shape.centre) > shape.cosAngle);
   }
 
-  /** The plants where volcanoes stand are buried under them. */
+  /** The plants where volcanoes stand are buried under them, and those where colonies are built cleared away. */
   private buryPlants(): void {
-    const volcanoes = this.volcanoes;
-    if (!volcanoes || volcanoes.count === 0) return;
-    this.plants?.setBuried((dir) => volcanoes.covers(dir));
-    this.rocks?.setBuried((dir) => volcanoes.covers(dir));
-    this.grass?.setBuried((dir) => volcanoes.covers(dir));
+    const volcanoes = this.volcanoes && this.volcanoes.count > 0 ? this.volcanoes : null;
+    const colonies = this.colonies && this.colonies.count > 0 ? this.colonies : null;
+    if (!volcanoes && !colonies) return;
+    const test = (dir: THREE.Vector3) => (volcanoes?.covers(dir) ?? false) || (colonies?.covers(dir) ?? false);
+    this.plants?.setBuried(test);
+    this.rocks?.setBuried(test);
+    this.grass?.setBuried(test);
+  }
+
+  /** Why the Colony Pod can't be used here now, or null if it can (where a colony can live is `colonySiteBlock`'s to say). */
+  private colonyPodBlock(): string | null {
+    if (isGas(this.body.config)) return 'No ground here to build a colony on';
+    if (this.busted || !this.colonies) return 'Nothing left here to build on';
+    if (this.busy) return 'Not while the planet buster goes off';
+    return null;
+  }
+
+  /** Why no colony can be founded at unit direction `dir` (body frame), or null if one can. */
+  private colonySiteBlock(dir: THREE.Vector3): string | null {
+    const others = this.colonies?.marks() ?? [];
+    return colonyBlock(this.colonySetup.world, this.colonySetup.ground, dir, others);
+  }
+
+  /** A Colony Pod has landed at `point` (body frame): a colony is founded there, for good, and starts to grow. */
+  private foundColony(point: THREE.Vector3): void {
+    const colonies = this.colonies;
+    if (!colonies || this.busted) return;
+    const dir = point.clone().normalize();
+    // Checked again: the ground under it may have changed while it fell (another colony, a volcano).
+    if (this.colonySiteBlock(dir) !== null) return;
+    const site = colonySite(this.body.config.seed, this.changes.nextColony, dir, colonyClock.now());
+    this.changes.addColony(site);
+    const layout = colonies.add(site);
+    if (!layout) return;
+    // The system view's globe marks it too.
+    this.body.addColony(site, layout.name);
+    this.buryPlants();
+    this.plantings?.bury((d) => colonies.covers(d));
+    const rings = colonyRings(layout.tier);
+    this.colonyPod.note(`${layout.name} founded: it will grow to ${rings} ring${rings === 1 ? '' : 's'} of buildings here`);
+    this.onColonyFounded(site, layout);
   }
 
   /** The buster is away: hold the ship where it is and pull the camera back to watch. */
@@ -653,12 +730,13 @@ export class PlanetLevel extends Level implements ItemUser {
     this.globe.bust(this.radius * DEBRIS_REACH);
     this.cargo?.clear(false);
     this.laser.clear();
-    for (const entity of [this.eruptions, this.geysers, this.ventSounds, this.weather, this.comet, this.plants, this.rocks, this.grass, this.wake, this.animals, this.animalSounds, this.radar, this.cargo, this.plantings, this.volcanoes, this.volcanoSounds, this.meteors])
+    for (const entity of [this.eruptions, this.geysers, this.ventSounds, this.weather, this.comet, this.plants, this.rocks, this.grass, this.wake, this.animals, this.animalSounds, this.radar, this.cargo, this.plantings, this.volcanoes, this.volcanoSounds, this.meteors, this.colonies])
       if (entity) this.remove(entity);
     this.eruptions = this.geysers = this.ventSounds = this.weather = this.comet = this.plants = this.rocks = this.grass = this.wake = this.animals = this.radar = this.cargo = this.plantings = this.meteors = null;
     this.animalSounds = null;
     this.volcanoes = null;
     this.volcanoSounds = null;
+    this.colonies = null;
     if (this.plantTooltip) {
       this.plantTooltip.deactivate();
       this.remove(this.plantTooltip);
@@ -826,6 +904,7 @@ export class PlanetLevel extends Level implements ItemUser {
     this.volcanoBomb.arm(false);
     this.laser.arm(false);
     this.scanner.arm(false);
+    this.colonyPod.arm(false);
     this.cargo?.arm(null);
     this.hud.deactivate();
     this.map.deactivate();

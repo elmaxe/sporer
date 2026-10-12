@@ -19,10 +19,10 @@ export interface SpeciesBody {
 /** Grown once per species object. */
 const bodies = new WeakMap<object, SpeciesBody>();
 
-export function speciesBody(s: Pick<AnimalSpecies, 'form' | 'length'> & Partial<Pick<AnimalSpecies, 'name' | 'diet'>>): SpeciesBody {
+export function speciesBody(s: Pick<AnimalSpecies, 'form' | 'length'> & Partial<Pick<AnimalSpecies, 'name' | 'diet' | 'design'>>): SpeciesBody {
   let b = bodies.get(s);
   if (!b) {
-    const design = speciesDesign(s.form, s.length, s.name, s.diet);
+    const design = s.design ?? speciesDesign(s.form, s.length, s.name, s.diet);
     const grown = growCreature(design);
     b = { design, grown, rig: creatureRig(grown) };
     bodies.set(s, b);

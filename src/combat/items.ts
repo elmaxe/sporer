@@ -3,12 +3,13 @@
  * Pure data; what an item does lives with the level that can use it (in low
  * orbit: the planet buster, combat/PlanetBuster.ts; the volcano bomb,
  * combat/VolcanoBomb.ts; the laser, combat/Laser.ts; the abduction beam and the cargo it brings up:
- * cargo/CargoBeam.ts; the radar, radar/Radar.ts; the scanner, scan/Scanner.ts).
+ * cargo/CargoBeam.ts; the radar, radar/Radar.ts; the scanner, scan/Scanner.ts; the Colony Pod,
+ * colony/ColonyPod.ts).
  */
 
 export type ItemTab = 'weapons' | 'inventory';
 /** The tools: always in their tab's first slots. */
-export type ToolId = 'planetBuster' | 'volcanoBomb' | 'laser' | 'abduct' | 'radar' | 'scan';
+export type ToolId = 'planetBuster' | 'volcanoBomb' | 'laser' | 'abduct' | 'radar' | 'scan' | 'colonyPod';
 /** What a slot holds: a tool, or a stack of cargo in the hold (`cargo:` and the stack's key, see cargo/inventory.ts). */
 export type ItemId = ToolId | `cargo:${string}`;
 
@@ -83,6 +84,12 @@ export const ITEMS: readonly ItemDef[] = [
     tab: 'inventory',
     name: 'Scanner',
     description: 'Reads the species of an animal or a plant and adds it to your species repository (R). Hold it on them.',
+  },
+  {
+    id: 'colonyPod',
+    tab: 'inventory',
+    name: 'Colony Pod',
+    description: 'Drops a colony of your species from low orbit. It grows ring by ring, as big as the planet is habitable. Green ground only.',
   },
 ];
 

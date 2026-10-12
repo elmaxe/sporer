@@ -1,6 +1,7 @@
 import { faceGridPoint, type Vec3Like } from '../world/cubeSphereMath';
 import { generateAnimalForm, legGirthFor, type AnimalForm, type AnimalSkeleton, type BodyPlan, type Diet } from './animalForm';
 import type { Habitability } from './climate';
+import type { CreatureDesign } from './creature';
 import { generateName } from './names';
 import { MIN_ELEVATION, fertility, localTemperature, type GroundRadius } from './plants';
 import { animalGait, type AnimalGait } from './gait';
@@ -52,6 +53,12 @@ export interface AnimalSpecies {
   readonly herdMin: number;
   readonly herdMax: number;
   readonly form: AnimalForm;
+  /**
+   * Its body, when it isn't the random creature its form's seed makes
+   * (`speciesDesign`): a colony's colonists are the captain's own
+   * (gen/colony.ts `colonistSpecies`).
+   */
+  readonly design?: CreatureDesign;
 }
 
 /** Herbivore and carnivore species per habitability tier (T0 has none): the higher the tier, the longer the food chain. */

@@ -1,4 +1,5 @@
 import type { VolcanoSite } from '../combat/volcano';
+import { parseColonySite, type ColonySite } from '../gen/colony';
 import type { AnimalSpecies } from '../gen/animals';
 import type { PlantSpecies } from '../gen/plants';
 
@@ -7,8 +8,8 @@ import type { PlantSpecies } from '../gen/plants';
  * planet level (which is built afresh on each visit): a removed plant or
  * animal (beamed up, or killed by the laser) stays gone after leaving and
  * coming back, a plant set down by the cargo beam stays where it took root,
- * an animal set down roams round where it landed, and a volcano raised by a
- * volcano bomb stands. Generated plants and herds are the same every time
+ * an animal set down roams round where it landed, a volcano raised by a
+ * volcano bomb stands, and a colony dropped by a Colony Pod grows. Generated plants and herds are the same every time
  * (see gen/plants.ts, gen/animals.ts), so these lists are all that save/load
  * will need.
  */
@@ -23,6 +24,8 @@ export interface SurfaceChangesData {
   removedAnimals?: string[];
   /** Animals set down here that live here now (removed ones left out). */
   released?: ReleasedAnimal[];
+  /** Colonies founded here by Colony Pods, oldest first (older saves have none). */
+  colonies?: ColonySite[];
 }
 
 /** An animal the player set down that lives here now: its species (from wherever it lived) and the home it roams round. */
@@ -78,6 +81,7 @@ export class SurfaceChanges {
   private readonly removedAnimals = new Set<string>();
   private readonly released = new Map<string, ReleasedAnimal>();
   private nextReleased = 0;
+  private readonly _colonies: ColonySite[] = [];
 
   isRemoved(id: string): boolean {
     return this.removed.has(id);
@@ -153,6 +157,28 @@ export class SurfaceChanges {
     this._volcanoes.push({ ...site });
   }
 
+  /** The colonies founded here, oldest first. */
+  get colonies(): readonly ColonySite[] {
+    return this._colonies;
+  }
+
+  /** The number the next colony founded here takes (its id is `colony:<n>`). */
+  get nextColony(): number {
+    let n = 0;
+    for (const c of this._colonies) {
+      const k = Number(c.id.slice(c.id.indexOf(':') + 1));
+      if (Number.isInteger(k)) n = Math.max(n, k + 1);
+    }
+    return n;
+  }
+
+  /** Records a colony founded at `site`; false if one of its id is here already. */
+  addColony(site: ColonySite): boolean {
+    if (this._colonies.some((c) => c.id === site.id)) return false;
+    this._colonies.push({ ...site });
+    return true;
+  }
+
   toJSON(): SurfaceChangesData {
     return {
       removed: [...this.removed],
@@ -160,6 +186,7 @@ export class SurfaceChanges {
       volcanoes: this._volcanoes.map((v) => ({ ...v })),
       removedAnimals: [...this.removedAnimals],
       released: [...this.released.values()],
+      colonies: this._colonies.map((c) => ({ ...c })),
     };
   }
 
@@ -173,6 +200,10 @@ export class SurfaceChanges {
     }
     for (const v of data.volcanoes ?? []) changes.addVolcano(v);
     for (const id of data.removedAnimals ?? []) changes.removedAnimals.add(id);
+    for (const c of data.colonies ?? []) {
+      const site = parseColonySite(c);
+      if (site) changes.addColony(site);
+    }
     for (const a of data.released ?? []) {
       changes.released.set(a.id, a);
       const n = Number(a.id.slice(RELEASED_PREFIX.length));

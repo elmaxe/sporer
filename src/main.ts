@@ -26,6 +26,7 @@ import { DebugDumpControl } from './debug/DebugDump';
 import { gameDumpSource } from './debug/gameState';
 import { openChosenVersion } from './ui/versions';
 import { registerServiceWorker } from './pwa/serviceWorker';
+import { colonyClock } from './colony/clock';
 
 // First, so the debug dump has the console's errors from start-up on.
 const consoleLog = installConsoleLog();
@@ -67,7 +68,7 @@ async function main(): Promise<void> {
   // Handles for poking at the game from the browser console / automation.
   // ship / world / system follow the current system level, planet the planet level (or null).
   if (import.meta.env.DEV) {
-    Object.assign(window, { game, galaxy, levels, audio, menu, repository, debugDump, freeze, thirdPerson, generateSystem, geyserKind, weatherKind, volcanicLightning, meteorShowers, nextShowerPeak, waveParams });
+    Object.assign(window, { game, galaxy, levels, audio, menu, repository, debugDump, colonyClock, freeze, thirdPerson, generateSystem, geyserKind, weatherKind, volcanicLightning, meteorShowers, nextShowerPeak, waveParams });
     Object.defineProperties(window, {
       ship: { get: () => levels.systemLevel.ship, configurable: true },
       world: { get: () => levels.systemLevel.world, configurable: true },

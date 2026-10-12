@@ -64,6 +64,8 @@ export class GalaxyHud implements Entity {
     private readonly map: GalaxyMap,
     /** The galaxy's rotating root; star positions are in its frame, the rings in the scene's. */
     private readonly root: THREE.Object3D,
+    /** The names of the colonies in a star's system (by its id), for its tooltip. */
+    private readonly colonyNames: (star: number) => readonly string[] = () => [],
   ) {
     this.currentRing = new MarkerRing(scene, '#66ffcc', 0, 0.08);
     this.destinationRing = new MarkerRing(scene, '#66ffcc', 0.08, 0.08);
@@ -112,10 +114,12 @@ export class GalaxyHud implements Entity {
       const isHere = hovered === ship.current && !ship.travelling;
       const here = isHere ? ' · you are here' : '';
       const inside = hovered.nebula ? ` · in the ${hovered.nebula.name}` : '';
+      const colonies = this.colonyNames(hovered.id);
+      const settled = colonies.length > 0 ? ` · colon${colonies.length === 1 ? 'y' : 'ies'}: ${colonies.join(', ')}` : '';
       this.tooltip.show(
         hovered,
         hovered.name,
-        this.describe(hovered) + inside + here,
+        this.describe(hovered) + inside + settled + here,
         clientX,
         clientY,
         isHere ? undefined : `${describeDistance(ship.distanceTo(hovered))} away`,

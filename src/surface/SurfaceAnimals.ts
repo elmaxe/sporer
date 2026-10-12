@@ -290,8 +290,44 @@ export class SurfaceAnimals implements Entity {
 
   /** Draws an animal set down here (recorded in the change list as `record`), roaming round where it landed. */
   private release(record: ReleasedAnimal): void {
-    const species = record.species;
-    let foreign = this.foreign.get(record.speciesKey);
+    this.addHerd({
+      id: record.id,
+      species: record.species,
+      speciesKey: record.speciesKey,
+      origin: record.origin,
+      home: record,
+      count: 1,
+      range: RELEASED_RANGE,
+      seed: record.seed,
+      scales: new Float32Array([record.scale]),
+      landed: record.landed,
+      facing: record.facing,
+    });
+  }
+
+  /**
+   * A herd of the player's own making, drawn and walked like the others from
+   * the clock: an animal set down here (a herd of one), or a colony's
+   * colonists (colony/Colonies.ts), `count` of `species` roaming within
+   * `range` of `home`. A herd of the same id is replaced (a colony growing).
+   */
+  addHerd(h: {
+    id: string;
+    species: AnimalSpecies;
+    /** Its species' batches are kept under this key. */
+    speciesKey: string;
+    origin: string | null;
+    home: { readonly x: number; readonly y: number; readonly z: number };
+    count: number;
+    range: number;
+    seed: number;
+    /** Each one's size (times the species' length); else the herds' adults' spread. */
+    scales?: Float32Array;
+    landed?: number;
+    facing?: number;
+  }): void {
+    const species = h.species;
+    let foreign = this.foreign.get(h.speciesKey);
     if (!foreign) {
       const motion = animalMotion(species, this.plan.gravity);
       const geometries = Array.from({ length: ANIMAL_LOD_COUNT }, (_, lod) => createAnimalGeometry(species, lod));
@@ -299,41 +335,49 @@ export class SurfaceAnimals implements Entity {
         const { material, uniforms } = createAnimalMaterial(lod, species, motion);
         return { ...this.createMesh(geometry, material, 4), geometry, material, uniforms, lod, count: 0 };
       });
-      this.foreign.set(record.speciesKey, (foreign = { row, geometries }));
+      this.foreign.set(h.speciesKey, (foreign = { row, geometries }));
     }
-    // A herd of one, of a plan whose only species is its own, on this body's ground and gravity.
+    // A herd of a plan whose only species is its own, on this body's ground and gravity.
     const plan: AnimalPlan = { ...this.plan, species: [species] };
     const herd: HerdData = {
-      id: record.id,
+      id: h.id,
       species: 0,
-      count: 1,
+      count: h.count,
       young: 0,
-      home: { x: record.x, y: record.y, z: record.z },
-      range: RELEASED_RANGE,
-      slot: 30 + (record.seed % 40),
-      offset: record.seed % 1000,
-      seed: record.seed,
-      landed: record.landed,
-      facing: record.facing,
+      home: { x: h.home.x, y: h.home.y, z: h.home.z },
+      range: h.range,
+      slot: 30 + (h.seed % 40),
+      offset: h.seed % 1000,
+      seed: h.seed,
+      landed: h.landed,
+      facing: h.facing,
     };
-    const scales = new Float32Array([record.scale]);
-    this.released.set(record.id, {
-      key: record.id,
+    const path = new HerdPath(plan, this.ground, herd, animalSkeleton(species), h.scales);
+    const scales = path.scales;
+    let longest = 0;
+    for (const k of scales) longest = Math.max(longest, k);
+    this.released.set(h.id, {
+      key: h.id,
       herd,
-      path: new HerdPath(plan, this.ground, herd, animalSkeleton(species), scales),
+      path,
       species,
       row: foreign.row,
-      origin: record.origin,
-      speciesKey: record.speciesKey,
-      gone: new Uint8Array([this.held.has(`${record.id}:0`) ? HELD : HERE]),
-      centre: new THREE.Vector3(record.x, record.y, record.z).multiplyScalar(this.plan.radius),
-      bound: RELEASED_RANGE + species.length * 2,
-      drawn: new Float32Array(3).fill(NaN),
+      origin: h.origin,
+      speciesKey: h.speciesKey,
+      gone: Uint8Array.from({ length: h.count }, (_, k) => (this.held.has(`${h.id}:${k}`) ? HELD : HERE)),
+      centre: new THREE.Vector3(h.home.x, h.home.y, h.home.z).multiplyScalar(this.plan.radius),
+      bound: h.range + species.length * (2 + 1.7 * Math.sqrt(h.count)) * Math.max(1, longest),
+      drawn: new Float32Array(3 * h.count).fill(NaN),
       scales,
-      poses: [{ x: 0, y: 0, z: 0, hx: 0, hy: 0, hz: 1, cycle: 0, stride: 0, trot: 0, graze: 0, idle: 0 }],
-      panic: new Uint8Array(1),
+      poses: Array.from({ length: h.count }, () => ({ x: 0, y: 0, z: 0, hx: 0, hy: 0, hz: 1, cycle: 0, stride: 0, trot: 0, graze: 0, idle: 0 })),
+      panic: new Uint8Array(h.count),
       alert: 0,
     });
+  }
+
+  /** Takes away a herd `addHerd` made. */
+  removeHerd(id: string): void {
+    this.released.delete(id);
   }
 
   private createMesh(geometry: THREE.BufferGeometry, material: THREE.Material, capacity: number): Pick<Batch, 'mesh' | 'anim' | 'idle'> {

@@ -11,6 +11,7 @@ import { isGas, type Planet } from '../world/Planet';
 import { arrivalParams, clampElevation, descentParams, leaveParams } from './arrival';
 import { SurfaceChangeStore } from '../surface/changes';
 import { BustedBodies, bodyKey } from '../combat/busted';
+import { ColonyLedger, colonyName, loadColonies, saveColonies, type ColonyLedgerData } from '../gen/colony';
 import { Inventory } from '../cargo/inventory';
 import { SpeciesRepository, loadRepository, saveRepository, type RepositoryEntry } from '../scan/repository';
 import type { SpeciesIcons } from '../planet/SpeciesTab';
@@ -127,6 +128,8 @@ export class SceneManager implements Entity {
   readonly icons: SpeciesIcons;
   /** The species the scanner has read (scan/repository.ts), saved on the device for this galaxy. */
   readonly repository: SpeciesRepository;
+  /** Every colony founded in this galaxy (gen/colony.ts), saved on the device; each body's change list holds its own sites too. */
+  readonly colonies: ColonyLedger;
   /** Told when a scan completes, with the species' entry and whether it's new (the repository menu shows a notice). */
   onScanned: (entry: RepositoryEntry, added: boolean) => void = () => {};
   private seamless: SeamlessTransition | null = null;
@@ -153,11 +156,22 @@ export class SceneManager implements Entity {
     this.icons = { plants: new PlantIcons(renderer), animals: new AnimalIcons(renderer) };
     this.repository = new SpeciesRepository((r) => saveRepository(galaxy.seed, r));
     this.repository.load(loadRepository(galaxy.seed));
+    this.colonies = new ColonyLedger((ledger) => saveColonies(galaxy.seed, ledger));
     this.nebulas = galaxy.nebulas;
     this.stars = galaxy.stars;
-    this.galaxyLevel = new GalaxyLevel(galaxy, start, camera, input, renderer.domElement, this.tooltip, debug, sfx, () =>
-      this.toSystem(),
+    this.galaxyLevel = new GalaxyLevel(
+      galaxy,
+      start,
+      camera,
+      input,
+      renderer.domElement,
+      this.tooltip,
+      debug,
+      sfx,
+      () => this.toSystem(),
+      (star) => this.colonies.records.filter((r) => r.star === star).map((r) => r.name),
     );
+    this.loadColonies(loadColonies(galaxy.seed));
     this._systemLevel = this.createSystem(start);
     game.setLevel(this._systemLevel);
     const f = debug.folder('Arrival');
@@ -559,6 +573,17 @@ export class SceneManager implements Entity {
     return Math.min(maxDistance, Math.max(ARRIVAL_DISTANCE, pastHandover * handover, leaveParams.reach * reach));
   }
 
+  /**
+   * Replaces the colonies (the device's saved ones at the start, or a debug
+   * dump's): kept in the ledger, each put in its body's change list, and the
+   * galaxy map's stars marked.
+   */
+  loadColonies(data: ColonyLedgerData | null): void {
+    this.colonies.load(data);
+    for (const r of this.colonies.records) this.surfaceChanges.forPlanet(r.body).addColony(r.site);
+    this.galaxyLevel.map.markColonies(this.colonies.stars());
+  }
+
   private createPlanet(body: Planet, side: THREE.Vector3): PlanetLevel {
     const { camera, input } = this.game;
     this._planetLevel = new PlanetLevel(
@@ -577,12 +602,19 @@ export class SceneManager implements Entity {
         // Recorded at once (it can't be fired twice), and the system view's body is debris from the blast on.
         this.busted.bust(bodyKey(body.config), time);
         body.bust(time);
+        // Its colonies went with it.
+        this.colonies.removeBody(bodyKey(body.config));
+        this.galaxyLevel.map.markColonies(this.colonies.stars());
       },
       this.inventory,
       this.switches,
       this.icons,
       this.repository,
       (entry, added) => this.onScanned(entry, added),
+      (site, layout) => {
+        this.colonies.add({ body: bodyKey(body.config), name: layout.name, star: this._systemLevel.ref.id, site });
+        this.galaxyLevel.map.markColonies(this.colonies.stars());
+      },
     );
     return this._planetLevel;
   }
@@ -611,7 +643,11 @@ export class SceneManager implements Entity {
       const key = bodyKey(body.config);
       // A new system's clock starts afresh: its debris has long settled.
       if (this.busted.isBusted(key)) body.bust(level.world.time - SETTLED_DEBRIS);
-      else for (const site of this.surfaceChanges.find(key)?.volcanoes ?? []) body.addVolcano(site, null);
+      else {
+        const changes = this.surfaceChanges.find(key);
+        for (const site of changes?.volcanoes ?? []) body.addVolcano(site, null);
+        for (const site of changes?.colonies ?? []) body.addColony(site, colonyName(site.seed));
+      }
     }
     // Remember the system in the URL, so a reload comes back here.
     const url = new URL(location.href);

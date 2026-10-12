@@ -26,6 +26,7 @@ import { CLOUD_RENDER_ORDER } from './weatherLook';
 import { DEBRIS_REACH, debrisLookFor } from '../gen/debris';
 import { DEBRIS_FAR, DebrisField } from './DebrisField';
 import { realSurface } from '../gen/realSurface';
+import type { ColonySite } from '../gen/colony';
 
 /** What the renderer needs; generated PlanetData and MoonData both satisfy it. */
 export interface PlanetConfig {
@@ -154,6 +155,8 @@ export class Planet implements Entity, CelestialBody {
   /** Volcanoes raised on it, and their glows' texture (made with the first). */
   private readonly volcanoes: SystemVolcano[] = [];
   private volcanoGlow: THREE.Texture | null = null;
+  /** Colonies founded on it, each marked by a glow on the globe. */
+  private readonly colonies: { site: ColonySite; name: string; mark: THREE.Sprite }[] = [];
   /** The system time it was last shown at. */
   private lastTime = 0;
 
@@ -235,7 +238,34 @@ export class Planet implements Entity, CelestialBody {
 
   /** The climate line of the tooltip, e.g. "−140 °C · thin N₂ atmosphere". */
   get details(): string | undefined {
-    return this.debris ? 'Blown apart by a planet buster' : this.climateLine;
+    if (this.debris) return 'Blown apart by a planet buster';
+    if (this.colonies.length === 0) return this.climateLine;
+    const names = this.colonies.map((c) => c.name).join(', ');
+    return [this.climateLine, `colon${this.colonies.length === 1 ? 'y' : 'ies'}: ${names}`].filter(Boolean).join(' · ');
+  }
+
+  /** The colonies founded on it by Colony Pods (none once busted), with their names. */
+  get colonySites(): { site: ColonySite; name: string }[] {
+    return this.debris ? [] : this.colonies.map((c) => ({ site: c.site, name: c.name }));
+  }
+
+  /**
+   * Marks a colony founded at `site` (by a Colony Pod in low orbit) on the
+   * globe: a small glow of its lights, over the clouds so it shows from
+   * afar, and its name in the tooltip. Nothing on a gas giant or once busted.
+   */
+  addColony(site: ColonySite, name: string): void {
+    if (this.debris || isGas(this.config) || this.colonies.some((c) => c.site.id === site.id)) return;
+    this.volcanoGlow ??= createGlowTexture();
+    const mark = new THREE.Sprite(
+      new THREE.SpriteMaterial({ map: this.volcanoGlow, color: '#9dffc0', blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, toneMapped: false }),
+    );
+    mark.renderOrder = CLOUD_RENDER_ORDER + 0.5;
+    mark.position.set(site.x, site.y, site.z).normalize().multiplyScalar(this.config.radius * 1.01);
+    mark.scale.setScalar(Math.max(0.6, this.config.radius * 0.14));
+    mark.name = `Colony ${name}`;
+    this.surface.add(mark);
+    this.colonies.push({ site, name, mark });
   }
 
   /** The system time it was blown apart by a planet buster, or null if it's whole. */
@@ -419,6 +449,7 @@ export class Planet implements Entity, CelestialBody {
 
   dispose(): void {
     for (const v of this.volcanoes) for (const sprite of [v.glow, ...v.puffs]) sprite.material.dispose();
+    for (const c of this.colonies) c.mark.material.dispose();
     this.volcanoGlow?.dispose();
     this.debris?.dispose();
     this.gas?.dispose();
